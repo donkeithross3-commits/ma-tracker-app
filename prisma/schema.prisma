@@ -1,0 +1,290 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER MANAGEMENT
+// ============================================================================
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  email     String   @unique
+  password  String   // Hashed password
+  fullName  String?  @map("full_name")
+  role      String   @default("analyst") // analyst, admin, viewer
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  dealsCreated        Deal[]             @relation("DealsCreated")
+  dealsUpdated        Deal[]             @relation("DealsUpdated")
+  dealVersions        DealVersion[]
+  portfolioPositions  PortfolioPosition[]
+  dealSnapshots       DealSnapshot[]
+  apiPriceFetches     ApiPriceFetch[]
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+// ============================================================================
+// DEALS (Core entity - one record per unique deal)
+// ============================================================================
+
+model Deal {
+  id             String   @id @default(uuid()) @map("deal_id")
+  ticker         String
+  targetName     String?  @map("target_name")
+  acquirorTicker String?  @map("acquiror_ticker")
+  acquirorName   String?  @map("acquiror_name")
+  status         String   @default("active") // active, closed, terminated, pending
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Foreign Keys
+  createdById String? @map("created_by")
+  updatedById String? @map("updated_by")
+
+  // Relations
+  createdBy          User?               @relation("DealsCreated", fields: [createdById], references: [id])
+  updatedBy          User?               @relation("DealsUpdated", fields: [updatedById], references: [id])
+  versions           DealVersion[]
+  prices             DealPrice[]
+  cvrs               Cvr[]
+  portfolioPositions PortfolioPosition[]
+  snapshots          DealSnapshot[]
+
+  @@index([ticker])
+  @@index([status])
+  @@map("deals")
+}
+
+// ============================================================================
+// DEAL VERSIONS (Version control - every update creates new version)
+// ============================================================================
+
+model DealVersion {
+  id              String    @id @default(uuid()) @map("version_id")
+  dealId          String    @map("deal_id")
+  versionNumber   Int       @map("version_number")
+  effectiveDate   DateTime  @default(now()) @map("effective_date")
+  isCurrentVersion Boolean  @default(true) @map("is_current_version")
+
+  // Deal Dates
+  announcedDate      DateTime? @map("announced_date") @db.Date
+  expectedCloseDate  DateTime? @map("expected_close_date") @db.Date
+  outsideDate        DateTime? @map("outside_date") @db.Date
+
+  // Deal Terms
+  category           String?   @db.VarChar(50) // all_cash, cash_stock, cash_cvr, stock, non_binding_offer
+  cashPerShare       Decimal?  @map("cash_per_share") @db.Decimal(10, 4)
+  stockRatio         Decimal?  @map("stock_ratio") @db.Decimal(10, 6)
+  dividendsOther     Decimal?  @map("dividends_other") @db.Decimal(10, 4)
+  stressTestDiscount Decimal?  @map("stress_test_discount") @db.Decimal(5, 4)
+
+  // Risk Assessments
+  voteRisk    String? @map("vote_risk") @db.VarChar(20) // low, medium, high
+  financeRisk String? @map("finance_risk") @db.VarChar(20) // low, medium, high
+  legalRisk   String? @map("legal_risk") @db.VarChar(20) // low, medium, high
+
+  // Calculated Metrics (from individual deal sheets)
+  currentYield Decimal? @map("current_yield") @db.Decimal(10, 6) // Expected IRR from individual sheet C19
+
+  // Investment Flags
+  isInvestable    Boolean @default(false) @map("is_investable")
+  investableNotes String? @map("investable_notes") @db.Text
+  dealNotes       String? @map("deal_notes") @db.Text
+  goShopEndDate   DateTime? @map("go_shop_end_date") @db.Date
+
+  // Foreign Keys
+  createdById String? @map("created_by")
+
+  // Relations
+  deal      Deal  @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  createdBy User? @relation(fields: [createdById], references: [id])
+
+  @@unique([dealId, versionNumber])
+  @@index([dealId, isCurrentVersion])
+  @@index([effectiveDate])
+  @@map("deal_versions")
+}
+
+// ============================================================================
+// DEAL PRICES (Time-series price data from Interactive Brokers API)
+// ============================================================================
+
+model DealPrice {
+  id             String   @id @default(uuid()) @map("price_id")
+  dealId         String   @map("deal_id")
+  priceDate      DateTime @map("price_date") @db.Date
+  targetPrice    Decimal  @map("target_price") @db.Decimal(10, 4)
+  acquirorPrice  Decimal? @map("acquiror_price") @db.Decimal(10, 4)
+  source         String   @default("interactive_brokers") @db.VarChar(50)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Relations
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, priceDate])
+  @@index([dealId, priceDate(sort: Desc)])
+  @@index([priceDate(sort: Desc)])
+  @@map("deal_prices")
+}
+
+// ============================================================================
+// CVRs (Contingent Value Rights - multiple per deal)
+// ============================================================================
+
+model Cvr {
+  id              String    @id @default(uuid()) @map("cvr_id")
+  dealId          String    @map("deal_id")
+  cvrName         String?   @map("cvr_name") @db.VarChar(255)
+  paymentAmount   Decimal   @map("payment_amount") @db.Decimal(10, 4)
+  probability     Decimal   @default(0.50) @db.Decimal(3, 2) // 0.00 to 1.00
+  paymentDeadline DateTime? @map("payment_deadline") @db.Date
+  paymentStatus   String    @default("pending") @map("payment_status") @db.VarChar(50) // pending, paid, expired
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
+  @@index([paymentStatus])
+  @@map("cvrs")
+}
+
+// ============================================================================
+// PORTFOLIO POSITIONS (Actual positions taken)
+// ============================================================================
+
+model PortfolioPosition {
+  id         String    @id @default(uuid()) @map("position_id")
+  dealId     String    @map("deal_id")
+  shares     Decimal   @db.Decimal(15, 4)
+  entryDate  DateTime  @map("entry_date") @db.Date
+  entryPrice Decimal   @map("entry_price") @db.Decimal(10, 4)
+  exitDate   DateTime? @map("exit_date") @db.Date
+  exitPrice  Decimal?  @map("exit_price") @db.Decimal(10, 4)
+  status     String    @default("open") @db.VarChar(50) // open, closed
+  notes      String?   @db.Text
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  // Foreign Keys
+  createdById String? @map("created_by")
+
+  // Relations
+  deal      Deal            @relation(fields: [dealId], references: [id])
+  createdBy User?           @relation(fields: [createdById], references: [id])
+  snapshots DealSnapshot[]
+
+  @@index([dealId])
+  @@index([status])
+  @@map("portfolio_positions")
+}
+
+// ============================================================================
+// DEAL SNAPSHOTS (Memorialize calculated values at key decision points)
+// ============================================================================
+
+model DealSnapshot {
+  id           String   @id @default(uuid()) @map("snapshot_id")
+  dealId       String   @map("deal_id")
+  snapshotType String   @map("snapshot_type") @db.VarChar(50) // entry_decision, exit_decision, monthly_review
+  snapshotDate DateTime @default(now()) @map("snapshot_date")
+
+  // Snapshot of prices at this moment
+  targetPrice    Decimal? @map("target_price") @db.Decimal(10, 4)
+  acquirorPrice  Decimal? @map("acquiror_price") @db.Decimal(10, 4)
+  dealPrice      Decimal? @map("deal_price") @db.Decimal(10, 4)
+
+  // Snapshot of calculated metrics
+  grossSpread       Decimal? @map("gross_spread") @db.Decimal(10, 6)
+  netSpread         Decimal? @map("net_spread") @db.Decimal(10, 6)
+  daysToClose       Int?     @map("days_to_close")
+  annualizedReturn  Decimal? @map("annualized_return") @db.Decimal(10, 6)
+  projectedIrr      Decimal? @map("projected_irr") @db.Decimal(10, 6)
+
+  // Snapshot of CVR NPV
+  cvrTotalNpv Decimal? @map("cvr_total_npv") @db.Decimal(10, 4)
+
+  // Context
+  notes String? @db.Text
+
+  // Foreign Keys
+  createdById String? @map("created_by")
+  positionId  String? @map("position_id")
+
+  // Relations
+  deal      Deal               @relation(fields: [dealId], references: [id])
+  createdBy User?              @relation(fields: [createdById], references: [id])
+  position  PortfolioPosition? @relation(fields: [positionId], references: [id])
+
+  @@index([dealId])
+  @@index([snapshotType])
+  @@index([snapshotDate(sort: Desc)])
+  @@map("deal_snapshots")
+}
+
+// ============================================================================
+// API INTEGRATION TRACKING (Track price fetches from Interactive Brokers)
+// ============================================================================
+
+model ApiPriceFetch {
+  id               String    @id @default(uuid()) @map("fetch_id")
+  fetchDate        DateTime  @map("fetch_date") @db.Date
+  ticker           String    @db.VarChar(10)
+  fetchStatus      String?   @map("fetch_status") @db.VarChar(50) // success, failure, partial
+  recordsFetched   Int       @default(0) @map("records_fetched")
+  errorMessage     String?   @map("error_message") @db.Text
+  fetchStartedAt   DateTime  @default(now()) @map("fetch_started_at")
+  fetchCompletedAt DateTime? @map("fetch_completed_at")
+
+  // Foreign Keys
+  createdById String? @map("created_by")
+
+  // Relations
+  createdBy User? @relation(fields: [createdById], references: [id])
+
+  @@index([fetchDate(sort: Desc)])
+  @@index([ticker])
+  @@map("api_price_fetches")
+}
+
+// ============================================================================
+// AUDIT LOG (Track all data changes for compliance and debugging)
+// ============================================================================
+
+model AuditLog {
+  id            String   @id @default(uuid()) @map("log_id")
+  entityType    String   @map("entity_type") @db.VarChar(50) // cvr, deal, position, etc.
+  entityId      String   @map("entity_id")
+  action        String   @db.VarChar(20) // create, update, delete
+  changedFields String?  @map("changed_fields") @db.Text // JSON of changed fields
+  oldValues     String?  @map("old_values") @db.Text // JSON of old values
+  newValues     String?  @map("new_values") @db.Text // JSON of new values
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Foreign Keys
+  createdById String? @map("created_by")
+
+  // Relations
+  createdBy User? @relation(fields: [createdById], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([createdAt(sort: Desc)])
+  @@index([createdById])
+  @@map("audit_logs")
+}
