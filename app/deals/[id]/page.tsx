@@ -41,7 +41,7 @@ async function getDealWithLatestData(id: string) {
 
 async function getAuditLogsForDeal(dealId: string) {
   // Get all CVR IDs for this deal
-  const cvrs = await prisma.cVR.findMany({
+  const cvrs = await prisma.cvr.findMany({
     where: { dealId },
     select: { id: true },
   });

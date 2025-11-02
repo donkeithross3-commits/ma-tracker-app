@@ -46,7 +46,7 @@ async function createCVR(dealId: string, formData: FormData) {
     notes: notes || null,
   };
 
-  const cvr = await prisma.cVR.create({
+  const cvr = await prisma.cvr.create({
     data: cvrData,
   });
 

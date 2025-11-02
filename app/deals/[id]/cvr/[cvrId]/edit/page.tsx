@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, Trash2 } from "lucide-react";
 
 async function getCVR(cvrId: string) {
-  const cvr = await prisma.cVR.findUnique({
+  const cvr = await prisma.cvr.findUnique({
     where: { id: cvrId },
     include: {
       deal: {
@@ -36,7 +36,7 @@ async function updateCVR(cvrId: string, dealId: string, formData: FormData) {
   const session = await auth();
 
   // Get old values for audit log
-  const oldCVR = await prisma.cVR.findUnique({
+  const oldCVR = await prisma.cvr.findUnique({
     where: { id: cvrId },
   });
 
@@ -60,7 +60,7 @@ async function updateCVR(cvrId: string, dealId: string, formData: FormData) {
     notes: notes || null,
   };
 
-  await prisma.cVR.update({
+  await prisma.cvr.update({
     where: { id: cvrId },
     data: newValues,
   });
@@ -91,7 +91,7 @@ async function deleteCVR(cvrId: string, dealId: string) {
   const session = await auth();
 
   // Get values for audit log before deletion
-  const cvr = await prisma.cVR.findUnique({
+  const cvr = await prisma.cvr.findUnique({
     where: { id: cvrId },
   });
 
@@ -99,7 +99,7 @@ async function deleteCVR(cvrId: string, dealId: string) {
     throw new Error("CVR not found");
   }
 
-  await prisma.cVR.delete({
+  await prisma.cvr.delete({
     where: { id: cvrId },
   });
 
