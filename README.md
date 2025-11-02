@@ -124,3 +124,4 @@ For detailed schema documentation, see `/Users/donaldross/ma_tracker_schema_docu
 - The app is currently in development with the dev server running
 - Database schema matches the SQL design in `ma_tracker_schema.sql`
 - UI components follow shadcn/ui patterns for consistency
+
