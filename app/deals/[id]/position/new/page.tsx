@@ -30,9 +30,7 @@ async function createPosition(dealId: string, formData: FormData) {
   const entryDate = formData.get("entryDate") as string;
   const shares = formData.get("shares") as string;
   const entryPrice = formData.get("entryPrice") as string;
-  const entryDealPrice = formData.get("entryDealPrice") as string;
-  const entryExpectedClose = formData.get("entryExpectedClose") as string;
-  const entryNotes = formData.get("entryNotes") as string;
+  const notes = formData.get("notes") as string;
 
   await prisma.portfolioPosition.create({
     data: {
@@ -40,10 +38,8 @@ async function createPosition(dealId: string, formData: FormData) {
       entryDate: new Date(entryDate),
       shares: parseInt(shares),
       entryPrice: parseFloat(entryPrice),
-      entryDealPrice: entryDealPrice ? parseFloat(entryDealPrice) : null,
-      entryExpectedClose: entryExpectedClose ? new Date(entryExpectedClose) : null,
       status: "open",
-      entryNotes: entryNotes || null,
+      notes: notes || null,
     },
   });
 
@@ -112,60 +108,29 @@ export default async function NewPositionPage({ params }: { params: Promise<{ id
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="entryPrice">
-                      Entry Price ($) <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="entryPrice"
-                      name="entryPrice"
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      required
-                      className="mt-1"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Price per share at entry
-                    </p>
-                  </div>
-                  <div>
-                    <Label htmlFor="entryDealPrice">Deal Price at Entry ($)</Label>
-                    <Input
-                      id="entryDealPrice"
-                      name="entryDealPrice"
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      className="mt-1"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      For calculating entry spread
-                    </p>
-                  </div>
-                </div>
-
                 <div>
-                  <Label htmlFor="entryExpectedClose">
-                    Expected Close Date at Entry
+                  <Label htmlFor="entryPrice">
+                    Entry Price ($) <span className="text-red-500">*</span>
                   </Label>
                   <Input
-                    id="entryExpectedClose"
-                    name="entryExpectedClose"
-                    type="date"
+                    id="entryPrice"
+                    name="entryPrice"
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    required
                     className="mt-1"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    For calculating expected IRR at entry
+                    Price per share at entry
                   </p>
                 </div>
 
                 <div>
-                  <Label htmlFor="entryNotes">Entry Notes</Label>
+                  <Label htmlFor="notes">Notes</Label>
                   <Textarea
-                    id="entryNotes"
-                    name="entryNotes"
+                    id="notes"
+                    name="notes"
                     placeholder="Rationale for entering this position..."
                     className="mt-1"
                     rows={4}
@@ -176,8 +141,8 @@ export default async function NewPositionPage({ params }: { params: Promise<{ id
 
             <div className="bg-blue-50 p-4 rounded-md">
               <p className="text-sm text-blue-900">
-                <strong>Note:</strong> This will create a new open position. The entry deal price
-                and expected close date will be memorialized to track how the deal evolves after entry.
+                <strong>Note:</strong> This will create a new open position. You can add notes about
+                your rationale for entering this position.
               </p>
             </div>
 
