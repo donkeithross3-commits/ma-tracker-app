@@ -35,8 +35,9 @@ WINDOWS USERS - IMPORTANT:
   Install Git for Windows: https://git-scm.com/download/win
   (Just click Next through all the options - defaults are fine)
 
-  Install Python 3: https://www.python.org/downloads/
-  (IMPORTANT: Check "Add Python to PATH" during installation)
+  Install Python 3.11: https://www.python.org/downloads/
+  ⚠️  CRITICAL: Download Python 3.11.x (NOT 3.14 or newer - too new!)
+  During installation, check "Add Python to PATH"
 
 Mac:
   Install via Xcode Command Line Tools (includes git):
