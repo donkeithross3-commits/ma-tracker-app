@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency, formatPercent, formatDate } from "@/lib/utils";
+import { OptionsScanner } from "@/components/options-scanner";
 
 async function getDealWithLatestData(id: string) {
   const deal = await prisma.deal.findUnique({
@@ -178,6 +179,7 @@ export default async function DealDetailPage({
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="terms">Deal Terms</TabsTrigger>
+            <TabsTrigger value="options">Options</TabsTrigger>
             <TabsTrigger value="cvrs">CVRs</TabsTrigger>
             <TabsTrigger value="positions">Positions</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
@@ -362,6 +364,18 @@ export default async function DealDetailPage({
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Options Tab */}
+          <TabsContent value="options" className="space-y-4">
+            <OptionsScanner
+              ticker={deal.ticker}
+              dealPrice={metrics?.dealPrice || version.cashPerShare?.toNumber() || 0}
+              expectedCloseDate={version.expectedCloseDate}
+              dividend={version.dividendsOther?.toNumber() || 0}
+              cvrValue={metrics?.cvrNpv || 0}
+              confidence={0.75}
+            />
           </TabsContent>
 
           {/* Deal Terms Tab */}

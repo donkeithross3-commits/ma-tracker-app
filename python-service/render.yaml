@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ma-options-scanner
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: IB_HOST
+        value: 127.0.0.1
+      - key: IB_PORT
+        value: 7497
+      - key: PYTHON_VERSION
+        value: 3.11.0
