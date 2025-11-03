@@ -36,25 +36,35 @@ if ! command -v python3 &> /dev/null; then
 fi
 echo "✅ Python 3 found: $(python3 --version)"
 
-# Check for pip3
-if ! command -v pip3 &> /dev/null; then
-    echo "❌ pip3 is not installed"
-    echo "Please install pip3 for Python 3"
+# Check for pip (try pip3 first, then pip, then python -m pip)
+if command -v pip3 &> /dev/null; then
+    echo "✅ pip3 found"
+    PIP_CMD="pip3"
+elif command -v pip &> /dev/null; then
+    echo "✅ pip found"
+    PIP_CMD="pip"
+elif python -m pip --version &> /dev/null; then
+    echo "✅ pip found (via python -m pip)"
+    PIP_CMD="python -m pip"
+else
+    echo "❌ pip is not installed"
+    echo "Please reinstall Python and ensure pip is included"
     exit 1
 fi
-echo "✅ pip3 found"
 
 echo ""
 
 # Step 1: Install Python dependencies
 echo "📦 Step 1/4: Installing Python dependencies..."
 cd "$(dirname "$0")/python-service" || exit
-pip3 install -q -r requirements.txt
+$PIP_CMD install -q -r requirements.txt
 if [ $? -eq 0 ]; then
     echo "✅ Python dependencies installed"
 else
     echo "❌ Failed to install Python dependencies"
-    echo "Try manually: pip3 install -r requirements.txt"
+    echo "Try manually:"
+    echo "  cd ~/ma-tracker-app/python-service"
+    echo "  python -m pip install -r requirements.txt"
     exit 1
 fi
 echo ""
