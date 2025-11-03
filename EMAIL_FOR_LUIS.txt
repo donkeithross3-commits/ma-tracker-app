@@ -1,0 +1,108 @@
+Subject: Quick 5-Minute Setup - M&A Options Scanner
+
+Hey Luis,
+
+Great news! The options scanner is ready. Your superior IB market data will power the scanner for the entire team. Setup takes just 5 minutes.
+
+═══════════════════════════════════════════
+WHAT YOU'LL BE RUNNING
+═══════════════════════════════════════════
+✅ Python service (connects to your IB Gateway)
+✅ Tunnel to expose it to the team
+✅ Everyone gets to use YOUR premium market data
+
+Daily effort: Run one command → ~/start-scanner.sh
+
+
+═══════════════════════════════════════════
+⚡ SUPER QUICK SETUP (5 MINUTES)
+═══════════════════════════════════════════
+
+STEP 1: Open Terminal and run these commands
+─────────────────────────────────────────────
+cd ~/Documents
+git clone https://github.com/donkeithross3-commits/ma-tracker-app.git
+cd ma-tracker-app
+chmod +x setup-for-luis.sh
+./setup-for-luis.sh
+
+Just copy-paste all 5 lines at once!
+
+
+STEP 2: Get ngrok token (one-time, 1 minute)
+─────────────────────────────────────────────
+1. Sign up (free): https://dashboard.ngrok.com/signup
+2. Get your token: https://dashboard.ngrok.com/get-started/your-authtoken
+3. Run this (paste your token):
+
+   ~/bin/ngrok config add-authtoken YOUR_TOKEN_HERE
+
+
+STEP 3: Configure IB Gateway (you probably have this already)
+──────────────────────────────────────────────────────────────
+• Open IB Gateway/TWS
+• Go to: Settings → API → Settings
+• Enable: "Enable ActiveX and Socket Clients"
+• Port: 7497 (paper) or 7496 (live)
+• Trusted IPs: Add 127.0.0.1
+• Click OK
+
+
+STEP 4: Start the scanner
+─────────────────────────────────────────────
+~/start-scanner.sh
+
+✅ DONE! You'll see your public URL. Send that URL to the team!
+
+
+═══════════════════════════════════════════
+📱 DAILY USE
+═══════════════════════════════════════════
+
+Every day, just run:
+    ~/start-scanner.sh
+
+That's it! Keep the terminal open. Press Ctrl+C to stop.
+
+
+═══════════════════════════════════════════
+❓ QUESTIONS?
+═══════════════════════════════════════════
+
+Complete documentation:
+📄 LUIS_QUICK_START.md - https://github.com/donkeithross3-commits/ma-tracker-app/blob/main/LUIS_QUICK_START.md
+📄 LUIS_SETUP_GUIDE.md - https://github.com/donkeithross3-commits/ma-tracker-app/blob/main/LUIS_SETUP_GUIDE.md
+
+Need help? Just reply to this email!
+
+
+═══════════════════════════════════════════
+🎯 WHAT HAPPENS AFTER SETUP
+═══════════════════════════════════════════
+
+1. You run ~/start-scanner.sh
+2. Script shows you a public URL like: https://abc123.ngrok-free.app
+3. You send that URL to the team
+4. Team updates Vercel with your URL
+5. ✅ Everyone can now scan options using YOUR premium IB data!
+
+
+═══════════════════════════════════════════
+✅ BENEFITS FOR YOU
+═══════════════════════════════════════════
+
+✅ Your superior market data helps the entire team
+✅ Minimal daily effort (one command)
+✅ You control when it runs
+✅ Auto-setup script does all the work
+
+
+───────────────────────────────────────────
+Total setup time: 5 minutes | Daily effort: Run one command
+───────────────────────────────────────────
+
+Thanks for being our IB data provider! 🙏
+
+Let me know when you get it running and I'll update the production app with your URL.
+
+Cheers!
