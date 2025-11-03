@@ -15,7 +15,6 @@ async function createDeal(formData: FormData) {
   // Extract form data
   const ticker = formData.get("ticker") as string;
   const acquirorName = formData.get("acquirorName") as string;
-  const description = formData.get("description") as string;
 
   // Version data
   const announcedDate = formData.get("announcedDate") as string;
@@ -40,7 +39,6 @@ async function createDeal(formData: FormData) {
     data: {
       ticker: ticker.toUpperCase(),
       acquirorName,
-      description: description || null,
       status: "active",
       versions: {
         create: {
@@ -119,16 +117,6 @@ export default function NewDealPage() {
                     className="mt-1"
                   />
                 </div>
-              </div>
-              <div className="mt-4">
-                <Label htmlFor="description">Description</Label>
-                <Textarea
-                  id="description"
-                  name="description"
-                  placeholder="Brief description of the deal..."
-                  className="mt-1"
-                  rows={3}
-                />
               </div>
             </div>
 

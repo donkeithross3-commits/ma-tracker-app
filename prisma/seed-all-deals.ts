@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
@@ -15,7 +16,7 @@ function mapCategory(category: string | null): string {
 }
 
 // Determine if deal is investable based on notes
-function isInvestable(investable: string | null): boolean {
+function isInvestable(investable: string | null | undefined): boolean {
   if (!investable) return false
   const lower = investable.toLowerCase()
   return lower.startsWith('yes')
@@ -35,10 +36,12 @@ async function main() {
   await prisma.user.deleteMany({})
 
   // Create user
+  const defaultPassword = await bcrypt.hash('limitless2025', 10)
   const user = await prisma.user.create({
     data: {
       username: 'power_user',
       email: 'poweruser@firm.com',
+      password: defaultPassword,
       fullName: 'Power User',
       role: 'admin',
     },

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
@@ -117,10 +118,12 @@ async function main() {
   await prisma.user.deleteMany({})
 
   // Create user
+  const defaultPassword = await bcrypt.hash('limitless2025', 10)
   const user = await prisma.user.create({
     data: {
       username: 'power_user',
       email: 'poweruser@firm.com',
+      password: defaultPassword,
       fullName: 'Power User',
       role: 'admin',
     },
