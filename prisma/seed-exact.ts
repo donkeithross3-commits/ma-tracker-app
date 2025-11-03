@@ -23,7 +23,7 @@ function mapCategory(category: string | null): string {
 }
 
 // Determine if deal is investable based on notes
-function isInvestable(investable: string | null): boolean {
+function isInvestable(investable: string | null | undefined): boolean {
   if (!investable) return false
   const lower = investable.toLowerCase()
   return lower.startsWith('yes')
