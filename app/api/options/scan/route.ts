@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true", // Skip ngrok browser warning page
       },
       body: JSON.stringify(body),
     });
@@ -51,6 +52,9 @@ export async function GET() {
   try {
     const response = await fetch(`${PYTHON_SERVICE_URL}/health`, {
       method: "GET",
+      headers: {
+        "ngrok-skip-browser-warning": "true", // Skip ngrok browser warning page
+      },
     });
 
     if (!response.ok) {

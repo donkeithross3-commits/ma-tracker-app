@@ -49,6 +49,20 @@ A Next.js application for tracking merger arbitrage deals with version control a
 - `npm run db:push` - Push schema changes to database
 - `npm run db:studio` - Open Prisma Studio (database GUI)
 
+## Python Options Scanner (Windows Setup)
+
+The options scanner connects to Interactive Brokers to analyze merger arbitrage option strategies.
+
+**For Windows users:** See [LUIS_WINDOWS_SETUP.md](./LUIS_WINDOWS_SETUP.md) for complete setup instructions.
+
+**Quick reference:** See [QUICK_TROUBLESHOOTING.md](./QUICK_TROUBLESHOOTING.md) for common issues.
+
+**Mac/Linux users:** The setup script works automatically:
+```bash
+bash setup-for-luis.sh
+~/start-scanner.sh
+```
+
 ## Project Structure
 
 ```
