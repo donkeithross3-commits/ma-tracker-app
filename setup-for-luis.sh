@@ -164,12 +164,19 @@ fi
 
 # Check if ngrok is authenticated (try multiple common locations)
 NGROK_AUTHENTICATED=false
-if [ -f ~/.ngrok2/ngrok.yml ] || [ -f ~/Library/Application\ Support/ngrok/ngrok.yml ] || [ -f ~/AppData/Local/ngrok/ngrok.yml ]; then
+
+# Mac/Linux locations
+if [ -f ~/.ngrok2/ngrok.yml ] || [ -f ~/Library/Application\ Support/ngrok/ngrok.yml ]; then
     NGROK_AUTHENTICATED=true
 fi
 
-# Also check Windows path with forward slashes (Git Bash style)
+# Windows standard location
 if [ -f "$HOME/AppData/Local/ngrok/ngrok.yml" ]; then
+    NGROK_AUTHENTICATED=true
+fi
+
+# Windows Store version (check in Packages folder)
+if find "$HOME/AppData/Local/Packages" -path "*/ngrok*/ngrok.yml" 2>/dev/null | grep -q .; then
     NGROK_AUTHENTICATED=true
 fi
 
