@@ -92,7 +92,7 @@ This automatically:
 3. Copy your authtoken from: https://dashboard.ngrok.com/get-started/your-authtoken
 4. Run:
    ```bash
-   ~/bin/ngrok config add-authtoken YOUR_TOKEN_HERE
+   ngrok config add-authtoken YOUR_TOKEN_HERE
    ```
 
 **That's it for setup!** You never have to do this again.

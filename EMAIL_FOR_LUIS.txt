@@ -76,7 +76,7 @@ STEP 2: Get ngrok token (one-time, 1 minute)
 2. Get your token: https://dashboard.ngrok.com/get-started/your-authtoken
 3. Run this (paste your token):
 
-   ~/bin/ngrok config add-authtoken YOUR_TOKEN_HERE
+   ngrok config add-authtoken YOUR_TOKEN_HERE
 
 
 STEP 3: Configure IB Gateway (you probably have this already)

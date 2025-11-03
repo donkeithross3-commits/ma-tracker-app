@@ -178,15 +178,25 @@ else
     echo "Check logs: tail -f /tmp/scanner.log"
 fi
 
-# Check if ngrok is authenticated
-if [ ! -f ~/.ngrok2/ngrok.yml ] && [ ! -f ~/Library/Application\ Support/ngrok/ngrok.yml ]; then
+# Check if ngrok is authenticated (try multiple common locations)
+NGROK_AUTHENTICATED=false
+if [ -f ~/.ngrok2/ngrok.yml ] || [ -f ~/Library/Application\ Support/ngrok/ngrok.yml ] || [ -f ~/AppData/Local/ngrok/ngrok.yml ]; then
+    NGROK_AUTHENTICATED=true
+fi
+
+# Also check Windows path with forward slashes (Git Bash style)
+if [ -f "$HOME/AppData/Local/ngrok/ngrok.yml" ]; then
+    NGROK_AUTHENTICATED=true
+fi
+
+if [ "$NGROK_AUTHENTICATED" = false ]; then
     echo ""
     echo "⚠️  ngrok is not authenticated yet!"
     echo ""
     echo "Please do this once:"
     echo "1. Sign up free at: https://dashboard.ngrok.com/signup"
     echo "2. Get your authtoken from: https://dashboard.ngrok.com/get-started/your-authtoken"
-    echo "3. Run: ~/bin/ngrok config add-authtoken YOUR_TOKEN_HERE"
+    echo "3. Run: ngrok config add-authtoken YOUR_TOKEN_HERE"
     echo ""
     echo "Then run this script again: ~/start-scanner.sh"
     exit 0
@@ -194,8 +204,7 @@ fi
 
 # Start ngrok tunnel
 echo "🌐 Starting ngrok tunnel..."
-export PATH="$HOME/bin:$PATH"
-~/bin/ngrok http 8000 > /tmp/ngrok.log 2>&1 &
+ngrok http 8000 > /tmp/ngrok.log 2>&1 &
 NGROK_PID=$!
 echo "✅ ngrok started (PID: $NGROK_PID)"
 
@@ -261,7 +270,7 @@ echo ""
 echo "2️⃣  Get ngrok auth token (one time only):"
 echo "   - Sign up free: https://dashboard.ngrok.com/signup"
 echo "   - Get token: https://dashboard.ngrok.com/get-started/your-authtoken"
-echo "   - Run: ~/bin/ngrok config add-authtoken YOUR_TOKEN"
+echo "   - Run: ngrok config add-authtoken YOUR_TOKEN"
 echo ""
 echo "3️⃣  Start the scanner:"
 echo "   ~/start-scanner.sh"
