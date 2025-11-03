@@ -178,6 +178,22 @@ class IBMergerArbScanner(EWrapper, EClient):
                     self.underlying_bid = price
                 elif tickType == 2:  # Ask
                     self.underlying_ask = price
+            elif reqId in self.option_chain:
+                # Handle option prices
+                if tickType == 1:  # Bid
+                    self.option_chain[reqId]['bid'] = price
+                elif tickType == 2:  # Ask
+                    self.option_chain[reqId]['ask'] = price
+                elif tickType == 4:  # Last
+                    self.option_chain[reqId]['last'] = price
+
+    def tickSize(self, reqId: TickerId, tickType: int, size: int):
+        """Handle size updates (volume, open interest)"""
+        if reqId in self.option_chain:
+            if tickType == 8:  # Volume
+                self.option_chain[reqId]['volume'] = size
+            elif tickType == 27:  # Open Interest
+                self.option_chain[reqId]['open_interest'] = size
 
     def fetch_option_chain(self, ticker: str, expiry_months: int = 6, current_price: float = None) -> List[OptionData]:
         """Fetch option chain from IB - LIMITED to avoid 100+ instrument limit"""
