@@ -213,7 +213,8 @@ class IBMergerArbScanner(EWrapper, EClient):
             for expiry in expiries:
                 # LIMIT: Only get strikes around current price and deal price
                 strikes = [price_to_use * 0.95, price_to_use, price_to_use * 1.05]
-                strikes = [round(s, 0) for s in strikes]  # Round to nearest dollar
+                # Round to nearest $5 increment (AAPL uses $5 strikes)
+                strikes = [round(s / 5) * 5 for s in strikes]
 
                 for strike in strikes:
                     # Request call option data
