@@ -56,13 +56,15 @@ model Deal {
   updatedById String? @map("updated_by")
 
   // Relations
-  createdBy          User?               @relation("DealsCreated", fields: [createdById], references: [id])
-  updatedBy          User?               @relation("DealsUpdated", fields: [updatedById], references: [id])
+  createdBy          User?                @relation("DealsCreated", fields: [createdById], references: [id])
+  updatedBy          User?                @relation("DealsUpdated", fields: [updatedById], references: [id])
   versions           DealVersion[]
   prices             DealPrice[]
   cvrs               Cvr[]
   portfolioPositions PortfolioPosition[]
   snapshots          DealSnapshot[]
+  secFilings         SecFiling[]
+  researchReport     DealResearchReport?
 
   @@index([ticker])
   @@index([status])
@@ -287,4 +289,103 @@ model AuditLog {
   @@index([createdAt(sort: Desc)])
   @@index([createdById])
   @@map("audit_logs")
+}
+
+// ============================================================================
+// AI DEAL RESEARCH REPORTS
+// ============================================================================
+
+// SEC Filings tracking (proxies, merger agreements, 8-Ks, etc.)
+model SecFiling {
+  id               String    @id @default(uuid()) @map("filing_id")
+  dealId           String    @map("deal_id")
+  filingType       String    @map("filing_type") @db.VarChar(20) // DEFM14A, 8-K, DEFA14A, etc.
+  filingDate       DateTime  @map("filing_date") @db.Date
+  accessionNumber  String    @map("accession_number") @db.VarChar(50) // SEC accession number
+  edgarUrl         String    @map("edgar_url") @db.Text // Full URL to filing on EDGAR
+  documentUrl      String?   @map("document_url") @db.Text // Direct URL to primary document
+  htmlText         String?   @map("html_text") @db.Text // Cached HTML content
+  textExtracted    String?   @map("text_extracted") @db.Text // Extracted plain text
+  fetchedAt        DateTime? @map("fetched_at")
+  fetchStatus      String    @default("pending") @map("fetch_status") @db.VarChar(20) // pending, fetched, error
+  fetchError       String?   @map("fetch_error") @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  deal            Deal              @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, accessionNumber])
+  @@index([dealId, filingType])
+  @@index([filingDate(sort: Desc)])
+  @@map("sec_filings")
+}
+
+// Main research report per deal
+model DealResearchReport {
+  id                    String    @id @default(uuid()) @map("report_id")
+  dealId                String    @unique @map("deal_id")
+  reportVersion         Int       @default(1) @map("report_version")
+  generatedAt           DateTime  @default(now()) @map("generated_at")
+  status                String    @default("pending") @map("status") @db.VarChar(20) // pending, generating, completed, error
+
+  // Overall risk scores (0-100)
+  antitrustRiskScore    Int?      @map("antitrust_risk_score")
+  contractRiskScore     Int?      @map("contract_risk_score")
+  toppingBidScore       Int?      @map("topping_bid_score") // Likelihood of topping bid
+  overallRiskScore      Int?      @map("overall_risk_score")
+
+  // Executive summary
+  executiveSummary      String?   @map("executive_summary") @db.Text
+  keyFindings           Json?     @map("key_findings") // Array of key findings
+  redFlags              Json?     @map("red_flags") // Array of red flags
+  opportunities         Json?     @map("opportunities") // Array of opportunities
+
+  // Report metadata
+  lastUpdated           DateTime  @updatedAt @map("last_updated")
+  errorMessage          String?   @map("error_message") @db.Text
+  processingTimeMs      Int?      @map("processing_time_ms")
+
+  // Relations
+  deal              Deal              @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  sections          ReportSection[]
+
+  @@index([status])
+  @@index([generatedAt(sort: Desc)])
+  @@map("deal_research_reports")
+}
+
+// Individual analysis sections (antitrust, contract, topping bids, etc.)
+model ReportSection {
+  id                  String    @id @default(uuid()) @map("section_id")
+  reportId            String    @map("report_id")
+  sectionType         String    @map("section_type") @db.VarChar(50) // antitrust, contract, topping_bid, deal_structure, etc.
+  sectionTitle        String    @map("section_title")
+
+  // Analysis content
+  analysisMarkdown    String    @map("analysis_markdown") @db.Text // Markdown formatted analysis
+  riskScore           Int?      @map("risk_score") // 0-100 section-specific risk score
+  confidence          String?   @map("confidence") @db.VarChar(20) // high, medium, low
+
+  // Structured data extracted
+  extractedData       Json?     @map("extracted_data") // Section-specific structured data
+  keyPoints           Json?     @map("key_points") // Array of key points
+
+  // Source tracking
+  sourceFilingIds     String[]  @map("source_filing_ids") // Array of filing IDs used
+  aiModel             String?   @map("ai_model") @db.VarChar(50) // claude-3-5-sonnet, etc.
+  promptVersion       String?   @map("prompt_version") @db.VarChar(20) // Track prompt versions
+
+  // Metadata
+  generatedAt         DateTime  @default(now()) @map("generated_at")
+  status              String    @default("pending") @map("status") @db.VarChar(20) // pending, completed, error
+  errorMessage        String?   @map("error_message") @db.Text
+  processingTimeMs    Int?      @map("processing_time_ms")
+
+  // Relations
+  report        DealResearchReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, sectionType])
+  @@index([sectionType])
+  @@map("report_sections")
 }
