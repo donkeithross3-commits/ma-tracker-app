@@ -120,10 +120,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         for i in range(10):  # 10 second timeout
             time.sleep(1)
             if self.isConnected():
-                print("✓ Connected to Interactive Brokers")
+                print("Connected to Interactive Brokers successfully")
                 return True
 
-        print("✗ Failed to connect to IB. Please ensure TWS/Gateway is running.")
+        print("ERROR: Failed to connect to IB. Please ensure TWS/Gateway is running.")
         return False
 
     def nextValidId(self, orderId: int):
