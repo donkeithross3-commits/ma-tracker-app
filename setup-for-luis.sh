@@ -45,33 +45,17 @@ PYTHON_MINOR=$(python3 -c 'import sys; print(sys.version_info[1])')
 
 echo "✅ Python found: $PYTHON_VERSION"
 
-# Check if version is compatible (3.9-3.12)
+# Check if version is compatible (3.9+)
 if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 9 ] && [ "$PYTHON_MINOR" -le 12 ]; then
     echo "✅ Python version is compatible"
 elif [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 13 ]; then
-    echo ""
-    echo "❌ Python $PYTHON_VERSION is TOO NEW"
-    echo ""
-    echo "Python 3.13+ is not yet supported by some required packages."
-    echo "Please install Python 3.11 or 3.12:"
-    echo ""
-    if [ "$MACHINE" = "Windows" ]; then
-        echo "1. Go to: https://www.python.org/downloads/"
-        echo "2. Download Python 3.11.x (latest 3.11 version)"
-        echo "3. Run installer and check 'Add Python to PATH'"
-        echo "4. Restart Git Bash and run this setup again"
-    elif [ "$MACHINE" = "Mac" ]; then
-        echo "Using Homebrew:"
-        echo "  brew install python@3.11"
-        echo ""
-        echo "Or download from: https://www.python.org/downloads/"
-    else
-        echo "  sudo apt-get install python3.11 python3.11-pip"
-    fi
-    echo ""
+    echo "⚠️  Python $PYTHON_VERSION detected (newer than recommended)"
+    echo "   Recommended: Python 3.11-3.12, but will try to proceed..."
+elif [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 9 ]; then
+    echo "❌ Python $PYTHON_VERSION is too old (need 3.9 or newer)"
     exit 1
 else
-    echo "❌ Python $PYTHON_VERSION is too old (need 3.9 or newer)"
+    echo "❌ Unsupported Python version: $PYTHON_VERSION"
     exit 1
 fi
 
