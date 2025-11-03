@@ -248,15 +248,32 @@ async def scan_deal(deal: DealRequest):
 async def test_scan(ticker: str):
     """
     Quick test endpoint - scans a ticker with default parameters
+    Uses current price + 5% as deal price to simulate realistic merger scenario
     """
     from datetime import timedelta
+
+    # Get scanner to fetch current price
+    scanner = get_scanner()
+
+    if not scanner.isConnected():
+        raise HTTPException(
+            status_code=503,
+            detail="Cannot connect to Interactive Brokers"
+        )
+
+    # Fetch underlying data to get current price
+    underlying_data = scanner.fetch_underlying_data(ticker.upper())
+    current_price = underlying_data.get('price', 100.0)
+
+    # Set deal price 5% above current (realistic merger premium)
+    deal_price = round(current_price * 1.05, 2)
 
     # Use default test parameters - close date 90 days from now
     future_date = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
 
     deal = DealRequest(
         ticker=ticker,
-        deal_price=100.0,  # Default deal price
+        deal_price=deal_price,
         expected_close_date=future_date,
         dividend_before_close=0.0,
         ctr_value=0.0,
