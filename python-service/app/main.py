@@ -244,6 +244,27 @@ async def scan_deal(deal: DealRequest):
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 
+@app.get("/test-scan/{ticker}", response_model=ScannerResponse)
+async def test_scan(ticker: str):
+    """
+    Quick test endpoint - scans a ticker with default parameters
+    """
+    from datetime import timedelta
+
+    # Use default test parameters - close date 90 days from now
+    future_date = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
+
+    deal = DealRequest(
+        ticker=ticker,
+        deal_price=100.0,  # Default deal price
+        expected_close_date=future_date,
+        dividend_before_close=0.0,
+        ctr_value=0.0,
+        confidence=0.75
+    )
+    return await scan_deal(deal)
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
