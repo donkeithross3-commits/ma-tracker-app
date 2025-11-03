@@ -179,7 +179,7 @@ class IBMergerArbScanner(EWrapper, EClient):
                 elif tickType == 2:  # Ask
                     self.underlying_ask = price
 
-    def fetch_option_chain(self, ticker: str, expiry_months: int = 6) -> List[OptionData]:
+    def fetch_option_chain(self, ticker: str, expiry_months: int = 6, current_price: float = None) -> List[OptionData]:
         """Fetch option chain from IB - LIMITED to avoid 100+ instrument limit"""
         print(f"Fetching option chain for {ticker} (LIMITED to avoid IB limits)...")
 
@@ -202,14 +202,17 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Now request specific option contracts - LIMITED
         options = []
 
+        # Use passed price or fallback to underlying_price
+        price_to_use = current_price or self.underlying_price
+
         # LIMIT: Only get 2-3 expirations and 2-3 strikes each
-        if self.underlying_price:
+        if price_to_use:
             # Get only 3 expirations
             expiries = self.get_expiries(ticker, datetime.now() + timedelta(days=expiry_months * 30))[:3]
 
             for expiry in expiries:
                 # LIMIT: Only get strikes around current price and deal price
-                strikes = [self.underlying_price * 0.95, self.underlying_price, self.underlying_price * 1.05]
+                strikes = [price_to_use * 0.95, price_to_use, price_to_use * 1.05]
                 strikes = [round(s, 0) for s in strikes]  # Round to nearest dollar
 
                 for strike in strikes:

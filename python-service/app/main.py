@@ -175,7 +175,7 @@ async def scan_deal(deal: DealRequest):
 
         # Fetch option chain
         logger.info(f"Fetching option chain for {deal.ticker}")
-        options = scanner.fetch_option_chain(deal.ticker.upper(), expiry_months=6)
+        options = scanner.fetch_option_chain(deal.ticker.upper(), expiry_months=6, current_price=current_price)
 
         if not options:
             return ScannerResponse(
