@@ -1,8 +1,10 @@
-# Team Instructions - Using the Options Scanner
+# Team Instructions - Using Luis's M&A Dashboard
 
 ## Overview
 
-Luis is running the options scanner service on his machine with the best IB market data subscriptions. Everyone else just uses the web app - no setup required!
+This is Luis's M&A arbitrage dashboard - a trading strategy he's been running for 5 years. Luis runs the Python service on his machine with his premium IB market data subscriptions, which powers the entire dashboard at https://ma-tracker-app.vercel.app/.
+
+Everyone else just uses the web app - no setup required! You'll be able to leverage Luis's superior market data for deal analysis and options scanning.
 
 ---
 
@@ -251,11 +253,11 @@ Planned improvements:
 ## Summary
 
 **For everyone except Luis**:
-- ✅ Just use the web app
-- ✅ Click "Scan Options" button
+- ✅ Just use the web app at https://ma-tracker-app.vercel.app/
+- ✅ Click "Scan Options" button to leverage Luis's data
 - ✅ No setup required
 - ✅ All scans use Luis's superior IB subscription
 
-**That's it!** It's designed to be simple for the team while Luis handles the infrastructure.
+**That's it!** This is Luis's M&A dashboard that he's been running for 5 years. You can leverage his premium IB data while he handles the infrastructure.
 
 Happy scanning! 📊

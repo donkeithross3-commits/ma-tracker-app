@@ -2,7 +2,7 @@
 
 ## Overview
 
-Luis will run the Python options scanner service on his machine alongside IB Gateway since he has the best market data subscriptions. Everyone else will access the scanner through the web app.
+This is Luis's M&A arbitrage dashboard - a trading strategy he's been running for 5 years. Luis will run the Python service on his machine alongside IB Gateway to power his dashboard at https://ma-tracker-app.vercel.app/ with his premium IB market data subscriptions. Team members can optionally leverage his data if he chooses to share.
 
 ---
 
@@ -24,10 +24,10 @@ Luis will run the Python options scanner service on his machine alongside IB Gat
 ```
 
 **Benefits**:
-- ✅ Luis's superior market data subscriptions used for all scans
-- ✅ One centralized IB connection
-- ✅ Team accesses via web app (no setup needed)
+- ✅ Luis's entire M&A dashboard powered by his premium IB subscriptions
+- ✅ Real-time market data for deal analysis and options scanning
 - ✅ Luis controls when service runs
+- ✅ Team can optionally leverage his data via web app (no setup needed for them)
 - ✅ Secure tunnel (no port forwarding needed)
 
 ---
@@ -665,11 +665,11 @@ Once Luis completes this setup:
 
 1. **Luis's machine** runs Python service + IB Gateway
 2. **Cloudflare tunnel** exposes service to internet
-3. **Vercel app** connects to tunnel URL
-4. **Team members** use web app normally
-5. **All scans** use Luis's superior market data subscriptions
+3. **Vercel app** connects to tunnel URL at https://ma-tracker-app.vercel.app/
+4. **Luis's M&A dashboard** powered by his premium IB subscriptions
+5. **Team members** can optionally leverage Luis's data if he chooses to share
 
-**Everyone benefits from Luis's better data, no setup required!**
+**This is Luis's M&A arbitrage dashboard - a strategy he's been running for 5 years!**
 
 ---
 
@@ -677,7 +677,8 @@ Once Luis completes this setup:
 
 **Time investment**: 30 minutes one-time setup
 **Daily effort**: Optionally start IB Gateway (if not auto-starting)
-**Benefit to team**: Everyone gets best market data
+**Benefit to you**: Your entire M&A dashboard powered by your premium IB data
+**Optional benefit**: Team can leverage your data if you choose to share
 
 **Services to keep running**:
 1. IB Gateway (for market data)

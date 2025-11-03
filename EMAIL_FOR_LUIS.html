@@ -26,18 +26,21 @@
 </head>
 <body>
 
-<h1>🚀 M&A Options Scanner - Quick Setup</h1>
+<h1>🚀 Your M&A Dashboard is Ready!</h1>
 
 <p>Hey Luis,</p>
 
-<p>Great news! The options scanner is ready to go. Your superior IB market data will power the scanner for the entire team. Setup takes just <span class="time-badge">5 minutes</span>.</p>
+<p>Great news! Your M&A arbitrage dashboard is fully deployed and ready at:<br>
+<strong><a href="https://ma-tracker-app.vercel.app/">https://ma-tracker-app.vercel.app/</a></strong></p>
+
+<p>This setup connects your IB Gateway to power YOUR dashboard with real-time market data from your premium IB subscriptions. Setup takes just <span class="time-badge">5 minutes</span>.</p>
 
 <div class="box">
     <strong>What You'll Be Running:</strong>
     <ul>
         <li>✅ Python service (connects to your IB Gateway)</li>
-        <li>✅ Tunnel to expose it to the team</li>
-        <li>✅ Everyone gets to use YOUR premium market data</li>
+        <li>✅ Tunnel to make your dashboard accessible</li>
+        <li>✅ Powers your entire M&A dashboard with real-time data</li>
     </ul>
     <strong>Daily effort:</strong> Run one command → <code>~/start-scanner.sh</code>
 </div>
@@ -45,16 +48,69 @@
 <h2>⚡ Super Quick Setup (5 Minutes)</h2>
 
 <div class="step">
+    <div class="step-number">Step 0:</div>
+    <strong>Install prerequisites (2 minutes):</strong>
+    <br><br>
+    <strong>You need two things:</strong>
+    <ul>
+        <li>Git (to download the code)</li>
+        <li>Python 3 (to run the service)</li>
+    </ul>
+
+    <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 15px 0;">
+        <strong>⚠️ WINDOWS USERS - IMPORTANT:</strong><br><br>
+        When you install Git for Windows, you get "Git Bash" - a terminal that lets you run the commands below.
+        After installing Git, search for <strong>"Git Bash"</strong> in your Start menu and use that (not Command Prompt).
+        <br><br>
+        <a href="https://git-scm.com/download/win" class="button">Install Git for Windows</a>
+        <br>
+        <em>Just click Next through all the options - defaults are fine!</em>
+        <br><br>
+        <a href="https://www.python.org/downloads/" class="button">Install Python 3</a>
+        <br>
+        <em>⚠️ IMPORTANT: Check "Add Python to PATH" during installation</em>
+    </div>
+
+    <strong>Mac:</strong>
+    <div class="command-block">
+<code># Install via Xcode Command Line Tools (includes git):
+xcode-select --install
+
+# Or install both via Homebrew:
+brew install git python3</code>
+    </div>
+
+    <strong>Linux:</strong>
+    <div class="command-block">
+<code>sudo apt-get install git python3 python3-pip</code>
+    </div>
+</div>
+
+<div class="step">
     <div class="step-number">Step 1:</div>
     <strong>Open Terminal and run these commands:</strong>
+    <br><br>
+    <strong>Windows:</strong> Search for "Git Bash" in Start menu and open that<br>
+    <strong>Mac/Linux:</strong> Open Terminal
+    <br><br>
+    <strong>Then copy-paste these commands ONE AT A TIME:</strong>
     <div class="command-block">
-<code>cd ~/Documents
-git clone https://github.com/donkeithross3-commits/ma-tracker-app.git
-cd ma-tracker-app
-chmod +x setup-for-luis.sh
-./setup-for-luis.sh</code>
+<code>cd ~</code>
     </div>
-    <em>Just copy-paste all 5 lines at once!</em>
+    <div class="command-block">
+<code>git clone https://github.com/donkeithross3-commits/ma-tracker-app.git</code>
+    </div>
+    <div class="command-block">
+<code>cd ma-tracker-app</code>
+    </div>
+    <div class="command-block">
+<code>bash setup-for-luis.sh</code>
+    </div>
+    <br>
+    <em>⚠️ IMPORTANT: Copy and paste each line ONE AT A TIME, pressing Enter after each.</em><br>
+    <em>Don't copy all lines at once - do them one by one.</em><br>
+    <em>Make sure you're in <strong>Git Bash</strong> (not Command Prompt) if on Windows!</em><br><br>
+    <em>The setup script will check everything and install what's needed.</em>
 </div>
 
 <div class="step">
@@ -120,27 +176,29 @@ chmod +x setup-for-luis.sh
 <ol>
     <li>You run <code>~/start-scanner.sh</code></li>
     <li>Script shows you a public URL like: <code>https://abc123.ngrok-free.app</code></li>
-    <li>You send that URL to the team</li>
-    <li>Team updates Vercel with your URL</li>
-    <li><strong class="success">Everyone can now scan options using YOUR premium IB data!</strong></li>
+    <li>Send that URL to your team if you want them to update Vercel</li>
+    <li>Your dashboard at ma-tracker-app.vercel.app connects to your IB data</li>
+    <li><strong class="success">Your 5-year M&A strategy is now fully operational with real-time data!</strong></li>
 </ol>
 
 <h2>✅ Benefits for You</h2>
 
 <ul>
-    <li>✅ Your superior market data helps the entire team</li>
+    <li>✅ Your entire M&A dashboard powered by your premium IB subscriptions</li>
+    <li>✅ Real-time market data for all your deals and options analysis</li>
     <li>✅ Minimal daily effort (one command)</li>
     <li>✅ You control when it runs</li>
     <li>✅ Auto-setup script does all the work</li>
+    <li>✅ Team can optionally leverage your data if you choose to share</li>
 </ul>
 
 <hr>
 
 <p><em>Total setup time: 5 minutes | Daily effort: Run one command</em></p>
 
-<p>Thanks for being our IB data provider! 🙏</p>
+<p>Your M&A arbitrage dashboard that you've been running for 5 years is now fully deployed! 🚀</p>
 
-<p>Let me know when you get it running and I'll update the production app with your URL.</p>
+<p>Let me know when you get it running and I'll update the production app with your URL if needed.</p>
 
 <p>Cheers!</p>
 

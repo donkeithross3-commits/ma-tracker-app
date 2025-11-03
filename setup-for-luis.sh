@@ -18,6 +18,34 @@ esac
 echo "Detected OS: $MACHINE"
 echo ""
 
+# Check prerequisites
+echo "🔍 Checking prerequisites..."
+echo ""
+
+# Check for Python3
+if ! command -v python3 &> /dev/null; then
+    echo "❌ Python 3 is not installed"
+    echo ""
+    if [ "$MACHINE" = "Mac" ]; then
+        echo "Install Python 3 from: https://www.python.org/downloads/"
+        echo "Or use Homebrew: brew install python3"
+    elif [ "$MACHINE" = "Linux" ]; then
+        echo "Install Python 3: sudo apt-get install python3 python3-pip"
+    fi
+    exit 1
+fi
+echo "✅ Python 3 found: $(python3 --version)"
+
+# Check for pip3
+if ! command -v pip3 &> /dev/null; then
+    echo "❌ pip3 is not installed"
+    echo "Please install pip3 for Python 3"
+    exit 1
+fi
+echo "✅ pip3 found"
+
+echo ""
+
 # Step 1: Install Python dependencies
 echo "📦 Step 1/4: Installing Python dependencies..."
 cd "$(dirname "$0")/python-service" || exit
@@ -73,9 +101,9 @@ echo "Starting M&A Options Scanner..."
 echo ""
 
 # Find the repository directory
-REPO_DIR="$HOME/Documents/ma-tracker-app"
+REPO_DIR="$HOME/ma-tracker-app"
 if [ ! -d "$REPO_DIR" ]; then
-    REPO_DIR="$HOME/ma-tracker-app"
+    REPO_DIR="$HOME/Documents/ma-tracker-app"
 fi
 if [ ! -d "$REPO_DIR" ]; then
     echo "❌ Cannot find ma-tracker-app directory"
