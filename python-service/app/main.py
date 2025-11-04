@@ -10,6 +10,7 @@ from typing import List, Optional
 import logging
 
 from .scanner import IBMergerArbScanner, MergerArbAnalyzer, DealInput
+from .futures import get_futures_scanner
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -280,6 +281,48 @@ async def test_scan(ticker: str):
         confidence=0.75
     )
     return await scan_deal(deal)
+
+
+@app.get("/test-futures")
+async def test_futures():
+    """
+    Test ES futures data feed - useful for overnight testing when options markets are closed
+
+    This endpoint:
+    - Verifies IB Gateway connectivity
+    - Tests real-time market data flow
+    - Works 23 hours/day (futures market hours)
+    """
+    try:
+        scanner = get_futures_scanner()
+
+        if not scanner.isConnected():
+            raise HTTPException(
+                status_code=503,
+                detail="Futures scanner not connected to Interactive Brokers"
+            )
+
+        # Fetch ES futures data (Dec 2025 contract)
+        futures_data = scanner.fetch_es_futures(contract_month="202512")
+
+        if not futures_data.get('success'):
+            raise HTTPException(
+                status_code=500,
+                detail=futures_data.get('error', 'Failed to fetch futures data')
+            )
+
+        return {
+            "success": True,
+            "message": "ES futures data retrieved successfully",
+            "data": futures_data,
+            "note": "This endpoint is useful for testing overnight when options markets are closed"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching futures data: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 
 @app.on_event("shutdown")
