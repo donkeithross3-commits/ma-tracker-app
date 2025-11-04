@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency, formatPercent, formatDate } from "@/lib/utils";
 import { OptionsScanner } from "@/components/options-scanner";
+import { ResearchReport } from "@/components/research-report";
 
 async function getDealWithLatestData(id: string) {
   const deal = await prisma.deal.findUnique({
@@ -182,6 +183,7 @@ export default async function DealDetailPage({
             <TabsTrigger value="options">Options</TabsTrigger>
             <TabsTrigger value="cvrs">CVRs</TabsTrigger>
             <TabsTrigger value="positions">Positions</TabsTrigger>
+            <TabsTrigger value="research">Research</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
             <TabsTrigger value="audit">Audit Log</TabsTrigger>
           </TabsList>
@@ -608,6 +610,11 @@ export default async function DealDetailPage({
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Research Tab */}
+          <TabsContent value="research" className="space-y-4">
+            <ResearchReport dealId={deal.id} ticker={deal.ticker} />
           </TabsContent>
 
           {/* Notes Tab */}
