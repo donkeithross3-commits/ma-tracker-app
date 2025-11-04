@@ -58,7 +58,7 @@ def test_connection():
     contract.secType = "FUT"
     contract.exchange = "CME"
     contract.currency = "USD"
-    contract.lastTradeDateOrContractMonth = "202412"  # December 2024 contract
+    contract.lastTradeDateOrContractMonth = "202512"  # December 2025 contract (ESZ5)
 
     # Request market data
     print("3. Requesting ES futures market data...")
