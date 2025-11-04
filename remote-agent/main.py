@@ -29,6 +29,10 @@ import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Setup logging
 logging.basicConfig(
