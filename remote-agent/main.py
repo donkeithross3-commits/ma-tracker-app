@@ -203,7 +203,7 @@ Output:
 """
 
         response = client.messages.create(
-            model="claude-3-sonnet-20240229",
+            model="claude-3-5-sonnet-latest",
             max_tokens=2000,
             temperature=0.2,  # Lower temperature for more consistent output
             messages=[{
