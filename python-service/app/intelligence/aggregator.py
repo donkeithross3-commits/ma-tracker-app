@@ -141,13 +141,17 @@ class IntelligenceAggregator:
     async def _add_source_to_deal(
         self, conn: asyncpg.Connection, deal_id: str, mention: DealMention
     ) -> None:
-        """Add source mention to deal_sources table"""
+        """Add source mention to deal_sources table (with deduplication)"""
+        # Use ON CONFLICT DO NOTHING to gracefully handle duplicate sources
+        # The unique index on (deal_id, source_url) will prevent duplicates
         await conn.execute(
             """INSERT INTO deal_sources (
                 deal_id, source_name, source_type, source_url,
                 mention_type, headline, content_snippet,
                 credibility_score, extracted_data, source_published_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)""",
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+            ON CONFLICT (deal_id, source_url) WHERE source_url IS NOT NULL
+            DO NOTHING""",
             deal_id,
             mention.source_name,
             mention.source_type.value,
