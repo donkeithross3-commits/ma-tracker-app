@@ -70,7 +70,11 @@ export async function generateResearchReport(
     })),
   };
 
-  // Create report record
+  // Create or update report record (delete existing if present)
+  await prisma.dealResearchReport.deleteMany({
+    where: { dealId: deal.id },
+  });
+
   const report = await prisma.dealResearchReport.create({
     data: {
       dealId: deal.id,

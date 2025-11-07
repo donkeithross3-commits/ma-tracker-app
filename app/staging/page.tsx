@@ -420,110 +420,124 @@ export default function StagingPage() {
                 )}
               </div>
             ) : (
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Target
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Acquirer
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Deal Value
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Filing
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Confidence
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Filing / Detected
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {deals.map((deal) => (
-                    <tr key={deal.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {deal.targetName}
-                          </div>
-                          {deal.targetTicker && (
-                            <div className="text-sm text-gray-500">{deal.targetTicker}</div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {deal.acquirerName || "—"}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {formatCurrency(deal.dealValue)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <a
-                          href={deal.filingUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-blue-600 hover:underline"
-                        >
-                          {deal.filingType}
-                        </a>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`text-sm font-medium ${
-                            deal.confidenceScore && deal.confidenceScore >= 0.7
-                              ? "text-green-600"
-                              : deal.confidenceScore && deal.confidenceScore >= 0.5
-                              ? "text-yellow-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {deal.confidenceScore
-                            ? `${(deal.confidenceScore * 100).toFixed(0)}%`
-                            : "—"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        <div className="flex flex-col">
-                          <span className="text-gray-700 font-medium">Filed: {formatDate(deal.filingDate)}</span>
-                          <span className="text-gray-500 text-xs">Detected: {formatDate(deal.detectedAt)}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            deal.status === "pending"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : deal.status === "approved"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-red-100 text-red-800"
-                          }`}
-                        >
-                          {deal.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <Link
-                          href={`/staging/${deal.id}`}
-                          className="text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          Review →
-                        </Link>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Target
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Acquirer
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Value
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Filing
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Conf.
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Dates
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Status
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Actions
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {deals.map((deal) => (
+                      <tr key={deal.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {deal.targetName}
+                            </div>
+                            {deal.targetTicker && (
+                              <div className="text-xs text-gray-500">{deal.targetTicker}</div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                          {deal.acquirerName || "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                          {formatCurrency(deal.dealValue)}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <a
+                            href={deal.filingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-blue-600 hover:underline"
+                          >
+                            {deal.filingType}
+                          </a>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span
+                            className={`text-sm font-medium ${
+                              deal.confidenceScore && deal.confidenceScore >= 0.7
+                                ? "text-green-600"
+                                : deal.confidenceScore && deal.confidenceScore >= 0.5
+                                ? "text-yellow-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {deal.confidenceScore
+                              ? `${(deal.confidenceScore * 100).toFixed(0)}%`
+                              : "—"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-500">
+                          <div className="flex flex-col">
+                            <span className="text-gray-700 font-medium">{formatDate(deal.filingDate)}</span>
+                            <span className="text-gray-500">Det: {formatDate(deal.detectedAt)}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span
+                            className={`px-2 py-1 text-xs font-medium rounded-full ${
+                              deal.status === "pending"
+                                ? "bg-yellow-100 text-yellow-800"
+                                : deal.status === "approved"
+                                ? "bg-green-100 text-green-800"
+                                : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {deal.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm">
+                          <div className="flex items-center gap-2">
+                            <Link
+                              href={`/staging/${deal.id}`}
+                              className="text-blue-600 hover:text-blue-800 font-medium text-xs"
+                            >
+                              Review
+                            </Link>
+                            <span className="text-gray-300">|</span>
+                            <button
+                              onClick={() => router.push(`/deals/edit/${deal.id}`)}
+                              className="text-green-600 hover:text-green-800 font-medium flex items-center gap-1 text-xs"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                              Add
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )
           ) : (
             // Intelligence Deals Table
@@ -537,94 +551,108 @@ export default function StagingPage() {
                 )}
               </div>
             ) : (
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Target
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Acquirer
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Deal Value
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Tier
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Sources
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Confidence
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      First Detected
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {intelligenceDeals.map((deal) => (
-                    <tr key={deal.dealId} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {deal.targetName}
-                          </div>
-                          {deal.targetTicker && (
-                            <div className="text-sm text-gray-500">{deal.targetTicker}</div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {deal.acquirerName || "—"}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {formatCurrency(deal.dealValue)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`px-2 py-1 text-xs font-medium rounded-full ${getTierBadge(deal.dealTier)}`}
-                        >
-                          {deal.dealTier}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-medium text-blue-600">
-                          {deal.sourceCount} {deal.sourceCount === 1 ? 'source' : 'sources'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`text-sm font-medium ${
-                            deal.confidenceScore >= 0.7
-                              ? "text-green-600"
-                              : deal.confidenceScore >= 0.5
-                              ? "text-yellow-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {(deal.confidenceScore * 100).toFixed(0)}%
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        {formatDate(deal.firstDetectedAt)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button
-                          onClick={() => router.push(`/intelligence/deals/${deal.dealId}`)}
-                          className="text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          View Sources →
-                        </button>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Target
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Acquirer
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Value
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Tier
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Sources
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Conf.
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Detected
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Actions
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {intelligenceDeals.map((deal) => (
+                      <tr key={deal.dealId} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {deal.targetName}
+                            </div>
+                            {deal.targetTicker && (
+                              <div className="text-xs text-gray-500">{deal.targetTicker}</div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                          {deal.acquirerName || "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                          {formatCurrency(deal.dealValue)}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span
+                            className={`px-2 py-1 text-xs font-medium rounded-full ${getTierBadge(deal.dealTier)}`}
+                          >
+                            {deal.dealTier}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className="text-sm font-medium text-blue-600">
+                            {deal.sourceCount}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span
+                            className={`text-sm font-medium ${
+                              deal.confidenceScore >= 0.7
+                                ? "text-green-600"
+                                : deal.confidenceScore >= 0.5
+                                ? "text-yellow-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {(deal.confidenceScore * 100).toFixed(0)}%
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-500">
+                          {formatDate(deal.firstDetectedAt)}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => router.push(`/intelligence/deals/${deal.dealId}`)}
+                              className="text-blue-600 hover:text-blue-800 font-medium text-xs"
+                            >
+                              View
+                            </button>
+                            <span className="text-gray-300">|</span>
+                            <button
+                              onClick={() => router.push(`/deals/edit/${deal.dealId}`)}
+                              className="text-green-600 hover:text-green-800 font-medium flex items-center gap-1 text-xs"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                              Add
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )
           )}
         </div>

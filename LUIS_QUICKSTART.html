@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>M&A Tracker - Quick Start Checklist for Luis</title>
+    <style>
+        @media print {
+            body {
+                margin: 0.5in;
+            }
+            .no-print {
+                display: none;
+            }
+            .page-break {
+                page-break-after: always;
+            }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            max-width: 8.5in;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9fafb;
+        }
+
+        .checklist-container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #1e40af;
+            font-size: 28px;
+            margin-top: 0;
+            border-bottom: 4px solid #2563eb;
+            padding-bottom: 15px;
+        }
+
+        h2 {
+            color: #1e40af;
+            font-size: 20px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            background-color: #dbeafe;
+            padding: 10px 15px;
+            border-left: 5px solid #2563eb;
+            border-radius: 4px;
+        }
+
+        .success-banner {
+            background-color: #10b981;
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-weight: 600;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        .info-box {
+            background-color: #fef3c7;
+            border: 2px solid #f59e0b;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-weight: 600;
+        }
+
+        .checklist-item {
+            margin: 15px 0;
+            padding: 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            display: flex;
+            align-items: flex-start;
+            background-color: #f9fafb;
+        }
+
+        .checklist-item:hover {
+            background-color: #f3f4f6;
+        }
+
+        .checklist-item input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 15px;
+            margin-top: 2px;
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+
+        .checklist-item label {
+            flex-grow: 1;
+            cursor: pointer;
+            line-height: 1.6;
+        }
+
+        .checklist-item.completed {
+            background-color: #d1fae5;
+            border-color: #10b981;
+        }
+
+        .code {
+            background-color: #1e293b;
+            color: #e2e8f0;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .url {
+            color: #2563eb;
+            word-break: break-all;
+        }
+
+        .warning {
+            color: #dc2626;
+            font-weight: 600;
+        }
+
+        .phase-number {
+            background-color: #2563eb;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .time-estimate {
+            color: #6b7280;
+            font-style: italic;
+            font-size: 14px;
+        }
+
+        ul {
+            margin: 8px 0;
+            padding-left: 25px;
+        }
+
+        .contact-info {
+            background-color: #fee2e2;
+            border: 2px solid #dc2626;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 30px;
+        }
+
+        .contact-info h3 {
+            color: #dc2626;
+            margin-top: 0;
+        }
+
+        .print-button {
+            background-color: #2563eb;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 20px 0;
+        }
+
+        .print-button:hover {
+            background-color: #1e40af;
+        }
+    </style>
+    <script>
+        function toggleComplete(checkbox) {
+            const item = checkbox.parentElement;
+            if (checkbox.checked) {
+                item.classList.add('completed');
+            } else {
+                item.classList.remove('completed');
+            }
+            saveState();
+        }
+
+        function saveState() {
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            const state = {};
+            checkboxes.forEach((cb, index) => {
+                state[index] = cb.checked;
+            });
+            localStorage.setItem('luisChecklistState', JSON.stringify(state));
+        }
+
+        function loadState() {
+            const savedState = localStorage.getItem('luisChecklistState');
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+                checkboxes.forEach((cb, index) => {
+                    if (state[index]) {
+                        cb.checked = true;
+                        cb.parentElement.classList.add('completed');
+                    }
+                });
+            }
+        }
+
+        function resetChecklist() {
+            if (confirm('Are you sure you want to reset all checkboxes?')) {
+                const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+                checkboxes.forEach(cb => {
+                    cb.checked = false;
+                    cb.parentElement.classList.remove('completed');
+                });
+                localStorage.removeItem('luisChecklistState');
+            }
+        }
+
+        window.onload = loadState;
+    </script>
+</head>
+<body>
+    <div class="checklist-container">
+        <h1>🚀 M&A Tracker - Quick Start Checklist</h1>
+
+        <div class="success-banner">
+            ✅ Tested on Windows staging PC with TWS - Everything works perfectly!
+        </div>
+
+        <p><strong>Installation Time:</strong> 30-45 minutes total</p>
+        <p><strong>Your Contact:</strong> Don (Slack: @don, Phone: [Your Number])</p>
+
+        <div class="no-print">
+            <button class="print-button" onclick="window.print()">🖨️ Print This Checklist</button>
+            <button class="print-button" onclick="resetChecklist()" style="background-color: #dc2626;">🔄 Reset All Checkboxes</button>
+        </div>
+
+        <div class="info-box">
+            ⚠️ <strong>Before You Start:</strong> Make sure you have admin rights on your PC and TWS is already installed.
+        </div>
+
+        <!-- PHASE 1: PREREQUISITES -->
+        <h2><span class="phase-number">1</span> Phase 1: Prerequisites <span class="time-estimate">(15 minutes)</span></h2>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="prereq1" onchange="toggleComplete(this)">
+            <label for="prereq1">
+                <strong>Download Node.js LTS</strong><br>
+                → Go to: <span class="url">https://nodejs.org/</span><br>
+                → Click the green <strong>"LTS"</strong> button<br>
+                → Save the installer to your Downloads folder
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="prereq2" onchange="toggleComplete(this)">
+            <label for="prereq2">
+                <strong>Install Node.js</strong><br>
+                → Run the installer from Downloads<br>
+                → Accept all defaults, click Next until finished<br>
+                → Restart PowerShell if it was open
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="prereq3" onchange="toggleComplete(this)">
+            <label for="prereq3">
+                <strong>Verify Node.js Installation</strong><br>
+                → Open PowerShell (search "PowerShell" in Start menu)<br>
+                → Type: <span class="code">node --version</span><br>
+                → Should show: v20.x.x or similar<br>
+                → Type: <span class="code">npm --version</span><br>
+                → Should show: 10.x.x or similar
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="prereq4" onchange="toggleComplete(this)">
+            <label for="prereq4">
+                <strong>Download Python 3.9+</strong><br>
+                → Go to: <span class="url">https://www.python.org/downloads/</span><br>
+                → Click <strong>"Download Python"</strong> button<br>
+                → Save the installer to your Downloads folder
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="prereq5" onchange="toggleComplete(this)">
+            <label for="prereq5">
+                <strong>Install Python</strong><br>
+                <span class="warning">⚠️ CRITICAL:</span> Check the box <strong>"Add Python to PATH"</strong> at the bottom!<br>
+                → Run the installer from Downloads<br>
+                → <strong>Check "Add Python to PATH"</strong> (bottom of window)<br>
+                → Click "Install Now"<br>
+                → Wait for completion<br>
+                → Restart PowerShell if it was open
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="prereq6" onchange="toggleComplete(this)">
+            <label for="prereq6">
+                <strong>Verify Python Installation</strong><br>
+                → Open PowerShell<br>
+                → Type: <span class="code">python --version</span><br>
+                → Should show: Python 3.9.x or higher<br>
+                → Type: <span class="code">pip --version</span><br>
+                → Should show pip version info
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="prereq7" onchange="toggleComplete(this)">
+            <label for="prereq7">
+                <strong>Download Git for Windows</strong><br>
+                → Go to: <span class="url">https://git-scm.com/download/win</span><br>
+                → Download will start automatically<br>
+                → Save to Downloads folder
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="prereq8" onchange="toggleComplete(this)">
+            <label for="prereq8">
+                <strong>Install Git</strong><br>
+                → Run the installer from Downloads<br>
+                → Accept all defaults, click Next until finished<br>
+                → Restart PowerShell if it was open
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="prereq9" onchange="toggleComplete(this)">
+            <label for="prereq9">
+                <strong>Verify Git Installation</strong><br>
+                → Open PowerShell<br>
+                → Type: <span class="code">git --version</span><br>
+                → Should show: git version 2.x.x
+            </label>
+        </div>
+
+        <!-- PHASE 2: GET THE CODE -->
+        <h2><span class="phase-number">2</span> Phase 2: Get the Code <span class="time-estimate">(5 minutes)</span></h2>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="code1" onchange="toggleComplete(this)">
+            <label for="code1">
+                <strong>Get the ma-tracker-app code from Don</strong><br>
+                → Contact Don to get the code (via git, USB drive, or network share)<br>
+                → Place the <strong>ma-tracker-app</strong> folder in: <span class="code">C:\Users\[YourUsername]\Documents\Projects\</span><br>
+                → Create the Projects folder if it doesn't exist
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="code2" onchange="toggleComplete(this)">
+            <label for="code2">
+                <strong>Verify the code is in place</strong><br>
+                → Open File Explorer<br>
+                → Navigate to the Projects folder<br>
+                → You should see the <strong>ma-tracker-app</strong> folder<br>
+                → Inside should be folders like: <strong>app</strong>, <strong>components</strong>, <strong>lib</strong>, <strong>python-service</strong>, <strong>scripts</strong>
+            </label>
+        </div>
+
+        <!-- PHASE 3: RUN INSTALLER -->
+        <h2><span class="phase-number">3</span> Phase 3: Run Automated Installer <span class="time-estimate">(15 minutes)</span></h2>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="install1" onchange="toggleComplete(this)">
+            <label for="install1">
+                <strong>Open PowerShell in the project folder</strong><br>
+                → Open File Explorer<br>
+                → Navigate to: <span class="code">C:\Users\[YourUsername]\Documents\Projects\ma-tracker-app</span><br>
+                → In the address bar, type: <span class="code">powershell</span> and press Enter<br>
+                → PowerShell will open in this folder
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="install2" onchange="toggleComplete(this)">
+            <label for="install2">
+                <strong>Run the automated installer</strong><br>
+                → In PowerShell, type:<br>
+                <span class="code">powershell -ExecutionPolicy Bypass -File .\scripts\windows-install.ps1</span><br>
+                → Press Enter<br>
+                → Wait for it to complete (this will take 10-15 minutes)<br>
+                → You'll see progress messages as it installs packages
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="install3" onchange="toggleComplete(this)">
+            <label for="install3">
+                <strong>Verify installation completed successfully</strong><br>
+                → Wait for message: <span class="code" style="background-color: #10b981;">Installation Complete! ✅</span><br>
+                → Check that these files were created:
+                <ul>
+                    <li><span class="code">start-all-services.bat</span></li>
+                    <li><span class="code">.env.local</span></li>
+                    <li><span class="code">python-service\venv</span> folder</li>
+                </ul>
+            </label>
+        </div>
+
+        <!-- PHASE 4: TWS CONFIGURATION -->
+        <h2><span class="phase-number">4</span> Phase 4: Configure TWS <span class="time-estimate">(5 minutes)</span></h2>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="tws1" onchange="toggleComplete(this)">
+            <label for="tws1">
+                <strong>Open TWS and log in</strong><br>
+                → Launch TWS or IB Gateway<br>
+                → Log in with your credentials<br>
+                → Wait for it to fully connect
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="tws2" onchange="toggleComplete(this)">
+            <label for="tws2">
+                <strong>Configure TWS API settings</strong><br>
+                → In TWS, go to: <strong>File → Global Configuration → API → Settings</strong><br>
+                → Check these boxes:
+                <ul>
+                    <li>✅ <strong>Enable ActiveX and Socket Clients</strong></li>
+                    <li>✅ Socket port: <strong>7497</strong> (paper) or <strong>7496</strong> (live)</li>
+                    <li>✅ Trusted IPs: Add <strong>127.0.0.1</strong></li>
+                    <li>❌ <strong>UNCHECK "Read-Only API"</strong></li>
+                </ul>
+                → Click <strong>OK</strong>
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="tws3" onchange="toggleComplete(this)">
+            <label for="tws3">
+                <strong>Restart TWS</strong><br>
+                → Close TWS completely<br>
+                → Reopen and log back in<br>
+                → This ensures API settings take effect
+            </label>
+        </div>
+
+        <!-- PHASE 5: LAUNCH -->
+        <h2><span class="phase-number">5</span> Phase 5: Launch the Application <span class="time-estimate">(5 minutes)</span></h2>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="launch1" onchange="toggleComplete(this)">
+            <label for="launch1">
+                <strong>Start all services</strong><br>
+                → In File Explorer, go to the <strong>ma-tracker-app</strong> folder<br>
+                → Double-click: <span class="code">start-all-services.bat</span><br>
+                → Two windows will open (one for Python, one for Next.js)<br>
+                → <strong>Keep both windows open!</strong> Don't close them.
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="launch2" onchange="toggleComplete(this)">
+            <label for="launch2">
+                <strong>Wait for services to start</strong><br>
+                → Python service window: Wait for "Application startup complete"<br>
+                → Next.js window: Wait for "Ready" or "compiled successfully"<br>
+                → This takes 30-60 seconds
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="launch3" onchange="toggleComplete(this)">
+            <label for="launch3">
+                <strong>Open the web app</strong><br>
+                → Open Chrome or Edge browser<br>
+                → Go to: <span class="code">http://localhost:3000</span><br>
+                → You should see the login page
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="launch4" onchange="toggleComplete(this)">
+            <label for="launch4">
+                <strong>Log in to the app</strong><br>
+                → Email: <span class="code">demo@example.com</span><br>
+                → Password: <span class="code">demo123</span><br>
+                → Click <strong>Sign In</strong><br>
+                → You should see the dashboard with M&A deals
+            </label>
+        </div>
+
+        <!-- PHASE 6: TEST -->
+        <h2><span class="phase-number">6</span> Phase 6: Test Basic Functionality <span class="time-estimate">(5 minutes)</span></h2>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="test1" onchange="toggleComplete(this)">
+            <label for="test1">
+                <strong>Test the dashboard</strong><br>
+                → You should see existing M&A deals in a table<br>
+                → Click on a deal name to view details<br>
+                → Verify you can navigate back to the dashboard
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="test2" onchange="toggleComplete(this)">
+            <label for="test2">
+                <strong>Test adding a new deal</strong><br>
+                → Click <strong>"Add Deal"</strong> button<br>
+                → Fill in test data (ticker, target name, acquirer, deal type)<br>
+                → Click <strong>Save</strong><br>
+                → Verify the new deal appears in the table
+            </label>
+        </div>
+
+        <!-- PHASE 7: TEST LIVE DATA (MARKET HOURS ONLY) -->
+        <h2><span class="phase-number">7</span> Phase 7: Test Options Scanner (After 8:30 AM CT) <span class="time-estimate">(5 minutes)</span></h2>
+
+        <div class="info-box">
+            ⏰ <strong>Note:</strong> Options scanner only works during market hours (8:30 AM - 3:00 PM CT, Monday-Friday).
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="scanner1" onchange="toggleComplete(this)">
+            <label for="scanner1">
+                <strong>Navigate to Positions/Options Scanner</strong><br>
+                → Click <strong>"Positions"</strong> in the sidebar<br>
+                → Click the <strong>"Options Scanner"</strong> tab<br>
+                → You should see the scanner interface
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="scanner2" onchange="toggleComplete(this)">
+            <label for="scanner2">
+                <strong>Start the scanner</strong><br>
+                → Make sure TWS is running and connected<br>
+                → Click <strong>"Start Scan"</strong> button<br>
+                → Wait 10-20 seconds for data to load<br>
+                → You should see options data populating in the table 🎉
+            </label>
+        </div>
+
+        <div class="checklist-item">
+            <input type="checkbox" id="scanner3" onchange="toggleComplete(this)">
+            <label for="scanner3">
+                <strong>Verify data is updating</strong><br>
+                → Watch the table for a minute<br>
+                → Prices should update in real-time<br>
+                → If data appears frozen, click "Stop" then "Start Scan" again
+            </label>
+        </div>
+
+        <!-- SUCCESS! -->
+        <div class="success-banner" style="margin-top: 40px;">
+            🎉 Installation Complete! You're all set up and ready to go!
+        </div>
+
+        <!-- EMERGENCY CONTACTS -->
+        <div class="contact-info">
+            <h3>🆘 Need Help? Contact Don:</h3>
+            <ul style="list-style: none; padding: 0;">
+                <li><strong>📱 Phone:</strong> [Your Number]</li>
+                <li><strong>💬 Slack:</strong> @don</li>
+                <li><strong>🖥️ Screen Share:</strong> Available for remote support</li>
+            </ul>
+            <p style="margin-bottom: 0;">If you hit any errors, take a screenshot and send it to Don. He'll help you debug!</p>
+        </div>
+
+        <div class="no-print" style="margin-top: 30px;">
+            <button class="print-button" onclick="window.print()">🖨️ Print This Checklist</button>
+        </div>
+    </div>
+</body>
+</html>

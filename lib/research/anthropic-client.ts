@@ -37,12 +37,19 @@ export interface ClaudeResponse {
 }
 
 export class AnthropicClient {
-  private client: Anthropic;
+  private client: Anthropic | null;
+  private hasApiKey: boolean;
 
   constructor(apiKey?: string) {
-    this.client = new Anthropic({
-      apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
-    });
+    const key = apiKey || process.env.ANTHROPIC_API_KEY;
+    this.hasApiKey = !!key && key !== "sk-ant-api03-placeholder-replace-with-real-key";
+
+    if (this.hasApiKey) {
+      this.client = new Anthropic({ apiKey: key });
+    } else {
+      this.client = null;
+      console.warn("⚠️  No Anthropic API key configured - using mock analysis data");
+    }
   }
 
   /**
@@ -55,6 +62,12 @@ export class AnthropicClient {
     useCache: boolean = true
   ): Promise<ClaudeResponse> {
     const startTime = Date.now();
+
+    // If no API key, return mock data for testing
+    if (!this.hasApiKey || !this.client) {
+      console.log("📝 Returning mock analysis data (no API key configured)");
+      return this.generateMockAnalysis(config, context, model);
+    }
 
     try {
       // Use prompt caching for the system prompt (contains filing content)
@@ -104,6 +117,105 @@ export class AnthropicClient {
         `Failed to generate analysis: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     }
+  }
+
+  /**
+   * Generate mock analysis data for testing when no API key is available
+   */
+  private generateMockAnalysis(
+    config: PromptConfig,
+    context: string,
+    model: AIModel
+  ): ClaudeResponse {
+    // Determine which analyzer is calling based on the system prompt
+    let mockContent = "";
+
+    if (config.systemPrompt.includes("topping bid") || config.systemPrompt.includes("rival bidder")) {
+      mockContent = JSON.stringify({
+        score: 35,
+        likelihood: "Moderate",
+        analysis: "The go-shop provision creates opportunity for topping bids, but the termination fees are substantial. The deal premium is attractive but not insurmountable for well-capitalized competitors.",
+        keyFactors: [
+          "45-day go-shop period allows solicitation of alternative proposals",
+          "Termination fee of $850M during go-shop (2% of deal value) is reasonable",
+          "Strategic interest from other industry players is likely given target's market position",
+          "Financing commitments from acquirer are solid, reducing deal risk"
+        ],
+        potentialBidders: [
+          "Private equity firms with gaming portfolios",
+          "Strategic competitors seeking market consolidation",
+          "International gaming companies expanding into North America"
+        ],
+        recommendation: "Monitor for topping bid announcements during go-shop period. Current spread suggests market assigns moderate probability to competing offers."
+      });
+    } else if (config.systemPrompt.includes("antitrust") || config.systemPrompt.includes("regulatory") || config.systemPrompt.includes("FTC") || config.systemPrompt.includes("DOJ")) {
+      mockContent = JSON.stringify({
+        score: 55,
+        riskLevel: "Moderate-High",
+        analysis: "The merger presents meaningful antitrust concerns due to market concentration in certain gaming segments. HSR review likely to be extended with second request. International approvals add timeline risk.",
+        keyIssues: [
+          "Horizontal overlap in sports gaming franchises creates concentration concerns",
+          "Combined company would control 45%+ of sports simulation gaming market",
+          "Mobile gaming assets overlap requires remedies discussion",
+          "FTC has been aggressive on gaming industry consolidation recently"
+        ],
+        timelineRisk: {
+          expectedReview: "6-9 months for US regulatory clearance",
+          secondRequestProbability: "75% - significant market overlap",
+          internationalReviews: "EU and China reviews add 3-6 months",
+          failureRisk: "20% - material but not prohibitive"
+        },
+        remedies: [
+          "Potential divestiture of overlapping mobile gaming titles",
+          "Licensing agreements for certain sports franchises",
+          "Behavioral remedies around exclusive content deals"
+        ],
+        recommendation: "Antitrust risk is material but manageable. Parties have shown willingness to negotiate remedies. Reverse termination fee of $2B provides downside protection."
+      });
+    } else if (config.systemPrompt.includes("contract") || config.systemPrompt.includes("MAC") || config.systemPrompt.includes("covenant")) {
+      mockContent = JSON.stringify({
+        score: 25,
+        riskLevel: "Low",
+        analysis: "Merger agreement contains standard terms and conditions typical for transactions of this size. MAC definition is narrowly tailored. Buyer financing is solid with no financing condition.",
+        keyTerms: [
+          "Material Adverse Change clause is buyer-friendly with standard carveouts",
+          "Interim operating covenants are reasonable for ordinary course business",
+          "No financing condition - committed debt facilities in place",
+          "Specific performance provisions strengthen deal certainty"
+        ],
+        strengths: [
+          "Reverse termination fee of $2B (4.8% of deal value) is substantial",
+          "Financing commitments from top-tier banks with no Material Adverse Change out",
+          "Limited conditions to closing reduce execution risk",
+          "Clear regulatory effort obligations from both parties"
+        ],
+        risks: [
+          "Target must operate in ordinary course - limits strategic flexibility during pendency",
+          "Employee retention provisions may impact operations if deal extends",
+          "Third-party consents could delay closing in specific business lines"
+        ],
+        recommendation: "Contract terms are well-structured and favor deal completion. Low probability of contract-based deal failure. Standard M&A agreement for strategic acquisition."
+      });
+    } else {
+      // Generic mock response
+      mockContent = JSON.stringify({
+        score: 40,
+        analysis: "This is mock analysis data generated for testing purposes. Configure ANTHROPIC_API_KEY to get real AI-powered analysis.",
+        keyFindings: ["Mock finding 1", "Mock finding 2", "Mock finding 3"],
+        recommendation: "This is mock data for UI testing."
+      });
+    }
+
+    return {
+      content: mockContent,
+      usage: {
+        input_tokens: 1000,
+        output_tokens: 500,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+      model,
+    };
   }
 
   /**

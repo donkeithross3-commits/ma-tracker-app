@@ -122,6 +122,155 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
     return "text-red-600";
   }
 
+  function formatExecutiveSummary(summary: string): JSX.Element {
+    // Split on double newlines to create paragraphs
+    const paragraphs = summary
+      .split('\n\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0);
+
+    return (
+      <>
+        {paragraphs.map((paragraph, idx) => (
+          <p key={idx} dangerouslySetInnerHTML={{ __html: parseMarkdown(paragraph) }} />
+        ))}
+      </>
+    );
+  }
+
+  function parseMarkdown(text: string): string {
+    let result = text;
+
+    // Headers: ### Header (must do before bold to avoid conflict with ***)
+    result = result.replace(/^### (.+)$/gm, '<h4 class="font-semibold text-sm mt-1 mb-0.5">$1</h4>');
+    result = result.replace(/^## (.+)$/gm, '<h3 class="font-semibold text-base mt-1 mb-0.5">$1</h3>');
+    result = result.replace(/^# (.+)$/gm, '<h2 class="font-semibold text-lg mt-2 mb-0.5">$1</h2>');
+
+    // Bold: **text** or ***text***
+    result = result.replace(/\*\*\*(.+?)\*\*\*/g, '<strong>$1</strong>');
+    result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    // Italic: *text*
+    result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+    // Line breaks
+    result = result.replace(/\n/g, '<br />');
+
+    return result;
+  }
+
+  function formatSectionContent(content: string): JSX.Element {
+    try {
+      // Try to parse as JSON
+      const parsed = JSON.parse(content);
+
+      return (
+        <div className="space-y-1.5">
+          {/* Main Analysis */}
+          {parsed.analysis && (
+            <div>
+              <p className="text-sm leading-snug text-gray-700">{parsed.analysis}</p>
+            </div>
+          )}
+
+          {/* Key Issues / Key Factors / Key Terms */}
+          {(parsed.keyIssues || parsed.keyFactors || parsed.keyTerms) && (
+            <div>
+              <h4 className="text-xs font-semibold mb-1 mt-1.5">
+                {parsed.keyIssues ? "Key Issues" : parsed.keyFactors ? "Key Factors" : "Key Terms"}
+              </h4>
+              <ul className="list-disc list-inside space-y-0.5 text-sm text-gray-700">
+                {(parsed.keyIssues || parsed.keyFactors || parsed.keyTerms).map((item: string, idx: number) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Strengths */}
+          {parsed.strengths && (
+            <div>
+              <h4 className="text-xs font-semibold mb-1 mt-1.5 text-green-700">Strengths</h4>
+              <ul className="list-disc list-inside space-y-0.5 text-sm text-gray-700">
+                {parsed.strengths.map((item: string, idx: number) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Risks */}
+          {parsed.risks && (
+            <div>
+              <h4 className="text-xs font-semibold mb-1 mt-1.5 text-red-700">Risks</h4>
+              <ul className="list-disc list-inside space-y-0.5 text-sm text-gray-700">
+                {parsed.risks.map((item: string, idx: number) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Timeline Risk */}
+          {parsed.timelineRisk && (
+            <div>
+              <h4 className="text-xs font-semibold mb-1 mt-1.5">Timeline & Regulatory Risk</h4>
+              <div className="text-sm text-gray-700 space-y-0.5">
+                {parsed.timelineRisk.expectedReview && (
+                  <p><span className="font-medium">Expected Review:</span> {parsed.timelineRisk.expectedReview}</p>
+                )}
+                {parsed.timelineRisk.secondRequestProbability && (
+                  <p><span className="font-medium">Second Request Probability:</span> {parsed.timelineRisk.secondRequestProbability}</p>
+                )}
+                {parsed.timelineRisk.internationalReviews && (
+                  <p><span className="font-medium">International Reviews:</span> {parsed.timelineRisk.internationalReviews}</p>
+                )}
+                {parsed.timelineRisk.failureRisk && (
+                  <p><span className="font-medium">Failure Risk:</span> {parsed.timelineRisk.failureRisk}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Remedies */}
+          {parsed.remedies && (
+            <div>
+              <h4 className="text-xs font-semibold mb-1 mt-1.5">Potential Remedies</h4>
+              <ul className="list-disc list-inside space-y-0.5 text-sm text-gray-700">
+                {parsed.remedies.map((item: string, idx: number) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Potential Bidders */}
+          {parsed.potentialBidders && (
+            <div>
+              <h4 className="text-xs font-semibold mb-1 mt-1.5">Potential Bidders</h4>
+              <ul className="list-disc list-inside space-y-0.5 text-sm text-gray-700">
+                {parsed.potentialBidders.map((item: string, idx: number) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Recommendation */}
+          {parsed.recommendation && (
+            <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
+              <h4 className="text-xs font-semibold mb-0.5 text-blue-900">Recommendation</h4>
+              <p className="text-sm text-blue-800 leading-snug">{parsed.recommendation}</p>
+            </div>
+          )}
+        </div>
+      );
+    } catch (e) {
+      // If not JSON, display as plain text
+      return <div className="whitespace-pre-wrap text-sm text-gray-700">{content}</div>;
+    }
+  }
+
   function getRiskLabel(score: number | null) {
     if (score === null) return "Not assessed";
     if (score <= 30) return "Low Risk";
@@ -183,12 +332,12 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-2">
       {/* Risk Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-4">
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Overall Risk
             </CardTitle>
           </CardHeader>
@@ -203,8 +352,8 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
         </Card>
 
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Antitrust Risk
             </CardTitle>
           </CardHeader>
@@ -219,8 +368,8 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
         </Card>
 
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Contract Risk
             </CardTitle>
           </CardHeader>
@@ -235,8 +384,8 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
         </Card>
 
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Topping Bid
             </CardTitle>
           </CardHeader>
@@ -254,29 +403,29 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
       {/* Executive Summary */}
       {report.executiveSummary && (
         <Card>
-          <CardHeader>
-            <CardTitle>Executive Summary</CardTitle>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Executive Summary</CardTitle>
           </CardHeader>
-          <CardContent>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">
-              {report.executiveSummary}
-            </p>
+          <CardContent className="pt-2">
+            <div className="text-sm leading-snug text-gray-700 space-y-1">
+              {formatExecutiveSummary(report.executiveSummary)}
+            </div>
           </CardContent>
         </Card>
       )}
 
       {/* Key Findings, Red Flags, Opportunities */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-3">
         {report.keyFindings && Array.isArray(report.keyFindings) && report.keyFindings.length > 0 && (
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
-                <CheckCircle className="h-5 w-5 text-blue-600" />
-                <CardTitle className="text-lg">Key Findings</CardTitle>
+                <CheckCircle className="h-4 w-4 text-blue-600" />
+                <CardTitle className="text-sm">Key Findings</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
-              <ul className="space-y-2">
+              <ul className="space-y-1">
                 {report.keyFindings.map((finding: string, idx: number) => (
                   <li key={idx} className="text-sm flex items-start gap-2">
                     <span className="text-muted-foreground mt-0.5">•</span>
@@ -290,14 +439,14 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
 
         {report.redFlags && Array.isArray(report.redFlags) && report.redFlags.length > 0 && (
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
-                <XCircle className="h-5 w-5 text-red-600" />
-                <CardTitle className="text-lg">Red Flags</CardTitle>
+                <XCircle className="h-4 w-4 text-red-600" />
+                <CardTitle className="text-sm">Red Flags</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
-              <ul className="space-y-2">
+              <ul className="space-y-1">
                 {report.redFlags.map((flag: string, idx: number) => (
                   <li key={idx} className="text-sm flex items-start gap-2">
                     <span className="text-red-600 mt-0.5">⚠</span>
@@ -311,14 +460,14 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
 
         {report.opportunities && Array.isArray(report.opportunities) && report.opportunities.length > 0 && (
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
-                <CheckCircle className="h-5 w-5 text-green-600" />
-                <CardTitle className="text-lg">Opportunities</CardTitle>
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                <CardTitle className="text-sm">Opportunities</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
-              <ul className="space-y-2">
+              <ul className="space-y-1">
                 {report.opportunities.map((opp: string, idx: number) => (
                   <li key={idx} className="text-sm flex items-start gap-2">
                     <span className="text-green-600 mt-0.5">✓</span>
@@ -333,31 +482,31 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
 
       {/* Report Sections */}
       {report.sections && report.sections.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Detailed Analysis</h3>
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">Detailed Analysis</h3>
           {report.sections.map((section) => (
             <Card key={section.id}>
-              <CardHeader>
+              <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle>{section.sectionTitle}</CardTitle>
+                  <CardTitle className="text-base">{section.sectionTitle}</CardTitle>
                   {section.riskScore !== null && (
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">Risk Score:</span>
-                      <span className={`text-lg font-bold ${getRiskColor(section.riskScore)}`}>
+                      <span className="text-xs text-muted-foreground">Risk Score:</span>
+                      <span className={`text-base font-bold ${getRiskColor(section.riskScore)}`}>
                         {section.riskScore}
                       </span>
                     </div>
                   )}
                 </div>
                 {section.confidence && (
-                  <CardDescription>
+                  <CardDescription className="text-xs">
                     Confidence: {section.confidence}
                   </CardDescription>
                 )}
               </CardHeader>
               <CardContent>
                 <div className="prose prose-sm max-w-none">
-                  <div className="whitespace-pre-wrap">{section.analysisMarkdown}</div>
+                  {formatSectionContent(section.analysisMarkdown)}
                 </div>
               </CardContent>
             </Card>
@@ -366,15 +515,16 @@ export function ResearchReport({ dealId, ticker }: ResearchReportProps) {
       )}
 
       {/* Regenerate Button */}
-      <div className="flex justify-center pt-4">
+      <div className="flex justify-center pt-2">
         <Button
           variant="outline"
+          size="sm"
           onClick={generateReport}
           disabled={generating}
         >
           {generating ? (
             <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <Loader2 className="h-3 w-3 mr-2 animate-spin" />
               Regenerating...
             </>
           ) : (

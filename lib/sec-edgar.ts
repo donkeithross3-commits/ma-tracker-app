@@ -11,7 +11,9 @@ const SEC_EDGAR_BASE_URL = "https://data.sec.gov";
 const SEC_EDGAR_ARCHIVE_URL = "https://www.sec.gov/cgi-bin/browse-edgar";
 
 // SEC requires User-Agent header with contact information
-const USER_AGENT = "M&A Tracker contact@example.com"; // TODO: Update with actual contact
+// Format: "Company Name email@domain.com"
+// Using environment variable or fallback to generic contact
+const USER_AGENT = process.env.SEC_EDGAR_USER_AGENT || "MA-Tracker-App admin@matracker.dev";
 
 /**
  * Lookup CIK (Central Index Key) for a ticker symbol

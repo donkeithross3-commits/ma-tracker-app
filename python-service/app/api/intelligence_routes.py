@@ -14,6 +14,18 @@ from app.intelligence.orchestrator import (
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
 
+# Global database pool - created once and reused
+_db_pool: Optional[EdgarDatabase] = None
+
+
+async def get_db_pool() -> EdgarDatabase:
+    """Get or create the global database pool"""
+    global _db_pool
+    if _db_pool is None:
+        _db_pool = EdgarDatabase()
+        await _db_pool.connect()
+    return _db_pool
+
 
 class IntelligenceStatusResponse(BaseModel):
     is_running: bool
@@ -171,33 +183,303 @@ async def get_deals(tier: Optional[str] = None, limit: int = 100):
 @router.get("/deals/{deal_id}")
 async def get_deal(deal_id: str):
     """Get detailed information about a specific deal including all sources"""
+    db = await get_db_pool()
+
+    conn = await db.pool.acquire()
+    try:
+        # Get deal info
+        deal = await conn.fetchrow(
+            """SELECT * FROM deal_intelligence WHERE deal_id = $1""",
+            deal_id
+        )
+
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+
+        # Get all sources for this deal
+        sources = await conn.fetch(
+            """SELECT * FROM deal_sources
+               WHERE deal_id = $1
+               ORDER BY detected_at DESC""",
+            deal_id
+        )
+
+        return {
+            "deal": dict(deal),
+            "sources": [dict(s) for s in sources]
+        }
+    finally:
+        await db.pool.release(conn)
+
+
+class TrackDealRequest(BaseModel):
+    production_deal_id: str
+
+
+class TrackDealResponse(BaseModel):
+    success: bool
+    message: str
+    tracking_status: str
+
+
+@router.post("/deals/{deal_id}/track", response_model=TrackDealResponse)
+async def track_deal_for_production(deal_id: str, request: TrackDealRequest):
+    """
+    Mark an intelligence deal as tracked for production.
+    Updates the deal with production_deal_id and sets tracking status.
+    Enables enhanced monitoring for continuous research and attribute extraction.
+    """
     db = EdgarDatabase()
     await db.connect()
 
     try:
         conn = await db.pool.acquire()
         try:
-            # Get deal info
+            # Verify deal exists
             deal = await conn.fetchrow(
-                """SELECT * FROM deal_intelligence WHERE deal_id = $1""",
+                """SELECT deal_id, target_name FROM deal_intelligence WHERE deal_id = $1""",
                 deal_id
             )
 
             if not deal:
                 raise HTTPException(status_code=404, detail="Deal not found")
 
-            # Get all sources for this deal
-            sources = await conn.fetch(
-                """SELECT * FROM deal_sources
-                   WHERE deal_id = $1
-                   ORDER BY detected_at DESC""",
+            # Update deal with production tracking info
+            await conn.execute(
+                """
+                UPDATE deal_intelligence
+                SET
+                    production_deal_id = $1,
+                    tracking_status = 'synced_to_production',
+                    last_synced_to_production = NOW(),
+                    enhanced_monitoring_enabled = TRUE
+                WHERE deal_id = $2
+                """,
+                request.production_deal_id,
                 deal_id
             )
 
-            return {
-                "deal": dict(deal),
-                "sources": [dict(s) for s in sources]
-            }
+            return TrackDealResponse(
+                success=True,
+                message=f"Deal '{deal['target_name']}' is now tracked for production",
+                tracking_status="synced_to_production"
+            )
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
+class SuggestionResponse(BaseModel):
+    suggestionId: str
+    dealId: str
+    productionDealId: str
+    suggestionType: str
+    suggestedField: Optional[str]
+    currentValue: Optional[str]
+    suggestedValue: Optional[str]
+    confidenceScore: Optional[float]
+    reasoning: str
+    sourceCount: int
+    status: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+@router.get("/suggestions/{production_deal_id}", response_model=List[SuggestionResponse])
+async def get_deal_suggestions(production_deal_id: str, status: Optional[str] = None):
+    """Get all suggestions for a production deal, optionally filtered by status"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        query = """
+            SELECT suggestion_id, deal_id, production_deal_id,
+                   suggestion_type, suggested_field, current_value, suggested_value,
+                   confidence_score, reasoning, source_count, status,
+                   created_at, updated_at
+            FROM production_deal_suggestions
+            WHERE production_deal_id = $1
+        """
+
+        params = [production_deal_id]
+        if status:
+            query += " AND status = $2"
+            params.append(status)
+
+        query += " ORDER BY created_at DESC"
+
+        conn = await db.pool.acquire()
+        try:
+            suggestions = await conn.fetch(query, *params)
+
+            results = []
+            for s in suggestions:
+                results.append(SuggestionResponse(
+                    suggestionId=str(s["suggestion_id"]),
+                    dealId=str(s["deal_id"]),
+                    productionDealId=s["production_deal_id"],
+                    suggestionType=s["suggestion_type"],
+                    suggestedField=s.get("suggested_field"),
+                    currentValue=s.get("current_value"),
+                    suggestedValue=s.get("suggested_value"),
+                    confidenceScore=float(s["confidence_score"]) if s.get("confidence_score") else None,
+                    reasoning=s["reasoning"],
+                    sourceCount=s["source_count"],
+                    status=s["status"],
+                    createdAt=s["created_at"],
+                    updatedAt=s["updated_at"],
+                ))
+
+            return results
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
+class AcceptSuggestionRequest(BaseModel):
+    reviewed_by: str
+
+
+class RejectSuggestionRequest(BaseModel):
+    reviewed_by: str
+    rejection_reason: Optional[str] = None
+
+
+class SuggestionActionResponse(BaseModel):
+    success: bool
+    message: str
+    suggestion: dict
+
+
+@router.post("/suggestions/{suggestion_id}/accept", response_model=SuggestionActionResponse)
+async def accept_suggestion(suggestion_id: str, request: AcceptSuggestionRequest):
+    """Accept a suggestion and mark it as applied"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            # Get suggestion details
+            suggestion = await conn.fetchrow(
+                """SELECT * FROM production_deal_suggestions WHERE suggestion_id = $1""",
+                suggestion_id
+            )
+
+            if not suggestion:
+                raise HTTPException(status_code=404, detail="Suggestion not found")
+
+            if suggestion["status"] != "pending":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Suggestion is already {suggestion['status']}"
+                )
+
+            # Update suggestion status
+            await conn.execute(
+                """
+                UPDATE production_deal_suggestions
+                SET
+                    status = 'accepted',
+                    reviewed_by = $1,
+                    reviewed_at = NOW(),
+                    applied_at = NOW()
+                WHERE suggestion_id = $2
+                """,
+                request.reviewed_by,
+                suggestion_id
+            )
+
+            # Update the production deal to mark has_pending_suggestions
+            await conn.execute(
+                """
+                UPDATE deals
+                SET has_pending_suggestions = (
+                    SELECT COUNT(*) > 0
+                    FROM production_deal_suggestions
+                    WHERE production_deal_id = $1 AND status = 'pending'
+                )
+                WHERE id = $1
+                """,
+                suggestion["production_deal_id"]
+            )
+
+            return SuggestionActionResponse(
+                success=True,
+                message="Suggestion accepted successfully",
+                suggestion=dict(suggestion)
+            )
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
+@router.post("/suggestions/{suggestion_id}/reject", response_model=SuggestionActionResponse)
+async def reject_suggestion(suggestion_id: str, request: RejectSuggestionRequest):
+    """Reject a suggestion"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            # Get suggestion details
+            suggestion = await conn.fetchrow(
+                """SELECT * FROM production_deal_suggestions WHERE suggestion_id = $1""",
+                suggestion_id
+            )
+
+            if not suggestion:
+                raise HTTPException(status_code=404, detail="Suggestion not found")
+
+            if suggestion["status"] != "pending":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Suggestion is already {suggestion['status']}"
+                )
+
+            # Update suggestion status
+            await conn.execute(
+                """
+                UPDATE production_deal_suggestions
+                SET
+                    status = 'rejected',
+                    reviewed_by = $1,
+                    reviewed_at = NOW()
+                WHERE suggestion_id = $2
+                """,
+                request.reviewed_by,
+                suggestion_id
+            )
+
+            # Update the production deal to mark has_pending_suggestions
+            await conn.execute(
+                """
+                UPDATE deals
+                SET has_pending_suggestions = (
+                    SELECT COUNT(*) > 0
+                    FROM production_deal_suggestions
+                    WHERE production_deal_id = $1 AND status = 'pending'
+                )
+                WHERE id = $1
+                """,
+                suggestion["production_deal_id"]
+            )
+
+            return SuggestionActionResponse(
+                success=True,
+                message="Suggestion rejected successfully",
+                suggestion=dict(suggestion)
+            )
+
         finally:
             await db.pool.release(conn)
 
@@ -390,6 +672,44 @@ async def get_rumored_deals_with_edgar_status():
                 })
 
             return {"deals": results, "total": len(results)}
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
+@router.get("/deals/{deal_id}/research")
+async def get_deal_research(deal_id: str):
+    """Get research report for a specific deal"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            research = await conn.fetchrow(
+                '''SELECT research_id, deal_id, report_markdown, extracted_deal_terms,
+                          target_ticker, go_shop_end_date, vote_risk, finance_risk, legal_risk,
+                          status, error_message, created_at, completed_at
+                   FROM deal_research
+                   WHERE deal_id = $1
+                   ORDER BY created_at DESC
+                   LIMIT 1''',
+                deal_id
+            )
+
+            if not research:
+                raise HTTPException(status_code=404, detail="No research found for this deal")
+
+            # Convert to dict and handle JSON parsing
+            import json
+            result = dict(research)
+            if result['extracted_deal_terms']:
+                result['extracted_deal_terms'] = json.loads(result['extracted_deal_terms'])
+
+            return result
 
         finally:
             await db.pool.release(conn)

@@ -37,7 +37,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch merger-related filings from SEC EDGAR
+    // Check if we already have filings for this deal
+    const existingFilings = await prisma.secFiling.findMany({
+      where: { dealId },
+    });
+
+    // If we have filings that are already fetched, return those
+    if (existingFilings.length > 0 && existingFilings.some(f => f.fetchStatus === "fetched")) {
+      return NextResponse.json({
+        success: true,
+        cik: "mock",
+        companyName: deal.targetName || ticker,
+        filingsFound: existingFilings.length,
+        filingsStored: existingFilings.length,
+        filings: existingFilings,
+        source: "database",
+      });
+    }
+
+    // Otherwise, fetch merger-related filings from SEC EDGAR
     const result = await fetchMergerFilings(ticker);
 
     // Store filings in database

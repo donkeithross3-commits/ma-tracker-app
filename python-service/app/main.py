@@ -8,9 +8,25 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import List, Optional
 import logging
+import os
+from pathlib import Path
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+        logger = logging.getLogger(__name__)
+        logger.info(f"Loaded environment from {env_path}")
+except ImportError:
+    pass
 
 from .scanner import IBMergerArbScanner, MergerArbAnalyzer, DealInput
 from .futures import get_futures_scanner
+from .api.edgar_routes import router as edgar_router
+from .api.intelligence_routes import router as intelligence_router
+from .api.webhooks import router as webhooks_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +37,15 @@ app = FastAPI(
     description="API for analyzing merger arbitrage options strategies",
     version="1.0.0"
 )
+
+# Include EDGAR monitoring routes
+app.include_router(edgar_router)
+
+# Include Intelligence platform routes
+app.include_router(intelligence_router)
+
+# Include Webhook routes
+app.include_router(webhooks_router)
 
 # Configure CORS - allow requests from Next.js frontend
 app.add_middleware(
@@ -328,10 +353,43 @@ async def test_futures():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
-    global scanner_instance
-    if scanner_instance and scanner_instance.isConnected():
-        logger.info("Disconnecting from IB...")
-        scanner_instance.disconnect()
+    logger.info("=" * 50)
+    logger.info("SHUTDOWN INITIATED - Cleaning up resources...")
+    logger.info("=" * 50)
+
+    # 1. Stop EDGAR monitoring
+    try:
+        from .api.edgar_routes import stop_edgar_monitoring, stop_research_worker
+        logger.info("Stopping EDGAR monitoring...")
+        await stop_edgar_monitoring()
+        logger.info("Stopping research worker...")
+        await stop_research_worker()
+        logger.info("✓ EDGAR services stopped")
+    except Exception as e:
+        logger.error(f"Error stopping EDGAR services: {e}")
+
+    # 2. Stop Intelligence monitoring
+    try:
+        from .intelligence.orchestrator import stop_intelligence_monitoring
+        logger.info("Stopping Intelligence monitoring...")
+        await stop_intelligence_monitoring()
+        logger.info("✓ Intelligence services stopped")
+    except Exception as e:
+        logger.error(f"Error stopping Intelligence services: {e}")
+
+    # 3. Disconnect IB scanner
+    try:
+        global scanner_instance
+        if scanner_instance and scanner_instance.isConnected():
+            logger.info("Disconnecting from IB...")
+            scanner_instance.disconnect()
+            logger.info("✓ IB disconnected")
+    except Exception as e:
+        logger.error(f"Error disconnecting IB: {e}")
+
+    logger.info("=" * 50)
+    logger.info("SHUTDOWN COMPLETE - All resources cleaned up")
+    logger.info("=" * 50)
 
 
 if __name__ == "__main__":

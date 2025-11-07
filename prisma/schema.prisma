@@ -33,6 +33,7 @@ model User {
   dealSnapshots       DealSnapshot[]
   apiPriceFetches     ApiPriceFetch[]
   auditLogs           AuditLog[]
+  stagedDealsReviewed StagedDeal[]
 
   @@map("users")
 }
@@ -50,6 +51,11 @@ model Deal {
   status         String   @default("active") // active, closed, terminated, pending
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Intelligence System Tracking
+  intelligenceDealId       String?   @map("intelligence_deal_id") // UUID from intelligence database
+  lastIntelligenceSync     DateTime? @map("last_intelligence_sync")
+  hasPendingSuggestions    Boolean   @default(false) @map("has_pending_suggestions")
 
   // Foreign Keys
   createdById String? @map("created_by")
@@ -319,6 +325,163 @@ model SecFiling {
   @@index([dealId, filingType])
   @@index([filingDate(sort: Desc)])
   @@map("sec_filings")
+}
+
+// ============================================================================
+// EDGAR REAL-TIME MONITORING SYSTEM
+// ============================================================================
+
+// All EDGAR filings detected (before M&A filtering)
+model EdgarFiling {
+  id                  String    @id @default(uuid()) @map("filing_id")
+  accessionNumber     String    @unique @map("accession_number") @db.VarChar(50) // e.g., "0001193125-25-012345"
+  cik                 String    @map("cik") @db.VarChar(10)
+  companyName         String?   @map("company_name")
+  ticker              String?   @db.VarChar(10)
+  filingType          String    @map("filing_type") @db.VarChar(20) // 8-K, SC TO, DEFM14A, etc.
+  filingDate          DateTime  @map("filing_date")
+  filingUrl           String    @map("filing_url") @db.Text
+  htmlUrl             String?   @map("html_url") @db.Text
+  xmlUrl              String?   @map("xml_url") @db.Text
+
+  // M&A Detection
+  isMaRelevant        Boolean   @default(false) @map("is_ma_relevant")
+  confidenceScore     Float?    @map("confidence_score") // 0.0 to 1.0
+  detectedKeywords    String[]  @map("detected_keywords")
+
+  // Processing status
+  status              String    @default("pending") @db.VarChar(20) // pending, processed, ignored, error
+  processedAt         DateTime? @map("processed_at")
+  errorMessage        String?   @map("error_message") @db.Text
+
+  // Timestamps
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  stagedDeals         StagedDeal[]
+
+  @@index([filingDate(sort: Desc)])
+  @@index([status])
+  @@index([isMaRelevant, confidenceScore])
+  @@index([ticker])
+  @@map("edgar_filings")
+}
+
+// Deals detected but awaiting review
+model StagedDeal {
+  id                    String    @id @default(uuid()) @map("staged_deal_id")
+
+  // Deal information (extracted from filing)
+  targetTicker          String?   @map("target_ticker") @db.VarChar(10)
+  targetName            String    @map("target_name")
+  acquirerName          String?   @map("acquirer_name")
+  acquirerTicker        String?   @map("acquirer_ticker") @db.VarChar(10)
+  dealValue             Decimal?  @map("deal_value") @db.Decimal(15, 2) // in billions
+  dealType              String?   @map("deal_type") @db.VarChar(50) // merger, acquisition, tender_offer
+  considerationType     String?   @map("consideration_type") @db.VarChar(50) // cash, stock, mixed
+
+  // Source information
+  sourceFilingId        String    @map("source_filing_id")
+  sourceFilingType      String    @map("source_filing_type") @db.VarChar(20)
+  detectedAt            DateTime  @default(now()) @map("detected_at")
+
+  // Extraction metadata
+  confidenceScore       Float?    @map("confidence_score")
+  extractionMethod      String    @default("llm") @db.VarChar(50) // llm, regex, manual
+  rawExtractedData      Json?     @map("raw_extracted_data") // Full LLM response
+
+  // Review workflow
+  status                String    @default("pending") @db.VarChar(20) // pending, approved, rejected, needs_info
+  reviewedById          String?   @map("reviewed_by")
+  reviewedAt            DateTime? @map("reviewed_at")
+  reviewNotes           String?   @map("review_notes") @db.Text
+
+  // Research status
+  researchStatus        String    @default("queued") @db.VarChar(20) // queued, generating, completed, failed
+  researchCompletedAt   DateTime? @map("research_completed_at")
+
+  // Notification status
+  alertSent             Boolean   @default(false) @map("alert_sent")
+  alertSentAt           DateTime? @map("alert_sent_at")
+
+  // If approved, link to created deal
+  approvedDealId        String?   @map("approved_deal_id")
+
+  // Timestamps
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  sourceFiling          EdgarFiling @relation(fields: [sourceFilingId], references: [id])
+  reviewedBy            User?       @relation(fields: [reviewedById], references: [id])
+  researchReports       StagedDealResearch[]
+
+  @@index([status, detectedAt(sort: Desc)])
+  @@index([researchStatus])
+  @@index([targetTicker])
+  @@map("staged_deals")
+}
+
+// Research reports for staged deals (before approval)
+model StagedDealResearch {
+  id                  String    @id @default(uuid()) @map("research_id")
+  stagedDealId        String    @map("staged_deal_id")
+  analyzerType        String    @map("analyzer_type") @db.VarChar(50) // topping_bid, antitrust, contract
+  analysisMarkdown    String    @map("analysis_markdown") @db.Text
+  extractedData       Json?     @map("extracted_data")
+  status              String    @default("pending") @db.VarChar(20) // pending, completed, error
+  errorMessage        String?   @map("error_message") @db.Text
+  generatedAt         DateTime  @default(now()) @map("generated_at")
+
+  // Relations
+  stagedDeal          StagedDeal @relation(fields: [stagedDealId], references: [id], onDelete: Cascade)
+
+  @@index([stagedDealId, analyzerType])
+  @@map("staged_deal_research")
+}
+
+// Queue for research generation
+model ResearchQueue {
+  id              String    @id @default(uuid()) @map("queue_id")
+  stagedDealId    String    @map("staged_deal_id")
+
+  // Queue metadata
+  priority        Int       @default(5) // 1 (low) to 10 (high)
+  status          String    @default("pending") @db.VarChar(20) // pending, processing, completed, failed
+
+  // Processing info
+  startedAt       DateTime? @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(3) @map("max_attempts")
+  errorMessage    String?   @map("error_message") @db.Text
+
+  // Research configuration
+  analyzerTypes   String[]  @map("analyzer_types") // ["topping_bid", "antitrust", "contract"]
+  options         Json?     // Additional options
+
+  // Timestamps
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, priority(sort: Desc), createdAt])
+  @@map("research_queue")
+}
+
+// Track polling activity for monitoring
+model EdgarPollingLog {
+  id                      String   @id @default(uuid()) @map("log_id")
+  pollTimestamp           DateTime @default(now()) @map("poll_timestamp")
+  filingsFetched          Int      @map("filings_fetched")
+  newFilings              Int      @map("new_filings")
+  maRelevantFilings       Int      @map("ma_relevant_filings")
+  errors                  Int      @default(0)
+  durationMs              Int      @map("duration_ms")
+  lastAccessionNumber     String?  @map("last_accession_number") @db.VarChar(50)
+
+  @@index([pollTimestamp(sort: Desc)])
+  @@map("edgar_polling_log")
 }
 
 // Main research report per deal

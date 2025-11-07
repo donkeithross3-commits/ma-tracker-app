@@ -30,6 +30,21 @@ export default function Home() {
             </Link>
 
             <Link
+              href="/staging"
+              className="block p-6 bg-blue-50 border-2 border-blue-200 rounded-lg hover:shadow-lg transition-shadow"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="text-xl font-semibold">Deal Staging Queue</h3>
+                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">
+                  EDGAR
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Review AI-detected M&A deals from SEC filings before approval
+              </p>
+            </Link>
+
+            <Link
               href="/portfolio"
               className="block p-6 bg-card border rounded-lg hover:shadow-lg transition-shadow"
             >

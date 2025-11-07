@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .email-container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2563eb;
+            font-size: 24px;
+            margin-top: 0;
+            border-bottom: 3px solid #2563eb;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #1e40af;
+            font-size: 20px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        h3 {
+            color: #1e40af;
+            font-size: 16px;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        .success-badge {
+            background-color: #10b981;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            display: inline-block;
+            font-weight: 600;
+            margin: 15px 0;
+        }
+        .section {
+            margin: 25px 0;
+            padding: 20px;
+            background-color: #f9fafb;
+            border-left: 4px solid #2563eb;
+            border-radius: 4px;
+        }
+        .checklist {
+            list-style: none;
+            padding-left: 0;
+        }
+        .checklist li {
+            padding: 8px 0;
+            padding-left: 30px;
+            position: relative;
+        }
+        .checklist li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #10b981;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .code-block {
+            background-color: #1e293b;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+        .code-comment {
+            color: #94a3b8;
+        }
+        .warning {
+            background-color: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        .info-box {
+            background-color: #dbeafe;
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        .timeline {
+            background-color: #f0fdf4;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 15px 0;
+        }
+        .timeline-item {
+            padding: 8px 0;
+            font-weight: 500;
+        }
+        a {
+            color: #2563eb;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .button {
+            display: inline-block;
+            background-color: #2563eb;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            margin: 10px 0;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #e5e7eb;
+            color: #6b7280;
+            font-size: 14px;
+        }
+        strong {
+            color: #1e40af;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <h1>M&A Tracker Setup - Ready to Install</h1>
+
+        <p>Hey Luis,</p>
+
+        <p>Great news! The M&A Tracker application is ready for you to install on your Windows machine. I've fully automated the entire setup - <strong>just run one file and it does everything in 15-20 minutes!</strong></p>
+
+        <div class="success-badge">
+            ✅ Just tested on staging Windows PC with TWS - everything works perfectly!
+        </div>
+
+        <div class="info-box" style="background-color: #dcfce7; border-color: #10b981;">
+            <strong>🚀 Super Simple Installation:</strong><br>
+            1. Get the ma-tracker-app folder from me<br>
+            2. Right-click <code>scripts\install.bat</code> → "Run as administrator"<br>
+            3. Wait 15 minutes while it auto-installs Node.js, Python, Git, and all dependencies<br>
+            4. Done! 🎉
+        </div>
+
+        <div class="section">
+            <h2>📋 What You're Getting</h2>
+            <ul class="checklist">
+                <li><strong>Web Application</strong> - View and manage M&A deals in your browser</li>
+                <li><strong>Options Scanner</strong> - Real-time data from your Interactive Brokers TWS</li>
+                <li><strong>Research Reports</strong> - AI-powered merger analysis</li>
+                <li><strong>Shared Database</strong> - Same data as my system (cloud-based)</li>
+            </ul>
+            <p style="margin-top: 15px;">Everything runs locally on your machine (except the cloud database).</p>
+        </div>
+
+        <h2>🎯 Installation Steps (Now Super Simple!)</h2>
+
+        <p>I've attached a <strong>Quick Start Checklist (LUIS_QUICKSTART.html)</strong> - open it in your browser and check off each step!</p>
+
+        <h3>Step 1: Get the Code (2 minutes)</h3>
+
+        <div class="info-box">
+            <strong>Get the ma-tracker-app folder from Don</strong><br>
+            I'll provide the code via USB drive, network share, or email<br>
+            Place the <code>ma-tracker-app</code> folder anywhere you like (e.g., Desktop or Documents)
+        </div>
+
+        <h3>Step 2: Run the Automated Installer (15 minutes)</h3>
+
+        <div class="warning">
+            <strong>⚠️ Important:</strong> Right-click <code>install.bat</code> and select <strong>"Run as administrator"</strong>
+        </div>
+
+        <p><strong>The installer automatically:</strong></p>
+        <ol style="line-height: 2;">
+            <li>Checks if you have Node.js, Python, and Git</li>
+            <li><strong>Downloads and installs</strong> any missing prerequisites using Windows Package Manager</li>
+            <li>Installs all Node.js packages (~300 packages)</li>
+            <li>Installs all Python packages in a virtual environment</li>
+            <li>Creates configuration files</li>
+            <li>Creates startup scripts</li>
+        </ol>
+
+        <p><strong>Just run one file:</strong></p>
+
+        <div class="code-block">
+<span class="code-comment">1. Open the ma-tracker-app folder</span>
+<span class="code-comment">2. Open the "scripts" folder</span>
+<span class="code-comment">3. Right-click: install.bat</span>
+<span class="code-comment">4. Select: "Run as administrator"</span>
+<span class="code-comment">5. Wait 15 minutes for it to complete</span>
+        </div>
+
+        <div class="section">
+            <p style="margin-top: 0;"><strong>The installer will show progress messages like:</strong></p>
+            <ul style="list-style: none; padding-left: 0;">
+                <li>✓ Checking Prerequisites</li>
+                <li>✓ Installing Node.js (if needed)</li>
+                <li>✓ Installing Python (if needed)</li>
+                <li>✓ Installing Git (if needed)</li>
+                <li>✓ Installing Node.js Dependencies</li>
+                <li>✓ Installing Python Dependencies</li>
+                <li>✓ Creating Configuration Files</li>
+                <li>✓ Creating Startup Scripts</li>
+            </ul>
+            <p style="margin-top: 15px;">Wait for: <strong style="color: #10b981;">"Installation Complete! ✓"</strong></p>
+        </div>
+
+        <h3>Step 3: Launch (5 minutes)</h3>
+
+        <ol style="line-height: 2;">
+            <li>Make sure <strong>TWS is running and logged in</strong></li>
+            <li>Double-click <code>start-all-services.bat</code> in the project folder</li>
+            <li>Two windows will open (keep them open!)</li>
+            <li>Open Chrome/Edge to <strong>http://localhost:3000</strong></li>
+            <li>Login with:
+                <ul style="margin-top: 8px;">
+                    <li>Email: <code>demo@example.com</code></li>
+                    <li>Password: <code>demo123</code></li>
+                </ul>
+            </li>
+        </ol>
+
+        <h2>⚙️ TWS Configuration</h2>
+
+        <p>Before starting, verify your TWS API settings:</p>
+
+        <ol style="line-height: 2;">
+            <li>Open TWS</li>
+            <li>Go to <strong>File → Global Configuration → API → Settings</strong></li>
+            <li>Make sure these are enabled:
+                <ul style="margin-top: 8px;">
+                    <li>✅ Enable ActiveX and Socket Clients</li>
+                    <li>✅ Socket port: <strong>7497</strong> (paper trading)</li>
+                    <li>✅ Trusted IPs: Add <strong>127.0.0.1</strong></li>
+                    <li>❌ Uncheck "Read-Only API"</li>
+                </ul>
+            </li>
+            <li>Click OK and restart TWS</li>
+        </ol>
+
+        <h2>📊 Testing (After 8:30 AM)</h2>
+
+        <p>Once the market opens at 8:30 AM CT:</p>
+
+        <ol style="line-height: 2;">
+            <li>In the app, click <strong>"Positions"</strong> in the sidebar</li>
+            <li>Click <strong>"Options Scanner"</strong> tab</li>
+            <li>Click <strong>"Start Scan"</strong> button</li>
+            <li>You should see options data populating! 🎉</li>
+        </ol>
+
+        <h2>🆘 Need Help?</h2>
+
+        <p>I'll be available for support during your installation:</p>
+
+        <ul style="line-height: 2;">
+            <li><strong>Phone:</strong> [Your Number]</li>
+            <li><strong>Slack:</strong> @don</li>
+            <li><strong>Screen Share:</strong> I can remote in if needed</li>
+        </ul>
+
+        <p>If you hit any errors, just send me a screenshot and I'll help debug.</p>
+
+        <h2>📎 Attached Files</h2>
+
+        <ol>
+            <li><strong>LUIS_QUICKSTART.md</strong> - Print this checklist!</li>
+            <li><strong>DEPLOY_LUIS.md</strong> - Detailed guide (if you need more info)</li>
+        </ol>
+
+        <div class="timeline">
+            <h2 style="margin-top: 0; color: #059669;">⏰ Suggested Timeline (Only 20 Minutes!)</h2>
+            <div class="timeline-item">📁 7:00-7:05 AM: Get ma-tracker-app folder from Don</div>
+            <div class="timeline-item">⚙️ 7:05-7:20 AM: Run install.bat (it does everything automatically!)</div>
+            <div class="timeline-item">🚀 7:20-7:30 AM: Configure TWS and launch services</div>
+            <div class="timeline-item">✓ 7:30-7:45 AM: Test basic functionality</div>
+            <div class="timeline-item">📈 8:30 AM+: Test options scanner with live market data</div>
+        </div>
+
+        <h2>🎯 Expected Result</h2>
+
+        <p>After installation, you'll be able to:</p>
+
+        <ul class="checklist">
+            <li>View M&A deals dashboard</li>
+            <li>Add new deals manually</li>
+            <li>Scan options from TWS (during market hours)</li>
+            <li>Generate AI research reports</li>
+            <li>Share the same database as my system</li>
+        </ul>
+
+        <p style="margin-top: 15px;"><em>Everything is local on your machine except the database (which is in the cloud and shared between us).</em></p>
+
+        <h2>🔒 Important Notes</h2>
+
+        <ul style="line-height: 2;">
+            <li><strong>Firewall:</strong> No changes needed, everything runs on localhost</li>
+            <li><strong>Security:</strong> Database credentials are included in the installer</li>
+            <li><strong>Updates:</strong> I'll provide updated code when new features are ready</li>
+            <li><strong>Backup:</strong> Your TWS settings won't be affected</li>
+        </ul>
+
+        <p style="margin-top: 30px;">Ready to get started? Let me know when you're about to begin and I'll make sure I'm available for support!</p>
+
+        <p>Looking forward to seeing you up and running! 🚀</p>
+
+        <p style="margin-top: 30px;">Best,<br>Don</p>
+
+        <div class="footer">
+            <p><strong>P.S.</strong> If anything doesn't work perfectly on the first try, don't worry! The installation is non-destructive and we can retry or fix issues remotely. I've tested this process thoroughly, but every Windows machine is a bit different, so I'll be here to help!</p>
+        </div>
+    </div>
+</body>
+</html>
