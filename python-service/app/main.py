@@ -27,6 +27,7 @@ from .futures import get_futures_scanner
 from .api.edgar_routes import router as edgar_router
 from .api.intelligence_routes import router as intelligence_router
 from .api.webhooks import router as webhooks_router
+from .api.halt_routes import router as halt_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +47,9 @@ app.include_router(intelligence_router)
 
 # Include Webhook routes
 app.include_router(webhooks_router)
+
+# Include Halt monitoring routes
+app.include_router(halt_router)
 
 # Configure CORS - allow requests from Next.js frontend
 app.add_middleware(
@@ -350,6 +354,35 @@ async def test_futures():
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup"""
+    logger.info("=" * 50)
+    logger.info("STARTUP INITIATED - Initializing services...")
+    logger.info("=" * 50)
+
+    # Start Halt Monitoring (commented out until migration is applied)
+    # Will auto-start monitoring M&A target tickers for trading halts
+    try:
+        from .monitors.halt_monitor import get_halt_monitor
+        import asyncio
+
+        logger.info("Starting Halt Monitor...")
+        monitor = get_halt_monitor()
+
+        # Start monitor in background task
+        asyncio.create_task(monitor.start())
+
+        logger.info("✓ Halt Monitor started - polling NASDAQ/NYSE every 2 seconds")
+    except Exception as e:
+        logger.error(f"Failed to start Halt Monitor: {e}")
+        logger.warning("Continuing without halt monitoring...")
+
+    logger.info("=" * 50)
+    logger.info("STARTUP COMPLETE")
+    logger.info("=" * 50)
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
@@ -357,7 +390,17 @@ async def shutdown_event():
     logger.info("SHUTDOWN INITIATED - Cleaning up resources...")
     logger.info("=" * 50)
 
-    # 1. Stop EDGAR monitoring
+    # 1. Stop Halt Monitor
+    try:
+        from .monitors.halt_monitor import get_halt_monitor
+        logger.info("Stopping Halt Monitor...")
+        monitor = get_halt_monitor()
+        await monitor.stop()
+        logger.info("✓ Halt Monitor stopped")
+    except Exception as e:
+        logger.error(f"Error stopping Halt Monitor: {e}")
+
+    # 2. Stop EDGAR monitoring
     try:
         from .api.edgar_routes import stop_edgar_monitoring, stop_research_worker
         logger.info("Stopping EDGAR monitoring...")
@@ -368,7 +411,7 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error stopping EDGAR services: {e}")
 
-    # 2. Stop Intelligence monitoring
+    # 3. Stop Intelligence monitoring
     try:
         from .intelligence.orchestrator import stop_intelligence_monitoring
         logger.info("Stopping Intelligence monitoring...")
@@ -377,7 +420,7 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error stopping Intelligence services: {e}")
 
-    # 3. Disconnect IB scanner
+    # 4. Disconnect IB scanner
     try:
         global scanner_instance
         if scanner_instance and scanner_instance.isConnected():

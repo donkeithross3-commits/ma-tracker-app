@@ -42,3 +42,5 @@ next-env.d.ts
 
 # prisma
 /prisma/migrations
+python-service/credentials.json
+python-service/token.json
