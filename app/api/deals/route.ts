@@ -81,8 +81,10 @@ export async function POST(request: NextRequest) {
         status,
         createdById,
         updatedById: createdById,
-        intelligenceDealId: intelligenceDealId || null,
-        lastIntelligenceSync: intelligenceDealId ? new Date() : null,
+        ...(intelligenceDealId && {
+          intelligenceDealId,
+          lastIntelligenceSync: new Date(),
+        }),
         versions: {
           create: {
             versionNumber: 1,
