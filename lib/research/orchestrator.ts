@@ -40,6 +40,10 @@ export async function generateResearchReport(
         },
         orderBy: { filingDate: "desc" },
       },
+      versions: {
+        where: { isCurrentVersion: true },
+        take: 1,
+      },
     },
   });
 
@@ -53,14 +57,17 @@ export async function generateResearchReport(
     );
   }
 
+  // Get current version for deal terms
+  const currentVersion = deal.versions[0];
+
   // Build analysis context
   const context: AnalysisContext = {
     dealId: deal.id,
-    ticker: deal.targetTicker,
-    targetCompany: deal.targetCompany,
-    acquirerCompany: deal.acquirerCompany,
-    dealPrice: deal.dealPricePerShare?.toNumber() || 0,
-    dealAnnounced: deal.dealAnnounced || new Date(),
+    ticker: deal.ticker,
+    targetCompany: deal.targetName || deal.ticker,
+    acquirerCompany: deal.acquirorName || deal.acquirorTicker || "Unknown",
+    dealPrice: currentVersion?.cashPerShare?.toNumber() || 0,
+    dealAnnounced: currentVersion?.announcedDate || new Date(),
     filings: deal.secFilings.map((f) => ({
       id: f.id,
       type: f.filingType,
