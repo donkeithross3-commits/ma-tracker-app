@@ -4,13 +4,14 @@ const PYTHON_API_URL = process.env.PYTHON_API_URL || 'http://localhost:8000'
 
 export async function POST(
   request: Request,
-  { params }: { params: { filingId: string } }
+  { params }: { params: Promise<{ filingId: string }> }
 ) {
   try {
+    const { filingId } = await params
     const body = await request.json()
 
     const response = await fetch(
-      `${PYTHON_API_URL}/edgar/filings/${params.filingId}/create-deal`,
+      `${PYTHON_API_URL}/edgar/filings/${filingId}/create-deal`,
       {
         method: 'POST',
         headers: {

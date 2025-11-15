@@ -77,8 +77,8 @@ export default function StagingPage() {
   const [deals, setDeals] = useState<StagedDeal[]>([]);
   const [intelligenceDeals, setIntelligenceDeals] = useState<IntelligenceDeal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all_filings">("pending");
-  const [tierFilter, setTierFilter] = useState<"pending" | "watchlist" | "rejected">("pending");
+  const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all_filings" | "all">("pending");
+  const [tierFilter, setTierFilter] = useState<"pending" | "watchlist" | "rejected" | "all">("pending");
 
   const [edgarStatus, setEdgarStatus] = useState<{
     is_running: boolean;
@@ -138,7 +138,7 @@ export default function StagingPage() {
       const response = await fetch("/api/intelligence/watch-list");
       if (response.ok) {
         const data = await response.json();
-        const tickers = new Set(data.watch_list.map((item: any) => item.ticker));
+        const tickers = new Set<string>(data.watch_list.map((item: any) => item.ticker));
         setWatchListTickers(tickers);
       }
     } catch (error) {
@@ -283,6 +283,7 @@ export default function StagingPage() {
       confidence_score: deal.confidenceScore,
       source_count: deal.sourceCount,
       first_detected_at: deal.firstDetectedAt,
+      source_published_at: deal.sourcePublishedAt || null,
       edgar_status: deal.edgar_status,
       source_breakdown: deal.source_breakdown
     };
