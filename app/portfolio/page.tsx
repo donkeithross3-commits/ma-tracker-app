@@ -5,6 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { formatCurrency, formatPercent, formatDate } from "@/lib/utils";
 import { ArrowUpRight, ArrowLeft } from "lucide-react";
 
+// Force dynamic rendering - don't pre-render at build time
+export const dynamic = 'force-dynamic';
+
 async function getPortfolioPositions() {
   const positions = await prisma.portfolioPosition.findMany({
     where: { status: "open" },

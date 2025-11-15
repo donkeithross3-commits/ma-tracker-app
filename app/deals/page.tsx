@@ -6,6 +6,9 @@ import { Plus } from "lucide-react";
 import { auth } from "@/auth";
 import { SignOutButton } from "@/components/sign-out-button";
 
+// Force dynamic rendering - don't pre-render at build time
+export const dynamic = 'force-dynamic';
+
 async function getDealsForDashboard() {
   // Use a stable timestamp for server/client consistency
   const now = new Date();
