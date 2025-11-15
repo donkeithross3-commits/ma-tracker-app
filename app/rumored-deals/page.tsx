@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatDateTime } from "@/lib/dateUtils";
 
 interface EdgarStatus {
   has_edgar_filing: boolean;
@@ -27,6 +28,7 @@ interface RumoredDeal {
   first_detected_at: string;
   last_updated_source_at: string | null;
   promoted_to_rumored_at: string | null;
+  source_published_at: string | null;
   edgar_status: EdgarStatus;
   source_breakdown: {
     total: number;
@@ -40,6 +42,12 @@ export default function RumoredDealsPage() {
   const [deals, setDeals] = useState<RumoredDeal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Rejection dialog state
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [rejectingDealId, setRejectingDealId] = useState<string | null>(null);
+  const [rejectionCategory, setRejectionCategory] = useState<string>("");
+  const [rejectionReason, setRejectionReason] = useState<string>("");
 
   useEffect(() => {
     fetchRumoredDeals();
@@ -94,14 +102,66 @@ export default function RumoredDealsPage() {
     }
   };
 
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return "N/A";
-    return new Date(dateString).toLocaleDateString();
-  };
-
   const formatCurrency = (value: number | null) => {
     if (!value) return "N/A";
     return `$${value.toLocaleString()}B`;
+  };
+
+  const handleRejectClick = (dealId: string) => {
+    setRejectingDealId(dealId);
+    setRejectionCategory("");
+    setRejectionReason("");
+    setShowRejectDialog(true);
+  };
+
+  const confirmRejectDeal = async () => {
+    if (!rejectingDealId) {
+      console.error("No deal ID to reject");
+      return;
+    }
+
+    console.log("Rejecting intelligence deal:", rejectingDealId, {
+      category: rejectionCategory,
+      reason: rejectionReason
+    });
+
+    try {
+      const response = await fetch(`/api/intelligence/deals/${rejectingDealId}/reject`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          rejection_category: rejectionCategory || null,
+          rejection_reason: rejectionReason || null,
+        }),
+      });
+
+      console.log("Response status:", response.status);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("Backend error:", errorData);
+        throw new Error(errorData.error || "Failed to reject deal");
+      }
+
+      const data = await response.json();
+      console.log("Deal rejected successfully:", data);
+
+      // Close dialog and reset state
+      setShowRejectDialog(false);
+      setRejectingDealId(null);
+      setRejectionCategory("");
+      setRejectionReason("");
+
+      // Refresh deals list
+      await fetchRumoredDeals();
+
+      alert(`Deal "${data.deal_status}" successfully`);
+    } catch (error) {
+      console.error("Error rejecting deal:", error);
+      alert(error instanceof Error ? error.message : "Failed to reject deal");
+    }
   };
 
   if (loading) {
@@ -256,7 +316,16 @@ export default function RumoredDealsPage() {
                         <span className="text-sm text-gray-900">{formatCurrency(deal.deal_value)}</span>
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">
-                        <span className="text-xs text-gray-500">{formatDate(deal.first_detected_at)}</span>
+                        <div className="flex flex-col gap-0.5">
+                          {deal.source_published_at && (
+                            <span className="text-xs text-gray-700 font-medium whitespace-nowrap">
+                              {formatDateTime(deal.source_published_at)}
+                            </span>
+                          )}
+                          <span className="text-xs text-gray-500 whitespace-nowrap">
+                            Det: {formatDateTime(deal.first_detected_at)}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         <div className="flex items-center gap-2">
@@ -276,6 +345,13 @@ export default function RumoredDealsPage() {
                             </svg>
                             Add
                           </button>
+                          <span className="text-gray-300">|</span>
+                          <button
+                            onClick={() => handleRejectClick(deal.deal_id)}
+                            className="text-xs text-red-600 hover:text-red-800 font-medium"
+                          >
+                            Reject
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -286,6 +362,79 @@ export default function RumoredDealsPage() {
           </div>
         )}
       </div>
+
+      {/* Rejection Reason Dialog */}
+      {showRejectDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">
+              Reject Rumored Deal - Add Reason (Optional)
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Help improve rumor detection accuracy by providing a rejection reason. This will be used to train the filter.
+            </p>
+
+            {/* Category Selection */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Category
+              </label>
+              <select
+                value={rejectionCategory}
+                onChange={(e) => setRejectionCategory(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Select a category...</option>
+                <option value="not_rumor">Not an M&A Rumor</option>
+                <option value="insufficient_evidence">Insufficient Evidence</option>
+                <option value="wrong_company">Wrong Company Ticker</option>
+                <option value="social_media_noise">Social Media Noise</option>
+                <option value="already_in_production">Already in Production</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            {/* Free-text Reason */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Additional Details (Optional)
+              </label>
+              <textarea
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="e.g., 'This is just speculation on Twitter, no credible sources'"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                rows={3}
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowRejectDialog(false);
+                  setRejectingDealId(null);
+                }}
+                className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRejectDeal}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+              >
+                Reject Deal
+              </button>
+            </div>
+
+            {rejectionCategory === "" && rejectionReason === "" && (
+              <p className="text-xs text-gray-500 mt-3 text-center">
+                You can skip adding a reason, but it helps improve accuracy
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

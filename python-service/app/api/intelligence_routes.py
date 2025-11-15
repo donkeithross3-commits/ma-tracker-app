@@ -1,8 +1,9 @@
 """API routes for M&A Intelligence Platform"""
 from fastapi import APIRouter, HTTPException
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
+import time
 
 from app.edgar.database import EdgarDatabase
 from app.intelligence.orchestrator import (
@@ -11,6 +12,34 @@ from app.intelligence.orchestrator import (
     is_intelligence_monitoring_running,
     get_monitoring_stats,
 )
+from app.utils.timezone import convert_to_cst
+
+# Simple in-memory cache for rumored deals with 30-second TTL
+# This dramatically speeds up repeated loads while keeping data fresh
+_rumored_deals_cache: Dict[str, Any] = {
+    "data": None,
+    "timestamp": 0,
+    "ttl": 30  # seconds
+}
+
+def invalidate_rumored_deals_cache():
+    """Invalidate the rumored deals cache when data changes"""
+    _rumored_deals_cache["data"] = None
+    _rumored_deals_cache["timestamp"] = 0
+
+# Cache for intelligence deals listing
+_intelligence_deals_cache: Dict[str, Any] = {
+    "data": None,
+    "cache_key": None,
+    "timestamp": 0,
+    "ttl": 30  # seconds
+}
+
+def invalidate_intelligence_deals_cache():
+    """Invalidate the intelligence deals cache when data changes"""
+    _intelligence_deals_cache["data"] = None
+    _intelligence_deals_cache["cache_key"] = None
+    _intelligence_deals_cache["timestamp"] = 0
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
 
@@ -19,12 +48,9 @@ _db_pool: Optional[EdgarDatabase] = None
 
 
 async def get_db_pool() -> EdgarDatabase:
-    """Get or create the global database pool"""
-    global _db_pool
-    if _db_pool is None:
-        _db_pool = EdgarDatabase()
-        await _db_pool.connect()
-    return _db_pool
+    """Get the global database pool from main.py"""
+    from ..main import get_db
+    return get_db()
 
 
 class IntelligenceStatusResponse(BaseModel):
@@ -125,59 +151,83 @@ async def get_status():
 
 
 @router.get("/deals", response_model=List[DealIntelligenceResponse])
-async def get_deals(tier: Optional[str] = None, limit: int = 100):
-    """Get all deals from intelligence system, optionally filtered by tier"""
-    db = EdgarDatabase()
-    await db.connect()
+async def get_deals(tier: Optional[str] = None, status: Optional[str] = None, limit: int = 100):
+    """Get all deals from intelligence system, optionally filtered by tier or status"""
+    import logging
+    logger = logging.getLogger(__name__)
 
+    # Check cache first
+    cache_key = f"tier_{tier}_status_{status}_limit_{limit}"
+    current_time = time.time()
+
+    if (_intelligence_deals_cache.get("cache_key") == cache_key and
+        _intelligence_deals_cache["data"] is not None and
+        current_time - _intelligence_deals_cache["timestamp"] < _intelligence_deals_cache["ttl"]):
+        logger.debug(f"Returning cached intelligence deals for key: {cache_key}")
+        return _intelligence_deals_cache["data"]
+
+    logger.debug(f"Cache miss for intelligence deals, fetching from database")
+
+    db = await get_db_pool()
+
+    query = """
+        SELECT deal_id, target_name, target_ticker, acquirer_name, acquirer_ticker,
+               deal_tier, deal_status, deal_value, deal_type,
+               confidence_score, source_count,
+               first_detected_at, last_updated_source_at,
+               promoted_to_rumored_at, promoted_to_active_at
+        FROM deal_intelligence
+    """
+
+    params = []
+    where_clauses = []
+
+    if tier:
+        where_clauses.append(f"deal_tier = ${len(params) + 1}")
+        params.append(tier)
+
+    if status:
+        where_clauses.append(f"deal_status = ${len(params) + 1}")
+        params.append(status)
+
+    if where_clauses:
+        query += " WHERE " + " AND ".join(where_clauses)
+
+    query += " ORDER BY first_detected_at DESC LIMIT $" + str(len(params) + 1)
+    params.append(limit)
+
+    conn = await db.pool.acquire()
     try:
-        query = """
-            SELECT deal_id, target_name, target_ticker, acquirer_name, acquirer_ticker,
-                   deal_tier, deal_status, deal_value, deal_type,
-                   confidence_score, source_count,
-                   first_detected_at, last_updated_source_at,
-                   promoted_to_rumored_at, promoted_to_active_at
-            FROM deal_intelligence
-        """
+        deals = await conn.fetch(query, *params)
 
-        params = []
-        if tier:
-            query += " WHERE deal_tier = $1"
-            params.append(tier)
+        results = []
+        for deal in deals:
+            results.append(DealIntelligenceResponse(
+                dealId=str(deal["deal_id"]),
+                targetName=deal["target_name"],
+                targetTicker=deal.get("target_ticker"),
+                acquirerName=deal.get("acquirer_name"),
+                acquirerTicker=deal.get("acquirer_ticker"),
+                dealTier=deal["deal_tier"],
+                dealStatus=deal["deal_status"],
+                dealValue=float(deal["deal_value"]) if deal.get("deal_value") else None,
+                dealType=deal.get("deal_type"),
+                confidenceScore=float(deal["confidence_score"]),
+                sourceCount=deal["source_count"],
+                firstDetectedAt=convert_to_cst(deal["first_detected_at"]),
+                lastUpdatedSourceAt=convert_to_cst(deal.get("last_updated_source_at")),
+                promotedToRumoredAt=convert_to_cst(deal.get("promoted_to_rumored_at")),
+                promotedToActiveAt=convert_to_cst(deal.get("promoted_to_active_at")),
+            ))
 
-        query += " ORDER BY first_detected_at DESC LIMIT $" + str(len(params) + 1)
-        params.append(limit)
+        # Update cache
+        _intelligence_deals_cache["data"] = results
+        _intelligence_deals_cache["cache_key"] = cache_key
+        _intelligence_deals_cache["timestamp"] = current_time
 
-        conn = await db.pool.acquire()
-        try:
-            deals = await conn.fetch(query, *params)
-
-            results = []
-            for deal in deals:
-                results.append(DealIntelligenceResponse(
-                    dealId=str(deal["deal_id"]),
-                    targetName=deal["target_name"],
-                    targetTicker=deal.get("target_ticker"),
-                    acquirerName=deal.get("acquirer_name"),
-                    acquirerTicker=deal.get("acquirer_ticker"),
-                    dealTier=deal["deal_tier"],
-                    dealStatus=deal["deal_status"],
-                    dealValue=float(deal["deal_value"]) if deal.get("deal_value") else None,
-                    dealType=deal.get("deal_type"),
-                    confidenceScore=float(deal["confidence_score"]),
-                    sourceCount=deal["source_count"],
-                    firstDetectedAt=deal["first_detected_at"],
-                    lastUpdatedSourceAt=deal.get("last_updated_source_at"),
-                    promotedToRumoredAt=deal.get("promoted_to_rumored_at"),
-                    promotedToActiveAt=deal.get("promoted_to_active_at"),
-                ))
-
-            return results
-        finally:
-            await db.pool.release(conn)
-
+        return results
     finally:
-        await db.disconnect()
+        await db.pool.release(conn)
 
 
 @router.get("/deals/{deal_id}")
@@ -210,6 +260,211 @@ async def get_deal(deal_id: str):
         }
     finally:
         await db.pool.release(conn)
+
+
+class RejectDealRequest(BaseModel):
+    rejection_reason: Optional[str] = None  # Free-text reason for rejection
+    rejection_category: Optional[str] = None  # Structured category
+
+class RejectDealResponse(BaseModel):
+    success: bool
+    message: str
+    deal_id: str
+    deal_status: str
+
+
+@router.post("/deals/{deal_id}/reject", response_model=RejectDealResponse)
+async def reject_deal(deal_id: str, request: Optional[RejectDealRequest] = None):
+    """
+    Mark an intelligence deal (rumored deal) as rejected.
+    This prevents it from reappearing in rumored deals and hides it from the main queue.
+
+    Optional rejection tracking for ML training:
+    - rejection_category: not_rumor, insufficient_evidence, wrong_company, social_media_noise, already_in_production, other
+    - rejection_reason: Free-text explanation
+    """
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            # Verify deal exists
+            deal = await conn.fetchrow(
+                """SELECT deal_id, target_name, deal_status FROM deal_intelligence WHERE deal_id = $1""",
+                deal_id
+            )
+
+            if not deal:
+                raise HTTPException(status_code=404, detail="Deal not found")
+
+            # Extract rejection tracking data
+            rejection_category = request.rejection_category if request else None
+            rejection_reason = request.rejection_reason if request else None
+
+            # Update deal status to rejected with tracking
+            await conn.execute(
+                """
+                UPDATE deal_intelligence
+                SET
+                    review_status = 'rejected',
+                    deal_status = 'rejected',
+                    rejection_category = $2,
+                    rejection_reason = $3,
+                    reviewed_at = NOW(),
+                    updated_at = NOW()
+                WHERE deal_id = $1
+                """,
+                deal_id, rejection_category, rejection_reason
+            )
+
+            # Log the rejection in deal_history
+            import json
+            await conn.execute(
+                """
+                INSERT INTO deal_history (deal_id, change_type, old_value, new_value, triggered_by, notes)
+                VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6)
+                """,
+                deal_id,
+                'status_updated',
+                json.dumps({'deal_status': deal['deal_status']}),
+                json.dumps({'deal_status': 'rejected'}),
+                'user',
+                'Deal manually rejected from intelligence queue'
+            )
+
+            return RejectDealResponse(
+                success=True,
+                message=f"Deal '{deal['target_name']}' has been rejected",
+                deal_id=str(deal_id),
+                deal_status="rejected"
+            )
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
+class IntelligenceRejectionStats(BaseModel):
+    category: str
+    count: int
+    avg_confidence: float
+    unique_tickers: int
+    deal_tiers: List[str]
+
+
+class IntelligenceRejectionAnalysis(BaseModel):
+    total_rejections: int
+    by_category: List[IntelligenceRejectionStats]
+    recent_rejections: List[dict]
+
+
+@router.get("/rejection-analysis", response_model=IntelligenceRejectionAnalysis)
+async def get_intelligence_rejection_analysis():
+    """
+    Get analysis of intelligence rejection reasons for ML training.
+
+    Excludes categories that represent valid deals (already_in_production, social_media_noise if duplicates).
+    Includes false positive patterns to learn from: not_rumor, insufficient_evidence, wrong_company, other.
+    """
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            # Get category breakdown (excluding valid duplicates from training data)
+            category_stats = await conn.fetch(
+                """
+                SELECT
+                    rejection_category as category,
+                    COUNT(*) as count,
+                    AVG(confidence_score) as avg_confidence,
+                    COUNT(DISTINCT target_ticker) as unique_tickers,
+                    array_agg(DISTINCT deal_tier) as deal_tiers
+                FROM deal_intelligence
+                WHERE review_status = 'rejected'
+                AND rejection_category IS NOT NULL
+                AND rejection_category NOT IN ('already_in_production')
+                GROUP BY rejection_category
+                ORDER BY count DESC
+                """
+            )
+
+            # Get recent rejections with details for analysis
+            recent_rejections = await conn.fetch(
+                """
+                SELECT
+                    deal_id,
+                    target_name,
+                    target_ticker,
+                    acquirer_name,
+                    deal_tier,
+                    confidence_score,
+                    rejection_category,
+                    rejection_reason,
+                    reviewed_at,
+                    first_detected_at
+                FROM deal_intelligence
+                WHERE review_status = 'rejected'
+                AND rejection_category IS NOT NULL
+                AND rejection_category NOT IN ('already_in_production')
+                ORDER BY reviewed_at DESC
+                LIMIT 100
+                """
+            )
+
+            # Get total rejection count
+            total = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM deal_intelligence
+                WHERE review_status = 'rejected'
+                AND rejection_category IS NOT NULL
+                AND rejection_category NOT IN ('already_in_production')
+                """
+            )
+
+            by_category = [
+                IntelligenceRejectionStats(
+                    category=row['category'],
+                    count=row['count'],
+                    avg_confidence=float(row['avg_confidence'] or 0),
+                    unique_tickers=row['unique_tickers'],
+                    deal_tiers=row['deal_tiers'] or []
+                )
+                for row in category_stats
+            ]
+
+            recent = [
+                {
+                    'deal_id': row['deal_id'],
+                    'target_name': row['target_name'],
+                    'target_ticker': row['target_ticker'],
+                    'acquirer_name': row['acquirer_name'],
+                    'deal_tier': row['deal_tier'],
+                    'confidence_score': float(row['confidence_score']),
+                    'rejection_category': row['rejection_category'],
+                    'rejection_reason': row['rejection_reason'],
+                    'reviewed_at': convert_to_cst(row['reviewed_at']),
+                    'first_detected_at': convert_to_cst(row['first_detected_at'])
+                }
+                for row in recent_rejections
+            ]
+
+            return IntelligenceRejectionAnalysis(
+                total_rejections=total,
+                by_category=by_category,
+                recent_rejections=recent
+            )
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
 
 
 class TrackDealRequest(BaseModel):
@@ -329,8 +584,8 @@ async def get_deal_suggestions(production_deal_id: str, status: Optional[str] = 
                     reasoning=s["reasoning"],
                     sourceCount=s["source_count"],
                     status=s["status"],
-                    createdAt=s["created_at"],
-                    updatedAt=s["updated_at"],
+                    createdAt=convert_to_cst(s["created_at"]),
+                    updatedAt=convert_to_cst(s["updated_at"]),
                 ))
 
             return results
@@ -517,7 +772,7 @@ async def get_watchlist(tier: Optional[str] = None):
                     companyName=ticker["company_name"],
                     watchTier=ticker["watch_tier"],
                     activeDealId=str(ticker["active_deal_id"]) if ticker.get("active_deal_id") else None,
-                    lastActivityAt=ticker.get("last_activity_at"),
+                    lastActivityAt=convert_to_cst(ticker.get("last_activity_at")),
                 ))
 
             return results
@@ -554,7 +809,10 @@ async def get_source_stats(source_name: str):
 
 
 @router.get("/rumored-deals")
-async def get_rumored_deals_with_edgar_status():
+async def get_rumored_deals_with_edgar_status(
+    exclude_watch_list: bool = False,
+    watch_list_only: bool = False
+):
     """
     Get all rumored and watchlist deals with their EDGAR confirmation status.
 
@@ -563,16 +821,27 @@ async def get_rumored_deals_with_edgar_status():
     - Whether EDGAR filings were found to corroborate
     - Confidence score and how EDGAR impacted it
     - When EDGAR was last searched
-    """
-    db = EdgarDatabase()
-    await db.connect()
 
+    Params:
+    - exclude_watch_list: If true, exclude deals that are in rumor_watch_list
+    - watch_list_only: If true, only show deals that are in rumor_watch_list
+    """
+    # Create cache key based on parameters
+    cache_key = f"exclude_watch_list={exclude_watch_list},watch_list_only={watch_list_only}"
+    current_time = time.time()
+
+    # Check if we have cached data for this exact query that's still fresh
+    if (_rumored_deals_cache.get("data") is not None and
+        _rumored_deals_cache.get("cache_key") == cache_key and
+        current_time - _rumored_deals_cache.get("timestamp", 0) < _rumored_deals_cache["ttl"]):
+        return _rumored_deals_cache["data"]
+
+    db = await get_db_pool()
+
+    conn = await db.pool.acquire()
     try:
-        conn = await db.pool.acquire()
-        try:
-            # Get all rumored/watchlist deals
-            deals = await conn.fetch(
-                """
+            # Build query based on filters
+            query = """
                 SELECT
                     di.deal_id,
                     di.target_name,
@@ -591,61 +860,100 @@ async def get_rumored_deals_with_edgar_status():
                     di.promoted_to_active_at
                 FROM deal_intelligence di
                 WHERE di.deal_tier IN ('rumored', 'watchlist')
-                ORDER BY di.confidence_score DESC, di.first_detected_at DESC
+                  AND di.deal_status != 'rejected'
+                  AND di.target_ticker IS NOT NULL
+            """
+
+            # Add watch list filtering
+            if exclude_watch_list:
+                query += """
+                  AND di.target_ticker NOT IN (
+                    SELECT ticker FROM rumor_watch_list WHERE is_active = TRUE
+                  )
                 """
+            elif watch_list_only:
+                query += """
+                  AND di.target_ticker IN (
+                    SELECT ticker FROM rumor_watch_list WHERE is_active = TRUE
+                  )
+                """
+
+            query += " ORDER BY di.first_detected_at DESC, di.confidence_score DESC"
+
+            deals = await conn.fetch(query)
+
+            if not deals:
+                return {"deals": [], "total": 0}
+
+            # Batch fetch all sources and EDGAR history in 2 queries instead of N queries per deal
+            deal_ids = [str(deal["deal_id"]) for deal in deals]
+
+            # Fetch all sources for all deals in one query
+            all_sources = await conn.fetch(
+                """
+                SELECT deal_id, source_name, source_type, mention_type, credibility_score, source_published_at
+                FROM deal_sources
+                WHERE deal_id = ANY($1::uuid[])
+                ORDER BY deal_id, detected_at DESC
+                """,
+                deal_ids
             )
 
+            # Fetch all EDGAR cross-reference history for all deals in one query
+            all_edgar_history = await conn.fetch(
+                """
+                SELECT DISTINCT ON (deal_id)
+                    deal_id, changed_at, old_value, new_value, notes
+                FROM deal_history
+                WHERE deal_id = ANY($1::uuid[])
+                  AND change_type = 'edgar_cross_reference'
+                ORDER BY deal_id, changed_at DESC
+                """,
+                deal_ids
+            )
+
+            # Group sources by deal_id for fast lookup
+            sources_by_deal = {}
+            for source in all_sources:
+                deal_id = str(source["deal_id"])
+                if deal_id not in sources_by_deal:
+                    sources_by_deal[deal_id] = []
+                sources_by_deal[deal_id].append(source)
+
+            # Group EDGAR history by deal_id for fast lookup
+            edgar_history_by_deal = {str(row["deal_id"]): row for row in all_edgar_history}
+
+            # Build results
             results = []
             for deal in deals:
                 deal_id = str(deal["deal_id"])
-
-                # Get sources breakdown
-                sources = await conn.fetch(
-                    """
-                    SELECT source_name, source_type, mention_type, credibility_score
-                    FROM deal_sources
-                    WHERE deal_id = $1
-                    ORDER BY detected_at DESC
-                    """,
-                    deal_id
-                )
+                sources = sources_by_deal.get(deal_id, [])
 
                 # Check if deal has EDGAR sources
                 edgar_sources = [s for s in sources if s["source_name"] == "edgar"]
                 non_edgar_sources = [s for s in sources if s["source_name"] != "edgar"]
 
-                # Get EDGAR cross-reference history from deal_history
-                edgar_searches = await conn.fetch(
-                    """
-                    SELECT
-                        changed_at,
-                        old_value,
-                        new_value,
-                        notes
-                    FROM deal_history
-                    WHERE deal_id = $1 AND change_type = 'edgar_cross_reference'
-                    ORDER BY changed_at DESC
-                    LIMIT 1
-                    """,
-                    deal_id
-                )
+                # Get EDGAR cross-reference history
+                edgar_history = edgar_history_by_deal.get(deal_id)
 
                 edgar_status = {
                     "has_edgar_filing": len(edgar_sources) > 0,
                     "edgar_filing_count": len(edgar_sources),
                     "edgar_filing_types": [s["mention_type"] for s in edgar_sources],
-                    "last_edgar_search": edgar_searches[0]["changed_at"] if edgar_searches else None,
+                    "last_edgar_search": edgar_history["changed_at"] if edgar_history else None,
                     "confidence_impact": None,
                     "filings_found_in_last_search": 0,
                 }
 
                 # Extract confidence impact from last search
-                if edgar_searches:
-                    search_data = edgar_searches[0]
-                    if search_data["new_value"]:
-                        new_val = dict(search_data["new_value"])
-                        edgar_status["confidence_impact"] = new_val.get("confidence_impact", 0)
-                        edgar_status["filings_found_in_last_search"] = new_val.get("filings_found", 0)
+                if edgar_history and edgar_history["new_value"]:
+                    new_val = dict(edgar_history["new_value"])
+                    edgar_status["confidence_impact"] = new_val.get("confidence_impact", 0)
+                    edgar_status["filings_found_in_last_search"] = new_val.get("filings_found", 0)
+
+                # Get earliest source published date (when the original article/filing was published)
+                source_published_dates = [s["source_published_at"] for s in sources if s.get("source_published_at")]
+                earliest_published_at = min(source_published_dates) if source_published_dates else None
 
                 results.append({
                     "deal_id": deal_id,
@@ -659,10 +967,11 @@ async def get_rumored_deals_with_edgar_status():
                     "deal_type": deal["deal_type"],
                     "confidence_score": float(deal["confidence_score"]),
                     "source_count": deal["source_count"],
-                    "first_detected_at": deal["first_detected_at"],
-                    "last_updated_source_at": deal["last_updated_source_at"],
-                    "promoted_to_rumored_at": deal["promoted_to_rumored_at"],
-                    "promoted_to_active_at": deal["promoted_to_active_at"],
+                    "first_detected_at": convert_to_cst(deal["first_detected_at"]),
+                    "last_updated_source_at": convert_to_cst(deal["last_updated_source_at"]),
+                    "promoted_to_rumored_at": convert_to_cst(deal["promoted_to_rumored_at"]),
+                    "promoted_to_active_at": convert_to_cst(deal["promoted_to_active_at"]),
+                    "source_published_at": convert_to_cst(earliest_published_at),
                     "edgar_status": edgar_status,
                     "source_breakdown": {
                         "total": len(sources),
@@ -671,13 +980,17 @@ async def get_rumored_deals_with_edgar_status():
                     }
                 })
 
-            return {"deals": results, "total": len(results)}
+            result = {"deals": results, "total": len(results)}
 
-        finally:
-            await db.pool.release(conn)
+            # Update cache with fresh data
+            _rumored_deals_cache["data"] = result
+            _rumored_deals_cache["cache_key"] = cache_key
+            _rumored_deals_cache["timestamp"] = current_time
+
+            return result
 
     finally:
-        await db.disconnect()
+        await db.pool.release(conn)
 
 
 @router.get("/deals/{deal_id}/research")
@@ -710,6 +1023,244 @@ async def get_deal_research(deal_id: str):
                 result['extracted_deal_terms'] = json.loads(result['extracted_deal_terms'])
 
             return result
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
+# ============================================================================
+# Rumor Watch List Endpoints
+# ============================================================================
+
+class WatchListItem(BaseModel):
+    id: int
+    ticker: str
+    company_name: Optional[str]
+    added_at: str
+    notes: Optional[str]
+    is_active: bool
+    last_checked_at: Optional[str]
+
+
+class AddToWatchListRequest(BaseModel):
+    ticker: str
+    company_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class WatchListResponse(BaseModel):
+    success: bool
+    message: str
+    watch_list: List[WatchListItem]
+
+
+class AddToWatchListResponse(BaseModel):
+    success: bool
+    message: str
+    item: WatchListItem
+
+
+@router.get("/watch-list", response_model=WatchListResponse)
+async def get_watch_list():
+    """Get all active tickers in the rumor watch list"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT id, ticker, company_name, added_at, notes, is_active, last_checked_at
+                FROM rumor_watch_list
+                WHERE is_active = TRUE
+                ORDER BY added_at DESC
+                """
+            )
+
+            watch_list = [
+                WatchListItem(
+                    id=row['id'],
+                    ticker=row['ticker'],
+                    company_name=row['company_name'],
+                    added_at=convert_to_cst(row['added_at']),
+                    notes=row['notes'],
+                    is_active=row['is_active'],
+                    last_checked_at=convert_to_cst(row['last_checked_at']) if row['last_checked_at'] else None
+                )
+                for row in rows
+            ]
+
+            return WatchListResponse(
+                success=True,
+                message=f"Found {len(watch_list)} tickers in watch list",
+                watch_list=watch_list
+            )
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
+@router.post("/watch-list/add", response_model=AddToWatchListResponse)
+async def add_to_watch_list(request: AddToWatchListRequest):
+    """Add a ticker to the rumor watch list"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            # Check if ticker already exists (active or inactive)
+            existing = await conn.fetchrow(
+                "SELECT id, is_active FROM rumor_watch_list WHERE ticker = $1",
+                request.ticker.upper()
+            )
+
+            if existing:
+                if existing['is_active']:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Ticker {request.ticker} is already in watch list"
+                    )
+                else:
+                    # Reactivate the ticker
+                    await conn.execute(
+                        """UPDATE rumor_watch_list
+                           SET is_active = TRUE, added_at = NOW(), updated_at = NOW(),
+                               company_name = COALESCE($2, company_name),
+                               notes = COALESCE($3, notes)
+                           WHERE id = $1""",
+                        existing['id'], request.company_name, request.notes
+                    )
+                    item_id = existing['id']
+            else:
+                # Insert new ticker
+                item_id = await conn.fetchval(
+                    """INSERT INTO rumor_watch_list (ticker, company_name, notes)
+                       VALUES ($1, $2, $3)
+                       RETURNING id""",
+                    request.ticker.upper(), request.company_name, request.notes
+                )
+
+            # Fetch the complete item
+            row = await conn.fetchrow(
+                """SELECT id, ticker, company_name, added_at, notes, is_active, last_checked_at
+                   FROM rumor_watch_list WHERE id = $1""",
+                item_id
+            )
+
+            item = WatchListItem(
+                id=row['id'],
+                ticker=row['ticker'],
+                company_name=row['company_name'],
+                added_at=convert_to_cst(row['added_at']),
+                notes=row['notes'],
+                is_active=row['is_active'],
+                last_checked_at=convert_to_cst(row['last_checked_at']) if row['last_checked_at'] else None
+            )
+
+            return AddToWatchListResponse(
+                success=True,
+                message=f"Added {request.ticker} to watch list",
+                item=item
+            )
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
+@router.delete("/watch-list/{ticker}")
+async def remove_from_watch_list(ticker: str):
+    """Remove a ticker from the watch list (soft delete)"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            result = await conn.execute(
+                """UPDATE rumor_watch_list
+                   SET is_active = FALSE, updated_at = NOW()
+                   WHERE ticker = $1 AND is_active = TRUE""",
+                ticker.upper()
+            )
+
+            if result == "UPDATE 0":
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Ticker {ticker} not found in watch list"
+                )
+
+            return {
+                "success": True,
+                "message": f"Removed {ticker} from watch list"
+            }
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
+# ============================================================================
+# Update Intelligence Deal Ticker
+# ============================================================================
+
+class UpdateTickerRequest(BaseModel):
+    ticker: Optional[str] = None
+
+
+class UpdateTickerResponse(BaseModel):
+    success: bool
+    message: str
+    deal_id: str
+    ticker: Optional[str]
+
+
+@router.patch("/deals/{deal_id}/ticker", response_model=UpdateTickerResponse)
+async def update_deal_ticker(deal_id: str, request: UpdateTickerRequest):
+    """Update the target ticker for an intelligence deal"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            # Verify deal exists
+            deal = await conn.fetchrow(
+                "SELECT deal_id, target_name FROM deal_intelligence WHERE deal_id = $1",
+                deal_id
+            )
+
+            if not deal:
+                raise HTTPException(status_code=404, detail="Deal not found")
+
+            # Update ticker
+            ticker = request.ticker.upper().strip() if request.ticker else None
+            
+            await conn.execute(
+                """UPDATE deal_intelligence
+                   SET target_ticker = $2, updated_at = NOW()
+                   WHERE deal_id = $1""",
+                deal_id, ticker
+            )
+
+            return UpdateTickerResponse(
+                success=True,
+                message=f"Updated ticker for {deal['target_name']}",
+                deal_id=deal_id,
+                ticker=ticker
+            )
 
         finally:
             await db.pool.release(conn)

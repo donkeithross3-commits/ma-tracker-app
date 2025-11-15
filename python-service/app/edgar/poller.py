@@ -6,6 +6,7 @@ from typing import List, Optional
 import feedparser
 import httpx
 from .models import EdgarRSSItem, EdgarFiling
+from app.services.ticker_lookup import get_ticker_lookup_service
 
 logger = logging.getLogger(__name__)
 
@@ -17,17 +18,44 @@ EDGAR_RSS_FEEDS = {
 
 # M&A relevant filing types
 MA_FILING_TYPES = {
-    "8-K",      # Current report (often announces M&A)
-    "8-K/A",    # Amended current report
-    "SC TO",    # Tender offer statement
-    "SC TO-T",  # Tender offer continuation
-    "SC TO-C",  # Tender offer corrective
-    "DEFM14A",  # Definitive proxy for merger
-    "PREM14A",  # Preliminary proxy for merger
-    "S-4",      # Registration for business combinations
-    "SC 13D",   # Beneficial ownership (activist, potential M&A)
-    "SC 13E3",  # Going private transaction
-    "425",      # Prospectus filed pursuant to merger
+    "8-K",       # Current report (often announces M&A - esp Items 1.01, 8.01)
+    "8-K/A",     # Amended current report
+    "SC TO",     # Tender offer statement
+    "SC TO-T",   # Tender offer continuation
+    "SC TO-C",   # Tender offer corrective
+    "SC 14D-9",  # Target response to tender offer
+    "DEFM14A",   # Definitive proxy for merger
+    "PREM14A",   # Preliminary proxy for merger
+    "S-4",       # Registration for business combinations
+    "SC 13E3",   # Going private transaction
+    "425",       # Business combination communications (Rule 425)
+}
+
+# High-priority filing types (likely to be first-time announcements)
+# Focus on 8-K Items 1.01 and 8.01 for timeliest disclosure of new $50M+ deals
+HIGH_PRIORITY_FILINGS = {
+    "8-K",       # Initial current report - MOST COMMON for new deal announcements
+                 # Especially Items 1.01 (Material Definitive Agreement) and 8.01 (Other Events)
+    "SC TO",     # Tender offer commencement - always new announcement
+    "SC 14D-9",  # Target response to tender offer - typically first disclosure from target
+    "S-4",       # Registration for merger - initial filing for stock deals
+    "SC 13E3",   # Going private - initial disclosure
+}
+
+# Medium-priority filing types (could be initial or ongoing communications)
+MEDIUM_PRIORITY_FILINGS = {
+    "425",       # Business combination communications
+                 # Can be initial (filed with S-4) OR ongoing communications
+                 # Requires careful analysis - check for historical references
+}
+
+# Low-priority filing types (typically updates to existing deals, NOT first announcements)
+LOW_PRIORITY_FILINGS = {
+    "8-K/A",     # Amended - BY DEFINITION updating previous filing (never new)
+    "PREM14A",   # Preliminary proxy - for existing deals seeking shareholder vote
+    "DEFM14A",   # Definitive proxy - for existing deals seeking shareholder vote
+    "SC TO-T",   # Tender offer continuation - updating existing offer
+    "SC TO-C",   # Tender offer corrective - updating existing offer
 }
 
 # Market hours (9:30 AM - 4:00 PM ET)
@@ -94,8 +122,8 @@ class EdgarPoller:
             logger.error(f"Failed to fetch RSS feed {feed_url}: {e}")
             return []
 
-    def parse_filing(self, rss_item: EdgarRSSItem) -> Optional[EdgarFiling]:
-        """Parse RSS item into EdgarFiling"""
+    async def parse_filing(self, rss_item: EdgarRSSItem) -> Optional[EdgarFiling]:
+        """Parse RSS item into EdgarFiling with ticker lookup"""
         try:
             # Title format: "8-K - COMPANY NAME INC (0001234567)"
             title_parts = rss_item.title.split(' - ', 1)
@@ -119,11 +147,21 @@ class EdgarPoller:
             # Keep the original -index.htm URL (it's the filing index page)
             filing_url = rss_item.link
 
+            # Look up ticker from company name
+            ticker = None
+            try:
+                ticker_service = get_ticker_lookup_service()
+                ticker = await ticker_service.lookup_ticker(company_name)
+                if ticker:
+                    logger.debug(f"Found ticker {ticker} for {company_name}")
+            except Exception as e:
+                logger.debug(f"Ticker lookup failed for {company_name}: {e}")
+
             return EdgarFiling(
                 accession_number=accession_number,
                 cik=cik,
                 company_name=company_name,
-                ticker=None,  # Will be resolved later
+                ticker=ticker,
                 filing_type=filing_type,
                 filing_date=rss_item.pub_date,
                 filing_url=filing_url
@@ -136,6 +174,26 @@ class EdgarPoller:
         """Check if filing type is potentially M&A relevant"""
         return filing_type in MA_FILING_TYPES
 
+    def get_filing_priority(self, filing_type: str) -> str:
+        """Get priority level for filing type (high/medium/low)
+
+        Returns:
+            'high' for filing types likely to be first-time announcements
+                   (8-K Items 1.01/8.01, SC TO, SC 14D-9, S-4, SC 13E3)
+            'medium' for filing types that could be initial OR ongoing
+                     (Form 425 - requires careful analysis)
+            'low' for filing types typically updating existing deals
+                  (8-K/A, PREM14A, DEFM14A, SC TO-T, SC TO-C)
+        """
+        if filing_type in HIGH_PRIORITY_FILINGS:
+            return 'high'
+        elif filing_type in MEDIUM_PRIORITY_FILINGS:
+            return 'medium'
+        elif filing_type in LOW_PRIORITY_FILINGS:
+            return 'low'
+        else:
+            return 'medium'  # Unknown filing types default to medium
+
     async def poll_once(self) -> List[EdgarFiling]:
         """Single poll of EDGAR feeds, returns new M&A-relevant filings"""
         new_filings = []
@@ -145,7 +203,7 @@ class EdgarPoller:
             logger.info(f"Fetched {len(items)} items from {feed_name} feed")
 
             for item in items:
-                filing = self.parse_filing(item)
+                filing = await self.parse_filing(item)
                 if not filing:
                     continue
 

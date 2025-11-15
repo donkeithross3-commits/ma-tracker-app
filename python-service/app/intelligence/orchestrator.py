@@ -13,6 +13,9 @@ from app.intelligence.monitors import (
     create_ftc_monitor,
     create_reuters_monitor,
     create_seeking_alpha_monitor,
+    create_globenewswire_ma_monitor,
+    create_globenewswire_corporate_actions_monitor,
+    create_globenewswire_executive_changes_monitor,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +75,12 @@ class IntelligenceOrchestrator:
                         monitor = create_reuters_monitor(config)
                     elif source_name == "seeking_alpha_ma":
                         monitor = create_seeking_alpha_monitor(config)
+                    elif source_name == "globenewswire_ma":
+                        monitor = create_globenewswire_ma_monitor(config)
+                    elif source_name == "globenewswire_corporate_actions":
+                        monitor = create_globenewswire_corporate_actions_monitor(config)
+                    elif source_name == "globenewswire_executive_changes":
+                        monitor = create_globenewswire_executive_changes_monitor(config)
                     # Add more monitors here as they're implemented
                     # elif source_name == "nasdaq_headlines":
                     #     monitor = create_nasdaq_monitor(config)
@@ -122,6 +131,10 @@ class IntelligenceOrchestrator:
                     try:
                         # Add mention to intelligence system
                         deal_id = await self.aggregator.process_mention(mention)
+
+                        # Check if deal was filtered out (e.g., no ticker found for private company)
+                        if deal_id is None:
+                            continue
 
                         # Evaluate tier promotion
                         tier_changed = await self.tier_manager.evaluate_tier_promotion(deal_id)

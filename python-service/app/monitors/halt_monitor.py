@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 import asyncpg
 import os
+import csv
+from io import StringIO
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +51,12 @@ class HaltMonitor:
     """Monitor NASDAQ and NYSE for real-time trading halts"""
 
     # Official exchange halt feeds
+    # NYSE provides a unified CSV API with both NYSE and NASDAQ halts
+    NYSE_CSV_URL = "https://www.nyse.com/api/trade-halts/current/download"
     NASDAQ_URL = "https://www.nasdaqtrader.com/trader.aspx?id=tradehalts"
-    NYSE_URL = "https://www.nyse.com/trade-halt-current"
 
     # Poll interval in seconds
-    POLL_INTERVAL = 2
+    POLL_INTERVAL = 10
 
     def __init__(self, db_url: str):
         self.db_url = db_url
@@ -66,6 +69,11 @@ class HaltMonitor:
 
         # Track M&A deals we're monitoring
         self.tracked_tickers = set()
+
+        # Logging rate limiting: log twice per minute
+        self.checks_since_last_log = 0
+        self.last_log_time = None
+        self.LOG_EVERY_N_CHECKS = 15  # Every 15 checks at 2s interval = 30s = twice per minute
 
     async def initialize(self):
         """Initialize database connection pool"""
@@ -111,31 +119,17 @@ class HaltMonitor:
         try:
             while self.is_running:
                 try:
-                    # Fetch halts from both exchanges
-                    nasdaq_halts, nyse_halts = await asyncio.gather(
-                        self.fetch_nasdaq_halts(),
-                        self.fetch_nyse_halts(),
-                        return_exceptions=True
-                    )
+                    # Fetch halts from NYSE CSV API (includes both NYSE and NASDAQ)
+                    all_halts = await self.fetch_nyse_csv_halts()
 
-                    # Process results
-                    all_halts = []
-
-                    if isinstance(nasdaq_halts, list):
-                        all_halts.extend(nasdaq_halts)
-                    else:
-                        logger.error(f"NASDAQ fetch error: {nasdaq_halts}")
-
-                    if isinstance(nyse_halts, list):
-                        all_halts.extend(nyse_halts)
-                    else:
-                        logger.error(f"NYSE fetch error: {nyse_halts}")
+                    # Increment check counter
+                    self.checks_since_last_log += 1
 
                     # Process new halts
                     await self.process_halts(all_halts)
 
                     # Refresh tracked tickers every 30 seconds
-                    if len(self.seen_halts) % 15 == 0:
+                    if self.checks_since_last_log % 15 == 0:
                         await self.refresh_tracked_tickers()
 
                 except Exception as e:
@@ -160,8 +154,80 @@ class HaltMonitor:
             await self.db_pool.close()
         logger.info("Halt monitor cleaned up")
 
+    async def fetch_nyse_csv_halts(self) -> List[HaltData]:
+        """
+        Fetch current halts from NYSE CSV API.
+        This endpoint provides halts from both NYSE and NASDAQ exchanges in a single feed.
+        """
+        try:
+            async with self.session.get(self.NYSE_CSV_URL) as response:
+                if response.status != 200:
+                    logger.warning(f"NYSE CSV API returned status {response.status}")
+                    return []
+
+                csv_text = await response.text()
+                reader = csv.DictReader(StringIO(csv_text))
+
+                halts = []
+                for row in reader:
+                    try:
+                        # CSV format: Halt Date,Halt Time,Symbol,Name,Exchange,Reason,Resume Date,NYSE Resume Time
+                        ticker = row['Symbol'].strip()
+                        company_name = row['Name'].strip()
+                        halt_date = row['Halt Date'].strip()
+                        halt_time = row['Halt Time'].strip()
+                        exchange = row['Exchange'].strip()
+                        reason = row['Reason'].strip()
+                        resume_date = row.get('Resume Date', '').strip()
+                        resume_time = row.get('NYSE Resume Time', '').strip()
+
+                        # Parse halt datetime
+                        halt_datetime_str = f"{halt_date} {halt_time}"
+                        halt_datetime = datetime.strptime(halt_datetime_str, "%Y-%m-%d %H:%M:%S")
+
+                        # Parse resumption datetime if available
+                        resumption_time = None
+                        if resume_date and resume_time:
+                            try:
+                                resume_datetime_str = f"{resume_date} {resume_time}"
+                                resumption_time = datetime.strptime(resume_datetime_str, "%Y-%m-%d %H:%M:%S")
+                            except:
+                                pass
+
+                        # Map reason to halt code
+                        # "News pending" maps to T1, "News dissemination" maps to T2
+                        halt_code = "T1" if "news pending" in reason.lower() else "T2"
+
+                        halt = HaltData(
+                            ticker=ticker,
+                            halt_time=halt_datetime,
+                            halt_code=halt_code,
+                            resumption_time=resumption_time,
+                            exchange=exchange,
+                            company_name=company_name
+                        )
+
+                        halts.append(halt)
+
+                    except Exception as e:
+                        logger.error(f"Failed to parse halt row: {e}, row: {row}")
+                        continue
+
+                # Only log every N checks to reduce verbosity
+                if self.checks_since_last_log % self.LOG_EVERY_N_CHECKS == 0:
+                    logger.info(
+                        f"Halt monitor status: Checked {self.checks_since_last_log} times, "
+                        f"currently {len(halts)} halts active"
+                    )
+
+                return halts
+
+        except Exception as e:
+            logger.error(f"Failed to fetch halts from NYSE CSV API: {e}")
+            return []
+
     async def fetch_nasdaq_halts(self) -> List[HaltData]:
-        """Fetch current halts from NASDAQ"""
+        """Fetch current halts from NASDAQ (DEPRECATED: Use fetch_nyse_csv_halts instead)"""
         try:
             async with self.session.get(self.NASDAQ_URL) as response:
                 if response.status != 200:
@@ -331,9 +397,14 @@ class HaltMonitor:
             # Store halt event in database
             await self.store_halt_event(halt, is_tracked)
 
-            # If tracked M&A target AND material news halt, trigger alert
+            # If tracked M&A target AND material news halt, trigger high-priority alert
             if is_tracked and is_material_news:
                 await self.trigger_halt_alert(halt)
+
+            # NEW: For ALL material news halts (even untracked), create investigation task
+            # This ensures we don't miss any potential M&A deals
+            elif is_material_news:
+                await self.create_halt_investigation_task(halt)
 
     async def store_halt_event(self, halt: HaltData, is_tracked: bool):
         """Store halt event in database"""
@@ -424,6 +495,77 @@ This may indicate material news about the acquisition.
 
         except Exception as e:
             logger.error(f"Failed to trigger halt alert: {e}", exc_info=True)
+
+    async def create_halt_investigation_task(self, halt: HaltData):
+        """Create investigation task for untracked material news halt"""
+        try:
+            halt_reason = {
+                'T1': 'News Pending',
+                'T2': 'News Dissemination',
+                'M1': 'M&A Activity Pending',
+                'M2': 'M&A Activity Dissemination'
+            }.get(halt.halt_code, halt.halt_code)
+
+            async with self.db_pool.acquire() as conn:
+                # Check if this ticker already has a recent investigation (within last 24 hours)
+                existing = await conn.fetchval("""
+                    SELECT COUNT(*)
+                    FROM alert_notifications
+                    WHERE alert_type = 'halt_investigation'
+                    AND metadata->>'ticker' = $1
+                    AND created_at > NOW() - INTERVAL '24 hours'
+                """, halt.ticker)
+
+                if existing > 0:
+                    logger.info(f"Skipping duplicate investigation for {halt.ticker}")
+                    return
+
+                message = f"""
+🔍 NEW TRADING HALT - Investigation Needed
+
+Ticker: {halt.ticker}
+Company: {halt.company_name or 'Unknown'}
+Halt Time: {halt.halt_time.strftime('%Y-%m-%d %H:%M:%S')}
+Halt Reason: {halt_reason} ({halt.halt_code})
+Exchange: {halt.exchange}
+
+This ticker is NOT currently tracked as an M&A target.
+Investigate to determine if this halt is M&A-related:
+- Check recent SEC filings (8-K, S-4, 425, DEFM14A)
+- Search for news announcements
+- Look for merger/acquisition language
+- If M&A-related, create staged deal for approval
+
+Note: Most T1/T2 halts are NOT M&A (clinical trials, earnings, compliance issues).
+M1/M2 codes are more likely to be merger-related.
+                """.strip()
+
+                # Store investigation task with medium severity
+                await conn.execute("""
+                    INSERT INTO alert_notifications (
+                        alert_type, severity, title, message,
+                        metadata, status
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                    'halt_investigation',
+                    'medium',
+                    f"Investigate Halt: {halt.ticker} - {halt_reason}",
+                    message,
+                    {
+                        'ticker': halt.ticker,
+                        'company_name': halt.company_name,
+                        'halt_code': halt.halt_code,
+                        'halt_time': halt.halt_time.isoformat(),
+                        'exchange': halt.exchange,
+                        'requires_investigation': True
+                    },
+                    'pending'
+                )
+
+                logger.info(f"🔍 INVESTIGATION TASK: {halt.ticker} - {halt_reason}")
+
+        except Exception as e:
+            logger.error(f"Failed to create halt investigation task: {e}", exc_info=True)
 
     async def get_recent_halts(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get recent halt events from database"""

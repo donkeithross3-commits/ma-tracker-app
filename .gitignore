@@ -44,3 +44,6 @@ next-env.d.ts
 /prisma/migrations
 python-service/credentials.json
 python-service/token.json
+
+# Claude Code session state (local only, don't commit)
+.claude-session

@@ -36,6 +36,7 @@ class DealExtraction(BaseModel):
     """Extracted deal information from filing"""
     target_name: str
     target_ticker: Optional[str] = None
+    target_country: Optional[str] = None  # ISO 3166-1 alpha-2 country code (e.g., "US", "DE", "GB")
     acquirer_name: Optional[str] = None
     acquirer_ticker: Optional[str] = None
     deal_value: Optional[float] = None  # in billions

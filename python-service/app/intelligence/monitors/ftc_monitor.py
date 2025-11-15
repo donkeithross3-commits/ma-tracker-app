@@ -39,8 +39,24 @@ class FTCEarlyTerminationMonitor(BaseSourceMonitor):
         """
         self.logger.info(f"Fetching FTC early termination notices from {self.base_url}")
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(self.base_url)
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            # Enhanced headers to avoid bot detection
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "DNT": "1",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "Cache-Control": "max-age=0"
+            }
+
+            response = await client.get(self.base_url, headers=headers)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")

@@ -16,7 +16,7 @@ from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
 from ibapi.order import Order
-from ibapi.common import TickerId, TickAttrib
+from ibapi.common import TickerId, TickAttrib, SetOfString, SetOfFloat
 from threading import Thread, Event
 import queue
 
@@ -91,6 +91,11 @@ class IBMergerArbScanner(EWrapper, EClient):
     def __init__(self):
         EWrapper.__init__(self)
         EClient.__init__(self, wrapper=self)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("=" * 80)
+        logger.info("SCANNER INIT: Code version with callback fix loaded!")
+        logger.info("=" * 80)
 
         # Data storage
         self.option_chain = {}
@@ -98,6 +103,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.underlying_bid = None
         self.underlying_ask = None
         self.historical_vol = None
+        self.contract_details = None  # Store resolved contract details
+        self.available_expirations = []  # Store available option expirations from IB
+        self.available_strikes = {}  # Store available strikes by expiration
 
         # Request tracking
         self.req_id_map = {}
@@ -128,6 +136,9 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def nextValidId(self, orderId: int):
         """Callback when connected"""
+        print("=" * 80)
+        print(f"NEXT VALID ID CALLBACK FIRED! orderId={orderId}")
+        print("=" * 80)
         super().nextValidId(orderId)
         self.next_req_id = orderId
         print(f"Ready with next order ID: {orderId}")
@@ -137,6 +148,45 @@ class IBMergerArbScanner(EWrapper, EClient):
         req_id = self.next_req_id
         self.next_req_id += 1
         return req_id
+
+    def resolve_contract(self, ticker: str) -> Optional[int]:
+        """Resolve stock contract to get contract ID"""
+        print(f"Resolving contract for {ticker}...")
+
+        # Create stock contract
+        contract = Contract()
+        contract.symbol = ticker
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.currency = "USD"
+
+        # Request contract details
+        req_id = self.get_next_req_id()
+        self.req_id_map[req_id] = f"contract_details_{ticker}"
+        self.contract_details = None
+
+        self.reqContractDetails(req_id, contract)
+
+        # Wait for response
+        time.sleep(2)
+
+        if self.contract_details:
+            con_id = self.contract_details.contract.conId
+            print(f"Resolved {ticker} to contract ID: {con_id}")
+            return con_id
+        else:
+            print(f"Warning: Could not resolve contract ID for {ticker}")
+            return None
+
+    def contractDetails(self, reqId: int, contractDetails):
+        """Handle contract details response"""
+        if reqId in self.req_id_map and "contract_details" in self.req_id_map[reqId]:
+            self.contract_details = contractDetails
+            print(f"Got contract details: {contractDetails.contract.symbol} (ID: {contractDetails.contract.conId})")
+
+    def contractDetailsEnd(self, reqId: int):
+        """Handle end of contract details"""
+        pass
 
     def fetch_underlying_data(self, ticker: str) -> Dict:
         """Fetch current underlying stock data"""
@@ -195,9 +245,23 @@ class IBMergerArbScanner(EWrapper, EClient):
             elif tickType == 27:  # Open Interest
                 self.option_chain[reqId]['open_interest'] = size
 
-    def fetch_option_chain(self, ticker: str, expiry_months: int = 6, current_price: float = None) -> List[OptionData]:
-        """Fetch option chain from IB - LIMITED to avoid 100+ instrument limit"""
+    def fetch_option_chain(self, ticker: str, expiry_months: int = 6, current_price: float = None, deal_close_date: datetime = None, days_before_close: int = 0, deal_price: float = None) -> List[OptionData]:
+        """Fetch option chain from IB - LIMITED to avoid 100+ instrument limit
+
+        If deal_close_date is provided, fetches expirations around that date.
+        days_before_close: How many days before deal close to look for expirations
+            - 0: Only expirations on or after deal_close_date
+            - N > 0: Expirations from (deal_close_date - N days) onwards
+        deal_price: Expected deal price for filtering relevant strikes
+        Otherwise falls back to expiry_months from now.
+        """
         print(f"Fetching option chain for {ticker} (LIMITED to avoid IB limits)...")
+
+        # First, resolve contract to get contract ID
+        contract_id = self.resolve_contract(ticker)
+        if not contract_id:
+            print(f"Warning: Could not resolve contract ID for {ticker}, trying with ID=0")
+            contract_id = 0
 
         # Create underlying contract for option chain request
         underlying = Contract()
@@ -210,7 +274,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         req_id = self.get_next_req_id()
         self.req_id_map[req_id] = f"option_chain_{ticker}"
 
-        self.reqSecDefOptParams(req_id, ticker, "", "STK", 0)
+        self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
 
         # Wait for response
         time.sleep(3)
@@ -223,53 +287,184 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         # LIMIT: Only get 2-3 expirations and 2-3 strikes each
         if price_to_use:
-            # Get only 3 expirations
-            expiries = self.get_expiries(ticker, datetime.now() + timedelta(days=expiry_months * 30))[:3]
+            # Determine which expirations to fetch
+            if deal_close_date:
+                # Smart selection: Get expiration before AND after deal close
+                # Use IB API to get REAL expirations (including weeklies)
+                all_expiries = self.get_available_expirations(ticker, contract_id)
+                if not all_expiries:  # Fallback to stub if IB call fails
+                    print(f"Warning: IB expiration lookup failed, falling back to monthly expirations only")
+                    all_expiries = self.get_expiries(ticker, deal_close_date + timedelta(days=90))
+
+                # Find expirations relative to deal close date and days_before_close parameter
+                if days_before_close == 0:
+                    # Select 2-3 expirations bracketing the deal close date
+                    # This allows for calendar spreads expiring around the deal close
+                    sorted_expiries = sorted(all_expiries)
+
+                    # Deduplicate while preserving order (remove exchange duplicates)
+                    seen = set()
+                    unique_expiries = [x for x in sorted_expiries if not (x in seen or seen.add(x))]
+
+                    print(f"DEBUG: {len(unique_expiries)} unique expirations for {ticker}: {unique_expiries}")
+                    print(f"DEBUG: Deal close date: {deal_close_date.strftime('%Y-%m-%d')}")
+
+                    expiries_before = [exp for exp in unique_expiries if datetime.strptime(exp, '%Y%m%d') < deal_close_date]
+                    expiries_after = [exp for exp in unique_expiries if datetime.strptime(exp, '%Y%m%d') >= deal_close_date]
+
+                    print(f"DEBUG: {len(expiries_before)} expirations BEFORE close: {expiries_before}")
+                    print(f"DEBUG: {len(expiries_after)} expirations AT/AFTER close: {expiries_after}")
+
+                    selected_expiries = []
+                    # Get the 2 closest expirations BEFORE deal close
+                    if len(expiries_before) >= 2:
+                        selected_expiries.extend(expiries_before[-2:])  # Last 2 before close
+                    elif expiries_before:
+                        selected_expiries.extend(expiries_before[-1:])  # Just 1 if only 1 available
+
+                    # Get first 2 expirations on or after deal close
+                    if expiries_after:
+                        selected_expiries.extend(expiries_after[:2])
+
+                    print(f"Selected expirations around deal close date {deal_close_date.strftime('%Y-%m-%d')}: {selected_expiries}")
+                else:
+                    # Allow expirations N days before deal close
+                    earliest_date = deal_close_date - timedelta(days=days_before_close)
+                    expiries_valid = [exp for exp in all_expiries if datetime.strptime(exp, '%Y%m%d') >= earliest_date]
+                    # Select 2-3 expirations in the valid range
+                    selected_expiries = expiries_valid[:3] if expiries_valid else []
+                    print(f"Selected expirations from {earliest_date.strftime('%Y-%m-%d')} to beyond deal close {deal_close_date.strftime('%Y-%m-%d')}: {selected_expiries}")
+
+                expiries = selected_expiries
+            else:
+                # Fallback: Get only 3 expirations from now
+                # Use IB API to get REAL expirations (including weeklies)
+                all_expiries = self.get_available_expirations(ticker, contract_id)
+                if not all_expiries:  # Fallback to stub if IB call fails
+                    print(f"Warning: IB expiration lookup failed, falling back to monthly expirations only")
+                    all_expiries = self.get_expiries(ticker, datetime.now() + timedelta(days=expiry_months * 30))
+                expiries = all_expiries[:3]
 
             for expiry in expiries:
-                # LIMIT: Only get strikes around current price and deal price
-                strikes = [price_to_use * 0.95, price_to_use, price_to_use * 1.05]
-                # Round to nearest $5 increment (AAPL uses $5 strikes)
-                strikes = [round(s / 5) * 5 for s in strikes]
+                # Try to get actual strikes from IB for this expiration
+                if expiry in self.available_strikes and self.available_strikes[expiry]:
+                    available_strikes = self.available_strikes[expiry]
+                    print(f"Using {len(available_strikes)} strikes from IB for {expiry}")
+
+                    # Filter strikes: 20% below deal price to 10% above
+                    # This captures all potential call spreads for merger arb
+                    if deal_price:
+                        min_strike = deal_price * 0.80  # 20% below deal price
+                        max_strike = max(price_to_use, deal_price) * 1.10  # 10% above current/deal
+                    else:
+                        min_strike = price_to_use * 0.80
+                        max_strike = price_to_use * 1.10
+
+                    relevant_strikes = [s for s in available_strikes if min_strike <= s <= max_strike]
+
+                    print(f"Strike range for {expiry}: ${min_strike:.2f} - ${max_strike:.2f}")
+                    print(f"Found {len(relevant_strikes)} relevant strikes: {relevant_strikes[:10]}...")  # Show first 10
+
+                    # Use all relevant strikes (don't limit to just 5)
+                    # The analyzer will evaluate all combinations and pick the best
+                    strikes = relevant_strikes
+
+                    print(f"Selected {len(strikes)} strikes for {expiry}")
+                else:
+                    # Fallback: guess strikes around current price
+                    print(f"No IB strikes available for {expiry}, using calculated strikes")
+                    strikes = [price_to_use * 0.95, price_to_use, price_to_use * 1.05]
+                    strikes = [round(s / 5) * 5 for s in strikes]
 
                 for strike in strikes:
                     # Request call option data
                     option = self.get_option_data(ticker, expiry, strike, "C")
                     if option:
                         options.append(option)
+                        # Debug: Show specific options we're interested in
+                        if expiry == '20260618' and strike in [200.0, 210.0]:
+                            print(f"DEBUG: Found {expiry} {strike}C - bid: {option.bid}, ask: {option.ask}, mid: {option.mid_price}")
 
                     # Small delay to avoid overwhelming IB
                     time.sleep(0.5)
 
         print(f"Retrieved {len(options)} option contracts (limited to avoid IB limits)")
+
+        # Debug: Show what we got for June 2026
+        june_options = [o for o in options if o.expiry == '20260618']
+        if june_options:
+            print(f"DEBUG: June 2026 options retrieved: {len(june_options)} contracts")
+            for opt in june_options:
+                print(f"  {opt.strike}C - bid: {opt.bid}, ask: {opt.ask}, mid: {opt.mid_price}")
+
         return options
 
-    def get_available_expirations(self, ticker: str) -> List[str]:
+    def get_available_expirations(self, ticker: str, contract_id: int = 0) -> List[str]:
         """Get actual available option expirations from IB"""
-        print(f"Getting available expirations for {ticker}...")
+        import logging
+        logger = logging.getLogger(__name__)
+
+        print(f"Getting available expirations for {ticker} (contract ID: {contract_id})...")
 
         # Request security definition option parameters
         req_id = self.get_next_req_id()
         self.req_id_map[req_id] = f"expirations_{ticker}"
 
-        # Store expirations as they come in
+        logger.info(f"REQUESTING expirations with reqId={req_id}, stored as '{self.req_id_map[req_id]}'")
+
+        # Reset storage for new request
         self.available_expirations = []
+        self.available_strikes = {}
 
-        self.reqSecDefOptParams(req_id, ticker, "", "STK", 0)
+        # Use proper IB API call - reqSecDefOptParams expects:
+        # reqId, underlyingSymbol, futFopExchange, underlyingSecType, underlyingConId
+        self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
 
-        # Wait for response
-        time.sleep(5)
+        # Wait for response (may need longer for IB to respond)
+        time.sleep(3)
+
+        if not self.available_expirations:
+            print(f"Warning: IB expiration lookup failed for {ticker} (contract ID: {contract_id})")
+        else:
+            print(f"Got {len(self.available_expirations)} expirations from IB")
+            print(f"Got strikes for {len(self.available_strikes)} expirations from IB")
 
         return self.available_expirations
 
-    def securityDefinitionOptionalParameter(self, reqId: int, exchange: str,
+    def securityDefinitionOptionParameter(self, reqId: int, exchange: str,
                                           underlyingConId: int, tradingClass: str,
-                                          multiplier: str, expirations: List[str],
-                                          strikes: List[float]):
+                                          multiplier: str, expirations: SetOfString,
+                                          strikes: SetOfFloat):
         """Handle security definition response"""
-        if reqId in self.req_id_map and "expirations" in self.req_id_map[reqId]:
-            print(f"Available expirations for {exchange}: {expirations}")
-            self.available_expirations.extend(expirations)
+        import sys
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"=== CALLBACK FIRED === reqId={reqId}, exchange={exchange}")
+        print(f"=== CALLBACK FIRED === reqId={reqId}, exchange={exchange}", flush=True)
+        sys.stdout.flush()
+
+        print(f"reqId in map: {reqId in self.req_id_map}", flush=True)
+        print(f"Mapped to: {self.req_id_map.get(reqId, 'NOT FOUND')}", flush=True)
+
+        if reqId in self.req_id_map:
+            # Convert sets to lists if needed
+            exp_list = list(expirations) if isinstance(expirations, set) else expirations
+            strike_list = sorted(list(strikes)) if isinstance(strikes, set) else strikes
+
+            logger.info(f"IB {exchange}: {len(exp_list)} expirations, {len(strike_list)} strikes")
+            print(f"IB {exchange}: {len(exp_list)} expirations, {len(strike_list)} strikes")
+            print(f"Sample expirations: {sorted(exp_list)[:5]}")
+            print(f"Sample strikes: {strike_list[:10]}")
+
+            self.available_expirations.extend(exp_list)
+            # Store strikes for each expiration
+            for exp in exp_list:
+                if exp not in self.available_strikes:
+                    self.available_strikes[exp] = strike_list
+        else:
+            logger.warning(f"Skipping exchange {exchange} - reqId {reqId} not in map")
+            print(f"Skipping exchange {exchange} - reqId not in map")
 
     def get_expiries(self, ticker: str, end_date: datetime) -> List[str]:
         """Get available expiries (simplified - in practice would get from IB)"""
@@ -477,8 +672,14 @@ class MergerArbAnalyzer:
         if spread_cost <= 0:
             return None
 
-        # Max profit is difference in strikes minus cost
-        max_profit = (short_call.strike - long_call.strike) - spread_cost
+        # Max profit is capped at deal price for merger arbitrage
+        # If stock goes to deal price, we get intrinsic value up to that point
+        if self.deal.total_deal_value >= short_call.strike:
+            # Deal price above short strike - max profit is full spread width
+            max_profit = (short_call.strike - long_call.strike) - spread_cost
+        else:
+            # Deal price below short strike - max profit is capped at deal price
+            max_profit = (self.deal.total_deal_value - long_call.strike) - spread_cost
 
         if max_profit <= 0:
             return None
@@ -496,19 +697,21 @@ class MergerArbAnalyzer:
 
         prob_success = prob_above_breakeven * self.deal.confidence
 
-        # Expected return
+        # Expected return calculation for merger arbitrage
+        # We assume stock goes to deal price if deal closes, zero if it fails
         if self.deal.total_deal_value >= short_call.strike:
-            # Deal price above short strike - get max profit
-            expected_profit = max_profit * self.deal.confidence
+            # Deal price at or above short strike - get full spread value
+            value_at_deal_close = short_call.strike - long_call.strike
         elif self.deal.total_deal_value > long_call.strike:
-            # Deal price between strikes
-            partial_profit = (self.deal.total_deal_value - long_call.strike) - spread_cost
-            expected_profit = partial_profit * self.deal.confidence
+            # Deal price between strikes - get partial value
+            value_at_deal_close = self.deal.total_deal_value - long_call.strike
         else:
-            # Deal price below long strike
-            expected_profit = -spread_cost * (1 - self.deal.confidence)
+            # Deal price below long strike - spread expires worthless
+            value_at_deal_close = 0
 
-        expected_return = expected_profit - ((1 - self.deal.confidence) * spread_cost)
+        # Expected value = (probability of deal) * (value at close - cost) + (probability of failure) * (-cost)
+        # Simplifies to: deal_confidence * value_at_close - cost
+        expected_return = (self.deal.confidence * value_at_deal_close) - spread_cost
 
         # Annualized return
         years_to_expiry = self.deal.days_to_close / 365
@@ -568,6 +771,7 @@ class MergerArbAnalyzer:
                                current_price: float,
                                top_n: int = 10) -> List[TradeOpportunity]:
         """Find the best opportunities from option chain"""
+        from collections import defaultdict
 
         opportunities = []
 
@@ -578,24 +782,34 @@ class MergerArbAnalyzer:
                 if opp and opp.expected_return > 0:
                     opportunities.append(opp)
 
-        # Analyze spreads
-        sorted_options = sorted(options, key=lambda x: x.strike)
+        # Group options by expiration - spreads MUST use same expiration
+        options_by_expiry = defaultdict(list)
+        for option in options:
+            options_by_expiry[option.expiry].append(option)
 
-        for i in range(len(sorted_options) - 1):
-            long_call = sorted_options[i]
+        # Analyze spreads - only within same expiration month
+        for expiry, expiry_options in options_by_expiry.items():
+            sorted_options = sorted(expiry_options, key=lambda x: x.strike)
 
-            # Only consider long strikes below deal price
-            if long_call.strike >= self.deal.total_deal_value:
-                continue
+            for i in range(len(sorted_options) - 1):
+                long_call = sorted_options[i]
 
-            for j in range(i + 1, min(i + 5, len(sorted_options))):  # Look at next 4 strikes
-                short_call = sorted_options[j]
+                # Only consider long strikes below deal price
+                if long_call.strike >= self.deal.total_deal_value:
+                    continue
 
-                # Short strike should be near or above deal price
-                if short_call.strike >= self.deal.total_deal_value * 0.95:
-                    opp = self.analyze_call_spread(long_call, short_call, current_price)
-                    if opp and opp.expected_return > 0:
-                        opportunities.append(opp)
+                for j in range(i + 1, min(i + 5, len(sorted_options))):  # Look at next 4 strikes
+                    short_call = sorted_options[j]
+
+                    # For merger arbitrage, only consider spreads where short strike is at or near deal price
+                    # Stock will converge to deal price, not exceed it
+                    # Allow short strike from 95% of deal price up to deal price + $0.50 buffer
+                    # This captures at-the-money spreads without including far OTM short strikes
+                    if (short_call.strike >= self.deal.total_deal_value * 0.95 and
+                        short_call.strike <= self.deal.total_deal_value + 0.50):
+                        opp = self.analyze_call_spread(long_call, short_call, current_price)
+                        if opp and opp.expected_return > 0:
+                            opportunities.append(opp)
 
         # Sort by annualized return
         opportunities.sort(key=lambda x: x.annualized_return, reverse=True)

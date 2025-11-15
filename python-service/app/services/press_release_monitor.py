@@ -203,16 +203,86 @@ class PressReleaseMonitor:
         """
         conn = await asyncpg.connect(self.db_url)
         try:
-            # Extract company names
-            companies = self._extract_company_names(headline)
+            # Use AI to extract deal information from press release
+            import os
+            from anthropic import AsyncAnthropic
+            import json
+            import re
 
-            if not companies:
-                logger.debug(f"No companies found in: {headline}")
-                return None
+            anthropic = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-            # Assume first company is target, second is acquirer
-            target_name = companies[0] if len(companies) > 0 else "Unknown"
-            acquirer_name = companies[1] if len(companies) > 1 else None
+            text = f"Title: {headline}\n\nContent: {content[:1000]}"  # Limit content to first 1000 chars
+
+            prompt = f"""Analyze this press release for M&A deal information.
+
+{text}
+
+CRITICAL: Correctly identify TARGET vs ACQUIRER:
+- TARGET = Company being acquired/bought (the company being sold)
+- ACQUIRER = Company doing the acquiring/buying (the buyer)
+
+Key indicators to help you identify the target:
+- "Company A to be acquired by Company B" → Target: A, Acquirer: B
+- "Company B acquires Company A" → Target: A, Acquirer: B
+- "Company A adds go-shop provision" → Target: A (the company ADDING the provision is the target)
+- "Company A adds go-shop TO Company B transaction" → Target: A, Acquirer: B (ignore the "TO Company B" part - whoever ADDS the provision is the target)
+- "Company A receives tender offer from Company B" → Target: A, Acquirer: B
+- "Company B makes offer for Company A" → Target: A, Acquirer: B
+- "Merger of equals" → Both could be considered target/acquirer, use context
+
+Extract:
+1. Target company name (company being acquired/bought)
+2. Acquirer company name (company doing the acquisition/buying)
+
+If this is NOT about an M&A deal, respond with: NOT_MA_RELEVANT
+
+Otherwise, respond in this exact JSON format:
+{{
+  "target_name": "Company Name",
+  "acquirer_name": "Acquirer Name" or null,
+  "is_ma_relevant": true
+}}"""
+
+            try:
+                response = await anthropic.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=300,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+
+                result = response.content[0].text.strip()
+
+                if "NOT_MA_RELEVANT" in result:
+                    logger.debug(f"Press release not M&A relevant: {headline}")
+                    return None
+
+                # Parse JSON response
+                try:
+                    data = json.loads(result)
+                except json.JSONDecodeError:
+                    # Try to extract JSON from response
+                    json_match = re.search(r'\{.*\}', result, re.DOTALL)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                    else:
+                        logger.warning(f"Could not parse AI response for press release: {result}")
+                        return None
+
+                if not data.get("is_ma_relevant"):
+                    return None
+
+                target_name = data.get("target_name", "Unknown")
+                acquirer_name = data.get("acquirer_name")
+
+            except Exception as e:
+                logger.error(f"AI extraction failed for press release, falling back to basic extraction: {e}")
+                # Fallback to basic extraction if AI fails
+                companies = self._extract_company_names(headline)
+                if not companies:
+                    logger.debug(f"No companies found in: {headline}")
+                    return None
+                target_name = companies[0] if len(companies) > 0 else "Unknown"
+                acquirer_name = companies[1] if len(companies) > 1 else None
 
             # Check if deal already exists
             existing = await conn.fetchval(

@@ -28,6 +28,12 @@ export async function createAuditLog({
     });
   }
 
+  // Skip audit logging if no userId is provided (no auth system yet)
+  if (!userId) {
+    console.log(`Skipping audit log for ${entityType}:${entityId} - no user ID`);
+    return;
+  }
+
   await prisma.auditLog.create({
     data: {
       entityType,
@@ -36,7 +42,7 @@ export async function createAuditLog({
       changedFields: changedFields.length > 0 ? JSON.stringify(changedFields) : null,
       oldValues: oldValues ? JSON.stringify(oldValues) : null,
       newValues: newValues ? JSON.stringify(newValues) : null,
-      createdById: userId || null,
+      createdById: userId,
     },
   });
 }

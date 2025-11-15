@@ -1,10 +1,11 @@
 """API routes for EDGAR monitoring and staged deals management"""
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from typing import List, Optional
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Body
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
 import logging
 import json
+import time
 
 from app.edgar.database import EdgarDatabase
 from app.edgar.orchestrator import (
@@ -18,10 +19,24 @@ from app.edgar.research_worker import (
     is_research_worker_running
 )
 from app.edgar.deal_research_generator import create_research_generator
+from app.utils.timezone import convert_to_cst
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/edgar", tags=["edgar"])
+
+# Simple in-memory cache for staged deals with 30-second TTL
+# This dramatically speeds up repeated loads while keeping data fresh
+_staged_deals_cache: Dict[str, Any] = {
+    "data": None,
+    "timestamp": 0,
+    "ttl": 30  # seconds
+}
+
+def invalidate_staged_deals_cache():
+    """Invalidate the staged deals cache when data changes"""
+    _staged_deals_cache["data"] = None
+    _staged_deals_cache["timestamp"] = 0
 
 
 async def generate_and_store_research(deal_id: str, deal_info: dict, filing_url: str, db: EdgarDatabase):
@@ -96,11 +111,16 @@ class StagedDealResponse(BaseModel):
     filingDate: datetime
     filingType: str
     filingUrl: str
+    matchedTextExcerpt: Optional[str] = None
+    rejectionCategory: Optional[str] = None
+    rejectionReason: Optional[str] = None
 
 
 class ApprovalRequest(BaseModel):
     action: str  # "approve" or "reject"
     notes: Optional[str] = None
+    rejection_reason: Optional[str] = None  # Free-text reason for rejection
+    rejection_category: Optional[str] = None  # Structured category: not_ma, duplicate, wrong_company, regulatory_only, incomplete, other
 
 
 @router.post("/monitoring/start", response_model=EdgarStatusResponse)
@@ -151,34 +171,50 @@ async def get_monitoring_status():
 @router.get("/staged-deals", response_model=List[StagedDealResponse])
 async def get_staged_deals(status: Optional[str] = None):
     """Get all staged deals, optionally filtered by status"""
-    db = EdgarDatabase()
-    await db.connect()
+    # Check cache first
+    cache_key = f"status_{status}"
+    current_time = time.time()
 
-    try:
-        deals = await db.list_staged_deals(status=status)
+    if (_staged_deals_cache.get("cache_key") == cache_key and
+        _staged_deals_cache["data"] is not None and
+        current_time - _staged_deals_cache["timestamp"] < _staged_deals_cache["ttl"]):
+        logger.debug(f"Returning cached staged deals (age: {current_time - _staged_deals_cache['timestamp']:.1f}s)")
+        return _staged_deals_cache["data"]
 
-        results = []
-        for deal in deals:
-            results.append(StagedDealResponse(
-                id=deal["staged_deal_id"],
-                targetName=deal["target_name"],
-                targetTicker=deal.get("target_ticker"),
-                acquirerName=deal.get("acquirer_name"),
-                dealValue=float(deal["deal_value"]) if deal.get("deal_value") else None,
-                dealType=deal.get("deal_type"),
-                confidenceScore=deal.get("confidence_score"),
-                status=deal["status"],
-                researchStatus=deal.get("researchStatus") or deal.get("researchstatus"),
-                detectedAt=deal["detected_at"],
-                filingDate=deal["filing_date"],
-                filingType=deal["filing_type"],
-                filingUrl=deal["filing_url"]
-            ))
+    # Cache miss or expired - fetch from database
+    from ..main import get_db
+    db = get_db()
 
-        return results
+    deals = await db.list_staged_deals(status=status)
 
-    finally:
-        await db.disconnect()
+    results = []
+    for deal in deals:
+        results.append(StagedDealResponse(
+            id=deal["staged_deal_id"],
+            targetName=deal["target_name"],
+            targetTicker=deal.get("target_ticker"),
+            acquirerName=deal.get("acquirer_name"),
+            dealValue=float(deal["deal_value"]) if deal.get("deal_value") else None,
+            dealType=deal.get("deal_type"),
+            confidenceScore=deal.get("confidence_score"),
+            status=deal["status"],
+            researchStatus=deal.get("researchStatus") or deal.get("researchstatus"),
+            detectedAt=convert_to_cst(deal["detected_at"]),
+            filingDate=convert_to_cst(deal["filing_date"]),
+            filingType=deal["filing_type"],
+            filingUrl=deal["filing_url"],
+            matchedTextExcerpt=deal.get("matched_text_excerpt"),
+            rejectionCategory=deal.get("rejection_category"),
+            rejectionReason=deal.get("rejection_reason")
+        ))
+
+    # Update cache
+    _staged_deals_cache["data"] = results
+    _staged_deals_cache["cache_key"] = cache_key
+    _staged_deals_cache["timestamp"] = current_time
+    logger.debug(f"Cached {len(results)} staged deals")
+
+    return results
 
 
 @router.get("/staged-deals/{deal_id}", response_model=StagedDealResponse)
@@ -203,10 +239,13 @@ async def get_staged_deal(deal_id: str):
             confidenceScore=deal.get("confidence_score"),
             status=deal["status"],
             researchStatus=deal.get("researchStatus") or deal.get("researchstatus"),
-            detectedAt=deal["detected_at"],
-            filingDate=deal["filing_date"],
+            detectedAt=convert_to_cst(deal["detected_at"]),
+            filingDate=convert_to_cst(deal["filing_date"]),
             filingType=deal["filing_type"],
-            filingUrl=deal["filing_url"]
+            filingUrl=deal["filing_url"],
+            matchedTextExcerpt=deal.get("matched_text_excerpt"),
+            rejectionCategory=deal.get("rejection_category"),
+            rejectionReason=deal.get("rejection_reason")
         )
 
     finally:
@@ -343,6 +382,9 @@ async def review_staged_deal(deal_id: str, request: ApprovalRequest):
                     db
                 )
 
+                # Invalidate cache since we modified staged deals
+                invalidate_staged_deals_cache()
+
                 return {
                     "status": "approved",
                     "dealId": str(intelligence_deal_id),
@@ -352,7 +394,14 @@ async def review_staged_deal(deal_id: str, request: ApprovalRequest):
                 await db.pool.release(conn)
 
         elif request.action == "reject":
-            await db.reject_staged_deal(deal_id)
+            await db.reject_staged_deal(
+                deal_id,
+                rejection_reason=request.rejection_reason,
+                rejection_category=request.rejection_category
+            )
+
+            # Invalidate cache since we modified staged deals
+            invalidate_staged_deals_cache()
 
             return {
                 "status": "rejected",
@@ -465,6 +514,9 @@ async def unapprove_staged_deal(deal_id: str):
 
             logger.info(f"Unapproved staged deal {deal_id} (target: {staged_deal['target_name']})")
 
+            # Invalidate cache since we modified staged deals
+            invalidate_staged_deals_cache()
+
             return {
                 "status": "success",
                 "message": f"Deal sent back to staging area",
@@ -563,3 +615,236 @@ async def clear_processed_filings():
         return {"success": True, "message": message, "cleared_count": count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to clear filings: {str(e)}")
+
+
+@router.get("/rejection-analysis")
+async def get_rejection_analysis():
+    """Get analysis of rejection reasons for ML training and filter improvement"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            # Get aggregated stats from the view we created
+            category_stats = await conn.fetch(
+                "SELECT * FROM staged_deals_rejection_analysis"
+            )
+
+            # Get recent rejections with full details for training
+            # EXCLUDE only: duplicate, already_in_production (these are valid detections, just redundant)
+            # INCLUDE: previously_announced (key pattern to learn - historical references)
+            recent_rejections = await conn.fetch(
+                '''SELECT
+                    target_name,
+                    target_ticker,
+                    acquirer_name,
+                    deal_type,
+                    confidence_score,
+                    rejection_category,
+                    rejection_reason,
+                    matched_text_excerpt,
+                    reviewed_at
+                FROM staged_deals
+                WHERE status = 'rejected'
+                AND rejection_category IS NOT NULL
+                AND rejection_category NOT IN ('duplicate', 'already_in_production')
+                ORDER BY reviewed_at DESC
+                LIMIT 100'''
+            )
+
+            # Get most common rejection patterns
+            # EXCLUDE only: duplicate, already_in_production (these are valid detections, just redundant)
+            # INCLUDE: previously_announced (key pattern to learn - historical references)
+            common_patterns = await conn.fetch(
+                '''SELECT
+                    rejection_category,
+                    rejection_reason,
+                    COUNT(*) as count,
+                    AVG(confidence_score) as avg_confidence
+                FROM staged_deals
+                WHERE status = 'rejected'
+                AND rejection_reason IS NOT NULL
+                AND rejection_category NOT IN ('duplicate', 'already_in_production')
+                GROUP BY rejection_category, rejection_reason
+                HAVING COUNT(*) > 1
+                ORDER BY count DESC
+                LIMIT 20'''
+            )
+
+            return {
+                "summary": [dict(row) for row in category_stats],
+                "recent_rejections": [dict(row) for row in recent_rejections],
+                "common_patterns": [dict(row) for row in common_patterns],
+                "total_rejections": len(recent_rejections)
+            }
+
+        finally:
+            await db.pool.release(conn)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get rejection analysis: {str(e)}")
+    finally:
+        await db.disconnect()
+
+
+@router.get("/filings")
+async def get_analyzed_filings(
+    status: str = "all",  # all, relevant, not_relevant
+    days: int = 7,
+    min_keywords: int = 0,
+    min_confidence: float = 0.0
+):
+    """Get analyzed EDGAR filings for review and tuning
+
+    This endpoint provides visibility into what the detector is analyzing
+    so users can tune the filtering logic based on actual results.
+    """
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            # Build WHERE clause based on filters
+            where_clauses = []
+            params = []
+
+            # Date filter
+            params.append(days)
+            where_clauses.append(f"filing_date >= NOW() - make_interval(days => ${len(params)})")
+
+            # Status filter
+            if status == "relevant":
+                where_clauses.append("is_ma_relevant = true")
+            elif status == "not_relevant":
+                where_clauses.append("is_ma_relevant = false")
+
+            # Keyword count filter
+            if min_keywords > 0:
+                params.append(min_keywords)
+                where_clauses.append(f"COALESCE(array_length(detected_keywords, 1), 0) >= ${len(params)}")
+
+            # Confidence filter
+            if min_confidence > 0:
+                params.append(min_confidence)
+                where_clauses.append(f"confidence_score >= ${len(params)}")
+
+            where_clause = " AND ".join(where_clauses)
+
+            query = f'''
+                SELECT
+                    filing_id,
+                    accession_number,
+                    company_name,
+                    ticker,
+                    filing_type,
+                    filing_date,
+                    filing_url,
+                    is_ma_relevant,
+                    confidence_score,
+                    detected_keywords,
+                    reasoning,
+                    status,
+                    processed_at
+                FROM edgar_filings
+                WHERE {where_clause}
+                ORDER BY filing_date DESC, confidence_score DESC NULLS LAST
+                LIMIT 500
+            '''
+
+            filings = await conn.fetch(query, *params)
+
+            # Convert to dicts and format
+            results = []
+            for f in filings:
+                results.append({
+                    "filing_id": f["filing_id"],
+                    "accession_number": f["accession_number"],
+                    "company_name": f["company_name"],
+                    "ticker": f["ticker"],
+                    "filing_type": f["filing_type"],
+                    "filing_date": f["filing_date"].isoformat() if f["filing_date"] else None,
+                    "filing_url": f["filing_url"],
+                    "is_ma_relevant": f["is_ma_relevant"],
+                    "confidence_score": float(f["confidence_score"]) if f["confidence_score"] is not None else None,
+                    "detected_keywords": f["detected_keywords"] or [],
+                    "keyword_count": len(f["detected_keywords"]) if f["detected_keywords"] else 0,
+                    "reasoning": f["reasoning"],
+                    "status": f["status"],
+                    "processed_at": f["processed_at"].isoformat() if f["processed_at"] else None,
+                })
+
+            return {
+                "filings": results,
+                "count": len(results),
+                "filters": {
+                    "status": status,
+                    "days": days,
+                    "min_keywords": min_keywords,
+                    "min_confidence": min_confidence
+                }
+            }
+
+        finally:
+            await db.pool.release(conn)
+
+    except Exception as e:
+        logger.error(f"Failed to get filings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get filings: {str(e)}")
+    finally:
+        await db.disconnect()
+
+
+@router.post("/filings/{filing_id}/create-deal")
+async def create_deal_from_filing(
+    filing_id: str,
+    target_name: str = Body(...),
+    target_ticker: Optional[str] = Body(None),
+    acquirer_name: Optional[str] = Body(None),
+    acquirer_ticker: Optional[str] = Body(None),
+    notes: Optional[str] = Body(None)
+):
+    """Create a staged deal from a filing (marks filing as false negative)"""
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        # Get the filing info
+        filing = await db.get_filing(filing_id)
+        if not filing:
+            raise HTTPException(status_code=404, detail="Filing not found")
+
+        # Create staged deal
+        staged_deal_id = await db.create_staged_deal(
+            target_name=target_name,
+            target_ticker=target_ticker,
+            acquirer_name=acquirer_name,
+            acquirer_ticker=acquirer_ticker,
+            deal_value=None,
+            deal_type=None,
+            source_filing_id=filing_id,
+            confidence_score=1.0,  # Manual confirmation = 100% confidence
+            matched_text_excerpt=None
+        )
+
+        # Record as false negative
+        await db.create_false_negative_record(
+            filing_id=filing_id,
+            staged_deal_id=staged_deal_id,
+            reported_by="manual",
+            notes=notes or "Manually identified from All Filings view"
+        )
+
+        logger.info(f"Created staged deal {staged_deal_id} from filing {filing_id} (false negative)")
+
+        return {
+            "staged_deal_id": staged_deal_id,
+            "message": "Staged deal created and marked as false negative"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create deal from filing: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await db.disconnect()

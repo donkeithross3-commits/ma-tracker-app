@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// GET /api/deals/prepare?dealId={intelligence_deal_id}
+// GET /api/deals/prepare?dealId={intelligence_deal_id_or_staged_deal_id}
 // Fetch deal from intelligence system and prepare data for editing
+// Supports both intelligence deal IDs and staged deal IDs
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -14,10 +15,81 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch deal from Python intelligence service
-    const response = await fetch(
+    // Try to fetch from intelligence deals first
+    let response = await fetch(
       `http://localhost:8000/intelligence/deals/${dealId}`
     );
+
+    // If not found in intelligence deals, try staged deals
+    if (!response.ok && response.status === 404) {
+      console.log(`Deal ${dealId} not found in intelligence table, checking staged_deals...`);
+      response = await fetch(
+        `http://localhost:8000/edgar/staged-deals/${dealId}`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Deal not found in either intelligence or staged deals tables. ` +
+          `Please ensure the deal has been approved. Deal ID: ${dealId}`
+        );
+      }
+
+      // If we found it in staged deals, we need to handle the response differently
+      const stagedDeal = await response.json();
+
+      // Convert staged deal to the expected format for the form
+      // Note: Staged deal response uses camelCase (targetTicker, targetName, etc.)
+      const preparedDeal = {
+        // Basic Info
+        ticker: stagedDeal.targetTicker || "",
+        targetName: stagedDeal.targetName || "",
+        acquirorTicker: stagedDeal.acquirerTicker || "",
+        acquirorName: stagedDeal.acquirerName || "",
+        status: "active",
+
+        // Deal Terms
+        dealValue: stagedDeal.dealValue || null,
+        dealType: stagedDeal.dealType || null,
+
+        // Dates
+        firstDetectedAt: stagedDeal.detectedAt,
+        announcedDate: null,
+        expectedCloseDate: null,
+        outsideDate: null,
+        goShopEndDate: null,
+
+        // Confidence & Sources
+        confidenceScore: stagedDeal.confidenceScore || 0.0,
+        sourceCount: 1,
+
+        // Sources for reference
+        sources: [],
+
+        // Fields that still need to be filled in
+        category: null,
+        cashPerShare: null,
+        stockRatio: null,
+        dividendsOther: null,
+        voteRisk: null,
+        financeRisk: null,
+        legalRisk: null,
+        stressTestDiscount: null,
+        currentYield: null,
+        isInvestable: false,
+        investableNotes: "",
+        dealNotes: "",
+
+        // Research report for reference
+        researchReport: null,
+        hasResearch: false,
+
+        // Metadata - use staged_deal_id as the identifier
+        intelligenceDealId: stagedDeal.id,
+        isStagedDeal: true,
+      };
+
+      return NextResponse.json({ deal: preparedDeal });
+    }
 
     if (!response.ok) {
       throw new Error(`Failed to fetch deal from intelligence service: ${response.statusText}`);
@@ -99,6 +171,7 @@ export async function GET(request: NextRequest) {
 
       // Metadata
       intelligenceDealId: dealId,
+      isStagedDeal: false,
     };
 
     return NextResponse.json({ deal: preparedDeal });

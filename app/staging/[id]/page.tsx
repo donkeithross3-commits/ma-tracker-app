@@ -57,7 +57,7 @@ export default function StagedDealDetailPage() {
     setReviewing(true);
     try {
       const response = await fetch(
-        `http://localhost:8000/edgar/staged-deals/${dealId}/review`,
+        `/api/edgar/staged-deals/${dealId}/review`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -7,6 +7,9 @@ import { auth } from "@/auth";
 import { SignOutButton } from "@/components/sign-out-button";
 
 async function getDealsForDashboard() {
+  // Use a stable timestamp for server/client consistency
+  const now = new Date();
+
   const deals = await prisma.deal.findMany({
     where: { status: "active" },
     include: {
@@ -51,14 +54,14 @@ async function getDealsForDashboard() {
       // Calculate days to close and outside date
       const daysToClose = version.expectedCloseDate
         ? Math.ceil(
-            (new Date(version.expectedCloseDate).getTime() - new Date().getTime()) /
+            (new Date(version.expectedCloseDate).getTime() - now.getTime()) /
               (1000 * 60 * 60 * 24)
           )
         : null;
 
       const countdown = version.outsideDate
         ? Math.ceil(
-            (new Date(version.outsideDate).getTime() - new Date().getTime()) /
+            (new Date(version.outsideDate).getTime() - now.getTime()) /
               (1000 * 60 * 60 * 24)
           )
         : 0;

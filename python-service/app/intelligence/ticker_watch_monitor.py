@@ -11,6 +11,7 @@ This helps catch M&A activity that might be announced in various filing types.
 """
 import logging
 import asyncio
+import json
 from typing import List, Dict, Any, Set
 from datetime import datetime, timedelta
 import asyncpg
@@ -96,7 +97,7 @@ class TickerWatchMonitor:
                     is_ma_relevant,
                     confidence_score,
                     detected_keywords,
-                    analyzed_at
+                    processed_at
                 FROM edgar_filings
                 WHERE ticker = $1
                   AND filing_date >= $2
@@ -233,11 +234,11 @@ class TickerWatchMonitor:
                     """,
                     deal_id,
                     'ticker_watch_filing_added',
-                    {
+                    json.dumps({
                         'filings_added': added_count,
                         'ticker': ticker,
                         'filing_types': [f['filing_type'] for f in filings[:5]]
-                    },
+                    }),
                     'ticker_watch_monitor',
                     f'Ticker watch monitor found {added_count} new filing(s) for {ticker}'
                 )

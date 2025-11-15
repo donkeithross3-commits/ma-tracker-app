@@ -12,6 +12,7 @@ from .extractor import DealExtractor
 from .alerts import AlertManager
 from .models import EdgarFiling, AlertPayload
 from .database import EdgarDatabase
+from app.services.ticker_lookup import get_ticker_lookup_service
 
 logger = logging.getLogger(__name__)
 
@@ -96,15 +97,17 @@ class EdgarOrchestrator:
                 filing_url=filing.filing_url
             )
 
-            # Step 3: Detect M&A relevance
-            detection_result = await self.detector.detect_ma_relevance(filing)
+            # Step 3: Detect M&A relevance (with filing priority for better filtering)
+            filing_priority = self.poller.get_filing_priority(filing.filing_type)
+            detection_result = await self.detector.detect_ma_relevance(filing, filing_priority=filing_priority)
 
             # Step 4: Update filing with detection results
             await self.db.update_filing_detection(
                 filing_id=filing_id,
                 is_ma_relevant=detection_result.is_ma_relevant,
                 confidence_score=detection_result.confidence_score,
-                detected_keywords=detection_result.detected_keywords
+                detected_keywords=detection_result.detected_keywords,
+                reasoning=detection_result.reasoning
             )
 
             # Step 5: If not M&A relevant, stop here
@@ -124,15 +127,58 @@ class EdgarOrchestrator:
                 logger.warning(f"Could not extract deal info from {filing.accession_number}")
                 return
 
+            # Step 7.5: Enrich with ticker lookups (AI often misses tickers)
+            ticker_service = get_ticker_lookup_service()
+            enriched = await ticker_service.enrich_deal_with_tickers(
+                target_name=deal_info.target_name,
+                acquirer_name=deal_info.acquirer_name,
+                target_ticker=deal_info.target_ticker,
+                acquirer_ticker=deal_info.acquirer_ticker
+            )
+
+            # Use enriched tickers (fallback to AI-extracted if lookup fails)
+            final_target_ticker = enriched["target_ticker"] or deal_info.target_ticker
+            final_acquirer_ticker = enriched["acquirer_ticker"] or deal_info.acquirer_ticker
+
+            # Step 7.7: Reject deals with no target ticker (private companies)
+            if not final_target_ticker:
+                logger.info(
+                    f"Rejecting deal for {deal_info.target_name}: No ticker found. "
+                    f"Likely a private company acquisition. Skipping staged deal creation."
+                )
+                return
+
+            # Step 7.8: Check for duplicate deals before creating
+            existing_deal = await self.db.check_duplicate_deal(
+                target_name=deal_info.target_name,
+                acquirer_name=deal_info.acquirer_name
+            )
+
+            if existing_deal:
+                logger.info(
+                    f"Duplicate deal detected for {deal_info.target_name}. "
+                    f"Existing deal in {existing_deal['source']} with status {existing_deal['status']}. "
+                    f"Skipping creation of new staged deal."
+                )
+                return
+
+            # Step 7.9: Extract matched text excerpt showing why deal was detected
+            matched_excerpt = self.detector.extract_matched_text_excerpt(
+                text=filing_text,
+                detected_keywords=detection_result.detected_keywords
+            )
+
             # Step 8: Create staged deal
             staged_deal_id = await self.db.create_staged_deal(
                 target_name=deal_info.target_name,
-                target_ticker=deal_info.target_ticker,
+                target_ticker=final_target_ticker,
                 acquirer_name=deal_info.acquirer_name,
+                acquirer_ticker=final_acquirer_ticker,
                 deal_value=deal_info.deal_value,
                 deal_type=deal_info.deal_type,
                 source_filing_id=filing_id,
-                confidence_score=deal_info.confidence_score
+                confidence_score=deal_info.confidence_score,
+                matched_text_excerpt=matched_excerpt
             )
 
             logger.info(f"Created staged deal: {staged_deal_id}")

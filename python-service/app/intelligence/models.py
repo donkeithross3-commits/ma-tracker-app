@@ -178,7 +178,7 @@ def calculate_confidence_score(sources: List[DealMention]) -> float:
     # Check for high-credibility news
     news_sources = [s for s in sources if s.source_type == SourceType.NEWS]
     if news_sources:
-        max_news_credibility = max(s.credibility_score for s in news_sources)
+        max_news_credibility = max(float(s.credibility_score) for s in news_sources)
         if len(news_sources) >= 2:
             return min(0.9, max_news_credibility + 0.1)  # Multiple news = high confidence
         return max_news_credibility

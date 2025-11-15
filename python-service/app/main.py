@@ -28,10 +28,20 @@ from .api.edgar_routes import router as edgar_router
 from .api.intelligence_routes import router as intelligence_router
 from .api.webhooks import router as webhooks_router
 from .api.halt_routes import router as halt_router
+from .edgar.database import EdgarDatabase
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Global database instance
+db_instance: Optional[EdgarDatabase] = None
+
+def get_db() -> EdgarDatabase:
+    """Get the global database instance"""
+    if db_instance is None:
+        raise RuntimeError("Database not initialized - call during startup event")
+    return db_instance
 
 app = FastAPI(
     title="M&A Options Scanner API",
@@ -69,6 +79,7 @@ class DealRequest(BaseModel):
     dividend_before_close: float = Field(0.0, description="Expected dividend before close")
     ctr_value: float = Field(0.0, description="CVR or other value per share")
     confidence: float = Field(0.75, ge=0, le=1, description="Deal confidence (0-1)")
+    days_before_close: int = Field(0, ge=0, description="How many days before deal close to look for option expirations (0 = on or after close date only)")
 
 
 class OptionContract(BaseModel):
@@ -81,8 +92,8 @@ class OptionContract(BaseModel):
     last: float
     volume: int
     open_interest: int
-    implied_vol: float
-    delta: float
+    implied_vol: Optional[float] = None  # May be None when IB doesn't provide Greeks
+    delta: Optional[float] = None  # May be None when IB doesn't provide Greeks
     mid_price: float
 
 
@@ -119,11 +130,30 @@ class HealthResponse(BaseModel):
 scanner_instance = None
 
 
+def reset_scanner():
+    """Force reset scanner instance"""
+    global scanner_instance
+    if scanner_instance:
+        try:
+            scanner_instance.disconnect()
+        except:
+            pass
+    scanner_instance = None
+    logger.info("Scanner instance reset")
+
+
 def get_scanner():
     """Get or create scanner instance"""
     global scanner_instance
     if scanner_instance is None:
-        scanner_instance = IBMergerArbScanner()
+        # Force reimport to get latest code
+        import importlib
+        import app.scanner
+        importlib.reload(app.scanner)
+        from app.scanner import IBMergerArbScanner as ReloadedScanner
+
+        scanner_instance = ReloadedScanner()
+        logger.info("Created new scanner instance with reloaded code")
         # Try to connect to IB
         connected = scanner_instance.connect_to_ib()
         if not connected:
@@ -203,9 +233,16 @@ async def scan_deal(deal: DealRequest):
         # Calculate spread
         spread_pct = ((deal_input.total_deal_value - current_price) / current_price) * 100
 
-        # Fetch option chain
+        # Fetch option chain - use deal close date to select appropriate expirations
         logger.info(f"Fetching option chain for {deal.ticker}")
-        options = scanner.fetch_option_chain(deal.ticker.upper(), expiry_months=6, current_price=current_price)
+        options = scanner.fetch_option_chain(
+            deal.ticker.upper(),
+            expiry_months=6,
+            current_price=current_price,
+            deal_close_date=deal_input.expected_close_date,
+            days_before_close=deal.days_before_close,
+            deal_price=deal.deal_price
+        )
 
         if not options:
             return ScannerResponse(
@@ -354,12 +391,31 @@ async def test_futures():
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 
+@app.post("/reset-scanner")
+async def reset_scanner_endpoint():
+    """Force reset the scanner instance to reload code"""
+    reset_scanner()
+    return {"success": True, "message": "Scanner instance reset - next scan will use reloaded code"}
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
+    global db_instance
+
     logger.info("=" * 50)
     logger.info("STARTUP INITIATED - Initializing services...")
     logger.info("=" * 50)
+
+    # Initialize global database connection pool
+    try:
+        logger.info("Creating global database connection pool...")
+        db_instance = EdgarDatabase()
+        await db_instance.connect()
+        logger.info("✓ Database connection pool created")
+    except Exception as e:
+        logger.error(f"Failed to create database pool: {e}")
+        logger.warning("API endpoints will create their own connections...")
 
     # Start Halt Monitoring (commented out until migration is applied)
     # Will auto-start monitoring M&A target tickers for trading halts
@@ -386,11 +442,22 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
+    global db_instance
+
     logger.info("=" * 50)
     logger.info("SHUTDOWN INITIATED - Cleaning up resources...")
     logger.info("=" * 50)
 
-    # 1. Stop Halt Monitor
+    # 1. Close global database connection pool
+    try:
+        if db_instance:
+            logger.info("Closing global database connection pool...")
+            await db_instance.disconnect()
+            logger.info("✓ Database pool closed")
+    except Exception as e:
+        logger.error(f"Error closing database pool: {e}")
+
+    # 2. Stop Halt Monitor
     try:
         from .monitors.halt_monitor import get_halt_monitor
         logger.info("Stopping Halt Monitor...")

@@ -16,8 +16,8 @@ interface OptionContract {
   last: number;
   volume: number;
   open_interest: number;
-  implied_vol: number;
-  delta: number;
+  implied_vol: number | null;  // May be null when IB doesn't provide Greeks
+  delta: number | null;  // May be null when IB doesn't provide Greeks
   mid_price: number;
 }
 
@@ -292,12 +292,12 @@ export function OptionsScanner({
                           <div>
                             <span className="text-muted-foreground">IV: </span>
                             <span className="font-mono">
-                              {formatPercent(contract.implied_vol)}
+                              {contract.implied_vol != null ? formatPercent(contract.implied_vol) : 'N/A'}
                             </span>
                           </div>
                           <div>
                             <span className="text-muted-foreground">Δ: </span>
-                            <span className="font-mono">{contract.delta.toFixed(2)}</span>
+                            <span className="font-mono">{contract.delta != null ? contract.delta.toFixed(2) : 'N/A'}</span>
                           </div>
                         </div>
                       </div>

@@ -1,0 +1,337 @@
+# M&A Tracker Development Rules
+# Auto-loaded by Claude Code at session start
+
+## Project Overview
+**Name:** M&A Intelligence Tracker
+**Stack:** Next.js (frontend) + FastAPI (backend) + PostgreSQL + Background Monitors
+**Purpose:** Track and analyze M&A deals with real-time intelligence gathering
+
+---
+
+## Core Development Philosophy
+
+### 1. Fail Early, Fail Often
+- Small, testable steps only
+- Each change must be independently verifiable
+- If a task takes >15 minutes, it's too big - break it down
+- Commit-ready code after each atomic task
+
+### 2. Test-First Development
+- Write tests BEFORE implementation (when applicable)
+- Backend: pytest for Python services
+- Frontend: Jest/React Testing Library for Next.js
+- Database: Test migrations in dev before applying to production
+
+### 3. Explicit Over Implicit
+- Clear error messages
+- Fail fast with validation
+- Log all important events
+- No silent failures
+
+---
+
+## Architecture Patterns
+
+### Dual-Stack Structure
+```
+/ma-tracker-app
+├── /app                    # Next.js 13+ (App Router)
+├── /components             # React components
+├── /lib                    # Frontend utilities
+├── /python-service         # FastAPI backend
+│   ├── /app               # FastAPI application
+│   ├── /migrations        # SQL migrations (numbered)
+│   └── /tests             # Python tests
+└── /prisma                # Prisma schema (currently unused)
+```
+
+### Background Services (Python)
+- **EDGAR Monitor**: Scrapes SEC filings every 60s
+- **Intelligence Orchestrator**: Monitors external sources (Bloomberg Law, etc.)
+- **Halt Monitor**: Scrapes NASDAQ/NYSE for trading halts every 2s
+- **Research Worker**: Generates deal research reports using Claude AI
+
+All monitors auto-start in `app/main.py` via FastAPI lifecycle events.
+
+---
+
+## Database Standards
+
+### Migration Workflow
+1. Create numbered migration: `migrations/XXX_description.sql`
+2. Follow existing pattern (see 001-010 for examples)
+3. Test migration locally with asyncpg:
+   ```python
+   conn = await asyncpg.connect(DATABASE_URL)
+   await conn.execute(sql)
+   ```
+4. Never modify old migrations - create new ones
+5. Use transactions for complex migrations
+
+### Table Naming
+- Snake_case: `deal_intelligence`, `staged_deals`, `halt_events`
+- Use descriptive names, avoid abbreviations
+- Foreign keys: `{table}_id` (e.g., `deal_id`)
+
+### Key Tables
+- `deal_intelligence`: Core M&A deals table
+- `staged_deals`: Deals pending approval
+- `deal_sources`: News sources for each deal
+- `edgar_filings`: SEC filing tracker
+- `halt_events`: Trading halt history
+- `alert_notifications`: System alerts
+- `source_monitors`: Configuration for external sources
+
+---
+
+## Python Service (FastAPI) Standards
+
+### Code Style
+- PEP 8 compliance
+- Type hints required: `def func(x: int) -> str:`
+- Docstrings for classes and complex functions
+- Use `async/await` for I/O operations
+
+### API Patterns
+```python
+# Route structure
+@router.get("/resource/{id}")
+async def get_resource(id: str) -> ResourceResponse:
+    """Get resource by ID"""
+    try:
+        # Validate input
+        # Fetch from database
+        # Return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+### Error Handling
+- Use HTTPException for client errors (400s)
+- Log unexpected errors with `exc_info=True`
+- Return structured error responses
+- Never expose internal implementation details in errors
+
+### Adding New Monitors
+1. Create class in `/app/monitors/{name}_monitor.py`
+2. Implement `start()` and `stop()` methods
+3. Add to `app/main.py` startup/shutdown events
+4. Use `asyncio.create_task()` for background execution
+5. Add API routes in `/app/api/{name}_routes.py`
+
+---
+
+## Frontend (Next.js) Standards
+
+### File Structure
+- App Router (Next.js 13+)
+- Server Components by default
+- Use `'use client'` only when needed (state, effects, browser APIs)
+
+### Component Patterns
+```typescript
+// Prefer server components
+export default async function Page() {
+  const data = await fetchData()
+  return <div>{data}</div>
+}
+
+// Client components when needed
+'use client'
+export default function InteractiveComponent() {
+  const [state, setState] = useState()
+  return <div onClick={() => setState(...)}/>
+}
+```
+
+### API Integration
+- Use `fetch()` in Server Components
+- Use React Query/SWR for Client Components
+- API base URL: `http://localhost:8000` (dev)
+
+---
+
+## Git & Commit Standards
+
+### Commit Messages
+Follow Conventional Commits:
+```
+feat: Add halt monitoring system
+fix: Correct deal deduplication logic
+docs: Update API documentation
+refactor: Simplify EDGAR parsing logic
+test: Add tests for deal approval flow
+```
+
+### Branching
+- `main`: Production-ready code
+- Feature branches: `feature/halt-monitoring`
+- Bug fixes: `fix/edgar-timeout`
+- Keep branches short-lived
+
+### Before Committing
+1. Run tests (if applicable)
+2. Check `git diff` for unintended changes
+3. Verify services still start correctly
+4. Use atomic commits (one logical change)
+
+---
+
+## Service Management
+
+### Starting Services
+```bash
+# Frontend (from /ma-tracker-app)
+npm run dev              # Port 3000
+
+# Backend (from /ma-tracker-app/python-service)
+python3 start_server.py  # Port 8000
+```
+
+### Health Checks
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000/health
+- Monitors: Check `/edgar/status`, `/halts/status`, etc.
+
+### Database
+- PostgreSQL (Neon hosted)
+- Connection string in `.env` (never commit!)
+- Use asyncpg for Python connections
+
+---
+
+## Common Patterns
+
+### Adding a New Deal Source
+1. Add source to `source_monitors` table
+2. Create monitor class extending base pattern
+3. Implement scraping logic
+4. Parse into `StagedDeal` format
+5. Add API endpoints for manual triggering
+6. Add to orchestrator startup
+
+### Adding API Endpoint
+1. Create route in appropriate `/app/api/` file
+2. Add Pydantic models for request/response
+3. Include in router and register in `main.py`
+4. Add error handling
+5. Test with curl/Postman
+6. Document in API docs (future)
+
+### Database Schema Changes
+1. Create new migration file (next number)
+2. Include both forward and (if possible) rollback logic
+3. Test on dev database
+4. Apply to production via Python script
+5. Update any affected code
+6. Commit migration + code changes together
+
+---
+
+## Never Do
+
+- ❌ Modify existing migrations
+- ❌ Commit `.env` files or secrets
+- ❌ Mix refactoring with feature changes
+- ❌ Break existing API contracts without versioning
+- ❌ Delete tests
+- ❌ Make database changes without migrations
+- ❌ Deploy without testing migrations first
+- ❌ Use `SELECT *` in production queries
+- ❌ Store passwords in plain text
+- ❌ Ignore TypeScript/Python errors
+
+---
+
+## Always Do
+
+- ✅ Write descriptive commit messages
+- ✅ Use type hints/annotations
+- ✅ Handle errors explicitly
+- ✅ Log important operations
+- ✅ Validate user input
+- ✅ Use transactions for multi-table updates
+- ✅ Test migrations before applying
+- ✅ Follow existing code patterns
+- ✅ Ask when uncertain
+- ✅ Keep functions small and focused
+
+---
+
+## When Uncertain
+
+1. Check existing code for patterns
+2. Review recent commits: `git log --oneline -10`
+3. Ask before making architectural changes
+4. Write a test to explore behavior
+5. Start with smallest possible change
+
+---
+
+## Emergency Procedures
+
+### If Service Won't Start
+1. Check logs for error messages
+2. Verify DATABASE_URL is set
+3. Check port conflicts: `lsof -i :8000`
+4. Try restarting services
+5. Check recent git changes
+
+### If Database Migration Fails
+1. **DO NOT** manually edit production database
+2. Check migration SQL syntax
+3. Test migration on dev database copy
+4. Create rollback migration if needed
+5. Document the issue
+
+### If Monitor Stops Working
+1. Check service status endpoint
+2. Review logs for errors
+3. Verify external service availability
+4. Check database connections
+5. Restart Python service if needed
+
+---
+
+## Testing Philosophy
+
+### Python Tests
+```python
+# tests/test_feature.py
+import pytest
+
+def test_feature():
+    # Arrange
+    input_data = {...}
+
+    # Act
+    result = function(input_data)
+
+    # Assert
+    assert result == expected
+```
+
+### Integration Tests
+- Test full request/response cycle
+- Use test database
+- Clean up after tests
+- Mock external API calls
+
+---
+
+## Performance Guidelines
+
+- Use database indexes for frequently queried fields
+- Batch database operations when possible
+- Cache expensive computations
+- Use async for I/O-bound operations
+- Monitor for N+1 query problems
+- Keep API response times <500ms
+
+---
+
+*Last updated: 2025-01-09*
+*For questions or clarifications, check git history or ask*

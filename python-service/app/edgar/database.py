@@ -61,8 +61,8 @@ class EdgarDatabase:
     async def connect(self):
         """Create connection pool"""
         if not self.pool:
-            self.pool = await asyncpg.create_pool(self.database_url, min_size=2, max_size=10)
-            logger.info("Database connection pool created")
+            self.pool = await asyncpg.create_pool(self.database_url, min_size=5, max_size=30)
+            logger.info("Database connection pool created (min: 5, max: 30)")
 
     async def disconnect(self):
         """Close connection pool"""
@@ -116,17 +116,19 @@ class EdgarDatabase:
         filing_id: str,
         is_ma_relevant: bool,
         confidence_score: float,
-        detected_keywords: List[str]
+        detected_keywords: List[str],
+        reasoning: str = None
     ):
         """Update filing with M&A detection results"""
         async with self.pool.acquire() as conn:
             await conn.execute(
                 '''UPDATE edgar_filings
                    SET is_ma_relevant = $2, confidence_score = $3,
-                       detected_keywords = $4, status = 'analyzed',
+                       detected_keywords = $4, reasoning = $5,
+                       status = 'analyzed',
                        processed_at = NOW(), updated_at = NOW()
                    WHERE filing_id = $1''',
-                filing_id, is_ma_relevant, confidence_score, detected_keywords
+                filing_id, is_ma_relevant, confidence_score, detected_keywords, reasoning
             )
 
     async def get_filing(self, filing_id: str) -> Optional[Dict[str, Any]]:
@@ -138,15 +140,71 @@ class EdgarDatabase:
             )
             return dict(row) if row else None
 
+    async def check_duplicate_deal(
+        self,
+        target_name: str,
+        acquirer_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Check if deal already exists in staged_deals or deal_intelligence
+
+        Returns existing deal info if found, None otherwise
+        """
+        async with self.pool.acquire() as conn:
+            # First check staged_deals (pending/approved)
+            staged_deal = await conn.fetchrow(
+                '''SELECT staged_deal_id, target_name, acquirer_name, status, detected_at
+                   FROM staged_deals
+                   WHERE LOWER(target_name) = LOWER($1)
+                   AND status IN ('pending', 'approved')
+                   ORDER BY detected_at DESC
+                   LIMIT 1''',
+                target_name
+            )
+
+            if staged_deal:
+                return {
+                    'source': 'staged_deals',
+                    'deal_id': staged_deal['staged_deal_id'],
+                    'target_name': staged_deal['target_name'],
+                    'acquirer_name': staged_deal['acquirer_name'],
+                    'status': staged_deal['status'],
+                    'detected_at': staged_deal['detected_at']
+                }
+
+            # Then check deal_intelligence (production deals)
+            intelligence_deal = await conn.fetchrow(
+                '''SELECT deal_id, target_name, acquirer_name, deal_status, first_detected_at
+                   FROM deal_intelligence
+                   WHERE LOWER(target_name) = LOWER($1)
+                   AND deal_status NOT IN ('completed', 'terminated')
+                   ORDER BY first_detected_at DESC
+                   LIMIT 1''',
+                target_name
+            )
+
+            if intelligence_deal:
+                return {
+                    'source': 'deal_intelligence',
+                    'deal_id': intelligence_deal['deal_id'],
+                    'target_name': intelligence_deal['target_name'],
+                    'acquirer_name': intelligence_deal['acquirer_name'],
+                    'status': intelligence_deal['deal_status'],
+                    'detected_at': intelligence_deal['first_detected_at']
+                }
+
+            return None
+
     async def create_staged_deal(
         self,
         target_name: str,
         target_ticker: Optional[str],
         acquirer_name: Optional[str],
-        deal_value: Optional[float],
-        deal_type: Optional[str],
-        source_filing_id: str,
-        confidence_score: float
+        acquirer_ticker: Optional[str] = None,
+        deal_value: Optional[float] = None,
+        deal_type: Optional[str] = None,
+        source_filing_id: Optional[str] = None,
+        confidence_score: float = 0.0,
+        matched_text_excerpt: Optional[str] = None
     ) -> str:
         """Create staged deal"""
         async with self.pool.acquire() as conn:
@@ -159,13 +217,13 @@ class EdgarDatabase:
 
             deal_id = await conn.fetchval(
                 '''INSERT INTO staged_deals
-                   (staged_deal_id, target_name, target_ticker, acquirer_name, deal_value,
-                    deal_type, source_filing_id, source_filing_type, confidence_score, status,
+                   (staged_deal_id, target_name, target_ticker, acquirer_name, acquirer_ticker, deal_value,
+                    deal_type, source_filing_id, source_filing_type, confidence_score, matched_text_excerpt, status,
                     "researchStatus", alert_sent, detected_at, created_at, updated_at)
-                   VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 'pending', 'queued', false, NOW(), NOW(), NOW())
+                   VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 'queued', false, NOW(), NOW(), NOW())
                    RETURNING staged_deal_id''',
-                target_name, target_ticker, acquirer_name, deal_value, deal_type,
-                source_filing_id, filing_type, confidence_score
+                target_name, target_ticker, acquirer_name, acquirer_ticker, deal_value, deal_type,
+                source_filing_id, filing_type, confidence_score, matched_text_excerpt
             )
             return deal_id
 
@@ -272,15 +330,18 @@ class EdgarDatabase:
     async def reject_staged_deal(
         self,
         deal_id: str,
-        reviewer_id: Optional[str] = None
+        reviewer_id: Optional[str] = None,
+        rejection_reason: Optional[str] = None,
+        rejection_category: Optional[str] = None
     ):
-        """Reject staged deal"""
+        """Reject staged deal with optional reason and category"""
         async with self.pool.acquire() as conn:
             await conn.execute(
                 '''UPDATE staged_deals
-                   SET status = 'rejected', reviewed_at = NOW(), reviewed_by = $2, updated_at = NOW()
+                   SET status = 'rejected', reviewed_at = NOW(), reviewed_by = $2,
+                       rejection_reason = $3, rejection_category = $4, updated_at = NOW()
                    WHERE staged_deal_id = $1''',
-                deal_id, reviewer_id
+                deal_id, reviewer_id, rejection_reason, rejection_category
             )
 
     async def list_recent_filings(
@@ -306,3 +367,22 @@ class EdgarDatabase:
                     limit
                 )
             return [dict(row) for row in rows]
+
+    async def create_false_negative_record(
+        self,
+        filing_id: str,
+        staged_deal_id: str,
+        reported_by: Optional[str] = None,
+        notes: Optional[str] = None
+    ) -> str:
+        """Record a false negative for detector improvement"""
+        async with self.pool.acquire() as conn:
+            false_negative_id = await conn.fetchval(
+                '''INSERT INTO detector_false_negatives
+                   (false_negative_id, filing_id, staged_deal_id, reported_by, notes,
+                    reported_at, created_at, updated_at)
+                   VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW(), NOW())
+                   RETURNING false_negative_id''',
+                filing_id, staged_deal_id, reported_by, notes
+            )
+            return false_negative_id

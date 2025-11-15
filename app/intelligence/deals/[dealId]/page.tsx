@@ -263,7 +263,8 @@ export default function DealSourcesPage() {
               {/* Extracted Data */}
               {source.extracted_data && (
                 <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 mb-4 border border-blue-100">
-                  <p className="text-xs font-bold text-blue-900 mb-3 uppercase tracking-wide">Extracted Deal Information</p>
+                  <p className="text-xs font-bold text-blue-900 mb-1 uppercase tracking-wide">Original AI Extraction from Source</p>
+                  <p className="text-xs text-gray-600 mb-3 italic">Note: This shows what was initially extracted. See deal summary above for verified information.</p>
                   <div className="grid grid-cols-2 gap-3">
                     {(() => {
                       try {

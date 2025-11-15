@@ -9,11 +9,10 @@ import httpx
 from bs4 import BeautifulSoup
 import feedparser
 import re
-import os
-from anthropic import AsyncAnthropic
 
 from app.intelligence.base_monitor import BaseSourceMonitor
 from app.intelligence.models import DealMention, SourceType, MentionType
+from app.intelligence.headline_parser import get_headline_parser
 
 
 class ReutersMAMonitor(BaseSourceMonitor):
@@ -35,8 +34,8 @@ class ReutersMAMonitor(BaseSourceMonitor):
         )
         self.base_url = self.config["url"]
         self.rss_url = self.config.get("rss_url")
-        self.seen_articles = set()
-        self.anthropic = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.seen_articles_this_cycle = set()
+        self.parser = get_headline_parser()
 
     async def fetch_updates(self) -> List[Dict[str, Any]]:
         """
@@ -48,6 +47,9 @@ class ReutersMAMonitor(BaseSourceMonitor):
             List of article dictionaries with keys: title, link, published, summary
         """
         self.logger.info(f"Fetching Reuters M&A news")
+
+        # Clear the cycle-specific seen set at the start of each fetch
+        self.seen_articles_this_cycle.clear()
 
         articles = []
 
@@ -68,8 +70,20 @@ class ReutersMAMonitor(BaseSourceMonitor):
 
     async def _fetch_rss(self) -> List[Dict[str, Any]]:
         """Fetch articles from RSS feed"""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(self.rss_url)
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            # Enhanced headers to avoid bot detection
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/rss+xml, application/xml, text/xml, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "DNT": "1",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+                "Cache-Control": "max-age=0"
+            }
+
+            response = await client.get(self.rss_url, headers=headers)
             response.raise_for_status()
 
             feed = feedparser.parse(response.text)
@@ -77,7 +91,8 @@ class ReutersMAMonitor(BaseSourceMonitor):
             articles = []
             for entry in feed.entries:
                 article_id = entry.get("link", entry.get("id", ""))
-                if article_id not in self.seen_articles:
+                # Only skip if seen in THIS cycle (database handles cross-cycle deduplication)
+                if article_id not in self.seen_articles_this_cycle:
                     articles.append({
                         "title": entry.get("title", ""),
                         "link": entry.get("link", ""),
@@ -85,14 +100,30 @@ class ReutersMAMonitor(BaseSourceMonitor):
                         "summary": entry.get("summary", ""),
                         "article_id": article_id
                     })
-                    self.seen_articles.add(article_id)
+                    self.seen_articles_this_cycle.add(article_id)
 
             return articles
 
     async def _fetch_html(self) -> List[Dict[str, Any]]:
         """Fetch articles by scraping HTML"""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(self.base_url)
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            # Enhanced headers to avoid bot detection
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "DNT": "1",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "Cache-Control": "max-age=0"
+            }
+
+            response = await client.get(self.base_url, headers=headers)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
@@ -107,7 +138,8 @@ class ReutersMAMonitor(BaseSourceMonitor):
                 if not href.startswith("http"):
                     href = f"https://www.reuters.com{href}"
 
-                if href not in self.seen_articles:
+                # Only skip if seen in THIS cycle (database handles cross-cycle deduplication)
+                if href not in self.seen_articles_this_cycle:
                     title = link.get_text(strip=True)
                     if title and len(title) > 10:  # Filter out navigation links
                         articles.append({
@@ -117,13 +149,13 @@ class ReutersMAMonitor(BaseSourceMonitor):
                             "summary": "",
                             "article_id": href
                         })
-                        self.seen_articles.add(href)
+                        self.seen_articles_this_cycle.add(href)
 
             return articles
 
     async def parse_item(self, item: Dict[str, Any]) -> Optional[DealMention]:
         """
-        Parse Reuters article into DealMention using Claude.
+        Parse Reuters article into DealMention using rule-based parser.
 
         Args:
             item: Article dictionary with title, link, published, summary
@@ -132,60 +164,14 @@ class ReutersMAMonitor(BaseSourceMonitor):
             DealMention if article is M&A-relevant, None otherwise
         """
         try:
-            # Combine title and summary for analysis
-            text = f"Title: {item['title']}\n\nSummary: {item.get('summary', '')}"
-
-            # Use Claude to extract deal information
-            prompt = f"""Analyze this Reuters article headline and summary for M&A deal information.
-
-{text}
-
-Extract the following information if present:
-1. Target company name (company being acquired)
-2. Target ticker symbol if mentioned
-3. Acquirer company name (company doing the acquisition)
-4. Acquirer ticker symbol if mentioned
-5. Deal value (in billions USD) if mentioned
-6. Deal type (merger, acquisition, tender_offer, etc.)
-
-If this is NOT about an M&A deal, respond with: NOT_MA_RELEVANT
-
-Otherwise, respond in this exact JSON format:
-{{
-  "target_name": "Company Name",
-  "target_ticker": "TICK" or null,
-  "acquirer_name": "Acquirer Name" or null,
-  "acquirer_ticker": "TICK" or null,
-  "deal_value": 1.5 or null,
-  "deal_type": "acquisition" or null,
-  "is_ma_relevant": true
-}}"""
-
-            response = await self.anthropic.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}]
+            # Use rule-based parser to extract deal information
+            parsed = self.parser.parse(
+                headline=item['title'],
+                summary=item.get('summary', '')
             )
 
-            result = response.content[0].text.strip()
-
-            if "NOT_MA_RELEVANT" in result:
-                return None
-
-            # Parse JSON response
-            import json
-            try:
-                data = json.loads(result)
-            except json.JSONDecodeError:
-                # Try to extract JSON from response
-                json_match = re.search(r'\{.*\}', result, re.DOTALL)
-                if json_match:
-                    data = json.loads(json_match.group())
-                else:
-                    self.logger.warning(f"Could not parse Claude response: {result}")
-                    return None
-
-            if not data.get("is_ma_relevant"):
+            if not parsed.is_ma_relevant:
+                self.logger.debug(f"Article not M&A relevant: {item['title']}")
                 return None
 
             # Parse published date
@@ -196,25 +182,33 @@ Otherwise, respond in this exact JSON format:
                 except:
                     pass
 
+            # Determine mention type
+            mention_type = MentionType.RUMOR if parsed.is_rumor else MentionType.ANNOUNCEMENT
+
             # Create DealMention
             mention = DealMention(
                 source_name=self.source_name,
                 source_type=self.source_type,
-                mention_type=MentionType.ANNOUNCEMENT if data.get("acquirer_name") else MentionType.RUMOR,
-                target_name=data["target_name"],
-                target_ticker=data.get("target_ticker"),
-                acquirer_name=data.get("acquirer_name"),
-                acquirer_ticker=data.get("acquirer_ticker"),
-                deal_value=data.get("deal_value"),
-                deal_type=data.get("deal_type"),
+                mention_type=mention_type,
+                target_name=parsed.target_name,
+                target_ticker=parsed.target_ticker,
+                acquirer_name=parsed.acquirer_name,
+                acquirer_ticker=parsed.acquirer_ticker,
+                deal_value=parsed.deal_value,
+                deal_type="rumor" if parsed.is_rumor else "acquisition",
                 source_url=item["link"],
                 headline=item["title"],
                 content_snippet=item.get("summary", "")[:500],
-                credibility_score=self.get_credibility_score(),  # Reuters = 0.8
-                extracted_data=data,
+                credibility_score=self.get_credibility_score() * parsed.confidence,  # Reuters = 0.8 * parse confidence
+                extracted_data={
+                    "parsed_confidence": parsed.confidence,
+                    "is_rumor": parsed.is_rumor,
+                    "reasoning": parsed.reasoning,
+                },
                 source_published_at=source_published_at,
             )
 
+            self.logger.info(f"Parsed M&A mention: {parsed.reasoning}")
             return mention
 
         except Exception as e:

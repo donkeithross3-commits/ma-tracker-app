@@ -2,7 +2,7 @@
 import logging
 import json
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import asdict
 import asyncpg
 
@@ -15,6 +15,8 @@ from app.intelligence.models import (
     calculate_confidence_score,
 )
 from app.intelligence.edgar_cross_reference import EdgarCrossReference
+from app.edgar.ticker_scanner import get_ticker_scanner
+from app.services.ticker_lookup import get_ticker_lookup_service
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ class IntelligenceAggregator:
         self.pool = db_pool
         self.edgar_cross_ref = EdgarCrossReference(db_pool)
 
-    async def process_mention(self, mention: DealMention) -> str:
+    async def process_mention(self, mention: DealMention) -> Optional[str]:
         """
         Process a new deal mention and update deal intelligence.
 
@@ -42,31 +44,89 @@ class IntelligenceAggregator:
             mention: The deal mention to process
 
         Returns:
-            deal_id: UUID of the deal in deal_intelligence table
+            deal_id: UUID of the deal in deal_intelligence table, or None if deal was filtered out
         """
         async with self.pool.acquire() as conn:
-            # Try to find existing deal by target company name or ticker
-            existing_deal = await self._find_existing_deal(conn, mention)
+            # Use explicit transaction to ensure atomicity
+            async with conn.transaction():
+                # STEP 1: Enrich mention with missing tickers
+                # If we have company names but no tickers, look them up
+                if (mention.target_name and not mention.target_ticker) or \
+                   (mention.acquirer_name and not mention.acquirer_ticker):
+                    await self._enrich_mention_with_tickers(mention)
 
-            if existing_deal:
-                # Update existing deal with new source
-                deal_id = existing_deal["deal_id"]
-                await self._add_source_to_deal(conn, deal_id, mention)
-                await self._update_deal_intelligence(conn, deal_id)
-                # Sync ticker_master with updated deal info
-                await self._sync_ticker_master(conn, deal_id, mention)
-                logger.info(f"Updated existing deal {deal_id} with new source: {mention.source_name}")
-            else:
-                # Create new deal
-                deal_id = await self._create_new_deal(conn, mention)
-                logger.info(f"Created new deal {deal_id} from source: {mention.source_name}")
+                # STEP 1.5: Validate that target has a ticker (filter out private companies)
+                # Most rumors about listed companies will include ticker or proper company name
+                # that our lookup can match. If we can't find a ticker, it's likely a private company.
+                if not mention.target_ticker:
+                    logger.info(
+                        f"Skipping deal mention - no ticker found for target: {mention.target_name} "
+                        f"(source: {mention.source_name}). Likely private company."
+                    )
+                    return None
 
-            # Automatic EDGAR cross-reference for non-official sources
-            # This helps corroborate deals and boost confidence
-            if mention.source_type != SourceType.OFFICIAL:
-                await self._perform_edgar_cross_reference(conn, deal_id, mention)
+                # STEP 1.6: Check if deal already exists in EDGAR staged_deals (approved)
+                # If a deal with this ticker already exists in EDGAR, it means the deal is already filed
+                # and this is just news/social media covering an existing deal. Skip it.
+                edgar_deal_exists = await self._check_edgar_deal_exists(conn, mention.target_ticker)
+                if edgar_deal_exists:
+                    logger.info(
+                        f"Skipping deal mention - deal already exists in EDGAR: {mention.target_name} ({mention.target_ticker}) "
+                        f"(source: {mention.source_name}). This is news about an already-filed deal."
+                    )
+                    return None
 
-            return deal_id
+                # STEP 2: Try to find existing deal by target company name or ticker
+                existing_deal = await self._find_existing_deal(conn, mention)
+
+                if existing_deal:
+                    # Update existing deal with new source
+                    deal_id = existing_deal["deal_id"]
+                    await self._add_source_to_deal(conn, deal_id, mention)
+                    await self._update_deal_intelligence(conn, deal_id)
+                    # Sync ticker_master with updated deal info
+                    await self._sync_ticker_master(conn, deal_id, mention)
+                    logger.info(f"Updated existing deal {deal_id} with new source: {mention.source_name}")
+                else:
+                    # Create new deal
+                    deal_id = await self._create_new_deal(conn, mention)
+                    logger.info(f"Created new deal {deal_id} from source: {mention.source_name}")
+
+                # STEP 3: Automatic EDGAR cross-reference for non-official sources
+                # This helps corroborate deals and boost confidence
+                if mention.source_type != SourceType.OFFICIAL:
+                    await self._perform_edgar_cross_reference(conn, deal_id, mention)
+
+                # STEP 4: Proactive ticker-based EDGAR scanning
+                # Scan SEC.gov for recent filings when a deal has tickers
+                if mention.target_ticker or mention.acquirer_ticker:
+                    await self._scan_tickers_for_filings(conn, deal_id, mention)
+
+                return deal_id
+
+    async def _check_edgar_deal_exists(
+        self, conn: asyncpg.Connection, target_ticker: str
+    ) -> bool:
+        """
+        Check if a deal with this ticker already exists in EDGAR staged_deals.
+
+        This prevents creating intelligence deals for news/rumors about deals that
+        are already filed with the SEC (e.g., news about go-shop periods, amendments, etc.)
+
+        Returns:
+            True if deal exists in EDGAR (approved or pending), False otherwise
+        """
+        # Check staged_deals table for any deal with this target ticker that's been approved
+        # or is pending review (meaning it came from EDGAR filings)
+        deal = await conn.fetchrow(
+            """SELECT staged_deal_id FROM staged_deals
+               WHERE target_ticker = $1
+               AND status IN ('approved', 'pending')
+               LIMIT 1""",
+            target_ticker.upper()
+        )
+
+        return deal is not None
 
     async def _find_existing_deal(
         self, conn: asyncpg.Connection, mention: DealMention
@@ -127,9 +187,9 @@ class IntelligenceAggregator:
         # Log to deal history
         await conn.execute(
             """INSERT INTO deal_history (deal_id, change_type, new_value, triggered_by)
-               VALUES ($1, 'created', $2, $3)""",
+               VALUES ($1, 'created', $2::jsonb, $3)""",
             deal_id,
-            {"source": mention.source_name, "target": mention.target_name},
+            json.dumps({"source": mention.source_name, "target": mention.target_name}),
             mention.source_name,
         )
 
@@ -144,6 +204,13 @@ class IntelligenceAggregator:
         """Add source mention to deal_sources table (with deduplication)"""
         # Use ON CONFLICT DO NOTHING to gracefully handle duplicate sources
         # The unique index on (deal_id, source_url) will prevent duplicates
+
+        # Normalize source_published_at to UTC if it has timezone info
+        source_published_at = mention.source_published_at
+        if source_published_at and source_published_at.tzinfo is not None:
+            # Convert to UTC and make naive (PostgreSQL timestamptz expects naive UTC)
+            source_published_at = source_published_at.astimezone(timezone.utc).replace(tzinfo=None)
+
         await conn.execute(
             """INSERT INTO deal_sources (
                 deal_id, source_name, source_type, source_url,
@@ -161,7 +228,7 @@ class IntelligenceAggregator:
             mention.content_snippet,
             mention.credibility_score,
             json.dumps(mention.extracted_data) if mention.extracted_data else None,
-            mention.source_published_at,
+            source_published_at,
         )
 
     async def _update_deal_intelligence(self, conn: asyncpg.Connection, deal_id: str) -> None:
@@ -291,6 +358,131 @@ class IntelligenceAggregator:
         except Exception as e:
             # Don't fail the whole mention processing if EDGAR search fails
             logger.error(f"EDGAR cross-reference failed for deal {deal_id}: {e}", exc_info=True)
+
+    async def _enrich_mention_with_tickers(self, mention: DealMention) -> None:
+        """
+        Enrich a deal mention with missing ticker symbols using SEC ticker lookup.
+
+        This modifies the mention object in-place by adding tickers when company
+        names are present but tickers are missing.
+
+        Args:
+            mention: DealMention object to enrich (modified in-place)
+        """
+        try:
+            ticker_lookup = get_ticker_lookup_service()
+
+            enriched = await ticker_lookup.enrich_deal_with_tickers(
+                target_name=mention.target_name,
+                acquirer_name=mention.acquirer_name,
+                target_ticker=mention.target_ticker,
+                acquirer_ticker=mention.acquirer_ticker
+            )
+
+            # Update mention with discovered tickers
+            if enriched.get("target_ticker") and not mention.target_ticker:
+                mention.target_ticker = enriched["target_ticker"]
+                logger.info(f"Enriched target ticker: {mention.target_name} → {enriched['target_ticker']}")
+
+            if enriched.get("acquirer_ticker") and not mention.acquirer_ticker:
+                mention.acquirer_ticker = enriched["acquirer_ticker"]
+                logger.info(f"Enriched acquirer ticker: {mention.acquirer_name} → {enriched['acquirer_ticker']}")
+
+        except Exception as e:
+            # Don't fail the whole mention processing if ticker lookup fails
+            logger.warning(f"Ticker enrichment failed: {e}")
+
+    async def _scan_tickers_for_filings(
+        self, conn: asyncpg.Connection, deal_id: str, mention: DealMention
+    ) -> None:
+        """
+        Proactively scan SEC.gov for recent filings using tickers.
+
+        When a deal is detected with ticker symbols, immediately scan that company's
+        recent SEC filings to find corroborating documents (8-K, DEFM14A, etc.).
+
+        This is called after deal creation to ensure we capture all relevant filings,
+        even if the EDGAR monitor wasn't running or missed them.
+        """
+        try:
+            ticker_scanner = get_ticker_scanner()
+
+            # Scan for filings from both target and acquirer
+            filings = await ticker_scanner.scan_deal_tickers(
+                target_ticker=mention.target_ticker,
+                acquirer_ticker=mention.acquirer_ticker,
+                lookback_days=30  # Look back 30 days
+            )
+
+            if not filings:
+                logger.info(
+                    f"Ticker scan for {mention.target_name}: no recent filings found "
+                    f"(target: {mention.target_ticker}, acquirer: {mention.acquirer_ticker})"
+                )
+                return
+
+            # Add filings as sources (limit to top 5 to avoid noise)
+            added_count = 0
+            for filing in filings[:5]:
+                # Check if this filing already exists in the database
+                existing_filing = await conn.fetchval(
+                    "SELECT filing_id FROM edgar_filings WHERE accession_number = $1",
+                    filing.accession_number
+                )
+
+                # If filing doesn't exist in edgar_filings table, we need to process it
+                # through the normal EDGAR pipeline, so skip it here
+                if not existing_filing:
+                    logger.debug(f"Skipping unprocessed filing: {filing.accession_number}")
+                    continue
+
+                # Check if we've already added this filing as a source
+                existing_source = await conn.fetchval(
+                    "SELECT source_id FROM deal_sources WHERE deal_id = $1 AND source_url = $2",
+                    deal_id,
+                    filing.filing_url
+                )
+
+                if existing_source:
+                    continue  # Already have this source
+
+                # Add filing as a source
+                await conn.execute(
+                    """INSERT INTO deal_sources (
+                        deal_id, source_name, source_type, source_url,
+                        mention_type, headline, content_snippet,
+                        credibility_score, detected_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                    ON CONFLICT (deal_id, source_url) WHERE source_url IS NOT NULL
+                    DO NOTHING""",
+                    deal_id,
+                    "EDGAR",
+                    SourceType.OFFICIAL.value,
+                    filing.filing_url,
+                    "filing",
+                    f"{filing.filing_type} filing for {filing.company_name}",
+                    f"Filing from ticker scan: {filing.filing_type} on {filing.filing_date}",
+                    0.85,  # High credibility for EDGAR filings
+                )
+                added_count += 1
+
+            if added_count > 0:
+                # Recalculate confidence with new sources
+                await self._update_deal_intelligence(conn, deal_id)
+
+                logger.info(
+                    f"Ticker scan for {mention.target_name}: "
+                    f"added {added_count}/{len(filings)} filings as sources"
+                )
+            else:
+                logger.info(
+                    f"Ticker scan for {mention.target_name}: "
+                    f"found {len(filings)} filing(s) but all already linked"
+                )
+
+        except Exception as e:
+            # Don't fail the whole mention processing if ticker scan fails
+            logger.error(f"Ticker scan failed for deal {deal_id}: {e}", exc_info=True)
 
     async def _sync_ticker_master(
         self, conn: asyncpg.Connection, deal_id: str, mention: DealMention
