@@ -29,9 +29,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# env files
+# env files (CRITICAL: Never commit secrets!)
 .env
 .env*.local
+python-service/.env
+python-service/.env.local
+.env.production
+.env.production.local
 
 # vercel
 .vercel

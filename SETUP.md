@@ -148,30 +148,60 @@ SENDGRID_API_KEY=SG.your-key-here
 - **ANTHROPIC_API_KEY**: Sign up at https://console.anthropic.com/
 - **SENDGRID_API_KEY**: Optional, sign up at https://sendgrid.com/
 
-#### Frontend Environment (Optional)
+#### Frontend Environment (REQUIRED)
 
-Create `.env.local` in the root directory (only if you need to customize):
+Create `.env.local` in the root directory:
 
 ```bash
 cd ..  # Back to root directory
 ```
 
-**Windows**:
+**Windows (Command Prompt)**:
 ```cmd
-copy nul .env.local
-notepad .env.local
+(
+echo # NextAuth/Auth.js Configuration
+echo AUTH_SECRET=development-secret-change-in-production-1234567890abcdef
+echo.
+echo # Database Connection ^(required by Prisma^)
+echo DATABASE_URL=postgresql://your_username:your_password@your_host/your_database
+echo.
+echo # Python Backend URL ^(optional - defaults to http://localhost:8000^)
+echo NEXT_PUBLIC_API_URL=http://localhost:8000
+) > .env.local
+```
+
+**Windows (PowerShell)**:
+```powershell
+@"
+# NextAuth/Auth.js Configuration
+AUTH_SECRET=development-secret-change-in-production-1234567890abcdef
+
+# Database Connection (required by Prisma)
+DATABASE_URL=postgresql://your_username:your_password@your_host/your_database
+
+# Python Backend URL (optional - defaults to http://localhost:8000)
+NEXT_PUBLIC_API_URL=http://localhost:8000
+"@ | Out-File -FilePath .env.local -Encoding utf8
 ```
 
 **Mac/Linux**:
 ```bash
-touch .env.local
-nano .env.local
+cat > .env.local << 'EOF'
+# NextAuth/Auth.js Configuration
+AUTH_SECRET=development-secret-change-in-production-1234567890abcdef
+
+# Database Connection (required by Prisma)
+DATABASE_URL=postgresql://your_username:your_password@your_host/your_database
+
+# Python Backend URL (optional - defaults to http://localhost:8000)
+NEXT_PUBLIC_API_URL=http://localhost:8000
+EOF
 ```
 
-Add (optional):
-```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
+**IMPORTANT**:
+- Replace `DATABASE_URL` with the same connection string from your `python-service/.env` file
+- The `AUTH_SECRET` can be any random string (at least 32 characters recommended for production)
+- For Auth.js v5, use `AUTH_SECRET` (not `NEXTAUTH_SECRET`)
 
 ### 3. Install Python Dependencies
 

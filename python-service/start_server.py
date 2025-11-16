@@ -22,7 +22,7 @@ if sys.version_info >= MAXIMUM_PYTHON:
     sys.stderr.write("Please use Python 3.12 (recommended) or 3.11.\n")
     sys.exit(1)
 
-print(f"✓ Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+print(f"[OK] Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
 
 # Load .env file
 env_path = Path(__file__).parent / '.env'
