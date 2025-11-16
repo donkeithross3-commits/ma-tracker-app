@@ -277,8 +277,7 @@ export default function StagingPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({
-        days: '7',
-        limit: '50'
+        limit: '10'  // Get 10 most recent per source, regardless of date
       });
 
       const response = await fetch(`/api/intelligence/sources?${params}`);
@@ -1265,7 +1264,7 @@ export default function StagingPage() {
               <div className="p-8 text-center text-gray-500">Loading sources...</div>
             ) : Object.keys(intelligenceSources.sources_by_type || {}).length === 0 ? (
               <div className="p-8 text-center">
-                <p className="text-gray-500 mb-2">No M&A-relevant articles found in the last 7 days</p>
+                <p className="text-gray-500 mb-2">No M&A-relevant articles found</p>
                 {!intelligenceStatus?.is_running && (
                   <p className="text-sm text-gray-400">
                     Start intelligence monitoring to detect articles from news sources
