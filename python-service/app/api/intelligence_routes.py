@@ -11,6 +11,7 @@ from app.intelligence.orchestrator import (
     stop_intelligence_monitoring,
     is_intelligence_monitoring_running,
     get_monitoring_stats,
+    get_recent_scanned_articles,
 )
 from app.utils.timezone import convert_to_cst
 
@@ -1415,3 +1416,34 @@ async def get_all_sources(
 
     finally:
         await db.pool.release(conn)
+
+
+@router.get("/articles/recent")
+async def get_recent_scanned_articles_endpoint():
+    """
+    Get recent scanned articles from all monitors (for debugging filter performance).
+
+    This endpoint shows ALL articles that monitors fetched in their most recent scan,
+    along with whether each article passed the M&A relevance filter.
+
+    Unlike /sources which shows M&A-relevant articles from the database,
+    this shows the raw scan results including articles that were filtered out.
+
+    Returns:
+        - status: "running" or "not_running"
+        - monitors: List of monitor scan results
+            - source_name: Monitor name (e.g., "seeking_alpha_ma")
+            - source_type: Type of source ("news", "official", etc.)
+            - last_scan_time: When the monitor last scanned
+            - articles: List of scanned articles with filter results
+                - title: Article headline
+                - url: Article link
+                - is_ma_relevant: Whether it passed M&A filter
+                - target_name: Extracted target company (if relevant)
+                - acquirer_name: Extracted acquirer (if relevant)
+                - scanned_at: When this article was scanned
+            - total_scanned: Total articles in last scan
+            - ma_relevant_count: How many passed M&A filter
+    """
+    result = await get_recent_scanned_articles()
+    return result

@@ -360,3 +360,34 @@ async def get_monitoring_stats() -> Dict[str, Any]:
             "monitors": [dict(m) for m in monitors],
             "ticker_watch": ticker_watch_stats,
         }
+
+
+async def get_recent_scanned_articles() -> Dict[str, Any]:
+    """Get recent scanned articles from all monitors (for debugging filter performance)"""
+    global _orchestrator
+
+    if not _orchestrator:
+        return {
+            "status": "not_running",
+            "monitors": []
+        }
+
+    # Collect scan results from all monitors
+    monitor_scans = []
+    for monitor in _orchestrator.monitors:
+        monitor_scans.append({
+            "source_name": monitor.source_name,
+            "source_type": monitor.source_type.value if hasattr(monitor.source_type, 'value') else str(monitor.source_type),
+            "last_scan_time": monitor.last_scan_time.isoformat() if monitor.last_scan_time else None,
+            "articles": monitor.last_scan_articles,
+            "total_scanned": len(monitor.last_scan_articles),
+            "ma_relevant_count": sum(1 for article in monitor.last_scan_articles if article.get("is_ma_relevant", False)),
+        })
+
+    # Sort by last scan time (most recent first)
+    monitor_scans.sort(key=lambda x: x["last_scan_time"] or "", reverse=True)
+
+    return {
+        "status": "running",
+        "monitors": monitor_scans
+    }

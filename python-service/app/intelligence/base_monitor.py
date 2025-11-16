@@ -34,6 +34,10 @@ class BaseSourceMonitor(ABC):
         self.config = config or {}
         self.logger = logging.getLogger(f"{__name__}.{source_name}")
 
+        # In-memory cache for last scan results (for debugging filter performance)
+        self.last_scan_articles: List[Dict[str, Any]] = []
+        self.last_scan_time: Optional[datetime] = None
+
     @abstractmethod
     async def fetch_updates(self) -> List[Any]:
         """
@@ -74,15 +78,33 @@ class BaseSourceMonitor(ABC):
             items = await self.fetch_updates()
             self.logger.info(f"Fetched {len(items)} items from {self.source_name}")
 
-            # Parse each item
+            # Parse each item and track results for debugging
             mentions = []
+            scan_results = []
+
             for item in items:
                 try:
                     mention = await self.parse_item(item)
+
+                    # Store scan result for debugging filter performance
+                    scan_result = {
+                        "title": item.get("title", "N/A") if isinstance(item, dict) else str(item)[:100],
+                        "url": item.get("link", "N/A") if isinstance(item, dict) else "N/A",
+                        "is_ma_relevant": mention is not None,
+                        "target_name": mention.target_name if mention else None,
+                        "acquirer_name": mention.acquirer_name if mention else None,
+                        "scanned_at": datetime.now().isoformat()
+                    }
+                    scan_results.append(scan_result)
+
                     if mention:
                         mentions.append(mention)
                 except Exception as e:
                     self.logger.error(f"Error parsing item from {self.source_name}: {e}", exc_info=True)
+
+            # Update last scan cache
+            self.last_scan_articles = scan_results
+            self.last_scan_time = datetime.now()
 
             self.logger.info(f"Found {len(mentions)} M&A mentions from {self.source_name}")
             return mentions

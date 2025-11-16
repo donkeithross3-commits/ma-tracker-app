@@ -22,7 +22,7 @@ MA_ANNOUNCEMENT_KEYWORDS = [
 
     # Tender offers
     "tender offer", "to tender", "launches tender offer", "announces tender offer",
-    "bids for", "makes offer for", "offer to purchase",
+    "bids for", "bid for", "makes offer for", "offer to purchase",
 
     # Deal nouns
     "acquisition deal", "merger deal", "takeover deal",
@@ -43,7 +43,7 @@ RUMOR_KEYWORDS = [
     "reportedly", "reports", "sources say", "sources said",
     "is said to", "are said to", "people familiar",
     "according to sources", "Bloomberg reports", "Reuters reports",
-    "exploring", "considering", "mulling", "weighing",
+    "exploring", "considering", "mulling", "weighing", "weigh",
     "potential", "possible", "may", "could",
     "in talks", "in discussions", "negotiating",
     "seeking", "looking to", "eyeing",
@@ -69,6 +69,10 @@ ACQUISITION_PATTERNS = [
 
     # "Company A buys/purchases Company B"
     r'([A-Z][A-Za-z0-9\s&\.,]+?)\s+(?:buys|purchases|buying|purchasing)\s+([A-Z][A-Za-z0-9\s&\.,]+?)(?:\s+for|\s+in|\s+\(|$)',
+
+    # "Company A weighs/mulls/considers bid for Company B"
+    # Use word boundary and non-greedy matching to stop at lowercase words like "is said to"
+    r'([A-Z][A-Za-z0-9&]+)\s+.*?\b(?:weigh|mull|consider|eye)s?\s+(?:a\s+)?(?:bid|offer|takeover|acquisition)\s+for\s+(?:[a-z]+\s+)*([A-Z][A-Za-z0-9\s&\.,]+?)(?:\s*\(|$)',
 
     # "Company A-Company B merger"
     r'([A-Z][A-Za-z0-9\s&\.,]+?)\s*-\s*([A-Z][A-Za-z0-9\s&\.,]+?)\s+(?:merger|deal|acquisition)',
