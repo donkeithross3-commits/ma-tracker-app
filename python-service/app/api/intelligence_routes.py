@@ -1247,7 +1247,7 @@ async def update_deal_ticker(deal_id: str, request: UpdateTickerRequest):
 
             # Update ticker
             ticker = request.ticker.upper().strip() if request.ticker else None
-            
+
             await conn.execute(
                 """UPDATE deal_intelligence
                    SET target_ticker = $2, updated_at = NOW()
@@ -1267,3 +1267,142 @@ async def update_deal_ticker(deal_id: str, request: UpdateTickerRequest):
 
     finally:
         await db.disconnect()
+
+
+# ============================================================================
+# All Articles - Monitor Performance Visibility
+# ============================================================================
+
+@router.get("/sources")
+async def get_all_sources(
+    days: int = 7,
+    source_name: Optional[str] = None,
+    min_confidence: float = 0.0,
+    limit: int = 50
+):
+    """
+    Get all monitored sources (articles) that were detected as M&A-relevant.
+    This helps verify monitors are working correctly and identify potential false negatives.
+
+    Similar to EDGAR's "All Filings" tab, but for intelligence sources.
+    Shows M&A-relevant articles from all monitors, grouped by source.
+
+    Params:
+    - days: Look back this many days (default 7)
+    - source_name: Filter by specific source (e.g., 'reuters_ma', 'seeking_alpha_ma')
+    - min_confidence: Minimum credibility score (0.0-1.0)
+    - limit: Max articles per source
+    """
+    db = await get_db_pool()
+
+    conn = await db.pool.acquire()
+    try:
+        # Build query to get all sources from deal_sources table
+        query = """
+            SELECT
+                source_id,
+                deal_id,
+                source_name,
+                source_type,
+                source_url,
+                mention_type,
+                headline,
+                content_snippet,
+                credibility_score,
+                source_published_at,
+                detected_at
+            FROM deal_sources
+            WHERE detected_at >= NOW() - INTERVAL '{days} days'
+        """
+
+        params = []
+        param_index = 1
+
+        if source_name:
+            query += f" AND source_name = ${param_index}"
+            params.append(source_name)
+            param_index += 1
+
+        if min_confidence > 0:
+            query += f" AND credibility_score >= ${param_index}"
+            params.append(min_confidence)
+            param_index += 1
+
+        query += " ORDER BY detected_at DESC"
+        query += f" LIMIT ${param_index}"
+        params.append(limit * 10)  # Get more initially to group by source
+
+        # Format the query with days
+        query = query.format(days=days)
+
+        sources = await conn.fetch(query, *params)
+
+        # Group sources by source_name
+        sources_by_type = {}
+        for source in sources:
+            src_name = source['source_name']
+            if src_name not in sources_by_type:
+                sources_by_type[src_name] = []
+
+            # Only add up to limit per source
+            if len(sources_by_type[src_name]) < limit:
+                sources_by_type[src_name].append({
+                    'source_id': str(source['source_id']),
+                    'deal_id': str(source['deal_id']) if source['deal_id'] else None,
+                    'source_name': source['source_name'],
+                    'source_type': source['source_type'],
+                    'source_url': source['source_url'],
+                    'mention_type': source['mention_type'],
+                    'headline': source['headline'],
+                    'content_snippet': source['content_snippet'],
+                    'credibility_score': float(source['credibility_score']) if source['credibility_score'] else 0.0,
+                    'source_published_at': convert_to_cst(source['source_published_at']) if source['source_published_at'] else None,
+                    'detected_at': convert_to_cst(source['detected_at'])
+                })
+
+        # Get monitor stats from source_monitors table
+        monitor_stats = await conn.fetch(
+            """
+            SELECT
+                source_name,
+                last_check_at,
+                last_success_at,
+                last_article_count,
+                total_checks,
+                total_articles_fetched,
+                total_ma_mentions_found,
+                is_enabled,
+                check_interval_seconds
+            FROM source_monitors
+            ORDER BY source_name
+            """
+        )
+
+        stats_by_source = {
+            row['source_name']: {
+                'last_check_at': convert_to_cst(row['last_check_at']) if row['last_check_at'] else None,
+                'last_success_at': convert_to_cst(row['last_success_at']) if row['last_success_at'] else None,
+                'last_article_count': row['last_article_count'],
+                'total_checks': row['total_checks'],
+                'total_articles_fetched': row['total_articles_fetched'],
+                'total_ma_mentions_found': row['total_ma_mentions_found'],
+                'is_enabled': row['is_enabled'],
+                'check_interval_seconds': row['check_interval_seconds']
+            }
+            for row in monitor_stats
+        }
+
+        return {
+            'sources_by_type': sources_by_type,
+            'monitor_stats': stats_by_source,
+            'total_sources': sum(len(sources) for sources in sources_by_type.values()),
+            'filters': {
+                'days': days,
+                'source_name': source_name,
+                'min_confidence': min_confidence,
+                'limit_per_source': limit
+            }
+        }
+
+    finally:
+        await db.pool.release(conn)
