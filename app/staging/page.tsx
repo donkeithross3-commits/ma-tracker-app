@@ -1259,99 +1259,98 @@ export default function StagingPage() {
                 </table>
               </div>
             )
-          ) : activeTab === "intelligence" ? (
-            tierFilter === "all_articles" ? (
-              // All Articles View
-              !intelligenceSources ? (
-                <div className="p-8 text-center text-gray-500">Loading sources...</div>
-              ) : Object.keys(intelligenceSources.sources_by_type || {}).length === 0 ? (
-                <div className="p-8 text-center">
-                  <p className="text-gray-500 mb-2">No M&A-relevant articles found in the last 7 days</p>
-                  {!intelligenceStatus?.is_running && (
-                    <p className="text-sm text-gray-400">
-                      Start intelligence monitoring to detect articles from news sources
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  {Object.entries(intelligenceSources.sources_by_type).map(([sourceName, articles]: [string, any]) => (
-                    <div key={sourceName} className="mb-6 last:mb-0">
-                      <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-gray-900 uppercase">{sourceName.replace(/_/g, ' ')}</h3>
-                        <div className="flex items-center gap-4 text-xs text-gray-600">
-                          <span>Articles: <strong>{articles.length}</strong></span>
-                          {intelligenceSources.monitor_stats?.[sourceName] && (
-                            <>
-                              <span>Total Fetched: <strong>{intelligenceSources.monitor_stats[sourceName].total_articles_fetched || 0}</strong></span>
-                              <span>Last Check: <strong>{intelligenceSources.monitor_stats[sourceName].last_check_at ? formatDateTime(intelligenceSources.monitor_stats[sourceName].last_check_at) : 'Never'}</strong></span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <table className="w-full">
-                        <thead className="bg-gray-100 border-b border-gray-200">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase w-1/2">Headline</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Published</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Detected</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Score</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {articles.map((article: any) => (
-                            <tr key={article.source_id} className="hover:bg-gray-50">
-                              <td className="px-3 py-3">
-                                <div className="text-sm">
-                                  {article.source_url ? (
-                                    <a
-                                      href={article.source_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                                    >
-                                      {article.headline || 'No headline'}
-                                    </a>
-                                  ) : (
-                                    <span className="text-gray-900 font-medium">{article.headline || 'No headline'}</span>
-                                  )}
-                                  {article.content_snippet && (
-                                    <div className="text-xs text-gray-600 mt-1 line-clamp-2">{article.content_snippet}</div>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-3 py-3">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                  {article.mention_type}
-                                </span>
-                              </td>
-                              <td className="px-3 py-3 text-xs text-gray-600">
-                                {article.source_published_at ? formatDateTime(article.source_published_at) : '-'}
-                              </td>
-                              <td className="px-3 py-3 text-xs text-gray-600">
-                                {formatDateTime(article.detected_at)}
-                              </td>
-                              <td className="px-3 py-3">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                  article.credibility_score >= 0.7 ? 'bg-green-100 text-green-800' :
-                                  article.credibility_score >= 0.5 ? 'bg-yellow-100 text-yellow-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {(article.credibility_score * 100).toFixed(0)}%
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ))}
-                </div>
-              )
+          ) : activeTab === "intelligence" && tierFilter === "all_articles" ? (
+            // All Articles View
+            !intelligenceSources ? (
+              <div className="p-8 text-center text-gray-500">Loading sources...</div>
+            ) : Object.keys(intelligenceSources.sources_by_type || {}).length === 0 ? (
+              <div className="p-8 text-center">
+                <p className="text-gray-500 mb-2">No M&A-relevant articles found in the last 7 days</p>
+                {!intelligenceStatus?.is_running && (
+                  <p className="text-sm text-gray-400">
+                    Start intelligence monitoring to detect articles from news sources
+                  </p>
+                )}
+              </div>
             ) : (
-              // Intelligence Deals Table
-              intelligenceDeals.length === 0 ? (
+              <div className="overflow-x-auto">
+                {Object.entries(intelligenceSources.sources_by_type).map(([sourceName, articles]: [string, any]) => (
+                  <div key={sourceName} className="mb-6 last:mb-0">
+                    <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900 uppercase">{sourceName.replace(/_/g, ' ')}</h3>
+                      <div className="flex items-center gap-4 text-xs text-gray-600">
+                        <span>Articles: <strong>{articles.length}</strong></span>
+                        {intelligenceSources.monitor_stats?.[sourceName] && (
+                          <>
+                            <span>Total Fetched: <strong>{intelligenceSources.monitor_stats[sourceName].total_articles_fetched || 0}</strong></span>
+                            <span>Last Check: <strong>{intelligenceSources.monitor_stats[sourceName].last_check_at ? formatDateTime(intelligenceSources.monitor_stats[sourceName].last_check_at) : 'Never'}</strong></span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <table className="w-full">
+                      <thead className="bg-gray-100 border-b border-gray-200">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase w-1/2">Headline</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Published</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Detected</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Score</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {articles.map((article: any) => (
+                          <tr key={article.source_id} className="hover:bg-gray-50">
+                            <td className="px-3 py-3">
+                              <div className="text-sm">
+                                {article.source_url ? (
+                                  <a
+                                    href={article.source_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                  >
+                                    {article.headline || 'No headline'}
+                                  </a>
+                                ) : (
+                                  <span className="text-gray-900 font-medium">{article.headline || 'No headline'}</span>
+                                )}
+                                {article.content_snippet && (
+                                  <div className="text-xs text-gray-600 mt-1 line-clamp-2">{article.content_snippet}</div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                {article.mention_type}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-xs text-gray-600">
+                              {article.source_published_at ? formatDateTime(article.source_published_at) : '-'}
+                            </td>
+                            <td className="px-3 py-3 text-xs text-gray-600">
+                              {formatDateTime(article.detected_at)}
+                            </td>
+                            <td className="px-3 py-3">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                article.credibility_score >= 0.7 ? 'bg-green-100 text-green-800' :
+                                article.credibility_score >= 0.5 ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {(article.credibility_score * 100).toFixed(0)}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : activeTab === "intelligence" ? (
+            // Intelligence Deals Table
+            intelligenceDeals.length === 0 ? (
                 <div className="p-8 text-center">
                   <p className="text-gray-500 mb-2">No {tierFilter === "all" ? "" : tierFilter} deals found</p>
                   {!intelligenceStatus?.is_running && (
