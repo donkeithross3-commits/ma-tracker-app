@@ -12,17 +12,17 @@ echo [1/6] Stopping services...
 call dev-stop.bat
 timeout /t 2 /nobreak >nul
 
-REM Step 2: Clean Python cache
-echo [2/6] Cleaning Python bytecode cache...
-FOR /d /r python-service %%d IN (__pycache__) DO @IF EXIST "%%d" rd /s /q "%%d"
-del /s /q python-service\*.pyc 2>nul
-echo Python cache cleaned
-
-REM Step 3: Pull latest code
-echo [3/6] Pulling latest code from main...
+REM Step 2: Pull latest code
+echo [2/6] Pulling latest code from main...
 git fetch origin
 git reset --hard origin/main
 echo Code updated to latest main
+
+REM Step 3: Clean Python cache AFTER pulling code
+echo [3/6] Cleaning Python bytecode cache...
+FOR /d /r python-service %%d IN (__pycache__) DO @IF EXIST "%%d" rd /s /q "%%d"
+del /s /q python-service\*.pyc 2>nul
+echo Python cache cleaned
 
 REM Step 4: Clean logs
 echo [4/6] Cleaning old logs...

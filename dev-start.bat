@@ -10,10 +10,10 @@ echo.
 REM Create logs directory if it doesn't exist
 if not exist logs mkdir logs
 
-REM Start Python backend in background
+REM Start Python backend in background (with -B to disable bytecode caching)
 echo Starting Python backend (port 8000)...
 cd python-service
-start "MA Tracker Backend" /MIN cmd /c "py -3.11 start_server.py > ..\logs\python-backend.log 2>&1"
+start "MA Tracker Backend" /MIN cmd /c "py -3.11 -B start_server.py > ..\logs\python-backend.log 2>&1"
 cd ..
 
 REM Wait a moment for backend to initialize
