@@ -24,22 +24,27 @@ FOR /d /r python-service %%d IN (__pycache__) DO @IF EXIST "%%d" rd /s /q "%%d"
 del /s /q python-service\*.pyc 2>nul
 echo Python cache cleaned
 
-REM Step 4: Clean logs
-echo [4/6] Cleaning old logs...
+REM Step 4: Clean Next.js build cache
+echo [4/7] Cleaning Next.js build cache...
+if exist .next rd /s /q .next
+echo Next.js cache cleaned
+
+REM Step 5: Clean logs
+echo [5/7] Cleaning old logs...
 if exist logs\python-backend.log del logs\python-backend.log
 if exist logs\nextjs-frontend.log del logs\nextjs-frontend.log
 echo Logs cleaned
 
-REM Step 5: Install/update dependencies (optional, uncomment if needed)
-REM echo [5/6] Updating Python dependencies...
+REM Step 6: Install/update dependencies (optional, uncomment if needed)
+REM echo [6/7] Updating Python dependencies...
 REM cd python-service
 REM py -3.11 -m pip install -r requirements.txt --upgrade
 REM cd ..
 
-echo [5/6] Skipping dependency installation (not needed)
+echo [6/7] Skipping dependency installation (not needed)
 
-REM Step 6: Start services
-echo [6/6] Starting services...
+REM Step 7: Start services
+echo [7/7] Starting services...
 call dev-start.bat
 
 echo.
