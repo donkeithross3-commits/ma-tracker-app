@@ -2,6 +2,7 @@
 import asyncio
 import aiohttp
 import logging
+import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
@@ -541,6 +542,15 @@ M1/M2 codes are more likely to be merger-related.
                 """.strip()
 
                 # Store investigation task with medium severity
+                metadata = json.dumps({
+                    'ticker': halt.ticker,
+                    'company_name': halt.company_name,
+                    'halt_code': halt.halt_code,
+                    'halt_time': halt.halt_time.isoformat(),
+                    'exchange': halt.exchange,
+                    'requires_investigation': True
+                })
+
                 await conn.execute("""
                     INSERT INTO alert_notifications (
                         alert_type, severity, title, message,
@@ -551,14 +561,7 @@ M1/M2 codes are more likely to be merger-related.
                     'medium',
                     f"Investigate Halt: {halt.ticker} - {halt_reason}",
                     message,
-                    {
-                        'ticker': halt.ticker,
-                        'company_name': halt.company_name,
-                        'halt_code': halt.halt_code,
-                        'halt_time': halt.halt_time.isoformat(),
-                        'exchange': halt.exchange,
-                        'requires_investigation': True
-                    },
+                    metadata,
                     'pending'
                 )
 
