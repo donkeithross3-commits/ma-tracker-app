@@ -93,7 +93,7 @@ class IntelligenceAggregator:
                         )
                         return None
                     else:
-                        # EDGAR filing was marked unlikely, but intelligence confirms it's real
+                        # EDGAR filing was marked unlikely/rejected, but intelligence confirms it's real
                         # Upgrade the EDGAR filing and skip creating intelligence deal (per user requirement)
                         logger.info(
                             f"[PROCESS_MENTION] Intelligence confirms EDGAR filing! Upgrading {mention.target_ticker} "

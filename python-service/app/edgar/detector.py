@@ -442,6 +442,9 @@ class MADetector:
         This is more precise than checking the entire document. If "previously disclosed"
         appears in the same paragraph as "merger agreement", it's likely an update.
 
+        Uses word-boundary matching to prevent false positives (e.g., "entered into"
+        matching "previously entered into").
+
         Args:
             text: Full filing text
             detected_keywords: M&A keywords that were found
@@ -468,8 +471,11 @@ class MADetector:
                 context = text_lower[start:end]
 
                 # Check if any historical reference keywords appear in this context
+                # Use word boundary regex to prevent substring false positives
                 for hist_keyword in HISTORICAL_REFERENCE_KEYWORDS:
-                    if hist_keyword in context:
+                    # Escape special regex chars and add word boundaries
+                    pattern = r'\b' + re.escape(hist_keyword) + r'\b'
+                    if re.search(pattern, context):
                         logger.info(
                             f"Historical reference '{hist_keyword}' found near M&A keyword '{keyword}' "
                             f"(within {context_radius} chars)"
