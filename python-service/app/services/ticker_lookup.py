@@ -210,6 +210,23 @@ class TickerLookupService:
                     "similarity_score": 1.0
                 }
 
+        # Token-based matching: Check if input is a complete word/token in company name
+        # This handles cases like "Cidara" matching "CIDARA THERAPEUTICS INC"
+        input_tokens = set(company_name_clean.split())
+        for ticker, data in self._ticker_cache.items():
+            sec_tokens = set(self._clean_company_name(data["title"]).upper().split())
+            # If all input tokens are in SEC name, it's a strong match
+            if input_tokens and input_tokens.issubset(sec_tokens):
+                logger.info(
+                    f"Token matched '{company_name}' to '{data['title']}' ({ticker})"
+                )
+                return {
+                    "ticker": ticker,
+                    "company_name": data["title"],
+                    "cik": str(data["cik_str"]).zfill(10),
+                    "similarity_score": 0.95  # High confidence for token match
+                }
+
         # Fuzzy matching - find best match above threshold
         best_match = None
         best_score = 0.0
@@ -235,7 +252,7 @@ class TickerLookupService:
                 f"({best_match['ticker']}) with score {best_score:.2f}"
             )
         else:
-            logger.debug(f"No ticker match found for '{company_name}'")
+            logger.warning(f"No ticker match found for '{company_name}' (tried exact, token, and fuzzy matching)")
 
         return best_match
 
