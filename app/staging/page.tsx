@@ -70,6 +70,20 @@ interface Filing {
   processed_at: string | null;
 }
 
+// Helper function to format source names for display
+function formatSourceName(sourceName: string): string {
+  const sourceLabels: Record<string, string> = {
+    'globenewswire_ma': 'GlobeNewswire - M&A Announcements',
+    'globenewswire_corporate_actions': 'GlobeNewswire - Corporate Actions',
+    'globenewswire_executive_changes': 'GlobeNewswire - Executive Changes',
+    'reuters_ma': 'Reuters - M&A News',
+    'seeking_alpha_ma': 'Seeking Alpha - M&A News',
+    'ftc_early_termination': 'FTC - Early Termination Notices'
+  };
+
+  return sourceLabels[sourceName] || sourceName.replace(/_/g, ' ').toUpperCase();
+}
+
 export default function StagingPage() {
   console.log("[PERF] StagingPage component mounting at", new Date().toISOString());
   const router = useRouter();
@@ -1278,7 +1292,7 @@ export default function StagingPage() {
                 {intelligenceSources.monitors.map((monitor: any, index: number) => (
                   <div key={`${monitor.source_name}-${index}`} className="mb-6 last:mb-0">
                     <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-gray-900 uppercase">{monitor.source_name.replace(/_/g, ' ')}</h3>
+                      <h3 className="text-sm font-semibold text-gray-900">{formatSourceName(monitor.source_name)}</h3>
                       <div className="flex items-center gap-4 text-xs text-gray-600">
                         <span>Total Scanned: <strong>{monitor.total_scanned || 0}</strong></span>
                         <span className="text-green-600">M&A Relevant: <strong>{monitor.ma_relevant_count || 0}</strong></span>
