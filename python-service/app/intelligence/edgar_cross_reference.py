@@ -7,6 +7,7 @@ automatically searches EDGAR for corroborating filings to boost confidence.
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+from app.utils.timezone import get_current_utc
 import asyncpg
 
 from app.intelligence.models import DealMention, SourceType, MentionType
@@ -71,7 +72,7 @@ class EdgarCrossReference:
         """
         async with self.pool.acquire() as conn:
             # Build search query - prefer ticker match, fallback to name
-            cutoff_date = datetime.utcnow() - timedelta(days=days_lookback)
+            cutoff_date = get_current_utc() - timedelta(days=days_lookback)
 
             filings = []
 

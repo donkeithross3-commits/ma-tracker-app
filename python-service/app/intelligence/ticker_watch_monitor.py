@@ -14,6 +14,7 @@ import asyncio
 import json
 from typing import List, Dict, Any, Set
 from datetime import datetime, timedelta
+from app.utils.timezone import get_current_utc
 import asyncpg
 
 from app.intelligence.models import DealMention, SourceType, MentionType
@@ -221,7 +222,7 @@ class TickerWatchMonitor:
                     """,
                     len(sources),
                     avg_confidence,
-                    datetime.utcnow(),
+                    get_current_utc(),
                     deal_id
                 )
 
@@ -280,11 +281,11 @@ class TickerWatchMonitor:
                 if ticker in self.last_check:
                     since_date = max(
                         self.last_check[ticker],
-                        datetime.utcnow() - timedelta(days=7)
+                        get_current_utc() - timedelta(days=7)
                     )
                 else:
                     # First time: look back 30 days
-                    since_date = datetime.utcnow() - timedelta(days=30)
+                    since_date = get_current_utc() - timedelta(days=30)
 
                 # Check for new filings
                 new_filings = await self.check_ticker_for_new_filings(
@@ -302,7 +303,7 @@ class TickerWatchMonitor:
                         deals_updated += 1
 
                 # Update last check time
-                self.last_check[ticker] = datetime.utcnow()
+                self.last_check[ticker] = get_current_utc()
                 self.monitored_tickers.add(ticker)
 
                 # Small delay to avoid hammering the database

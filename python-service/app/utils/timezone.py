@@ -1,4 +1,10 @@
-"""Timezone utilities for converting UTC timestamps to user timezone (ET)"""
+"""Timezone utilities for converting UTC timestamps to user timezone (ET)
+
+STANDARD PRACTICE:
+- Always store datetimes as UTC in database (using NOW() or get_current_utc())
+- Convert to ISO string with convert_to_et() when sending to frontend
+- Frontend automatically displays in user's local timezone
+"""
 from datetime import datetime
 from typing import Optional
 import pytz
@@ -6,6 +12,28 @@ import pytz
 # User's timezone (Eastern Time - America/New_York)
 USER_TIMEZONE = pytz.timezone('America/New_York')
 UTC = pytz.UTC
+
+
+def get_current_utc() -> datetime:
+    """
+    Get current time as timezone-aware UTC datetime.
+
+    This is the STANDARD way to get current time in this codebase.
+    Use this instead of datetime.now() or datetime.utcnow().
+
+    Returns:
+        Timezone-aware datetime in UTC
+
+    Example:
+        from app.utils.timezone import get_current_utc
+
+        # In database inserts:
+        await conn.execute("INSERT INTO table (created_at) VALUES ($1)", get_current_utc())
+
+        # For timestamp comparisons:
+        cutoff = get_current_utc() - timedelta(days=7)
+    """
+    return datetime.now(UTC)
 
 
 def convert_to_et(dt: Optional[datetime]) -> Optional[str]:

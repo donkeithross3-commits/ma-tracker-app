@@ -17,6 +17,7 @@ from app.intelligence.models import (
 from app.intelligence.edgar_cross_reference import EdgarCrossReference
 from app.edgar.ticker_scanner import get_ticker_scanner
 from app.services.ticker_lookup import get_ticker_lookup_service
+from app.utils.timezone import get_current_utc
 
 logger = logging.getLogger(__name__)
 
@@ -337,7 +338,7 @@ class IntelligenceAggregator:
                WHERE deal_id = $4""",
             len(sources),
             confidence_score,
-            datetime.utcnow(),
+            get_current_utc(),
             deal_id,
         )
 
@@ -821,7 +822,7 @@ class TierManager:
                SET deal_tier = 'rumored',
                    promoted_to_rumored_at = $1
                WHERE deal_id = $2""",
-            datetime.utcnow(),
+            get_current_utc(),
             deal_id,
         )
 
@@ -848,7 +849,7 @@ class TierManager:
                        active_deal_id = $2,
                        promoted_to_rumored_at = $1,
                        last_activity_at = $1""",
-                datetime.utcnow(),
+                get_current_utc(),
                 deal_id,
             )
 
@@ -860,7 +861,7 @@ class TierManager:
                    deal_status = 'announced',
                    promoted_to_active_at = $1
                WHERE deal_id = $2""",
-            datetime.utcnow(),
+            get_current_utc(),
             deal_id,
         )
 
@@ -887,6 +888,6 @@ class TierManager:
                        active_deal_id = $2,
                        promoted_to_active_at = $1,
                        last_activity_at = $1""",
-                datetime.utcnow(),
+                get_current_utc(),
                 deal_id,
             )

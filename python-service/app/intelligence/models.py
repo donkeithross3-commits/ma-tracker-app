@@ -1,6 +1,7 @@
 """Data models for M&A intelligence platform"""
 from dataclasses import dataclass
 from datetime import datetime
+from app.utils.timezone import get_current_utc
 from typing import Optional, Dict, Any, List
 from enum import Enum
 
@@ -72,7 +73,7 @@ class DealMention:
 
     def __post_init__(self):
         if self.detected_at is None:
-            self.detected_at = datetime.utcnow()
+            self.detected_at = get_current_utc()
 
 
 @dataclass
@@ -109,7 +110,7 @@ class DealIntelligence:
         if self.sources is None:
             self.sources = []
         if self.first_detected_at is None:
-            self.first_detected_at = datetime.utcnow()
+            self.first_detected_at = get_current_utc()
 
 
 @dataclass
@@ -130,9 +131,9 @@ class TickerWatch:
 
     def __post_init__(self):
         if self.added_at is None:
-            self.added_at = datetime.utcnow()
+            self.added_at = get_current_utc()
         if self.last_activity_at is None:
-            self.last_activity_at = datetime.utcnow()
+            self.last_activity_at = get_current_utc()
 
 
 # Source credibility ratings

@@ -4,7 +4,7 @@ import logging
 import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from app.utils.timezone import convert_to_et
+from app.utils.timezone import convert_to_et, get_current_utc
 import asyncpg
 
 from app.intelligence.base_monitor import BaseSourceMonitor
@@ -108,7 +108,7 @@ class IntelligenceOrchestrator:
         Returns:
             Dictionary with cycle statistics
         """
-        cycle_start = datetime.utcnow()
+        cycle_start = get_current_utc()
         total_mentions = 0
         total_deals_created = 0
         total_deals_updated = 0
@@ -172,7 +172,7 @@ class IntelligenceOrchestrator:
                 # Update monitor error status
                 await self._update_monitor_status(monitor.source_name, "error", error=str(e))
 
-        cycle_duration = (datetime.utcnow() - cycle_start).total_seconds()
+        cycle_duration = (get_current_utc() - cycle_start).total_seconds()
 
         stats = {
             "cycle_start": cycle_start,
@@ -206,7 +206,7 @@ class IntelligenceOrchestrator:
                        SET last_poll_at = $1,
                            total_polls = total_polls + 1
                        WHERE source_name = $2""",
-                    datetime.utcnow(),
+                    get_current_utc(),
                     source_name,
                 )
             elif status == "success":
@@ -217,7 +217,7 @@ class IntelligenceOrchestrator:
                            error_count = 0,
                            last_error = NULL
                        WHERE source_name = $3""",
-                    datetime.utcnow(),
+                    get_current_utc(),
                     deals_found,
                     source_name,
                 )
@@ -228,7 +228,7 @@ class IntelligenceOrchestrator:
                            error_count = error_count + 1,
                            last_error = $2
                        WHERE source_name = $3""",
-                    datetime.utcnow(),
+                    get_current_utc(),
                     error[:500],  # Truncate error message
                     source_name,
                 )
