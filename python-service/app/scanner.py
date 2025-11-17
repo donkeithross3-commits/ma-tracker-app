@@ -395,6 +395,19 @@ class IBMergerArbScanner(EWrapper, EClient):
                     # Small delay to avoid overwhelming IB
                     time.sleep(0.5)
 
+                    # Also request put option data
+                    put_option = self.get_option_data(ticker, expiry, strike, "P")
+                    if put_option:
+                        options.append(put_option)
+                        # Debug: Show specific puts we're interested in
+                        if expiry == '20260618' and strike in [200.0, 210.0]:
+                            print(f"DEBUG: Found {expiry} {strike}P - bid: {put_option.bid}, ask: {put_option.ask}, mid: {put_option.mid_price}")
+                    else:
+                        print(f"DEBUG: Filtered out {expiry} {strike}P - no valid pricing data from IB")
+
+                    # Small delay to avoid overwhelming IB
+                    time.sleep(0.5)
+
         print(f"Retrieved {len(options)} option contracts (limited to avoid IB limits)")
 
         # Debug: Show what we got for June 2026 and September 2026
@@ -748,6 +761,92 @@ class MergerArbAnalyzer:
             annualized_return_ft=annualized_return_ft
         )
 
+    def analyze_put_spread(self, long_put: OptionData, short_put: OptionData,
+                          current_price: float) -> Optional[TradeOpportunity]:
+        """
+        Analyze a credit put spread for merger arbitrage.
+
+        Strategy: Sell put at/near deal price, buy put below deal price
+        - Collect net credit (max gain)
+        - Max loss = spread width - credit
+        - Assumes stock converges to deal price (puts expire worthless)
+        """
+
+        # Validate prices
+        if long_put.mid_price <= 0 or short_put.mid_price <= 0:
+            return None
+        if long_put.ask <= 0 or short_put.bid <= 0:
+            return None
+
+        # Spread width
+        spread_width = short_put.strike - long_put.strike
+        if spread_width <= 0:
+            return None
+
+        # MIDPOINT credit (credit = sell short put at mid - buy long put at mid)
+        credit_mid = short_put.mid_price - long_put.mid_price
+
+        # FAR-TOUCH credit (sell short put at bid, buy long put at ask)
+        credit_ft = short_put.bid - long_put.ask
+
+        print(f"DEBUG PUT FT: {long_put.strike}/{short_put.strike} - Short bid: {short_put.bid}, Long ask: {long_put.ask}, FT credit: {credit_ft}")
+
+        if credit_mid <= 0 or credit_ft <= 0:
+            return None
+
+        # Max gain = credit collected (if deal closes and stock at/above short strike)
+        max_gain_mid = credit_mid
+        max_gain_ft = credit_ft
+
+        # Max loss = spread width - credit
+        max_loss_mid = spread_width - credit_mid
+        max_loss_ft = spread_width - credit_ft
+
+        if max_loss_mid <= 0 or max_loss_ft <= 0:
+            return None
+
+        # Risk/reward ratio = max gain / max loss
+        risk_reward_mid = max_gain_mid / max_loss_mid
+        risk_reward_ft = max_gain_ft / max_loss_ft
+
+        # Expected return: if deal closes at or above short strike, keep full credit
+        # For merger arb, we expect this outcome with high probability
+        expected_return_mid = max_gain_mid
+        expected_return_ft = max_gain_ft
+
+        # Annualized return (on max loss as capital at risk)
+        years_to_expiry = self.deal.days_to_close / 365
+        annualized_return_mid = (expected_return_mid / max_loss_mid) / years_to_expiry if years_to_expiry > 0 and max_loss_mid > 0 else 0
+        annualized_return_ft = (expected_return_ft / max_loss_ft) / years_to_expiry if years_to_expiry > 0 and max_loss_ft > 0 else 0
+
+        # Breakeven = short strike - credit
+        breakeven_mid = short_put.strike - credit_mid
+
+        # Probability (based on midpoint breakeven)
+        prob_above_breakeven = self.calculate_probability_above(
+            current_price,
+            breakeven_mid,
+            short_put.implied_vol if short_put.implied_vol and short_put.implied_vol > 0 else 0.30,
+            years_to_expiry
+        )
+        prob_success = prob_above_breakeven * self.deal.confidence
+
+        return TradeOpportunity(
+            strategy='put_spread',
+            contracts=[long_put, short_put],
+            entry_cost=max_loss_mid,  # Capital at risk
+            max_profit=max_gain_mid,
+            breakeven=breakeven_mid,
+            expected_return=expected_return_mid,
+            annualized_return=annualized_return_mid,
+            probability_of_profit=prob_success,
+            edge_vs_market=risk_reward_mid,  # Use risk/reward as edge metric
+            notes=f"Sell {short_put.strike}/Buy {long_put.strike} Put Spread - Credit: ${credit_mid:.2f} mid (${credit_ft:.2f} FT), R/R: {risk_reward_mid:.2f}x mid ({risk_reward_ft:.2f}x FT)",
+            entry_cost_ft=max_loss_ft,
+            expected_return_ft=expected_return_ft,
+            annualized_return_ft=annualized_return_ft
+        )
+
     def calculate_probability_itm(self, current: float, target: float,
                                   vol: float, time: float) -> float:
         """Calculate probability of being in the money"""
@@ -840,15 +939,62 @@ class MergerArbAnalyzer:
                         else:
                             print(f"DEBUG: ✗ Rejected {expiry} {long_call.strike}/{short_call.strike} spread - failed spread analysis")
 
-        # Add top 5 spreads from each expiration (sorted by annualized return)
+        # Add top 5 call spreads from each expiration (sorted by annualized return)
         for expiry, expiry_spreads in spreads_by_expiry.items():
             # Sort this expiration's spreads by annualized return
             expiry_spreads.sort(key=lambda x: x.annualized_return, reverse=True)
             top_5 = expiry_spreads[:5]
-            print(f"DEBUG: Adding top {len(top_5)} spreads from {expiry}")
+            print(f"DEBUG: Adding top {len(top_5)} call spreads from {expiry}")
             opportunities.extend(top_5)
 
-        # Sort all opportunities by annualized return
-        opportunities.sort(key=lambda x: x.annualized_return, reverse=True)
+        # Analyze PUT SPREADS - only within same expiration month
+        # Collect put spreads per expiration to ensure we show top 5 from each
+        put_spreads_by_expiry = defaultdict(list)
 
-        return opportunities[:top_n]
+        print(f"DEBUG: Analyzing PUT spreads for {len(options_by_expiry)} expirations")
+
+        for expiry, expiry_options in options_by_expiry.items():
+            # Separate puts from calls
+            puts = [opt for opt in expiry_options if opt.right == 'P']
+            sorted_puts = sorted(puts, key=lambda x: x.strike)
+
+            print(f"DEBUG PUT: Expiry {expiry}: {len(sorted_puts)} puts with strikes {[opt.strike for opt in sorted_puts]}")
+
+            for i in range(len(sorted_puts) - 1):
+                long_put = sorted_puts[i]  # Buy lower strike put
+
+                # Only consider long strikes below deal price
+                if long_put.strike >= self.deal.total_deal_value:
+                    continue
+
+                for j in range(i + 1, min(i + 5, len(sorted_puts))):  # Look at next 4 strikes
+                    short_put = sorted_puts[j]  # Sell higher strike put
+
+                    # For merger arbitrage credit put spreads:
+                    # Sell put at/near deal price, buy put below
+                    # Short strike should be at or near deal price (same range as call spreads)
+                    if (short_put.strike >= self.deal.total_deal_value * 0.95 and
+                        short_put.strike <= self.deal.total_deal_value + 0.50):
+                        print(f"DEBUG PUT: Analyzing {expiry} {long_put.strike}/{short_put.strike} put spread")
+                        opp = self.analyze_put_spread(long_put, short_put, current_price)
+                        if opp:
+                            put_spreads_by_expiry[expiry].append(opp)
+                            print(f"DEBUG PUT: Added {expiry} {long_put.strike}/{short_put.strike} put spread - expected return: ${opp.expected_return:.2f}, annualized: {opp.annualized_return:.2%}, R/R: {opp.edge_vs_market:.2f}x")
+                        else:
+                            print(f"DEBUG PUT: ✗ Rejected {expiry} {long_put.strike}/{short_put.strike} put spread - failed spread analysis")
+
+        # Add top 5 put spreads from each expiration (sorted by annualized return)
+        for expiry, expiry_put_spreads in put_spreads_by_expiry.items():
+            # Sort this expiration's put spreads by annualized return
+            expiry_put_spreads.sort(key=lambda x: x.annualized_return, reverse=True)
+            top_5 = expiry_put_spreads[:5]
+            print(f"DEBUG PUT: Adding top {len(top_5)} put spreads from {expiry}")
+            opportunities.extend(top_5)
+
+        # Don't limit or globally sort - return all call spreads and put spreads
+        # Frontend will display them in separate sections
+        print(f"DEBUG: Returning {len(opportunities)} total opportunities")
+        print(f"DEBUG: Call spreads: {len([o for o in opportunities if o.strategy == 'spread'])}")
+        print(f"DEBUG: Put spreads: {len([o for o in opportunities if o.strategy == 'put_spread'])}")
+
+        return opportunities

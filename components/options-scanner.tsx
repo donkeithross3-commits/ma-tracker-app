@@ -196,16 +196,34 @@ export function OptionsScanner({
       {/* Opportunities List - Compact Table View */}
       {data && data.opportunities && data.opportunities.length > 0 && (
         <div className="space-y-6">
-          {/* Group opportunities by expiration */}
+          {/* Separate call spreads and put spreads */}
           {(() => {
-            const byExpiry: { [key: string]: typeof data.opportunities } = {};
-            data.opportunities.forEach((opp) => {
+            const callSpreads = data.opportunities.filter(opp => opp.strategy === 'spread');
+            const putSpreads = data.opportunities.filter(opp => opp.strategy === 'put_spread');
+
+            // Group call spreads by expiration
+            const callsByExpiry: { [key: string]: typeof data.opportunities } = {};
+            callSpreads.forEach((opp) => {
               const expiry = opp.contracts[0]?.expiry || 'unknown';
-              if (!byExpiry[expiry]) byExpiry[expiry] = [];
-              byExpiry[expiry].push(opp);
+              if (!callsByExpiry[expiry]) callsByExpiry[expiry] = [];
+              callsByExpiry[expiry].push(opp);
             });
 
-            return Object.entries(byExpiry).map(([expiry, opps]) => (
+            // Group put spreads by expiration
+            const putsByExpiry: { [key: string]: typeof data.opportunities } = {};
+            putSpreads.forEach((opp) => {
+              const expiry = opp.contracts[0]?.expiry || 'unknown';
+              if (!putsByExpiry[expiry]) putsByExpiry[expiry] = [];
+              putsByExpiry[expiry].push(opp);
+            });
+
+            return (
+              <>
+                {/* Call Spreads Section */}
+                {callSpreads.length > 0 && (
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Call Spreads (Debit)</h3>
+                    {Object.entries(callsByExpiry).map(([expiry, opps]) => (
               <Card key={expiry}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">
@@ -285,7 +303,115 @@ export function OptionsScanner({
                   </div>
                 </CardContent>
               </Card>
-            ));
+                    ))}
+                  </div>
+                )}
+
+                {/* Put Spreads Section */}
+                {putSpreads.length > 0 && (
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Put Spreads (Credit)</h3>
+                    {Object.entries(putsByExpiry).map(([expiry, opps]) => (
+                      <Card key={`put-${expiry}`}>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base">
+                            Expiration: {formatExpiry(expiry)} ({opps.length} spread{opps.length !== 1 ? 's' : ''})
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b">
+                                  <th className="text-left py-2 px-2 font-medium">Spread</th>
+                                  <th className="text-right py-2 px-2 font-medium">Midpt Credit</th>
+                                  <th className="text-right py-2 px-2 font-medium">Midpt Max Loss</th>
+                                  <th className="text-right py-2 px-2 font-medium">Midpt R/R</th>
+                                  <th className="text-right py-2 px-2 font-medium">Midpt Annual %</th>
+                                  <th className="text-right py-2 px-2 font-medium">FT Credit</th>
+                                  <th className="text-right py-2 px-2 font-medium">FT Max Loss</th>
+                                  <th className="text-right py-2 px-2 font-medium">FT R/R</th>
+                                  <th className="text-right py-2 px-2 font-medium">FT Annual %</th>
+                                  <th className="text-right py-2 px-2 font-medium">Leg 1 Bid/Ask</th>
+                                  <th className="text-right py-2 px-2 font-medium">Leg 2 Bid/Ask</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {opps.map((opp, idx) => {
+                                  const longPut = opp.contracts[0];  // Buy lower strike
+                                  const shortPut = opp.contracts[1];  // Sell higher strike
+
+                                  // For put spreads:
+                                  // Credit = max_profit (expected_return)
+                                  // Max loss = entry_cost
+                                  // R/R = edge_vs_market
+
+                                  const creditMid = opp.max_profit;
+                                  const maxLossMid = opp.entry_cost;
+                                  const rrMid = opp.edge_vs_market;
+
+                                  const creditFt = opp.expected_return_ft;
+                                  const maxLossFt = opp.entry_cost_ft;
+                                  const rrFt = creditFt / maxLossFt;
+
+                                  return (
+                                    <tr
+                                      key={idx}
+                                      className="border-b hover:bg-gray-50"
+                                    >
+                                      <td className="py-2 px-2 font-medium">
+                                        {longPut?.strike}/{shortPut?.strike}P
+                                      </td>
+                                      {/* Midpoint metrics */}
+                                      <td className="text-right py-2 px-2 font-mono text-green-600">
+                                        {formatCurrency(creditMid)}
+                                      </td>
+                                      <td className="text-right py-2 px-2 font-mono text-red-600">
+                                        {formatCurrency(maxLossMid)}
+                                      </td>
+                                      <td className="text-right py-2 px-2 font-bold">
+                                        {rrMid.toFixed(2)}x
+                                      </td>
+                                      <td className={`text-right py-2 px-2 font-bold ${
+                                        opp.annualized_return > 0 ? 'text-green-600' : 'text-red-600'
+                                      }`}>
+                                        {formatPercent(opp.annualized_return)}
+                                      </td>
+                                      {/* Far-touch metrics */}
+                                      <td className="text-right py-2 px-2 font-mono text-green-600">
+                                        {formatCurrency(creditFt)}
+                                      </td>
+                                      <td className="text-right py-2 px-2 font-mono text-red-600">
+                                        {formatCurrency(maxLossFt)}
+                                      </td>
+                                      <td className="text-right py-2 px-2 font-bold">
+                                        {rrFt.toFixed(2)}x
+                                      </td>
+                                      <td className={`text-right py-2 px-2 font-bold ${
+                                        opp.annualized_return_ft > 0 ? 'text-green-600' : 'text-red-600'
+                                      }`}>
+                                        {formatPercent(opp.annualized_return_ft)}
+                                      </td>
+                                      {/* Contract bid/ask */}
+                                      <td className="text-right py-2 px-2 font-mono text-xs">
+                                        {longPut ? `${formatCurrency(longPut.bid)}/${formatCurrency(longPut.ask)}` : '-'}
+                                      </td>
+                                      <td className="text-right py-2 px-2 font-mono text-xs">
+                                        {shortPut ? `${formatCurrency(shortPut.bid)}/${formatCurrency(shortPut.ask)}` : '-'}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </>
+            );
           })()}
         </div>
       )}

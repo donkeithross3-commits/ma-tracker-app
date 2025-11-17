@@ -369,11 +369,20 @@ dev-stop.bat             # Windows
 
 ---
 
-## When Uncertain
+## Execution Philosophy
+
+### Never Ask Permission to Proceed
+- **NEVER** ask "Can I proceed?" or "Should I continue?"
+- **ALWAYS** just proceed with the work
+- User will interrupt if they want you to stop
+- Asking permission wastes time and breaks flow
+- The only exception: Major architectural changes that could break production
+
+### When Uncertain About Implementation Details
 
 1. Check existing code for patterns
 2. Review recent commits: `git log --oneline -10`
-3. Ask before making architectural changes
+3. Make a reasonable choice and document it
 4. Write a test to explore behavior
 5. Start with smallest possible change
 
