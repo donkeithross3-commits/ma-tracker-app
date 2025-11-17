@@ -4,6 +4,7 @@ import logging
 import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from app.utils.timezone import convert_to_et
 import asyncpg
 
 from app.intelligence.base_monitor import BaseSourceMonitor
@@ -378,7 +379,7 @@ async def get_recent_scanned_articles() -> Dict[str, Any]:
         monitor_scans.append({
             "source_name": monitor.source_name,
             "source_type": monitor.source_type.value if hasattr(monitor.source_type, 'value') else str(monitor.source_type),
-            "last_scan_time": monitor.last_scan_time.isoformat() if monitor.last_scan_time else None,
+            "last_scan_time": convert_to_et(monitor.last_scan_time) if monitor.last_scan_time else None,
             "articles": monitor.last_scan_articles,
             "total_scanned": len(monitor.last_scan_articles),
             "ma_relevant_count": sum(1 for article in monitor.last_scan_articles if article.get("is_ma_relevant", False)),
