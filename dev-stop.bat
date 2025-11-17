@@ -3,7 +3,7 @@ REM Development shutdown script for Windows
 REM Stops both Python backend and Next.js frontend
 
 echo ========================================
-echo Stopping M&A Tracker Development Environment
+echo "Stopping M&A Tracker Development Environment"
 echo ========================================
 echo.
 
