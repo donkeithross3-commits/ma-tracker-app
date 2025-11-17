@@ -1050,6 +1050,8 @@ class MergerArbAnalyzer:
         put_spreads_by_expiry = defaultdict(list)
 
         print(f"DEBUG: Analyzing PUT spreads for {len(options_by_expiry)} expirations")
+        print(f"DEBUG PUT: Deal price: ${self.deal.total_deal_value:.2f}")
+        print(f"DEBUG PUT: Short strike range: ${self.deal.total_deal_value * 0.95:.2f} - ${self.deal.total_deal_value + 0.50:.2f}")
 
         for expiry, expiry_options in options_by_expiry.items():
             # Separate puts from calls
@@ -1057,6 +1059,10 @@ class MergerArbAnalyzer:
             sorted_puts = sorted(puts, key=lambda x: x.strike)
 
             print(f"DEBUG PUT: Expiry {expiry}: {len(sorted_puts)} puts with strikes {[opt.strike for opt in sorted_puts]}")
+
+            # Show which puts have valid pricing
+            for p in sorted_puts:
+                print(f"DEBUG PUT: {expiry} {p.strike}P - bid: {p.bid}, ask: {p.ask}, mid: {p.mid_price}")
 
             for i in range(len(sorted_puts) - 1):
                 long_put = sorted_puts[i]  # Buy lower strike put
@@ -1080,6 +1086,8 @@ class MergerArbAnalyzer:
                             print(f"DEBUG PUT: Added {expiry} {long_put.strike}/{short_put.strike} put spread - expected return: ${opp.expected_return:.2f}, annualized: {opp.annualized_return:.2%}, R/R: {opp.edge_vs_market:.2f}x")
                         else:
                             print(f"DEBUG PUT: X Rejected {expiry} {long_put.strike}/{short_put.strike} put spread - failed spread analysis")
+                    else:
+                        print(f"DEBUG PUT: Skipped {expiry} {long_put.strike}/{short_put.strike} - short strike ${short_put.strike:.2f} outside range")
 
         # Add top 5 put spreads from each expiration (sorted by annualized return)
         for expiry, expiry_put_spreads in put_spreads_by_expiry.items():
