@@ -46,12 +46,49 @@
 ```
 
 ### Background Services (Python)
-- **EDGAR Monitor**: Scrapes SEC filings every 60s
-- **Intelligence Orchestrator**: Monitors external sources (Bloomberg Law, etc.)
+- **EDGAR Monitor**: Scrapes SEC filings every 60s for M&A activity
+- **Intelligence Orchestrator**: Monitors external news sources for deal mentions
 - **Halt Monitor**: Scrapes NASDAQ/NYSE for trading halts every 2s
 - **Research Worker**: Generates deal research reports using Claude AI
+- **Ticker Watch Monitor**: Continuously monitors EDGAR for filings from rumored deal tickers
 
-All monitors auto-start in `app/main.py` via FastAPI lifecycle events.
+All monitors can be controlled via API endpoints (see Intelligence Monitoring section below).
+
+### Intelligence Monitoring System
+
+**Active Sources:**
+- ✅ GlobeNewswire M&A (polls every 10 min)
+- ✅ GlobeNewswire Corporate Actions (polls every 15 min)
+- ✅ GlobeNewswire Executive Changes (polls every 30 min)
+- ✅ Seeking Alpha M&A
+- ✅ FTC Early Termination Notices
+- ❌ Reuters M&A (disabled - Cloudflare blocking)
+
+**How It Works:**
+1. Monitors scrape external sources for M&A mentions
+2. Rule-based detector identifies potential deals (keywords, NER, confidence scoring)
+3. Creates "staged deals" in database (status: pending)
+4. User reviews staged deals at `/staging` page
+5. Approved deals become active in `deal_intelligence` table
+6. System cross-references with EDGAR filings
+7. Ticker watch monitor tracks ongoing EDGAR activity for rumored deals
+
+**Starting/Stopping:**
+```bash
+# Start intelligence monitoring
+curl -X POST http://localhost:8000/intelligence/monitoring/start
+
+# Stop intelligence monitoring
+curl -X POST http://localhost:8000/intelligence/monitoring/stop
+
+# Check status
+curl http://localhost:8000/intelligence/monitoring/status
+```
+
+**Key Pages:**
+- `/staging` - Review scanned articles and staged deals
+- `/intelligence/deals` - View active intelligence deals
+- `/rumored-deals` - Watch list of rumored/unconfirmed deals
 
 ---
 
@@ -180,26 +217,87 @@ test: Add tests for deal approval flow
 
 ---
 
+## Development → Staging Workflow
+
+### Platform-Specific Deployment
+
+**macOS/Linux:**
+```bash
+./deploy-staging.sh      # Use this on Mac/Unix systems
+```
+
+**Windows:**
+```bash
+deploy-staging.bat       # Use this on Windows systems
+```
+
+### What the Deploy Script Does
+1. **Stops all services** (dev-stop.sh/bat)
+2. **Pulls latest code** from `origin/main` via `git reset --hard`
+3. **Cleans Python cache** (removes __pycache__ and .pyc files)
+4. **Cleans Next.js cache** (removes .next directory) ← CRITICAL for UI updates!
+5. **Cleans logs** (removes old log files)
+6. **Starts all services** (dev-start.sh/bat)
+7. **Auto-starts intelligence monitoring** via API call
+
+### Important: Next.js Cache Clearing
+
+**Problem**: Next.js caches compiled pages in `.next/`. If this isn't cleared after pulling code, UI changes won't appear.
+
+**Solution**: Always delete `.next/` before restarting Next.js:
+```bash
+rm -rf .next && npm run dev
+```
+
+The deploy scripts now handle this automatically.
+
+### Manual Cache Clear (if needed)
+```bash
+# If changes don't appear after deployment:
+rm -rf .next           # Clear Next.js cache
+rm -rf python-service/__pycache__  # Clear Python cache
+```
+
+---
+
 ## Service Management
 
 ### Starting Services
+
+**Quick Start (Recommended):**
+```bash
+./dev-start.sh           # Mac/Linux
+dev-start.bat            # Windows
+```
+
+**Manual Start:**
 ```bash
 # Frontend (from /ma-tracker-app)
 npm run dev              # Port 3000
 
 # Backend (from /ma-tracker-app/python-service)
-python3 start_server.py  # Port 8000
+/Users/donaldross/opt/anaconda3/bin/python3 start_server.py  # Port 8000
+```
+
+**Note**: Always use the absolute Python path (`/Users/donaldross/opt/anaconda3/bin/python3`) to ensure correct environment.
+
+### Stopping Services
+```bash
+./dev-stop.sh            # Mac/Linux
+dev-stop.bat             # Windows
 ```
 
 ### Health Checks
 - Frontend: http://localhost:3000
 - Backend: http://localhost:8000/health
-- Monitors: Check `/edgar/status`, `/halts/status`, etc.
+- Staging page: http://localhost:3000/staging
+- Monitors: Check `/edgar/status`, `/halts/status`, `/intelligence/monitoring/status`
 
 ### Database
-- PostgreSQL (Neon hosted)
+- PostgreSQL (Neon hosted - cloud database)
 - Connection string in `.env` (never commit!)
 - Use asyncpg for Python connections
+- Database migrations: Numbered SQL files in `python-service/migrations/`
 
 ---
 
