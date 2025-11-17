@@ -84,11 +84,6 @@ class TickerWatchMonitor:
         Returns:
             List of new filings found
         """
-        # Ensure since_date is timezone-aware for database query
-        # asyncpg returns naive datetimes, so we need to handle both
-        if since_date.tzinfo is None:
-            since_date = pytz.UTC.localize(since_date)
-
         async with self.pool.acquire() as conn:
             # Get all filings for this ticker since the last check
             filings = await conn.fetch(

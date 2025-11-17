@@ -16,13 +16,13 @@ UTC = pytz.UTC
 
 def get_current_utc() -> datetime:
     """
-    Get current time as timezone-aware UTC datetime.
+    Get current time as naive UTC datetime (for PostgreSQL compatibility).
 
     This is the STANDARD way to get current time in this codebase.
     Use this instead of datetime.now() or datetime.utcnow().
 
     Returns:
-        Timezone-aware datetime in UTC
+        Naive datetime in UTC (no timezone info, matches PostgreSQL storage)
 
     Example:
         from app.utils.timezone import get_current_utc
@@ -32,8 +32,12 @@ def get_current_utc() -> datetime:
 
         # For timestamp comparisons:
         cutoff = get_current_utc() - timedelta(days=7)
+
+    Note:
+        Returns naive UTC datetime because PostgreSQL stores timestamps without timezone info.
+        When retrieving from DB, asyncpg returns naive datetimes which can be compared directly.
     """
-    return datetime.now(UTC)
+    return datetime.utcnow()
 
 
 def convert_to_et(dt: Optional[datetime]) -> Optional[str]:
