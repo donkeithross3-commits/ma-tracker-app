@@ -1,8 +1,18 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Interactive Brokers Merger Arbitrage Option Scanner
 ====================================================
 Scans for attractive call options and spreads based on merger deal parameters
 """
+
+import sys
+import io
+
+# Force UTF-8 encoding for Windows compatibility
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import pandas as pd
 import numpy as np
@@ -1022,7 +1032,7 @@ class MergerArbAnalyzer:
                             spreads_by_expiry[expiry].append(opp)
                             print(f"DEBUG: Added {expiry} {long_call.strike}/{short_call.strike} spread - expected return: ${opp.expected_return:.2f}, annualized: {opp.annualized_return:.2%}")
                         else:
-                            print(f"DEBUG: ✗ Rejected {expiry} {long_call.strike}/{short_call.strike} spread - failed spread analysis")
+                            print(f"DEBUG: X Rejected {expiry} {long_call.strike}/{short_call.strike} spread - failed spread analysis")
 
         # Add top 5 call spreads from each expiration (sorted by annualized return)
         for expiry, expiry_spreads in spreads_by_expiry.items():
@@ -1066,7 +1076,7 @@ class MergerArbAnalyzer:
                             put_spreads_by_expiry[expiry].append(opp)
                             print(f"DEBUG PUT: Added {expiry} {long_put.strike}/{short_put.strike} put spread - expected return: ${opp.expected_return:.2f}, annualized: {opp.annualized_return:.2%}, R/R: {opp.edge_vs_market:.2f}x")
                         else:
-                            print(f"DEBUG PUT: ✗ Rejected {expiry} {long_put.strike}/{short_put.strike} put spread - failed spread analysis")
+                            print(f"DEBUG PUT: X Rejected {expiry} {long_put.strike}/{short_put.strike} put spread - failed spread analysis")
 
         # Add top 5 put spreads from each expiration (sorted by annualized return)
         for expiry, expiry_put_spreads in put_spreads_by_expiry.items():
