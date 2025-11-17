@@ -20,13 +20,14 @@ taskkill /F /FI "WINDOWTITLE eq MA Tracker Frontend*" 2>nul
 if %ERRORLEVEL% EQU 0 (
     echo Next.js frontend stopped
 ) else (
-    echo No Next.js process found
+    echo No Next.js process found by window title, trying by process name...
+    taskkill /F /IM node.exe 2>nul
+    if %ERRORLEVEL% EQU 0 (
+        echo Next.js frontend stopped
+    ) else (
+        echo No Node.js processes found
+    )
 )
-
-REM More aggressive cleanup - kill all node and python processes if needed
-REM Uncomment these lines if the above doesn't work:
-REM taskkill /F /IM node.exe 2>nul
-REM taskkill /F /IM python.exe 2>nul
 
 echo.
 echo ========================================
