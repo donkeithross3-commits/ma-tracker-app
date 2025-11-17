@@ -707,18 +707,20 @@ class MergerArbAnalyzer:
             value_at_deal_close = 0
 
         # MIDPOINT calculations
-        max_profit_mid = value_at_deal_close - spread_cost_mid
-        if max_profit_mid <= 0:
+        # For merger arb, expected return = spread value at close - cost
+        # (not probability-weighted - the risk is in taking the trade or not)
+        expected_return_mid = value_at_deal_close - spread_cost_mid
+        if expected_return_mid <= 0:
             return None
 
+        max_profit_mid = expected_return_mid  # Same as expected return for merger arb
         breakeven_mid = long_call.strike + spread_cost_mid
-        expected_return_mid = (self.deal.confidence * value_at_deal_close) - spread_cost_mid
 
         years_to_expiry = self.deal.days_to_close / 365
         annualized_return_mid = (expected_return_mid / spread_cost_mid) / years_to_expiry if years_to_expiry > 0 and spread_cost_mid > 0 else 0
 
         # FAR-TOUCH calculations
-        expected_return_ft = (self.deal.confidence * value_at_deal_close) - spread_cost_ft
+        expected_return_ft = value_at_deal_close - spread_cost_ft
         annualized_return_ft = (expected_return_ft / spread_cost_ft) / years_to_expiry if years_to_expiry > 0 and spread_cost_ft > 0 else 0
 
         # Probability (based on midpoint breakeven)
