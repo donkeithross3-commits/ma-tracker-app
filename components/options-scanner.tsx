@@ -23,15 +23,19 @@ interface OptionContract {
 
 interface Opportunity {
   strategy: string;
-  entry_cost: number;
+  entry_cost: number;  // Midpoint cost
   max_profit: number;
   breakeven: number;
-  expected_return: number;
-  annualized_return: number;
+  expected_return: number;  // Midpoint expected return
+  annualized_return: number;  // Midpoint annualized return
   probability_of_profit: number;
   edge_vs_market: number;
   notes: string;
   contracts: OptionContract[];
+  // Far-touch metrics
+  entry_cost_ft: number;
+  expected_return_ft: number;
+  annualized_return_ft: number;
 }
 
 interface ScannerResponse {
@@ -214,14 +218,14 @@ export function OptionsScanner({
                       <thead>
                         <tr className="border-b">
                           <th className="text-left py-2 px-2 font-medium">Spread</th>
-                          <th className="text-right py-2 px-2 font-medium">Cost</th>
-                          <th className="text-right py-2 px-2 font-medium">Max Profit</th>
-                          <th className="text-right py-2 px-2 font-medium">Exp Return</th>
-                          <th className="text-right py-2 px-2 font-medium">Annual %</th>
-                          <th className="text-right py-2 px-2 font-medium">Prob</th>
-                          <th className="text-right py-2 px-2 font-medium">Breakeven</th>
-                          <th className="text-right py-2 px-2 font-medium">Long Bid/Ask</th>
-                          <th className="text-right py-2 px-2 font-medium">Short Bid/Ask</th>
+                          <th className="text-right py-2 px-2 font-medium">Midpt Cost</th>
+                          <th className="text-right py-2 px-2 font-medium">Midpt Exp Return</th>
+                          <th className="text-right py-2 px-2 font-medium">Midpt Annual %</th>
+                          <th className="text-right py-2 px-2 font-medium">FT Cost</th>
+                          <th className="text-right py-2 px-2 font-medium">FT Exp Return</th>
+                          <th className="text-right py-2 px-2 font-medium">FT Annual %</th>
+                          <th className="text-right py-2 px-2 font-medium">Leg 1 Bid/Ask</th>
+                          <th className="text-right py-2 px-2 font-medium">Leg 2 Bid/Ask</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -231,18 +235,14 @@ export function OptionsScanner({
                           return (
                             <tr
                               key={idx}
-                              className={`border-b hover:bg-gray-50 ${
-                                opp.annualized_return < 0 ? 'bg-red-50' : ''
-                              }`}
+                              className="border-b hover:bg-gray-50"
                             >
                               <td className="py-2 px-2 font-medium">
                                 {longContract?.strike}/{shortContract?.strike}
                               </td>
+                              {/* Midpoint metrics */}
                               <td className="text-right py-2 px-2 font-mono">
                                 {formatCurrency(opp.entry_cost)}
-                              </td>
-                              <td className="text-right py-2 px-2 font-mono text-green-600">
-                                {formatCurrency(opp.max_profit)}
                               </td>
                               <td className="text-right py-2 px-2">
                                 <div className="font-mono">{formatCurrency(opp.expected_return)}</div>
@@ -255,12 +255,22 @@ export function OptionsScanner({
                               }`}>
                                 {formatPercent(opp.annualized_return)}
                               </td>
+                              {/* Far-touch metrics */}
                               <td className="text-right py-2 px-2 font-mono">
-                                {formatPercent(opp.probability_of_profit)}
+                                {formatCurrency(opp.entry_cost_ft)}
                               </td>
-                              <td className="text-right py-2 px-2 font-mono">
-                                {formatCurrency(opp.breakeven)}
+                              <td className="text-right py-2 px-2">
+                                <div className="font-mono">{formatCurrency(opp.expected_return_ft)}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {formatPercent(opp.expected_return_ft / opp.entry_cost_ft)}
+                                </div>
                               </td>
+                              <td className={`text-right py-2 px-2 font-bold ${
+                                opp.annualized_return_ft > 0 ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                                {formatPercent(opp.annualized_return_ft)}
+                              </td>
+                              {/* Contract bid/ask */}
                               <td className="text-right py-2 px-2 font-mono text-xs">
                                 {longContract ? `${formatCurrency(longContract.bid)}/${formatCurrency(longContract.ask)}` : '-'}
                               </td>

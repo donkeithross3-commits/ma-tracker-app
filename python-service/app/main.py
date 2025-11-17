@@ -99,15 +99,19 @@ class OptionContract(BaseModel):
 
 class Opportunity(BaseModel):
     strategy: str
-    entry_cost: float
+    entry_cost: float  # Midpoint cost
     max_profit: float
     breakeven: float
-    expected_return: float
-    annualized_return: float
+    expected_return: float  # Midpoint expected return
+    annualized_return: float  # Midpoint annualized return
     probability_of_profit: float
     edge_vs_market: float
     notes: str
     contracts: List[OptionContract]
+    # Far-touch metrics
+    entry_cost_ft: float = 0.0
+    expected_return_ft: float = 0.0
+    annualized_return_ft: float = 0.0
 
 
 class ScannerResponse(BaseModel):

@@ -73,14 +73,18 @@ class TradeOpportunity:
     """Identified trading opportunity"""
     strategy: str  # 'call' or 'spread'
     contracts: List[OptionData]
-    entry_cost: float
+    entry_cost: float  # Midpoint cost (default)
     max_profit: float
     breakeven: float
-    expected_return: float
-    annualized_return: float
+    expected_return: float  # Midpoint expected return
+    annualized_return: float  # Midpoint annualized return
     probability_of_profit: float
     edge_vs_market: float
     notes: str
+    # Far-touch metrics (worst-case execution)
+    entry_cost_ft: float = 0.0  # Far-touch cost (pay ask, sell bid)
+    expected_return_ft: float = 0.0  # Far-touch expected return
+    annualized_return_ft: float = 0.0  # Far-touch annualized return
 
 
 class IBMergerArbScanner(EWrapper, EClient):
@@ -677,39 +681,19 @@ class MergerArbAnalyzer:
         # Calculate spread cost
         if long_call.mid_price <= 0 or short_call.mid_price <= 0:
             return None
-
-        spread_cost = long_call.mid_price - short_call.mid_price
-
-        if spread_cost <= 0:
+        if long_call.ask <= 0 or short_call.bid <= 0:
             return None
 
-        # Max profit is capped at deal price for merger arbitrage
-        # If stock goes to deal price, we get intrinsic value up to that point
-        if self.deal.total_deal_value >= short_call.strike:
-            # Deal price above short strike - max profit is full spread width
-            max_profit = (short_call.strike - long_call.strike) - spread_cost
-        else:
-            # Deal price below short strike - max profit is capped at deal price
-            max_profit = (self.deal.total_deal_value - long_call.strike) - spread_cost
+        # MIDPOINT spread cost (using mid prices)
+        spread_cost_mid = long_call.mid_price - short_call.mid_price
 
-        if max_profit <= 0:
+        # FAR-TOUCH spread cost (pay ask for long, receive bid for short)
+        spread_cost_ft = long_call.ask - short_call.bid
+
+        if spread_cost_mid <= 0 or spread_cost_ft <= 0:
             return None
 
-        # Breakeven
-        breakeven = long_call.strike + spread_cost
-
-        # Probability of profit (simplified)
-        prob_above_breakeven = self.calculate_probability_above(
-            current_price,
-            breakeven,
-            long_call.implied_vol if long_call.implied_vol > 0 else 0.30,
-            self.deal.days_to_close / 365
-        )
-
-        prob_success = prob_above_breakeven * self.deal.confidence
-
-        # Expected return calculation for merger arbitrage
-        # We assume stock goes to deal price if deal closes, zero if it fails
+        # Value at deal close (same for both calculations)
         if self.deal.total_deal_value >= short_call.strike:
             # Deal price at or above short strike - get full spread value
             value_at_deal_close = short_call.strike - long_call.strike
@@ -720,26 +704,44 @@ class MergerArbAnalyzer:
             # Deal price below long strike - spread expires worthless
             value_at_deal_close = 0
 
-        # Expected value = (probability of deal) * (value at close - cost) + (probability of failure) * (-cost)
-        # Simplifies to: deal_confidence * value_at_close - cost
-        expected_return = (self.deal.confidence * value_at_deal_close) - spread_cost
+        # MIDPOINT calculations
+        max_profit_mid = value_at_deal_close - spread_cost_mid
+        if max_profit_mid <= 0:
+            return None
 
-        # Annualized return
+        breakeven_mid = long_call.strike + spread_cost_mid
+        expected_return_mid = (self.deal.confidence * value_at_deal_close) - spread_cost_mid
+
         years_to_expiry = self.deal.days_to_close / 365
-        annualized_return = (expected_return / spread_cost) / years_to_expiry if years_to_expiry > 0 else 0
+        annualized_return_mid = (expected_return_mid / spread_cost_mid) / years_to_expiry if years_to_expiry > 0 and spread_cost_mid > 0 else 0
+
+        # FAR-TOUCH calculations
+        expected_return_ft = (self.deal.confidence * value_at_deal_close) - spread_cost_ft
+        annualized_return_ft = (expected_return_ft / spread_cost_ft) / years_to_expiry if years_to_expiry > 0 and spread_cost_ft > 0 else 0
+
+        # Probability (based on midpoint breakeven)
+        prob_above_breakeven = self.calculate_probability_above(
+            current_price,
+            breakeven_mid,
+            long_call.implied_vol if long_call.implied_vol > 0 else 0.30,
+            self.deal.days_to_close / 365
+        )
+        prob_success = prob_above_breakeven * self.deal.confidence
 
         return TradeOpportunity(
             strategy='spread',
             contracts=[long_call, short_call],
-            entry_cost=spread_cost,
-            max_profit=max_profit,
-            breakeven=breakeven,
-            expected_return=expected_return,
-            annualized_return=annualized_return,
+            entry_cost=spread_cost_mid,
+            max_profit=max_profit_mid,
+            breakeven=breakeven_mid,
+            expected_return=expected_return_mid,
+            annualized_return=annualized_return_mid,
             probability_of_profit=prob_success,
-            edge_vs_market=expected_return / spread_cost,
-            notes=f"Buy {long_call.strike}/{short_call.strike} Call Spread @ ${spread_cost:.2f}, "
-                  f"Max profit: ${max_profit:.2f}"
+            edge_vs_market=expected_return_mid / spread_cost_mid,
+            notes=f"Buy {long_call.strike}/{short_call.strike} Call Spread @ ${spread_cost_mid:.2f} mid (${spread_cost_ft:.2f} FT)",
+            entry_cost_ft=spread_cost_ft,
+            expected_return_ft=expected_return_ft,
+            annualized_return_ft=annualized_return_ft
         )
 
     def calculate_probability_itm(self, current: float, target: float,
