@@ -3,7 +3,7 @@ REM Development startup script for Windows
 REM Starts both Python backend and Next.js frontend
 
 echo ========================================
-echo Starting M&A Tracker Development Environment
+echo Starting MA Tracker Development Environment
 echo ========================================
 echo.
 
@@ -13,7 +13,7 @@ if not exist logs mkdir logs
 REM Start Python backend in background
 echo Starting Python backend (port 8000)...
 cd python-service
-start "M&A Tracker Backend" /MIN cmd /c "py -3.11 start_server.py > ..\logs\python-backend.log 2>&1"
+start "MA Tracker Backend" /MIN cmd /c "py -3.11 start_server.py > ..\logs\python-backend.log 2>&1"
 cd ..
 
 REM Wait a moment for backend to initialize
@@ -22,7 +22,7 @@ timeout /t 5 /nobreak >nul
 
 REM Start Next.js frontend in background
 echo Starting Next.js frontend (port 3000)...
-start "M&A Tracker Frontend" /MIN cmd /c "npm run dev > logs\nextjs-frontend.log 2>&1"
+start "MA Tracker Frontend" /MIN cmd /c "npm run dev > logs\nextjs-frontend.log 2>&1"
 
 echo.
 echo ========================================

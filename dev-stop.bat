@@ -3,12 +3,12 @@ REM Development shutdown script for Windows
 REM Stops both Python backend and Next.js frontend
 
 echo ========================================
-echo "Stopping M&A Tracker Development Environment"
+echo Stopping MA Tracker Development Environment
 echo ========================================
 echo.
 
 echo Stopping Python backend (uvicorn)...
-taskkill /F /IM python.exe /FI "WINDOWTITLE eq*uvicorn*" 2>nul
+taskkill /F /FI "WINDOWTITLE eq MA Tracker Backend*" 2>nul
 if %ERRORLEVEL% EQU 0 (
     echo Python backend stopped
 ) else (
@@ -16,7 +16,7 @@ if %ERRORLEVEL% EQU 0 (
 )
 
 echo Stopping Next.js frontend (node)...
-taskkill /F /IM node.exe /FI "WINDOWTITLE eq*next*" 2>nul
+taskkill /F /FI "WINDOWTITLE eq MA Tracker Frontend*" 2>nul
 if %ERRORLEVEL% EQU 0 (
     echo Next.js frontend stopped
 ) else (
