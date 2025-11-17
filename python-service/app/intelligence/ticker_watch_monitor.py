@@ -16,6 +16,7 @@ from typing import List, Dict, Any, Set
 from datetime import datetime, timedelta
 from app.utils.timezone import get_current_utc
 import asyncpg
+import pytz
 
 from app.intelligence.models import DealMention, SourceType, MentionType
 from app.intelligence.edgar_cross_reference import EdgarCrossReference
@@ -83,6 +84,11 @@ class TickerWatchMonitor:
         Returns:
             List of new filings found
         """
+        # Ensure since_date is timezone-aware for database query
+        # asyncpg returns naive datetimes, so we need to handle both
+        if since_date.tzinfo is None:
+            since_date = pytz.UTC.localize(since_date)
+
         async with self.pool.acquire() as conn:
             # Get all filings for this ticker since the last check
             filings = await conn.fetch(
