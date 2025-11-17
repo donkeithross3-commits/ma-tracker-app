@@ -170,32 +170,67 @@ export default function StagingPage() {
       console.log("[PERF] Starting parallel prefetch of ALL tabs");
       const startTime = performance.now();
 
-      // Fire ALL requests simultaneously
+      // Fire ALL requests simultaneously and cache them
       await Promise.allSettled([
-        // EDGAR pending deals (most common view)
-        fetch("/api/edgar/staged-deals?status=pending").then(r => r.json()).then(setDeals).catch(() => setDeals([])),
-        // Intelligence pending deals
+        // EDGAR deals - all filter states
+        fetch("/api/edgar/staged-deals?status=pending").then(r => r.json()).then(data => {
+          if (Array.isArray(data)) {
+            stagingCache.set(CacheKeys.EDGAR_DEALS("pending"), data);
+            if (filter === "pending") setDeals(data);
+          }
+        }).catch(() => {}),
+        fetch("/api/edgar/staged-deals?status=approved").then(r => r.json()).then(data => {
+          if (Array.isArray(data)) {
+            stagingCache.set(CacheKeys.EDGAR_DEALS("approved"), data);
+          }
+        }).catch(() => {}),
+        fetch("/api/edgar/staged-deals?status=rejected").then(r => r.json()).then(data => {
+          if (Array.isArray(data)) {
+            stagingCache.set(CacheKeys.EDGAR_DEALS("rejected"), data);
+          }
+        }).catch(() => {}),
+
+        // Intelligence deals - all tier states
         fetch("/api/intelligence/rumored-deals?exclude_watch_list=true").then(r => r.json()).then(data => {
           const dealsArray = Array.isArray(data) ? data : (data.deals || []);
-          setIntelligenceDeals(dealsArray.map((d: any) => normalizeDeal(d)));
-        }).catch(() => setIntelligenceDeals([])),
+          const normalized = dealsArray.map((d: any) => normalizeDeal(d));
+          stagingCache.set(CacheKeys.INTELLIGENCE_DEALS("pending"), normalized);
+          if (tierFilter === "pending") setIntelligenceDeals(normalized);
+        }).catch(() => {}),
+        fetch("/api/intelligence/rumored-deals?watch_list_only=true").then(r => r.json()).then(data => {
+          const dealsArray = Array.isArray(data) ? data : (data.deals || []);
+          const normalized = dealsArray.map((d: any) => normalizeDeal(d));
+          stagingCache.set(CacheKeys.INTELLIGENCE_DEALS("watchlist"), normalized);
+        }).catch(() => {}),
+        fetch("/api/intelligence/deals?status=rejected").then(r => r.json()).then(data => {
+          const dealsArray = Array.isArray(data) ? data : (data.deals || []);
+          const normalized = dealsArray.map((d: any) => normalizeDeal(d));
+          stagingCache.set(CacheKeys.INTELLIGENCE_DEALS("rejected"), normalized);
+        }).catch(() => {}),
+
         // Halts
         fetch("/api/halts/recent?limit=100").then(r => r.json()).then(data => {
-          setHalts(data.halts || []);
-          const tracked = data.halts?.filter((h: any) => h.is_tracked_ticker) || [];
+          const halts = data.halts || [];
+          stagingCache.set(CacheKeys.HALTS, halts);
+          setHalts(halts);
+          const tracked = halts.filter((h: any) => h.is_tracked_ticker) || [];
           setTrackedHaltsCount(tracked.length);
         }).catch(() => setHalts([])),
-        // Monitoring status
-        fetchMonitoringStatus(),
-        // Watch list for intelligence tab
+
+        // Watch list
         fetch("/api/intelligence/watch-list").then(r => r.json()).then(data => {
           const tickers = new Set<string>(data.watch_list.map((item: any) => item.ticker));
+          stagingCache.set(CacheKeys.WATCH_LIST, tickers);
           setWatchListTickers(tickers);
-        }).catch(() => {})
+        }).catch(() => {}),
+
+        // Monitoring status
+        fetchMonitoringStatus()
       ]);
 
       const endTime = performance.now();
       console.log(`[PERF] Parallel prefetch completed in ${(endTime - startTime).toFixed(0)}ms`);
+      console.log(`[CACHE] Prefetched 6+ data sets into cache`);
       setLoading(false);
     };
 
