@@ -384,18 +384,29 @@ class IBMergerArbScanner(EWrapper, EClient):
                         # Debug: Show specific options we're interested in
                         if expiry == '20260618' and strike in [200.0, 210.0]:
                             print(f"DEBUG: Found {expiry} {strike}C - bid: {option.bid}, ask: {option.ask}, mid: {option.mid_price}")
+                    else:
+                        # Debug: Show why options are filtered out
+                        print(f"DEBUG: Filtered out {expiry} {strike}C - no valid pricing data from IB")
 
                     # Small delay to avoid overwhelming IB
                     time.sleep(0.5)
 
         print(f"Retrieved {len(options)} option contracts (limited to avoid IB limits)")
 
-        # Debug: Show what we got for June 2026
+        # Debug: Show what we got for June 2026 and September 2026
         june_options = [o for o in options if o.expiry == '20260618']
         if june_options:
             print(f"DEBUG: June 2026 options retrieved: {len(june_options)} contracts")
             for opt in june_options:
                 print(f"  {opt.strike}C - bid: {opt.bid}, ask: {opt.ask}, mid: {opt.mid_price}")
+
+        sept_options = [o for o in options if o.expiry == '20260918']
+        if sept_options:
+            print(f"DEBUG: September 2026 options retrieved: {len(sept_options)} contracts")
+            for opt in sept_options:
+                print(f"  {opt.strike}C - bid: {opt.bid}, ask: {opt.ask}, mid: {opt.mid_price}")
+        else:
+            print(f"DEBUG: No September 2026 options retrieved - likely filtered due to no pricing data")
 
         return options
 
@@ -561,8 +572,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Request market data and Greeks with RTH=False for after-hours data
         self.reqMktData(req_id, contract, "100,101,104,106", False, False, [])
 
-        # Wait for data
-        time.sleep(1)
+        # Wait for data - longer wait for far-dated options
+        time.sleep(2)
 
         # Cancel market data
         self.cancelMktData(req_id)
@@ -787,9 +798,17 @@ class MergerArbAnalyzer:
         for option in options:
             options_by_expiry[option.expiry].append(option)
 
+        print(f"DEBUG: Analyzing spreads for {len(options_by_expiry)} expirations")
+        print(f"DEBUG: Deal price: ${self.deal.total_deal_value:.2f}")
+        print(f"DEBUG: Short strike range: ${self.deal.total_deal_value * 0.95:.2f} - ${self.deal.total_deal_value + 0.50:.2f}")
+
         # Analyze spreads - only within same expiration month
+        # Collect spreads per expiration to ensure we show top 3 from each
+        spreads_by_expiry = defaultdict(list)
+
         for expiry, expiry_options in options_by_expiry.items():
             sorted_options = sorted(expiry_options, key=lambda x: x.strike)
+            print(f"DEBUG: Expiry {expiry}: {len(sorted_options)} options with strikes {[opt.strike for opt in sorted_options]}")
 
             for i in range(len(sorted_options) - 1):
                 long_call = sorted_options[i]
@@ -807,11 +826,23 @@ class MergerArbAnalyzer:
                     # This captures at-the-money spreads without including far OTM short strikes
                     if (short_call.strike >= self.deal.total_deal_value * 0.95 and
                         short_call.strike <= self.deal.total_deal_value + 0.50):
+                        print(f"DEBUG: Analyzing {expiry} {long_call.strike}/{short_call.strike} spread")
                         opp = self.analyze_call_spread(long_call, short_call, current_price)
-                        if opp and opp.expected_return > 0:
-                            opportunities.append(opp)
+                        if opp:  # Changed: accept any valid spread analysis (removed expected_return > 0 filter)
+                            spreads_by_expiry[expiry].append(opp)
+                            print(f"DEBUG: Added {expiry} {long_call.strike}/{short_call.strike} spread - expected return: ${opp.expected_return:.2f}, annualized: {opp.annualized_return:.2%}")
+                        else:
+                            print(f"DEBUG: ✗ Rejected {expiry} {long_call.strike}/{short_call.strike} spread - failed spread analysis")
 
-        # Sort by annualized return
+        # Add top 3 spreads from each expiration (sorted by annualized return)
+        for expiry, expiry_spreads in spreads_by_expiry.items():
+            # Sort this expiration's spreads by annualized return
+            expiry_spreads.sort(key=lambda x: x.annualized_return, reverse=True)
+            top_3 = expiry_spreads[:3]
+            print(f"DEBUG: Adding top {len(top_3)} spreads from {expiry}")
+            opportunities.extend(top_3)
+
+        # Sort all opportunities by annualized return
         opportunities.sort(key=lambda x: x.annualized_return, reverse=True)
 
         return opportunities[:top_n]

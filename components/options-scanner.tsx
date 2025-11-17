@@ -189,137 +189,94 @@ export function OptionsScanner({
         </Card>
       )}
 
-      {/* Opportunities List */}
+      {/* Opportunities List - Compact Table View */}
       {data && data.opportunities && data.opportunities.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">
-              Top Opportunities ({data.opportunities.length})
-            </h3>
-          </div>
+        <div className="space-y-6">
+          {/* Group opportunities by expiration */}
+          {(() => {
+            const byExpiry: { [key: string]: typeof data.opportunities } = {};
+            data.opportunities.forEach((opp) => {
+              const expiry = opp.contracts[0]?.expiry || 'unknown';
+              if (!byExpiry[expiry]) byExpiry[expiry] = [];
+              byExpiry[expiry].push(opp);
+            });
 
-          {data.opportunities.map((opp, index) => (
-            <Card key={index}>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-muted-foreground">
-                        #{index + 1}
-                      </span>
-                      <span className="capitalize">{opp.strategy}</span>
-                      {opp.annualized_return > 0 && (
-                        <TrendingUp className="h-4 w-4 text-green-600" />
-                      )}
-                    </CardTitle>
-                    <CardDescription className="mt-1">{opp.notes}</CardDescription>
+            return Object.entries(byExpiry).map(([expiry, opps]) => (
+              <Card key={expiry}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">
+                    Expiration: {formatExpiry(expiry)} ({opps.length} spread{opps.length !== 1 ? 's' : ''})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-2 px-2 font-medium">Spread</th>
+                          <th className="text-right py-2 px-2 font-medium">Cost</th>
+                          <th className="text-right py-2 px-2 font-medium">Max Profit</th>
+                          <th className="text-right py-2 px-2 font-medium">Exp Return</th>
+                          <th className="text-right py-2 px-2 font-medium">Annual %</th>
+                          <th className="text-right py-2 px-2 font-medium">Prob</th>
+                          <th className="text-right py-2 px-2 font-medium">Breakeven</th>
+                          <th className="text-right py-2 px-2 font-medium">Long Bid/Ask</th>
+                          <th className="text-right py-2 px-2 font-medium">Short Bid/Ask</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {opps.map((opp, idx) => {
+                          const longContract = opp.contracts[0];
+                          const shortContract = opp.contracts[1];
+                          return (
+                            <tr
+                              key={idx}
+                              className={`border-b hover:bg-gray-50 ${
+                                opp.annualized_return < 0 ? 'bg-red-50' : ''
+                              }`}
+                            >
+                              <td className="py-2 px-2 font-medium">
+                                {longContract?.strike}/{shortContract?.strike}
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono">
+                                {formatCurrency(opp.entry_cost)}
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono text-green-600">
+                                {formatCurrency(opp.max_profit)}
+                              </td>
+                              <td className="text-right py-2 px-2">
+                                <div className="font-mono">{formatCurrency(opp.expected_return)}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {formatPercent(opp.expected_return / opp.entry_cost)}
+                                </div>
+                              </td>
+                              <td className={`text-right py-2 px-2 font-bold ${
+                                opp.annualized_return > 0 ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                                {formatPercent(opp.annualized_return)}
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono">
+                                {formatPercent(opp.probability_of_profit)}
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono">
+                                {formatCurrency(opp.breakeven)}
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono text-xs">
+                                {longContract ? `${formatCurrency(longContract.bid)}/${formatCurrency(longContract.ask)}` : '-'}
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono text-xs">
+                                {shortContract ? `${formatCurrency(shortContract.bid)}/${formatCurrency(shortContract.ask)}` : '-'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-bold text-green-600">
-                      {formatPercent(opp.annualized_return)}
-                    </div>
-                    <div className="text-xs text-muted-foreground">Annualized</div>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-5">
-                  <div>
-                    <div className="text-sm text-muted-foreground">Entry Cost</div>
-                    <div className="text-lg font-bold">
-                      {formatCurrency(opp.entry_cost)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground">Max Profit</div>
-                    <div className="text-lg font-bold text-green-600">
-                      {formatCurrency(opp.max_profit)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground">Expected Return</div>
-                    <div className="text-lg font-bold">
-                      {formatCurrency(opp.expected_return)}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {formatPercent(opp.expected_return / opp.entry_cost)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground">Probability</div>
-                    <div className="text-lg font-bold">
-                      {formatPercent(opp.probability_of_profit)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground">Edge vs Market</div>
-                    <div
-                      className={`text-lg font-bold ${
-                        opp.edge_vs_market > 0 ? "text-green-600" : "text-red-600"
-                      }`}
-                    >
-                      {opp.edge_vs_market > 0 ? "+" : ""}
-                      {formatPercent(opp.edge_vs_market)}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Contract Details */}
-                <div className="mt-4 pt-4 border-t">
-                  <div className="text-sm font-medium mb-2">Contract Details:</div>
-                  <div className="space-y-2">
-                    {opp.contracts.map((contract, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between text-sm bg-gray-50 rounded p-2"
-                      >
-                        <div className="flex items-center gap-4">
-                          <span className="font-medium">
-                            {contract.symbol} {formatCurrency(contract.strike)}{" "}
-                            {contract.right === "C" ? "Call" : "Put"}
-                          </span>
-                          <span className="text-muted-foreground">
-                            Exp: {formatExpiry(contract.expiry)}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <div>
-                            <span className="text-muted-foreground">Bid/Ask: </span>
-                            <span className="font-mono">
-                              {formatCurrency(contract.bid)} / {formatCurrency(contract.ask)}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">IV: </span>
-                            <span className="font-mono">
-                              {contract.implied_vol != null ? formatPercent(contract.implied_vol) : 'N/A'}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Δ: </span>
-                            <span className="font-mono">{contract.delta != null ? contract.delta.toFixed(2) : 'N/A'}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-4 border-t flex items-center justify-between text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Breakeven: </span>
-                    <span className="font-semibold">{formatCurrency(opp.breakeven)}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Return on Risk: </span>
-                    <span className="font-semibold">
-                      {formatPercent(opp.max_profit / opp.entry_cost)}
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            ));
+          })()}
         </div>
       )}
 
