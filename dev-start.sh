@@ -99,9 +99,10 @@ echo ""
 echo -e "${BLUE}[3/5] Starting Python Backend (FastAPI)...${NC}"
 cd "$PYTHON_SERVICE_DIR"
 
-# Use existing start_server.py which handles env loading and validation
-echo "   Using start_server.py (handles env validation)"
-/Users/donaldross/opt/anaconda3/bin/python3 start_server.py > "$LOGS_DIR/python-backend.log" 2>&1 &
+# Activate venv and use its Python
+echo "   Activating venv and using start_server.py (handles env validation)"
+source venv/bin/activate
+python3 start_server.py > "$LOGS_DIR/python-backend.log" 2>&1 &
 PYTHON_PID=$!
 echo -e "   ${GREEN}✓ Started${NC} (PID: $PYTHON_PID, Log: logs/python-backend.log)"
 

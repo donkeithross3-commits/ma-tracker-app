@@ -35,12 +35,24 @@ class GlobeNewswireMonitor(BaseSourceMonitor):
     }
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
+        # Get feed category first to construct the proper source_name
+        config = config or {"feed_category": "ma"}
+        feed_category = config.get("feed_category", "ma")
+
+        # Create unique source_name for each feed category
+        source_name_map = {
+            "ma": "globenewswire_ma",
+            "corporate_actions": "globenewswire_corporate_actions",
+            "executive_changes": "globenewswire_executive_changes"
+        }
+        source_name = source_name_map.get(feed_category, "globenewswire")
+
         super().__init__(
-            source_name="globenewswire",
+            source_name=source_name,
             source_type=SourceType.NEWS,
-            config=config or {"feed_category": "ma"}
+            config=config
         )
-        self.feed_category = self.config.get("feed_category", "ma")
+        self.feed_category = feed_category
         self.feed_url = self.FEED_URLS.get(self.feed_category, self.FEED_URLS["ma"])
         self.seen_guids_this_cycle = set()
         self.parser = get_headline_parser()

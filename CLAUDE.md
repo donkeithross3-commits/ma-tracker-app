@@ -20,11 +20,16 @@ tail -f logs/nextjs-frontend.log
 
 ### Python Backend (FastAPI - Port 8000)
 
+**IMPORTANT: Always use the venv Python (Python 3.11+)**
+
 ```bash
 cd python-service
 
+# Activate venv first (required for all Python commands)
+source venv/bin/activate
+
 # Start server (validates env, starts uvicorn)
-/Users/donaldross/opt/anaconda3/bin/python3 start_server.py
+python3 start_server.py
 
 # Install dependencies
 pip install -r requirements.txt
