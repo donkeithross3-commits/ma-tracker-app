@@ -43,15 +43,23 @@ echo [6/6] Starting services...
 call dev-start.bat
 
 echo.
+echo Waiting for backend to fully initialize...
+timeout /t 10 /nobreak >nul
+
+echo Starting intelligence monitoring...
+curl -X POST http://localhost:8000/intelligence/monitoring/start
+
+echo.
 echo ========================================
 echo Deployment Complete!
 echo ========================================
 echo.
-echo Services should be starting up...
+echo Services running:
+echo   Backend: http://localhost:8000
+echo   Frontend: http://localhost:3000
+echo   Intelligence monitoring: STARTED
+echo.
 echo Check logs for any errors:
 echo   type logs\python-backend.log
 echo   type logs\nextjs-frontend.log
-echo.
-echo After services start, run:
-echo   curl -X POST http://localhost:8000/intelligence/monitoring/start
 echo.
