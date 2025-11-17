@@ -288,6 +288,34 @@ const deals = await prisma.deals.findMany()
 - Python uses **absolute path to Anaconda**: `/Users/donaldross/opt/anaconda3/bin/python3`
 - All scripts expect to be run from project root: `/Users/donaldross/ma-tracker-app`
 
+### Windows-Specific Considerations
+
+**The backend runs on Windows** in staging/production environments:
+
+1. **Encoding**: Always use UTF-8 for console output
+   - Windows console defaults to `cp1252` encoding
+   - Avoid unicode symbols (✓, ✗, etc.) in print statements
+   - Wrap stdout/stderr with UTF-8 TextIOWrapper if needed
+
+2. **File Paths**: Use cross-platform path handling
+   ```python
+   from pathlib import Path
+   # Good: Path("logs") / "backend.log"
+   # Bad: "logs\\backend.log"  # Unix incompatible
+   ```
+
+3. **Line Endings**: Git handles CRLF/LF conversion automatically
+   - Python files: LF (Unix)
+   - Batch files: CRLF (Windows)
+
+4. **Process Management**:
+   - Use `dev-start.bat` and `dev-stop.bat` for Windows
+   - Use `dev-start.sh` and `dev-stop.sh` for Mac/Linux (development)
+
+5. **Deployment**: The `deploy-staging.bat` script handles Windows backend deployment
+   - Always test encoding-sensitive code on Windows before deploying
+   - Check `logs/python-backend.log` after deployment for errors
+
 ### Testing Infrastructure
 
 **Test framework**: pytest (tests not yet written - see TESTING_PLAN.md)
@@ -364,13 +392,70 @@ See `start-claude-session.sh` for session initialization.
 
 ---
 
-## Production Deployment
+## Deployment Architecture
 
-- **Frontend**: Vercel (https://ma-tracker-app.vercel.app/)
-- **Backend**: Not yet deployed (runs locally)
-- **Database**: Neon (cloud PostgreSQL)
+### Production/Staging Environment
 
-Backend is designed for local execution to maintain IB Gateway connection.
+**Three-tier architecture with Windows backend server**:
+
+1. **Frontend** (Next.js on Vercel)
+   - URL: https://ma-tracker-app.vercel.app/
+   - Auto-deploys from `main` branch on GitHub
+   - Connects to backend API via `NEXT_PUBLIC_API_URL`
+   - Serves user interface, handles client-side routing
+
+2. **Backend** (FastAPI on Windows Server)
+   - Runs on Windows server (local or cloud Windows VM)
+   - **Must run on Windows** to access Interactive Brokers TWS/Gateway
+   - Deployed via `deploy-staging.bat` script (pulls from git, restarts services)
+   - Exposes REST API on port 8000
+   - **Critical**: Backend and IB Gateway run on same Windows machine
+
+3. **Database** (PostgreSQL on Neon)
+   - Cloud-hosted PostgreSQL database
+   - Accessed by backend via `DATABASE_URL` environment variable
+   - Shared between all environments
+
+### Why Windows Backend?
+
+The backend **must run on Windows** because:
+- Interactive Brokers TWS/IB Gateway only runs on Windows/Mac
+- Options scanner (`app/scanner.py`) requires direct connection to IB API
+- In production, power users' IB credentials power the options scanning system
+- Backend and IB Gateway must be on the same machine (localhost connection)
+
+### Deployment Process
+
+**Frontend** (automatic):
+```bash
+git push origin main
+# Vercel automatically builds and deploys
+```
+
+**Backend** (manual - on Windows server):
+```bash
+# On Windows staging/production server:
+cd ma-tracker-app
+deploy-staging.bat  # Pulls latest code, restarts backend
+```
+
+The `deploy-staging.bat` script:
+1. Stops backend services
+2. Pulls latest code from `main` branch
+3. Cleans Python cache
+4. Restarts backend with new code
+5. Auto-starts intelligence monitoring
+
+### Architecture Diagram
+```
+User Browser
+    ↓
+Next.js (Vercel)
+    ↓ API calls
+FastAPI Backend (Windows Server) ←→ IB Gateway (same Windows machine)
+    ↓
+PostgreSQL (Neon Cloud)
+```
 
 ---
 
