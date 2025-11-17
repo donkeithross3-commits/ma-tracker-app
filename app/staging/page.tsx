@@ -1275,8 +1275,8 @@ export default function StagingPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                {intelligenceSources.monitors.map((monitor: any) => (
-                  <div key={monitor.source_name} className="mb-6 last:mb-0">
+                {intelligenceSources.monitors.map((monitor: any, index: number) => (
+                  <div key={`${monitor.source_name}-${index}`} className="mb-6 last:mb-0">
                     <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
                       <h3 className="text-sm font-semibold text-gray-900 uppercase">{monitor.source_name.replace(/_/g, ' ')}</h3>
                       <div className="flex items-center gap-4 text-xs text-gray-600">
