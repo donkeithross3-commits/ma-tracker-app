@@ -840,13 +840,13 @@ class MergerArbAnalyzer:
                         else:
                             print(f"DEBUG: ✗ Rejected {expiry} {long_call.strike}/{short_call.strike} spread - failed spread analysis")
 
-        # Add top 3 spreads from each expiration (sorted by annualized return)
+        # Add top 5 spreads from each expiration (sorted by annualized return)
         for expiry, expiry_spreads in spreads_by_expiry.items():
             # Sort this expiration's spreads by annualized return
             expiry_spreads.sort(key=lambda x: x.annualized_return, reverse=True)
-            top_3 = expiry_spreads[:3]
-            print(f"DEBUG: Adding top {len(top_3)} spreads from {expiry}")
-            opportunities.extend(top_3)
+            top_5 = expiry_spreads[:5]
+            print(f"DEBUG: Adding top {len(top_5)} spreads from {expiry}")
+            opportunities.extend(top_5)
 
         # Sort all opportunities by annualized return
         opportunities.sort(key=lambda x: x.annualized_return, reverse=True)
