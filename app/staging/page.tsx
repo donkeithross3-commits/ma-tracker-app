@@ -276,11 +276,8 @@ export default function StagingPage() {
   const fetchIntelligenceSources = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        limit: '10'  // Get 10 most recent per source, regardless of date
-      });
-
-      const response = await fetch(`/api/intelligence/sources?${params}`);
+      // Fetch recent scanned articles (includes filtered and relevant articles)
+      const response = await fetch(`/api/intelligence/articles/recent`);
       const data = await response.json();
       setIntelligenceSources(data);
     } catch (error) {
@@ -854,7 +851,7 @@ export default function StagingPage() {
                       { key: "pending", label: "Pending", title: "Rumored deals awaiting approval or rejection" },
                       { key: "watchlist", label: "Rumor Watch List", title: "Tickers added to rumor watch list for monitoring" },
                       { key: "rejected", label: "Rejected", title: "Rejected deals (will not reappear in rumor queue)" },
-                      { key: "all_articles", label: "All Articles", title: "M&A-relevant articles detected by monitors (for performance verification)" }
+                      { key: "all_articles", label: "Recent Articles", title: "All articles scanned by monitors (shows which passed M&A filter)" }
                     ].map((f) => (
                       <button
                         key={f.key}
@@ -1259,90 +1256,100 @@ export default function StagingPage() {
               </div>
             )
           ) : activeTab === "intelligence" && tierFilter === "all_articles" ? (
-            // All Articles View
+            // Recent Articles View - Shows ALL scanned articles (both filtered and M&A-relevant)
             !intelligenceSources ? (
-              <div className="p-8 text-center text-gray-500">Loading sources...</div>
-            ) : Object.keys(intelligenceSources.sources_by_type || {}).length === 0 ? (
+              <div className="p-8 text-center text-gray-500">Loading recent articles...</div>
+            ) : intelligenceSources.status === "not_running" ? (
               <div className="p-8 text-center">
-                <p className="text-gray-500 mb-2">No M&A-relevant articles found</p>
-                {!intelligenceStatus?.is_running && (
-                  <p className="text-sm text-gray-400">
-                    Start intelligence monitoring to detect articles from news sources
-                  </p>
-                )}
+                <p className="text-gray-500 mb-2">Intelligence monitoring is not running</p>
+                <p className="text-sm text-gray-400">
+                  Start intelligence monitoring to scan articles from news sources
+                </p>
+              </div>
+            ) : !intelligenceSources.monitors || intelligenceSources.monitors.length === 0 ? (
+              <div className="p-8 text-center">
+                <p className="text-gray-500 mb-2">No monitors have scanned articles yet</p>
+                <p className="text-sm text-gray-400">
+                  Wait for the monitoring cycle to complete
+                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
-                {Object.entries(intelligenceSources.sources_by_type).map(([sourceName, articles]: [string, any]) => (
-                  <div key={sourceName} className="mb-6 last:mb-0">
+                {intelligenceSources.monitors.map((monitor: any) => (
+                  <div key={monitor.source_name} className="mb-6 last:mb-0">
                     <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-gray-900 uppercase">{sourceName.replace(/_/g, ' ')}</h3>
+                      <h3 className="text-sm font-semibold text-gray-900 uppercase">{monitor.source_name.replace(/_/g, ' ')}</h3>
                       <div className="flex items-center gap-4 text-xs text-gray-600">
-                        <span>Articles: <strong>{articles.length}</strong></span>
-                        {intelligenceSources.monitor_stats?.[sourceName] && (
-                          <>
-                            <span>Total Fetched: <strong>{intelligenceSources.monitor_stats[sourceName].total_articles_fetched || 0}</strong></span>
-                            <span>Last Check: <strong>{intelligenceSources.monitor_stats[sourceName].last_check_at ? formatDateTime(intelligenceSources.monitor_stats[sourceName].last_check_at) : 'Never'}</strong></span>
-                          </>
+                        <span>Total Scanned: <strong>{monitor.total_scanned || 0}</strong></span>
+                        <span className="text-green-600">M&A Relevant: <strong>{monitor.ma_relevant_count || 0}</strong></span>
+                        <span className="text-red-600">Filtered Out: <strong>{(monitor.total_scanned || 0) - (monitor.ma_relevant_count || 0)}</strong></span>
+                        {monitor.last_scan_time && (
+                          <span>Last Scan: <strong>{formatDateTime(monitor.last_scan_time)}</strong></span>
                         )}
                       </div>
                     </div>
-                    <table className="w-full">
-                      <thead className="bg-gray-100 border-b border-gray-200">
-                        <tr>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase w-1/2">Headline</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Published</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Detected</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Score</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {articles.map((article: any) => (
-                          <tr key={article.source_id} className="hover:bg-gray-50">
-                            <td className="px-3 py-3">
-                              <div className="text-sm">
-                                {article.source_url ? (
-                                  <a
-                                    href={article.source_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                                  >
-                                    {article.headline || 'No headline'}
-                                  </a>
-                                ) : (
-                                  <span className="text-gray-900 font-medium">{article.headline || 'No headline'}</span>
-                                )}
-                                {article.content_snippet && (
-                                  <div className="text-xs text-gray-600 mt-1 line-clamp-2">{article.content_snippet}</div>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-3 py-3">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                {article.mention_type}
-                              </span>
-                            </td>
-                            <td className="px-3 py-3 text-xs text-gray-600">
-                              {article.source_published_at ? formatDateTime(article.source_published_at) : '-'}
-                            </td>
-                            <td className="px-3 py-3 text-xs text-gray-600">
-                              {formatDateTime(article.detected_at)}
-                            </td>
-                            <td className="px-3 py-3">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                article.credibility_score >= 0.7 ? 'bg-green-100 text-green-800' :
-                                article.credibility_score >= 0.5 ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {(article.credibility_score * 100).toFixed(0)}%
-                              </span>
-                            </td>
+                    {monitor.articles && monitor.articles.length > 0 ? (
+                      <table className="w-full">
+                        <thead className="bg-gray-100 border-b border-gray-200">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase w-1/2">Headline</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Filter Status</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Target</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Acquirer</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Scanned At</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {monitor.articles.map((article: any, idx: number) => (
+                            <tr
+                              key={`${monitor.source_name}-${idx}`}
+                              className={`hover:bg-gray-50 ${article.is_ma_relevant ? 'bg-green-50' : 'bg-red-50'}`}
+                            >
+                              <td className="px-3 py-3">
+                                <div className="text-sm">
+                                  {article.url && article.url !== 'N/A' ? (
+                                    <a
+                                      href={article.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                    >
+                                      {article.title || 'No headline'}
+                                    </a>
+                                  ) : (
+                                    <span className="text-gray-900 font-medium">{article.title || 'No headline'}</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-3">
+                                {article.is_ma_relevant ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                    ✓ M&A Relevant
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                                    ✗ Filtered Out
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-3 text-xs text-gray-600">
+                                {article.target_name || '-'}
+                              </td>
+                              <td className="px-3 py-3 text-xs text-gray-600">
+                                {article.acquirer_name || '-'}
+                              </td>
+                              <td className="px-3 py-3 text-xs text-gray-600">
+                                {article.scanned_at ? formatDateTime(article.scanned_at) : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="p-4 text-center text-sm text-gray-500">
+                        No articles scanned yet
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
