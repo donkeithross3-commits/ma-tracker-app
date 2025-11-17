@@ -46,6 +46,11 @@ class IntelligenceAggregator:
         Returns:
             deal_id: UUID of the deal in deal_intelligence table, or None if deal was filtered out
         """
+        logger.info(
+            f"[PROCESS_MENTION] Starting processing for: {mention.target_name} (ticker={mention.target_ticker}) "
+            f"acquirer={mention.acquirer_name} (ticker={mention.acquirer_ticker}) source={mention.source_name}"
+        )
+
         async with self.pool.acquire() as conn:
             # Use explicit transaction to ensure atomicity
             async with conn.transaction():
@@ -53,28 +58,49 @@ class IntelligenceAggregator:
                 # If we have company names but no tickers, look them up
                 if (mention.target_name and not mention.target_ticker) or \
                    (mention.acquirer_name and not mention.acquirer_ticker):
+                    logger.info(
+                        f"[PROCESS_MENTION] Enriching tickers: target={mention.target_name} ({mention.target_ticker}), "
+                        f"acquirer={mention.acquirer_name} ({mention.acquirer_ticker})"
+                    )
                     await self._enrich_mention_with_tickers(mention)
+                    logger.info(
+                        f"[PROCESS_MENTION] After enrichment: target_ticker={mention.target_ticker}, "
+                        f"acquirer_ticker={mention.acquirer_ticker}"
+                    )
 
                 # STEP 1.5: Validate that target has a ticker (filter out private companies)
                 # Most rumors about listed companies will include ticker or proper company name
                 # that our lookup can match. If we can't find a ticker, it's likely a private company.
                 if not mention.target_ticker:
-                    logger.info(
-                        f"Skipping deal mention - no ticker found for target: {mention.target_name} "
+                    logger.warning(
+                        f"[PROCESS_MENTION] FILTERED OUT - no ticker found for target: {mention.target_name} "
                         f"(source: {mention.source_name}). Likely private company."
                     )
                     return None
 
-                # STEP 1.6: Check if deal already exists in EDGAR staged_deals (approved)
-                # If a deal with this ticker already exists in EDGAR, it means the deal is already filed
-                # and this is just news/social media covering an existing deal. Skip it.
-                edgar_deal_exists = await self._check_edgar_deal_exists(conn, mention.target_ticker)
-                if edgar_deal_exists:
-                    logger.info(
-                        f"Skipping deal mention - deal already exists in EDGAR: {mention.target_name} ({mention.target_ticker}) "
-                        f"(source: {mention.source_name}). This is news about an already-filed deal."
-                    )
-                    return None
+                # STEP 1.6: Check if deal already exists in EDGAR staged_deals
+                # Three scenarios:
+                # 1. EDGAR filing is approved/pending -> Skip (already in queue)
+                # 2. EDGAR filing exists but rated unlikely -> Upgrade it with intelligence confirmation
+                # 3. No EDGAR filing -> Proceed normally
+                edgar_filing = await self._find_edgar_filing(conn, mention.target_ticker)
+                if edgar_filing:
+                    if edgar_filing['status'] in ('approved', 'pending'):
+                        # Already in the queue - don't duplicate
+                        logger.warning(
+                            f"[PROCESS_MENTION] FILTERED OUT - deal already {edgar_filing['status']} in EDGAR: "
+                            f"{mention.target_name} ({mention.target_ticker}) (source: {mention.source_name})"
+                        )
+                        return None
+                    else:
+                        # EDGAR filing was marked unlikely, but intelligence confirms it's real
+                        # Upgrade the EDGAR filing and skip creating intelligence deal (per user requirement)
+                        logger.info(
+                            f"[PROCESS_MENTION] Intelligence confirms EDGAR filing! Upgrading {mention.target_ticker} "
+                            f"from '{edgar_filing['status']}' to 'pending'"
+                        )
+                        await self._upgrade_edgar_filing(conn, edgar_filing['staged_deal_id'], mention)
+                        return None  # Don't create intelligence deal - just upgraded EDGAR filing
 
                 # STEP 2: Try to find existing deal by target company name or ticker
                 existing_deal = await self._find_existing_deal(conn, mention)
@@ -104,29 +130,76 @@ class IntelligenceAggregator:
 
                 return deal_id
 
-    async def _check_edgar_deal_exists(
+    async def _find_edgar_filing(
         self, conn: asyncpg.Connection, target_ticker: str
-    ) -> bool:
+    ) -> Optional[Dict[str, Any]]:
         """
-        Check if a deal with this ticker already exists in EDGAR staged_deals.
+        Find an EDGAR filing for this ticker, regardless of status.
 
-        This prevents creating intelligence deals for news/rumors about deals that
-        are already filed with the SEC (e.g., news about go-shop periods, amendments, etc.)
+        This returns the full record so we can check status and potentially upgrade it
+        if intelligence confirms a deal that was marked unlikely.
 
         Returns:
-            True if deal exists in EDGAR (approved or pending), False otherwise
+            Full staged_deals record if found, None otherwise
         """
-        # Check staged_deals table for any deal with this target ticker that's been approved
-        # or is pending review (meaning it came from EDGAR filings)
-        deal = await conn.fetchrow(
-            """SELECT staged_deal_id FROM staged_deals
+        if not target_ticker:
+            return None
+
+        filing = await conn.fetchrow(
+            """SELECT staged_deal_id, target_name, target_ticker, acquirer_name,
+                      acquirer_ticker, status, detected_at
+               FROM staged_deals
                WHERE target_ticker = $1
-               AND status IN ('approved', 'pending')
                LIMIT 1""",
             target_ticker.upper()
         )
 
-        return deal is not None
+        return dict(filing) if filing else None
+
+    async def _upgrade_edgar_filing(
+        self,
+        conn: asyncpg.Connection,
+        staged_deal_id: str,
+        mention: DealMention
+    ) -> None:
+        """
+        Upgrade an EDGAR filing from 'unlikely' to 'pending' when intelligence confirms it.
+
+        This handles the case where the EDGAR detector initially marked a filing as unlikely,
+        but a high-quality intelligence source (like Seeking Alpha) has definitive language
+        confirming it's a real deal.
+
+        Args:
+            staged_deal_id: ID of the staged_deals record to upgrade
+            mention: The intelligence mention that confirms the deal
+        """
+        await conn.execute(
+            """UPDATE staged_deals
+               SET status = 'pending',
+                   updated_at = NOW()
+               WHERE staged_deal_id = $1""",
+            staged_deal_id
+        )
+
+        # Add a note to the staging system audit log about the upgrade
+        await conn.execute(
+            """INSERT INTO deal_history (deal_id, change_type, new_value, triggered_by)
+               VALUES ($1, 'status_upgraded', $2::jsonb, $3)""",
+            staged_deal_id,
+            json.dumps({
+                "from_status": "unlikely",
+                "to_status": "pending",
+                "reason": "Intelligence source confirmed deal",
+                "source": mention.source_name,
+                "headline": mention.headline
+            }),
+            mention.source_name
+        )
+
+        logger.info(
+            f"Upgraded EDGAR filing {staged_deal_id} from 'unlikely' to 'pending' "
+            f"based on intelligence confirmation from {mention.source_name}"
+        )
 
     async def _find_existing_deal(
         self, conn: asyncpg.Connection, mention: DealMention
@@ -370,6 +443,11 @@ class IntelligenceAggregator:
             mention: DealMention object to enrich (modified in-place)
         """
         try:
+            logger.info(
+                f"[ENRICH_TICKERS] Starting enrichment for target={mention.target_name} ({mention.target_ticker}), "
+                f"acquirer={mention.acquirer_name} ({mention.acquirer_ticker})"
+            )
+
             ticker_lookup = get_ticker_lookup_service()
 
             enriched = await ticker_lookup.enrich_deal_with_tickers(
@@ -379,18 +457,23 @@ class IntelligenceAggregator:
                 acquirer_ticker=mention.acquirer_ticker
             )
 
+            logger.info(f"[ENRICH_TICKERS] Enrichment result: {enriched}")
+
             # Update mention with discovered tickers
             if enriched.get("target_ticker") and not mention.target_ticker:
                 mention.target_ticker = enriched["target_ticker"]
-                logger.info(f"Enriched target ticker: {mention.target_name} → {enriched['target_ticker']}")
+                logger.info(f"[ENRICH_TICKERS] ✓ Enriched target ticker: {mention.target_name} → {enriched['target_ticker']}")
 
             if enriched.get("acquirer_ticker") and not mention.acquirer_ticker:
                 mention.acquirer_ticker = enriched["acquirer_ticker"]
-                logger.info(f"Enriched acquirer ticker: {mention.acquirer_name} → {enriched['acquirer_ticker']}")
+                logger.info(f"[ENRICH_TICKERS] ✓ Enriched acquirer ticker: {mention.acquirer_name} → {enriched['acquirer_ticker']}")
+
+            if not enriched.get("target_ticker"):
+                logger.warning(f"[ENRICH_TICKERS] ✗ No target ticker found for: {mention.target_name}")
 
         except Exception as e:
             # Don't fail the whole mention processing if ticker lookup fails
-            logger.warning(f"Ticker enrichment failed: {e}")
+            logger.warning(f"[ENRICH_TICKERS] Ticker enrichment failed: {e}", exc_info=True)
 
     async def _scan_tickers_for_filings(
         self, conn: asyncpg.Connection, deal_id: str, mention: DealMention
