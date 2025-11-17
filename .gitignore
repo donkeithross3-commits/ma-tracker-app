@@ -51,3 +51,13 @@ python-service/token.json
 
 # Claude Code session state (local only, don't commit)
 .claude-session
+
+# Test/diagnostic scripts (temporary, don't commit)
+test_*.py
+check_*.py
+disable_*.py
+investigate_*.py
+enhance_*.py
+backfill_*.py
+reprocess_*.py
+apply_migration_*.py
