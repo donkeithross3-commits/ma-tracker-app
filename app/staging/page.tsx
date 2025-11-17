@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatDateTime } from "@/lib/dateUtils";
+import { stagingCache, CacheKeys } from "@/lib/stagingDataCache";
 
 interface StagedDeal {
   id: string;
@@ -163,23 +164,61 @@ export default function StagingPage() {
     }
   };
 
+  // OPTIMIZATION: Prefetch ALL tab data on mount in parallel - never wait for tab clicks!
+  useEffect(() => {
+    const prefetchAllTabs = async () => {
+      console.log("[PERF] Starting parallel prefetch of ALL tabs");
+      const startTime = performance.now();
+
+      // Fire ALL requests simultaneously
+      await Promise.allSettled([
+        // EDGAR pending deals (most common view)
+        fetch("/api/edgar/staged-deals?status=pending").then(r => r.json()).then(setDeals).catch(() => setDeals([])),
+        // Intelligence pending deals
+        fetch("/api/intelligence/rumored-deals?exclude_watch_list=true").then(r => r.json()).then(data => {
+          const dealsArray = Array.isArray(data) ? data : (data.deals || []);
+          setIntelligenceDeals(dealsArray.map((d: any) => normalizeDeal(d)));
+        }).catch(() => setIntelligenceDeals([])),
+        // Halts
+        fetch("/api/halts/recent?limit=100").then(r => r.json()).then(data => {
+          setHalts(data.halts || []);
+          const tracked = data.halts?.filter((h: any) => h.is_tracked_ticker) || [];
+          setTrackedHaltsCount(tracked.length);
+        }).catch(() => setHalts([])),
+        // Monitoring status
+        fetchMonitoringStatus(),
+        // Watch list for intelligence tab
+        fetch("/api/intelligence/watch-list").then(r => r.json()).then(data => {
+          const tickers = new Set<string>(data.watch_list.map((item: any) => item.ticker));
+          setWatchListTickers(tickers);
+        }).catch(() => {})
+      ]);
+
+      const endTime = performance.now();
+      console.log(`[PERF] Parallel prefetch completed in ${(endTime - startTime).toFixed(0)}ms`);
+      setLoading(false);
+    };
+
+    prefetchAllTabs();
+  }, []);
+
+  // Fetch data when tabs/filters change (but data may already be prefetched!)
   useEffect(() => {
     if (activeTab === "edgar") {
       if (filter === "all_filings") {
         fetchFilings();
       } else {
+        // Always fetch when filter changes (including back to pending)
         fetchDeals();
       }
     } else if (activeTab === "intelligence") {
       if (tierFilter === "all_articles") {
         fetchIntelligenceSources();
       } else {
+        // Always fetch when filter changes (including back to pending)
         fetchIntelligenceDeals();
       }
-    } else if (activeTab === "halts") {
-      fetchHalts();
     }
-    fetchMonitoringStatus();
   }, [filter, tierFilter, activeTab]);
 
   // Separate effect for filings filters - only refetch when filters change AND we're on all_filings view
@@ -218,13 +257,24 @@ export default function StagingPage() {
 
     autoStartMonitors();
 
-    // Refresh status every 10 seconds
-    const statusInterval = setInterval(fetchMonitoringStatus, 10000);
+    // OPTIMIZATION: Refresh status every 30 seconds (reduced from 10s)
+    // Reduces API calls from 360/hour to 120/hour per user
+    const statusInterval = setInterval(fetchMonitoringStatus, 30000);
 
     return () => clearInterval(statusInterval);
   }, []);
 
   const fetchDeals = async () => {
+    const cacheKey = CacheKeys.EDGAR_DEALS(filter);
+
+    // Try to get from cache first
+    const cachedData = stagingCache.get<StagedDeal[]>(cacheKey);
+    if (cachedData) {
+      setDeals(cachedData);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     const startTime = performance.now();
     try {
@@ -249,6 +299,8 @@ export default function StagingPage() {
       if (Array.isArray(data)) {
         const stateStart = performance.now();
         setDeals(data);
+        // Store in cache
+        stagingCache.set(cacheKey, data);
         const stateEnd = performance.now();
         console.log(`[PERF] State update took ${(stateEnd - stateStart).toFixed(0)}ms`);
         console.log(`[DEBUG] State updated with ${data.length} deals`);
@@ -326,6 +378,16 @@ export default function StagingPage() {
   };
 
   const fetchIntelligenceDeals = async () => {
+    const cacheKey = CacheKeys.INTELLIGENCE_DEALS(tierFilter);
+
+    // Try to get from cache first
+    const cachedData = stagingCache.get<IntelligenceDeal[]>(cacheKey);
+    if (cachedData) {
+      setIntelligenceDeals(cachedData);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
       // Map frontend filters to backend API parameters
@@ -358,6 +420,8 @@ export default function StagingPage() {
       const normalizedDeals = dealsArray.map(normalizeDeal);
 
       setIntelligenceDeals(normalizedDeals);
+      // Store in cache
+      stagingCache.set(cacheKey, normalizedDeals);
     } catch (error) {
       console.error("Failed to fetch intelligence deals:", error);
       setIntelligenceDeals([]); // Set empty array on error
@@ -367,15 +431,30 @@ export default function StagingPage() {
   };
 
   const fetchHalts = async () => {
+    const cacheKey = CacheKeys.HALTS;
+
+    // Try to get from cache first
+    const cachedData = stagingCache.get<any[]>(cacheKey);
+    if (cachedData) {
+      setHalts(cachedData);
+      const tracked = cachedData.filter((h: any) => h.is_tracked_ticker) || [];
+      setTrackedHaltsCount(tracked.length);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await fetch("/api/halts/recent?limit=100");
       const data = await response.json();
 
-      setHalts(data.halts || []);
+      const halts = data.halts || [];
+      setHalts(halts);
+      // Store in cache
+      stagingCache.set(cacheKey, halts);
 
       // Count tracked halts (halts for tickers we're monitoring)
-      const tracked = data.halts?.filter((h: any) => h.is_tracked_ticker) || [];
+      const tracked = halts.filter((h: any) => h.is_tracked_ticker) || [];
       setTrackedHaltsCount(tracked.length);
     } catch (error) {
       console.error("Failed to fetch halts:", error);

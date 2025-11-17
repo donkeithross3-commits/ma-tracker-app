@@ -19,6 +19,9 @@ from ibapi.order import Order
 from ibapi.common import TickerId, TickAttrib, SetOfString, SetOfFloat
 from threading import Thread, Event
 import queue
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import logging
 
 
 @dataclass
@@ -95,7 +98,6 @@ class IBMergerArbScanner(EWrapper, EClient):
     def __init__(self):
         EWrapper.__init__(self)
         EClient.__init__(self, wrapper=self)
-        import logging
         logger = logging.getLogger(__name__)
         logger.info("=" * 80)
         logger.info("SCANNER INIT: Code version with callback fix loaded!")
@@ -118,6 +120,9 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         # Queue for handling callbacks
         self.data_queue = queue.Queue()
+
+        # Thread pool for parallel requests
+        self.executor = ThreadPoolExecutor(max_workers=10)
 
     def connect_to_ib(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1):
         """Connect to IB Gateway or TWS"""
@@ -171,8 +176,8 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         self.reqContractDetails(req_id, contract)
 
-        # Wait for response
-        time.sleep(2)
+        # Wait for response - reduced from 2s to 0.5s
+        time.sleep(0.5)
 
         if self.contract_details:
             con_id = self.contract_details.contract.conId
@@ -209,8 +214,8 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         self.reqMktData(req_id, contract, "", False, False, [])
 
-        # Wait for data
-        time.sleep(2)
+        # Wait for data - reduced from 2s to 0.5s
+        time.sleep(0.5)
 
         # Cancel market data
         self.cancelMktData(req_id)
@@ -280,8 +285,8 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
 
-        # Wait for response
-        time.sleep(3)
+        # Wait for response - reduced from 3s to 1s
+        time.sleep(1)
 
         # Now request specific option contracts - LIMITED
         options = []
@@ -380,33 +385,32 @@ class IBMergerArbScanner(EWrapper, EClient):
                     strikes = [price_to_use * 0.95, price_to_use, price_to_use * 1.05]
                     strikes = [round(s / 5) * 5 for s in strikes]
 
+                # Build batch requests for all strikes (calls and puts)
+                batch_requests = []
                 for strike in strikes:
-                    # Request call option data
-                    option = self.get_option_data(ticker, expiry, strike, "C")
-                    if option:
-                        options.append(option)
+                    batch_requests.append((expiry, strike, "C"))  # Call
+                    batch_requests.append((expiry, strike, "P"))  # Put
+
+                print(f"Fetching {len(batch_requests)} option contracts for {expiry} using batch processing...")
+
+                # Fetch all contracts for this expiry in parallel batches
+                batch_results = self.get_option_data_batch(ticker, batch_requests)
+
+                # Process results and add to options list
+                for i, option_data in enumerate(batch_results):
+                    if option_data:
+                        options.append(option_data)
                         # Debug: Show specific options we're interested in
-                        if expiry == '20260618' and strike in [200.0, 210.0]:
-                            print(f"DEBUG: Found {expiry} {strike}C - bid: {option.bid}, ask: {option.ask}, mid: {option.mid_price}")
+                        expiry_match = option_data.expiry == '20260618'
+                        strike_match = option_data.strike in [200.0, 210.0]
+                        if expiry_match and strike_match:
+                            print(f"DEBUG: Found {option_data.expiry} {option_data.strike}{option_data.right} - "
+                                  f"bid: {option_data.bid}, ask: {option_data.ask}, mid: {option_data.mid_price}")
                     else:
-                        # Debug: Show why options are filtered out
-                        print(f"DEBUG: Filtered out {expiry} {strike}C - no valid pricing data from IB")
-
-                    # Small delay to avoid overwhelming IB
-                    time.sleep(0.5)
-
-                    # Also request put option data
-                    put_option = self.get_option_data(ticker, expiry, strike, "P")
-                    if put_option:
-                        options.append(put_option)
-                        # Debug: Show specific puts we're interested in
-                        if expiry == '20260618' and strike in [200.0, 210.0]:
-                            print(f"DEBUG: Found {expiry} {strike}P - bid: {put_option.bid}, ask: {put_option.ask}, mid: {put_option.mid_price}")
-                    else:
-                        print(f"DEBUG: Filtered out {expiry} {strike}P - no valid pricing data from IB")
-
-                    # Small delay to avoid overwhelming IB
-                    time.sleep(0.5)
+                        # Debug: Show why options are filtered out (only for key strikes)
+                        req = batch_requests[i]
+                        if req[0] == '20260618' and req[1] in [200.0, 210.0]:
+                            print(f"DEBUG: Filtered out {req[0]} {req[1]}{req[2]} - no valid pricing data from IB")
 
         print(f"Retrieved {len(options)} option contracts (limited to avoid IB limits)")
 
@@ -448,8 +452,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         # reqId, underlyingSymbol, futFopExchange, underlyingSecType, underlyingConId
         self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
 
-        # Wait for response (may need longer for IB to respond)
-        time.sleep(3)
+        # Wait for response - reduced from 3s to 1s
+        time.sleep(1)
 
         if not self.available_expirations:
             print(f"Warning: IB expiration lookup failed for {ticker} (contract ID: {contract_id})")
@@ -589,8 +593,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Request market data and Greeks with RTH=False for after-hours data
         self.reqMktData(req_id, contract, "100,101,104,106", False, False, [])
 
-        # Wait for data - longer wait for far-dated options
-        time.sleep(2)
+        # Reduced wait time - IB typically responds within 0.3-0.5s
+        time.sleep(0.3)
 
         # Cancel market data
         self.cancelMktData(req_id)
@@ -601,6 +605,87 @@ class IBMergerArbScanner(EWrapper, EClient):
             return OptionData(**data)
 
         return None
+
+    def get_option_data_batch(self, ticker: str, requests: List[Tuple[str, float, str]]) -> List[Optional[OptionData]]:
+        """
+        Get data for multiple option contracts in parallel batches.
+
+        Args:
+            ticker: Stock symbol
+            requests: List of (expiry, strike, right) tuples
+
+        Returns:
+            List of OptionData objects (None for failed requests)
+        """
+        logger = logging.getLogger(__name__)
+        batch_size = 50  # IB limit to avoid overwhelming API
+        results = []
+
+        # Process in batches
+        for i in range(0, len(requests), batch_size):
+            batch = requests[i:i + batch_size]
+            batch_req_ids = []
+
+            logger.info(f"Processing batch {i//batch_size + 1}/{(len(requests) + batch_size - 1)//batch_size} ({len(batch)} contracts)")
+
+            # Submit all requests in batch
+            for expiry, strike, right in batch:
+                contract = Contract()
+                contract.symbol = ticker
+                contract.secType = "OPT"
+                contract.exchange = "SMART"
+                contract.currency = "USD"
+                contract.lastTradeDateOrContractMonth = expiry
+                contract.strike = strike
+                contract.right = right
+                contract.multiplier = "100"
+
+                req_id = self.get_next_req_id()
+                self.req_id_map[req_id] = f"option_{ticker}_{expiry}_{strike}_{right}"
+
+                self.option_chain[req_id] = {
+                    'symbol': ticker,
+                    'strike': strike,
+                    'expiry': expiry,
+                    'right': right,
+                    'bid': 0,
+                    'ask': 0,
+                    'last': 0,
+                    'volume': 0,
+                    'open_interest': 0,
+                    'implied_vol': 0,
+                    'delta': 0,
+                    'gamma': 0,
+                    'theta': 0,
+                    'vega': 0
+                }
+
+                self.reqMktData(req_id, contract, "100,101,104,106", False, False, [])
+                batch_req_ids.append(req_id)
+
+                # Tiny delay between submissions to avoid rate limit
+                time.sleep(0.05)
+
+            # Wait for all batch responses (longer for larger batches)
+            wait_time = min(2.0, 0.5 + len(batch) * 0.02)
+            logger.info(f"Waiting {wait_time:.2f}s for batch responses...")
+            time.sleep(wait_time)
+
+            # Cancel all requests and collect results
+            for req_id in batch_req_ids:
+                self.cancelMktData(req_id)
+                data = self.option_chain.get(req_id)
+                if data and (data['bid'] > 0 or data['last'] > 0):
+                    results.append(OptionData(**data))
+                else:
+                    results.append(None)
+
+            # Small delay between batches
+            if i + batch_size < len(requests):
+                time.sleep(0.2)
+
+        logger.info(f"Batch processing complete: {len([r for r in results if r])} / {len(requests)} successful")
+        return results
 
     def tickOptionComputation(self, reqId: TickerId, tickType: int,
                              impliedVol: float, delta: float, optPrice: float,
