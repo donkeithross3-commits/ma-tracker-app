@@ -295,7 +295,10 @@ async def scan_deal(deal: DealRequest):
                 probability_of_profit=opp.probability_of_profit,
                 edge_vs_market=opp.edge_vs_market,
                 notes=opp.notes,
-                contracts=contracts
+                contracts=contracts,
+                entry_cost_ft=opp.entry_cost_ft,
+                expected_return_ft=opp.expected_return_ft,
+                annualized_return_ft=opp.annualized_return_ft
             ))
 
         return ScannerResponse(

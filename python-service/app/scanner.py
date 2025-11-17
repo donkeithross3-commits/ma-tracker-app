@@ -690,6 +690,8 @@ class MergerArbAnalyzer:
         # FAR-TOUCH spread cost (pay ask for long, receive bid for short)
         spread_cost_ft = long_call.ask - short_call.bid
 
+        print(f"DEBUG FT: {long_call.strike}/{short_call.strike} - Long ask: {long_call.ask}, Short bid: {short_call.bid}, FT cost: {spread_cost_ft}")
+
         if spread_cost_mid <= 0 or spread_cost_ft <= 0:
             return None
 
