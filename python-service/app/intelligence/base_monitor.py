@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.intelligence.models import DealMention, SourceType
 
@@ -93,7 +93,7 @@ class BaseSourceMonitor(ABC):
                         "is_ma_relevant": mention is not None,
                         "target_name": mention.target_name if mention else None,
                         "acquirer_name": mention.acquirer_name if mention else None,
-                        "scanned_at": datetime.now().isoformat()
+                        "scanned_at": datetime.now(timezone.utc).isoformat()
                     }
                     scan_results.append(scan_result)
 
@@ -104,7 +104,7 @@ class BaseSourceMonitor(ABC):
 
             # Update last scan cache
             self.last_scan_articles = scan_results
-            self.last_scan_time = datetime.now()
+            self.last_scan_time = datetime.now(timezone.utc)
 
             self.logger.info(f"Found {len(mentions)} M&A mentions from {self.source_name}")
             return mentions
