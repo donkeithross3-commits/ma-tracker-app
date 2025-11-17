@@ -214,6 +214,16 @@ test: Add tests for deal approval flow
 2. Check `git diff` for unintended changes
 3. Verify services still start correctly
 4. Use atomic commits (one logical change)
+5. **Check if .claude-rules needs updating** - If commit adds:
+   - New deployment workflow or script
+   - New service/monitor with start/stop commands
+   - New API endpoints that will be commonly used
+   - New database tables or major schema changes
+   - New pages or important UI routes
+   - Platform-specific requirements or workarounds
+   - Critical troubleshooting steps
+
+   Then update `.claude-rules` in the SAME commit so context stays synchronized.
 
 ---
 
