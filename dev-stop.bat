@@ -8,7 +8,7 @@ echo ========================================
 echo.
 
 echo Stopping Python backend (uvicorn)...
-taskkill /F /FI "WINDOWTITLE eq MA Tracker Backend*" 2>nul
+taskkill /F /IM python.exe 2>nul
 if %ERRORLEVEL% EQU 0 (
     echo Python backend stopped
 ) else (
@@ -16,17 +16,11 @@ if %ERRORLEVEL% EQU 0 (
 )
 
 echo Stopping Next.js frontend (node)...
-taskkill /F /FI "WINDOWTITLE eq MA Tracker Frontend*" 2>nul
+taskkill /F /IM node.exe 2>nul
 if %ERRORLEVEL% EQU 0 (
     echo Next.js frontend stopped
 ) else (
-    echo No Next.js process found by window title, trying by process name...
-    taskkill /F /IM node.exe 2>nul
-    if %ERRORLEVEL% EQU 0 (
-        echo Next.js frontend stopped
-    ) else (
-        echo No Node.js processes found
-    )
+    echo No Node.js processes found
 )
 
 echo.
