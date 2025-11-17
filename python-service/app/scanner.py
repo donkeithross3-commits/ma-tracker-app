@@ -986,8 +986,9 @@ class MergerArbAnalyzer:
 
         opportunities = []
 
-        # Analyze single calls
-        for option in options:
+        # Analyze single calls - ONLY analyze actual call options
+        calls_only = [opt for opt in options if opt.right == 'C']
+        for option in calls_only:
             if option.strike < self.deal.total_deal_value:  # Only calls below deal price
                 opp = self.analyze_single_call(option, current_price)
                 if opp and opp.expected_return > 0:
@@ -1002,23 +1003,25 @@ class MergerArbAnalyzer:
         print(f"DEBUG: Deal price: ${self.deal.total_deal_value:.2f}")
         print(f"DEBUG: Short strike range: ${self.deal.total_deal_value * 0.95:.2f} - ${self.deal.total_deal_value + 0.50:.2f}")
 
-        # Analyze spreads - only within same expiration month
-        # Collect spreads per expiration to ensure we show top 3 from each
+        # Analyze CALL SPREADS - only within same expiration month
+        # Collect spreads per expiration to ensure we show top 5 from each
         spreads_by_expiry = defaultdict(list)
 
         for expiry, expiry_options in options_by_expiry.items():
-            sorted_options = sorted(expiry_options, key=lambda x: x.strike)
-            print(f"DEBUG: Expiry {expiry}: {len(sorted_options)} options with strikes {[opt.strike for opt in sorted_options]}")
+            # CRITICAL: Separate calls from puts - only use CALLS for call spreads
+            calls = [opt for opt in expiry_options if opt.right == 'C']
+            sorted_calls = sorted(calls, key=lambda x: x.strike)
+            print(f"DEBUG: Expiry {expiry}: {len(sorted_calls)} calls with strikes {[opt.strike for opt in sorted_calls]}")
 
-            for i in range(len(sorted_options) - 1):
-                long_call = sorted_options[i]
+            for i in range(len(sorted_calls) - 1):
+                long_call = sorted_calls[i]
 
                 # Only consider long strikes below deal price
                 if long_call.strike >= self.deal.total_deal_value:
                     continue
 
-                for j in range(i + 1, min(i + 5, len(sorted_options))):  # Look at next 4 strikes
-                    short_call = sorted_options[j]
+                for j in range(i + 1, min(i + 5, len(sorted_calls))):  # Look at next 4 strikes
+                    short_call = sorted_calls[j]
 
                     # For merger arbitrage, only consider spreads where short strike is at or near deal price
                     # Stock will converge to deal price, not exceed it
