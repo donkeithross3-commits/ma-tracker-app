@@ -547,30 +547,32 @@ export default function StagingPage() {
     }
   };
 
-  const handleRemoveFromWatchList = async (ticker: string) => {
+  const handlePromoteToProduction = async (deal: IntelligenceDeal) => {
+    if (!confirm(`Promote "${deal.target_name}" to production/active tier?`)) {
+      return;
+    }
+
     try {
-      const response = await fetch(`/api/intelligence/watch-list/${ticker}`, {
-        method: "DELETE"
+      const response = await fetch(`/api/intelligence/deals/${deal.deal_id}/promote`, {
+        method: "POST"
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to remove from watch list");
+        throw new Error(error.error || "Failed to promote deal");
       }
 
       // Invalidate caches and refresh data
-      stagingCache.invalidate(CacheKeys.WATCH_LIST);
       stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("pending"));
       stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("watchlist"));
 
-      // Refresh all affected data
-      await fetchWatchList();
-      await fetchIntelligenceDeals(); // Refresh current view
+      // Refresh current view
+      await fetchIntelligenceDeals();
 
-      alert(`Removed ${ticker} from Rumor Watch List`);
+      alert(`Successfully promoted ${deal.target_name} to production!`);
     } catch (error) {
-      console.error("Error removing from watch list:", error);
-      alert(error instanceof Error ? error.message : "Failed to remove from watch list");
+      console.error("Error promoting deal:", error);
+      alert(error instanceof Error ? error.message : "Failed to promote deal");
     }
   };
 
@@ -1716,11 +1718,14 @@ export default function StagingPage() {
                               <>
                                 <span className="text-gray-300">|</span>
                                 <button
-                                  onClick={() => handleRemoveFromWatchList(deal.target_ticker!)}
-                                  className="text-red-600 hover:text-red-800 font-medium text-xs"
-                                  title="Remove from Watch List"
+                                  onClick={() => handlePromoteToProduction(deal)}
+                                  className="text-green-600 hover:text-green-800 font-medium text-xs flex items-center gap-1"
+                                  title="Promote to Production/Active Tier"
                                 >
-                                  Remove
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                  </svg>
+                                  Add to Production
                                 </button>
                               </>
                             )}

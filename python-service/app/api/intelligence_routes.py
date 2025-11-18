@@ -348,6 +348,65 @@ async def reject_deal(deal_id: str, request: Optional[RejectDealRequest] = None)
         await db.disconnect()
 
 
+class PromoteDealResponse(BaseModel):
+    success: bool
+    message: str
+    deal_id: str
+    new_tier: str
+
+
+@router.post("/deals/{deal_id}/promote", response_model=PromoteDealResponse)
+async def promote_deal_to_active(deal_id: str):
+    """
+    Promote an intelligence deal from watchlist/rumored to active tier.
+    This moves the deal to production tracking.
+    """
+    db = EdgarDatabase()
+    await db.connect()
+
+    try:
+        conn = await db.pool.acquire()
+        try:
+            # Verify deal exists and get current state
+            deal = await conn.fetchrow(
+                """SELECT deal_id, target_name, deal_tier, deal_status
+                   FROM deal_intelligence WHERE deal_id = $1""",
+                deal_id
+            )
+
+            if not deal:
+                raise HTTPException(status_code=404, detail="Deal not found")
+
+            if deal['deal_status'] == 'rejected':
+                raise HTTPException(status_code=400, detail="Cannot promote rejected deal")
+
+            # Promote deal to active tier
+            await conn.execute(
+                """
+                UPDATE deal_intelligence
+                SET
+                    deal_tier = 'active',
+                    promoted_to_active_at = NOW(),
+                    updated_at = NOW()
+                WHERE deal_id = $1
+                """,
+                deal_id
+            )
+
+            return PromoteDealResponse(
+                success=True,
+                message=f"Deal '{deal['target_name']}' promoted to active tier",
+                deal_id=str(deal_id),
+                new_tier="active"
+            )
+
+        finally:
+            await db.pool.release(conn)
+
+    finally:
+        await db.disconnect()
+
+
 class IntelligenceRejectionStats(BaseModel):
     category: str
     count: int
