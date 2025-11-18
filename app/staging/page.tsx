@@ -1026,12 +1026,9 @@ export default function StagingPage() {
           ) : activeTab === "edgar" ? (
             filter === "all_filings" ? (
               // All Filings Table
-              filings.length === 0 ? (
-                <div className="p-8 text-center text-gray-500">No filings found</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  {/* Filters */}
-                  <div className="px-3 py-2 border-b border-gray-200 bg-gray-50">
+              <div className="overflow-x-auto">
+                {/* Filters - always show even when no results */}
+                <div className="px-3 py-2 border-b border-gray-200 bg-gray-50">
                     <div className="flex items-center gap-3 text-xs">
                       <div className="flex items-center gap-1.5">
                         <label className="text-gray-600 font-medium">Ticker:</label>
@@ -1107,7 +1104,10 @@ export default function StagingPage() {
                     </div>
                   </div>
 
-                  {/* Table */}
+                {/* Table */}
+                {filings.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500">No filings found</div>
+                ) : (
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
@@ -1215,8 +1215,8 @@ export default function StagingPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
-              )
+                )}
+              </div>
             ) : deals.length === 0 ? (
             // EDGAR Deals Table (
               <div className="p-8 text-center">
