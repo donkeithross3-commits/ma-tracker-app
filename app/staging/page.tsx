@@ -258,11 +258,12 @@ export default function StagingPage() {
   }, [filter, tierFilter, activeTab]);
 
   // Separate effect for filings filters - only refetch when filters change AND we're on all_filings view
+  // Note: ticker is excluded from auto-fetch, only searches on Enter key
   useEffect(() => {
     if (activeTab === "edgar" && filter === "all_filings") {
       fetchFilings();
     }
-  }, [filingsFilters]);
+  }, [filingsFilters.status, filingsFilters.days, filingsFilters.minKeywords, filingsFilters.minConfidence]);
 
   // Auto-start monitors on page load and refresh status periodically
   useEffect(() => {
@@ -1036,10 +1037,15 @@ export default function StagingPage() {
                         <label className="text-gray-600 font-medium">Ticker:</label>
                         <input
                           type="text"
-                          placeholder="Search..."
+                          placeholder="Press Enter..."
                           value={filingsFilters.ticker}
                           onChange={(e) => setFilingsFilters({ ...filingsFilters, ticker: e.target.value })}
-                          className="border border-gray-300 rounded px-2 py-0.5 text-xs w-24"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              fetchFilings();
+                            }
+                          }}
+                          className="border border-gray-300 rounded px-2 py-0.5 text-xs w-28"
                         />
                       </div>
                       <div className="flex items-center gap-1.5">
