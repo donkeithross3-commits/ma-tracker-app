@@ -547,33 +547,10 @@ export default function StagingPage() {
     }
   };
 
-  const handlePromoteToProduction = async (deal: IntelligenceDeal) => {
-    if (!confirm(`Promote "${deal.target_name}" to production/active tier?`)) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/intelligence/deals/${deal.deal_id}/promote`, {
-        method: "POST"
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to promote deal");
-      }
-
-      // Invalidate caches and refresh data
-      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("pending"));
-      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("watchlist"));
-
-      // Refresh current view
-      await fetchIntelligenceDeals();
-
-      alert(`Successfully promoted ${deal.target_name} to production!`);
-    } catch (error) {
-      console.error("Error promoting deal:", error);
-      alert(error instanceof Error ? error.message : "Failed to promote deal");
-    }
+  const handlePromoteToProduction = (deal: IntelligenceDeal) => {
+    // Navigate to the same deal edit page used for EDGAR deals
+    // The /api/deals/prepare route will handle intelligence deals via their deal_id
+    router.push(`/deals/edit/${deal.deal_id}`);
   };
 
   const handleStartEditingTicker = (deal: IntelligenceDeal) => {
