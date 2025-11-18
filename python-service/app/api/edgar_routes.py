@@ -812,7 +812,10 @@ async def create_deal_from_filing(
     acquirer_ticker: Optional[str] = Body(None),
     notes: Optional[str] = Body(None)
 ):
-    """Create a staged deal from a filing (marks filing as false negative)"""
+    """Create a staged deal from a filing (marks filing as false negative)
+
+    Now uses AI extraction to automatically populate deal details from the filing.
+    """
     db = EdgarDatabase()
     await db.connect()
 
@@ -822,17 +825,65 @@ async def create_deal_from_filing(
         if not filing:
             raise HTTPException(status_code=404, detail="Filing not found")
 
-        # Create staged deal
+        # Extract comprehensive deal info using AI
+        from ..edgar.detector import MADetector
+        from ..edgar.extractor import DealExtractor
+        from ..edgar.models import EdgarFiling
+        import os
+
+        logger.info(f"Extracting deal information from filing {filing_id}...")
+
+        # Create EdgarFiling object for extraction
+        edgar_filing = EdgarFiling(
+            accession_number=filing['accession_number'],
+            cik=filing['cik'],
+            company_name=filing['company_name'],
+            ticker=filing.get('ticker'),
+            filing_type=filing['filing_type'],
+            filing_date=filing['filing_date'],
+            filing_url=filing['filing_url']
+        )
+
+        # Fetch filing text
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        detector = MADetector(anthropic_api_key=api_key)
+        filing_text = await detector.fetch_filing_text(filing['filing_url'])
+
+        # Extract deal info using AI
+        extractor = DealExtractor(anthropic_api_key=api_key)
+        extracted_info = await extractor.extract_deal_info(edgar_filing, filing_text)
+
+        # Use extracted info if available, otherwise fall back to provided values
+        if extracted_info:
+            logger.info(f"Successfully extracted deal info: {extracted_info.target_name} / {extracted_info.acquirer_name}")
+            final_target_name = extracted_info.target_name
+            final_target_ticker = extracted_info.target_ticker or target_ticker
+            final_acquirer_name = extracted_info.acquirer_name or acquirer_name
+            final_acquirer_ticker = extracted_info.acquirer_ticker or acquirer_ticker
+            final_deal_value = extracted_info.deal_value
+            final_deal_type = extracted_info.deal_type
+            extraction_confidence = extracted_info.confidence_score
+        else:
+            logger.warning(f"Failed to extract deal info, using provided values")
+            final_target_name = target_name
+            final_target_ticker = target_ticker
+            final_acquirer_name = acquirer_name
+            final_acquirer_ticker = acquirer_ticker
+            final_deal_value = None
+            final_deal_type = None
+            extraction_confidence = 1.0
+
+        # Create staged deal with extracted information
         staged_deal_id = await db.create_staged_deal(
-            target_name=target_name,
-            target_ticker=target_ticker,
-            acquirer_name=acquirer_name,
-            acquirer_ticker=acquirer_ticker,
-            deal_value=None,
-            deal_type=None,
+            target_name=final_target_name,
+            target_ticker=final_target_ticker,
+            acquirer_name=final_acquirer_name,
+            acquirer_ticker=final_acquirer_ticker,
+            deal_value=final_deal_value,
+            deal_type=final_deal_type,
             source_filing_id=filing_id,
-            confidence_score=1.0,  # Manual confirmation = 100% confidence
-            matched_text_excerpt=None
+            confidence_score=extraction_confidence,
+            matched_text_excerpt=extracted_info.announcement_summary if extracted_info else None
         )
 
         # Record as false negative
@@ -840,14 +891,15 @@ async def create_deal_from_filing(
             filing_id=filing_id,
             staged_deal_id=staged_deal_id,
             reported_by="manual",
-            notes=notes or "Manually identified from All Filings view"
+            notes=notes or "Manually identified from All Filings view (AI-extracted)"
         )
 
-        logger.info(f"Created staged deal {staged_deal_id} from filing {filing_id} (false negative)")
+        logger.info(f"Created staged deal {staged_deal_id} from filing {filing_id} (false negative, AI-enhanced)")
 
         return {
             "staged_deal_id": staged_deal_id,
-            "message": "Staged deal created and marked as false negative"
+            "message": "Staged deal created with AI-extracted deal information",
+            "extracted": extracted_info is not None
         }
 
     except Exception as e:
