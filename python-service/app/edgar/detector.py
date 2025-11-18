@@ -2,6 +2,7 @@
 import logging
 import re
 from typing import List, Optional, Tuple
+from datetime import datetime, timedelta
 import httpx
 from anthropic import Anthropic
 from .models import EdgarFiling, MADetectionResult
@@ -180,9 +181,15 @@ class MADetector:
 
             # Look for table rows with document links
             # Pattern: <a href="FILENAME.htm">FILENAME.htm</a>
+            # Also handle iXBRL format: <a href="/ix?doc=/Archives/.../file.htm">
             # Exclude index.htm and -index.htm files
             doc_pattern = r'<a href="([^"]+\.(?:htm|html|txt))"'
             all_matches = re.findall(doc_pattern, html, re.IGNORECASE)
+
+            # Extract actual document paths from iXBRL /ix?doc= URLs
+            ixbrl_pattern = r'/ix\?doc=(/Archives/[^"]+\.(?:htm|html))'
+            ixbrl_matches = re.findall(ixbrl_pattern, html, re.IGNORECASE)
+            all_matches.extend(ixbrl_matches)
 
             # Filter to keep only filing documents (exclude index files and navigation links)
             # Get the filing directory path (everything before the index filename)
@@ -220,16 +227,19 @@ class MADetector:
                 # Prefer .htm/.html over .txt (HTML is formatted better for parsing)
                 primary_doc = None
 
-                # First try: Find _8k.htm document
+                # First try: Find _8k.htm or d8k.htm document (most reliable pattern)
                 for match in matches:
-                    if '_8k' in match.lower() and match.lower().endswith(('.htm', '.html')):
+                    match_lower = match.lower()
+                    if (('_8k' in match_lower or 'd8k' in match_lower) and
+                        match_lower.endswith(('.htm', '.html'))):
                         primary_doc = match
                         break
 
-                # Second try: Find _8k document (any format)
+                # Second try: Find _8k or d8k document (any format)
                 if not primary_doc:
                     for match in matches:
-                        if '_8k' in match.lower():
+                        match_lower = match.lower()
+                        if '_8k' in match_lower or 'd8k' in match_lower:
                             primary_doc = match
                             break
 
@@ -483,6 +493,56 @@ class MADetector:
                         return True
 
                 pos += 1
+
+        return False
+
+    def detect_recent_announcement_date(self, filing_text: str, filing_date: datetime, context_window: int = 3000) -> bool:
+        """Detect if filing mentions announcement on a recent date (yesterday/today)
+
+        8-Ks often say "On November 13, 2025, the Company entered into..." when filed on Nov 14.
+        This is a NEW announcement, not historical. We need to parse dates and compare.
+
+        Args:
+            filing_text: Full filing text
+            filing_date: The date the filing was made
+            context_window: Characters from start to check (default 3000, Item 1.01 area)
+
+        Returns:
+            True if mentions announcement within 0-2 days before filing date
+        """
+        text_to_check = filing_text[:context_window]
+
+        # Patterns for "On [Date]" or "announced on [Date]"
+        # Matches: "On November 13, 2025", "announced on November 13, 2025", etc.
+        # Use \s to match any whitespace including non-breaking spaces
+        date_patterns = [
+            r'[Oo]n\s+([A-Z][a-z]+\s+\d{1,2},?\s*\d{4})',  # "On November 13, 2025"
+            r'announced\s+on\s+([A-Z][a-z]+\s+\d{1,2},?\s*\d{4})',  # "announced on November 13, 2025"
+            r'entered\s+into.*on\s+([A-Z][a-z]+\s+\d{1,2},?\s*\d{4})',  # "entered into...on November 13, 2025"
+            r'Date\s+of.*event.*:\s+([A-Z][a-z]+\s+\d{1,2},?\s*\d{4})',  # "Date of earliest event reported: November 13, 2025"
+        ]
+
+        for pattern in date_patterns:
+            matches = re.findall(pattern, text_to_check)
+            for date_str in matches:
+                try:
+                    # Parse the date string (handle both "November 13, 2025" and "November 13 2025")
+                    # Also normalize whitespace (including non-breaking spaces \xa0)
+                    date_str_clean = ' '.join(date_str.replace(',', '').split())
+                    announced_date = datetime.strptime(date_str_clean, '%B %d %Y')
+
+                    # Check if announcement was within 0-2 days before filing
+                    days_diff = (filing_date - announced_date).days
+
+                    if 0 <= days_diff <= 2:
+                        logger.info(
+                            f"RECENT announcement date detected: '{date_str}' "
+                            f"({days_diff} days before filing on {filing_date.date()}) - treating as NEW"
+                        )
+                        return True
+                except ValueError:
+                    # Date parsing failed, skip this match
+                    continue
 
         return False
 
@@ -745,19 +805,33 @@ class MADetector:
             context_radius=500  # Increased from 300 to catch more context
         )
 
-        if has_contextual_historical_ref:
+        # NEW: Check for recent announcement dates (overrides historical reference detection)
+        # If filing says "On November 13..." and filed on November 14, that's NEW, not historical
+        has_recent_announcement = self.detect_recent_announcement_date(
+            filing_text,
+            filing.filing_date,
+            context_window=3000
+        )
+
+        if has_contextual_historical_ref and not has_recent_announcement:
             # This is the most reliable signal - historical references NEAR the M&A keywords
             # "As previously disclosed... entered into a merger agreement" = update, not new deal
+            # BUT: If we detect a recent announcement date, this is actually NEW
             return MADetectionResult(
                 is_ma_relevant=False,
                 confidence_score=0.05,
                 detected_keywords=detected_keywords,
                 reasoning="REJECTED: Historical reference found near M&A keywords - update to previously announced deal"
             )
+        elif has_contextual_historical_ref and has_recent_announcement:
+            # Override: Historical language but recent date = NEW announcement
+            logger.info("Historical reference detected BUT recent announcement date found - treating as NEW deal")
+            # Don't return, continue with normal detection flow
 
-        if has_early_historical_ref:
+        if has_early_historical_ref and not has_recent_announcement:
             # Historical reference at the beginning is also a strong signal
             # For retrospective filing types (425, PREM14A), be even more aggressive
+            # BUT: Don't reject if we found a recent announcement date
             if is_retrospective_filing:
                 return MADetectionResult(
                     is_ma_relevant=False,
@@ -773,6 +847,9 @@ class MADetector:
                 detected_keywords=detected_keywords,
                 reasoning=f"REJECTED: Historical reference at beginning of filing - likely update to previously announced deal"
             )
+        elif has_early_historical_ref and has_recent_announcement:
+            # Override: Historical language at beginning but recent date = likely NEW
+            logger.info("Early historical reference detected BUT recent announcement date found - treating as NEW deal")
 
         # ============================================================================
         # RULE 2: IMMEDIATE REJECTION - Private Company Target (Easy to Rule Out)
