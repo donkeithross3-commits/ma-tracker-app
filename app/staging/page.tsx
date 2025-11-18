@@ -138,7 +138,8 @@ export default function StagingPage() {
     status: 'all',
     days: '7',
     minKeywords: '0',
-    minConfidence: '0'
+    minConfidence: '0',
+    ticker: ''
   });
 
   // All Articles state (intelligence sources)
@@ -362,6 +363,11 @@ export default function StagingPage() {
         minKeywords: filingsFilters.minKeywords,
         minConfidence: filingsFilters.minConfidence
       });
+
+      // Add ticker if provided
+      if (filingsFilters.ticker) {
+        params.append('ticker', filingsFilters.ticker);
+      }
 
       const response = await fetch(`/api/edgar/filings?${params}`);
       const data = await response.json();
@@ -1026,6 +1032,16 @@ export default function StagingPage() {
                   {/* Filters */}
                   <div className="px-3 py-2 border-b border-gray-200 bg-gray-50">
                     <div className="flex items-center gap-3 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-gray-600 font-medium">Ticker:</label>
+                        <input
+                          type="text"
+                          placeholder="Search..."
+                          value={filingsFilters.ticker}
+                          onChange={(e) => setFilingsFilters({ ...filingsFilters, ticker: e.target.value })}
+                          className="border border-gray-300 rounded px-2 py-0.5 text-xs w-24"
+                        />
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <label className="text-gray-600 font-medium">Status:</label>
                         <select

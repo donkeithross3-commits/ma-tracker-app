@@ -9,6 +9,7 @@ export async function GET(request: Request) {
     const days = searchParams.get('days') || '7'
     const minKeywords = searchParams.get('minKeywords') || '0'
     const minConfidence = searchParams.get('minConfidence') || '0'
+    const ticker = searchParams.get('ticker') || ''
 
     // Build query string
     const params = new URLSearchParams({
@@ -17,6 +18,11 @@ export async function GET(request: Request) {
       min_keywords: minKeywords,
       min_confidence: minConfidence,
     })
+
+    // Add ticker if provided
+    if (ticker) {
+      params.append('ticker', ticker)
+    }
 
     const response = await fetch(
       `${PYTHON_API_URL}/edgar/filings?${params}`,

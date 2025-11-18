@@ -693,12 +693,14 @@ async def get_analyzed_filings(
     status: str = "all",  # all, relevant, not_relevant
     days: int = 7,
     min_keywords: int = 0,
-    min_confidence: float = 0.0
+    min_confidence: float = 0.0,
+    ticker: str = None  # Optional ticker search
 ):
     """Get analyzed EDGAR filings for review and tuning
 
     This endpoint provides visibility into what the detector is analyzing
     so users can tune the filtering logic based on actual results.
+    Supports optional ticker search across all filings in database.
     """
     db = EdgarDatabase()
     await db.connect()
@@ -729,6 +731,11 @@ async def get_analyzed_filings(
             if min_confidence > 0:
                 params.append(min_confidence)
                 where_clauses.append(f"confidence_score >= ${len(params)}")
+
+            # Ticker search filter (case-insensitive, partial match)
+            if ticker:
+                params.append(f"%{ticker.upper()}%")
+                where_clauses.append(f"UPPER(ticker) LIKE ${len(params)}")
 
             where_clause = " AND ".join(where_clauses)
 
