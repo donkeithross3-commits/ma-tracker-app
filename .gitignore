@@ -61,3 +61,13 @@ enhance_*.py
 backfill_*.py
 reprocess_*.py
 apply_migration_*.py
+
+# Backup and temp files
+*.bak
+*.backup
+.env.backup
+logs/
+fix_*.py
+rescan_*.py
+standardize_*.py
+update_*.py
