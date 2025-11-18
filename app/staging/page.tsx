@@ -531,8 +531,14 @@ export default function StagingPage() {
         throw new Error(error.error || "Failed to add to watch list");
       }
 
-      // Refresh watch list from database
+      // Invalidate caches and refresh data
+      stagingCache.invalidate(CacheKeys.WATCH_LIST);
+      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("pending"));
+      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("watchlist"));
+
+      // Refresh all affected data
       await fetchWatchList();
+      await fetchIntelligenceDeals(); // Refresh current view
 
       alert(`Added ${ticker} (${deal.target_name}) to Rumor Watch List`);
     } catch (error) {
@@ -552,8 +558,14 @@ export default function StagingPage() {
         throw new Error(error.error || "Failed to remove from watch list");
       }
 
-      // Refresh watch list from database
+      // Invalidate caches and refresh data
+      stagingCache.invalidate(CacheKeys.WATCH_LIST);
+      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("pending"));
+      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("watchlist"));
+
+      // Refresh all affected data
       await fetchWatchList();
+      await fetchIntelligenceDeals(); // Refresh current view
 
       alert(`Removed ${ticker} from Rumor Watch List`);
     } catch (error) {
@@ -582,20 +594,17 @@ export default function StagingPage() {
         throw new Error(error.error || "Failed to update ticker");
       }
 
-      // Update local state
-      setIntelligenceDeals(deals =>
-        deals.map(d =>
-          d.deal_id === dealId
-            ? { ...d, target_ticker: editingTickerValue.trim() || null }
-            : d
-        )
-      );
-
       // Exit edit mode
       setEditingTickerId(null);
       setEditingTickerValue("");
 
-      // Refresh watch list in case ticker was in watch list
+      // Invalidate caches since ticker changed
+      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("pending"));
+      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("watchlist"));
+      stagingCache.invalidate(CacheKeys.WATCH_LIST);
+
+      // Refresh data
+      await fetchIntelligenceDeals();
       await fetchWatchList();
     } catch (error) {
       console.error("Error updating ticker:", error);
@@ -647,6 +656,11 @@ export default function StagingPage() {
       setRejectingIntelligenceDealId(null);
       setIntelligenceRejectionCategory("");
       setIntelligenceRejectionReason("");
+
+      // Invalidate all intelligence deal caches since status changed
+      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("pending"));
+      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("watchlist"));
+      stagingCache.invalidate(CacheKeys.INTELLIGENCE_DEALS("rejected"));
 
       // Refresh deals list
       await fetchIntelligenceDeals();
@@ -703,6 +717,12 @@ export default function StagingPage() {
       // Close dialog and refresh
       setShowRejectDialog(false);
       setRejectingDealId(null);
+
+      // Invalidate all EDGAR deal caches since status changed
+      stagingCache.invalidate(CacheKeys.EDGAR_DEALS("pending"));
+      stagingCache.invalidate(CacheKeys.EDGAR_DEALS("approved"));
+      stagingCache.invalidate(CacheKeys.EDGAR_DEALS("rejected"));
+
       await fetchDeals();
     } catch (error) {
       console.error("Failed to reject staged deal:", error);
