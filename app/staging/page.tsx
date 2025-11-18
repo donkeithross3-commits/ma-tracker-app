@@ -760,31 +760,24 @@ export default function StagingPage() {
   };
 
   const handleAddFilingAsManualDeal = async (filing: Filing) => {
-    const targetName = prompt(`Enter target company name for ${filing.company_name}:`, filing.company_name);
-    if (!targetName) return;
-
-    const targetTicker = prompt('Enter target ticker (optional):', filing.ticker || '');
-    const acquirerName = prompt('Enter acquirer name (optional):');
-    const acquirerTicker = prompt('Enter acquirer ticker (optional):');
-
+    // First, create a minimal staged deal from this filing
     try {
       const response = await fetch(`/api/edgar/filings/${filing.filing_id}/create-deal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          target_name: targetName,
-          target_ticker: targetTicker || null,
-          acquirer_name: acquirerName || null,
-          acquirer_ticker: acquirerTicker || null,
+          target_name: filing.company_name,
+          target_ticker: filing.ticker || null,
+          acquirer_name: null,
+          acquirer_ticker: null,
           notes: `Manually added from All Filings view. Original confidence: ${filing.confidence_score}`
         })
       });
 
       if (response.ok) {
         const data = await response.json();
-        alert(`Success! Staged deal created and marked as false negative.\n\nDeal ID: ${data.staged_deal_id}`);
-        // Switch to pending tab to see the new deal
-        setFilter('pending');
+        // Navigate to the deal edit page where user can fill in all details
+        router.push(`/deals/edit/${data.staged_deal_id}`);
       } else {
         const error = await response.json();
         alert(`Error: ${error.detail || 'Failed to create deal'}`);
