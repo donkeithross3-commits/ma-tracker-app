@@ -1,13 +1,47 @@
-import { NextResponse } from "next/server"
-import type { NextRequest } from "next/server"
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-// Temporarily simplified middleware to reduce bundle size for Vercel free tier
-// TODO: Re-enable full NextAuth middleware after upgrading Vercel plan
-export function middleware(request: NextRequest) {
-  // Allow all requests for now
-  return NextResponse.next()
+function unauthorizedResponse() {
+  const res = new NextResponse("Authentication required", { status: 401 });
+  res.headers.set("WWW-Authenticate", 'Basic realm="KRJ Reports"');
+  return res;
 }
 
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  // Only protect /krj (and any subpaths if we add them later)
+  if (!pathname.startsWith("/krj")) {
+    return NextResponse.next();
+  }
+
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader || !authHeader.startsWith("Basic ")) {
+    return unauthorizedResponse();
+  }
+
+  const base64Credentials = authHeader.split(" ")[1];
+
+  let decoded: string;
+  try {
+    decoded = Buffer.from(base64Credentials, "base64").toString("utf8");
+  } catch {
+    return unauthorizedResponse();
+  }
+
+  const [user, pass] = decoded.split(":");
+
+  const expectedUser = process.env.KRJ_BASIC_USER || "krj";
+  const expectedPass = process.env.KRJ_BASIC_PASS || "changeme";
+
+  if (user === expectedUser && pass === expectedPass) {
+    return NextResponse.next();
+  }
+
+  return unauthorizedResponse();
+}
+
+// Tell Next which paths use this middleware
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
-}
+  matcher: ["/krj/:path*", "/krj"],
+};
