@@ -1,16 +1,22 @@
 import fs from "fs";
 import path from "path";
 import Papa from "papaparse";
+import Link from "next/link";
+import KrjTabsClient from "@/components/KrjTabsClient";
+
+// Force dynamic rendering to ensure metadata.json is read at request time
+export const dynamic = 'force-dynamic';
 
 type RawRow = Record<string, string>;
 
-type GroupKey = "equities" | "etfs_fx" | "sp500" | "sp100";
+type GroupKey = "equities" | "etfs_fx" | "sp500" | "sp100" | "drc";
 
 const GROUPS: { key: GroupKey; label: string; file: string }[] = [
   { key: "equities", label: "Top Equities", file: "latest_equities.csv" },
   { key: "etfs_fx", label: "ETFs / FX", file: "latest_etfs_fx.csv" },
   { key: "sp500", label: "SP500", file: "latest_sp500.csv" },
   { key: "sp100", label: "SP100", file: "latest_sp100.csv" },
+  { key: "drc", label: "DRC", file: "latest_drc.csv" },
 ];
 
 function loadCsv(fileName: string): RawRow[] {
@@ -25,6 +31,62 @@ function loadCsv(fileName: string): RawRow[] {
     console.error("CSV parse errors", fileName, parsed.errors);
   }
   return parsed.data;
+}
+
+function getSignalDate(): string {
+  /**
+   * SIGNAL DATE RESOLUTION (FIXED v2):
+   * 
+   * PROBLEM:
+   * - KRJ signals are generated every Friday (e.g., 2025-12-19)
+   * - Source CSV filenames contain the signal date: KRJ_signals_latest_week_Equities_2025-12-19.csv
+   * - Batch script copies these to latest_*.csv, stripping the date from filename
+   * - Previous fix used file modification timestamp (e.g., 2025-12-24) which was wrong
+   * 
+   * CORRECT SOLUTION:
+   * - Batch script (run_krj_batch.py) now extracts the signal date from source filenames
+   * - Writes metadata.json with the actual signal date: { "signal_date": "2025-12-19" }
+   * - UI reads from metadata.json to display the correct Friday signal date
+   * 
+   * FALLBACK:
+   * - If metadata.json doesn't exist (old batch script), fall back to file timestamp
+   * - This ensures backwards compatibility during deployment
+   */
+  try {
+    // Try to read metadata.json first (preferred method)
+    const metadataPath = path.join(process.cwd(), "data", "krj", "metadata.json");
+    
+    if (fs.existsSync(metadataPath)) {
+      const metadataContent = fs.readFileSync(metadataPath, "utf8");
+      const metadata = JSON.parse(metadataContent);
+      
+      if (metadata.signal_date) {
+        // Parse YYYY-MM-DD format and format as "Mon DD, YYYY"
+        const [year, month, day] = metadata.signal_date.split('-');
+        const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        
+        return date.toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric' 
+        });
+      }
+    }
+    
+    // Fallback: Use file modification timestamp (backwards compatibility)
+    const filePath = path.join(process.cwd(), "data", "krj", "latest_equities.csv");
+    const stats = fs.statSync(filePath);
+    const fileDate = stats.mtime;
+    
+    return fileDate.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+  } catch (error) {
+    console.error(`Error reading signal date:`, error);
+    return "—"; // Defensive fallback only if file is inaccessible
+  }
 }
 
 function computeSummary(rows: RawRow[]) {
@@ -55,37 +117,47 @@ function computeSummary(rows: RawRow[]) {
   return { rowsSummary, totals };
 }
 
-function getWeekEnding(rows: RawRow[]): string | null {
-  if (!rows.length) return null;
-  const raw = rows[0]["date"];
-  if (!raw) return null;
-  // raw should look like "2025-12-12" or "2025-12-12T00:00:00"
-  const d = raw.split("T")[0];
-  return d;
+function isCurrencyPair(ticker: string): boolean {
+  return ticker.startsWith("c:");
 }
 
-function formatPercentString(x: string | undefined) {
-  if (!x) return "";
-  if (x.includes("%")) return x;
-  const num = Number(x);
-  if (Number.isNaN(num)) return x;
-  return (num * 100).toFixed(1) + "%";
+function sortWithCurrencyPairsFirst(rows: RawRow[]): RawRow[] {
+  return [...rows].sort((a, b) => {
+    const tickerA = (a["ticker"] || "").trim();
+    const tickerB = (b["ticker"] || "").trim();
+    
+    const isACurrency = isCurrencyPair(tickerA);
+    const isBCurrency = isCurrencyPair(tickerB);
+    
+    // Currency pairs come first
+    if (isACurrency && !isBCurrency) return -1;
+    if (!isACurrency && isBCurrency) return 1;
+    
+    // Within same type, sort alphabetically
+    return tickerA.localeCompare(tickerB);
+  });
 }
 
 // Server component
 export default function KrjPage() {
   const dataByGroup: Record<GroupKey, RawRow[]> = {
     equities: loadCsv("latest_equities.csv"),
-    etfs_fx: loadCsv("latest_etfs_fx.csv"),
+    etfs_fx: sortWithCurrencyPairsFirst(loadCsv("latest_etfs_fx.csv")),
     sp500: loadCsv("latest_sp500.csv"),
     sp100: loadCsv("latest_sp100.csv"),
+  drc: loadCsv("latest_drc.csv"),
   };
+
+  // Get the signal date from metadata.json (source of truth)
+  // This reflects the actual Friday signal date from the batch pipeline
+  const dataDate = getSignalDate();
 
   const summaries: Record<GroupKey, ReturnType<typeof computeSummary>> = {
     equities: computeSummary(dataByGroup.equities),
     etfs_fx: computeSummary(dataByGroup.etfs_fx),
     sp500: computeSummary(dataByGroup.sp500),
     sp100: computeSummary(dataByGroup.sp100),
+  drc: computeSummary(dataByGroup.drc),
   };
 
   const columns: { key: string; label: string }[] = [
@@ -105,121 +177,33 @@ export default function KrjPage() {
     { key: "avg_trade_size", label: "Average Trade Size" },
   ];
 
+  const groupsData = GROUPS.map(group => ({
+    key: group.key,
+    label: group.label,
+    rows: dataByGroup[group.key],
+    summary: summaries[group.key],
+  }));
+
   return (
-    <div className="p-6 space-y-8">
-      <h1 className="text-2xl font-semibold mb-2">KRJ Weekly Signals</h1>
+    <div className="p-3 bg-gray-950 text-gray-100 min-h-screen">
+      <div className="flex justify-between items-center mb-2 no-print">
+        <div>
+          <h1 className="text-3xl font-semibold text-gray-100">
+            KRJ Weekly Signals
+            <span className="text-xl text-gray-400 ml-3 font-normal">
+              {dataDate}
+            </span>
+          </h1>
+        </div>
+        <Link
+          href="/ma-options"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-semibold transition-colors"
+        >
+          M&A Options Scanner →
+        </Link>
+      </div>
 
-      <p className="text-sm text-gray-400">
-        Latest snapshot for each group. Source: KRJ_signals_latest_week_*.csv
-      </p>
-
-      {GROUPS.map((group) => {
-        const rows = dataByGroup[group.key];
-        const summary = summaries[group.key];
-
-        return (
-          <section key={group.key} className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">{group.label}</h2>
-            </div>
-
-            <div className="grid grid-cols-12 gap-4">
-              {/* Main table */}
-              <div className="col-span-9 border border-gray-700 rounded-lg overflow-auto max-h-[70vh]">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-gray-900 sticky top-0 z-10">
-                    <tr>
-                      {columns.map((col) => (
-                        <th
-                          key={col.key}
-                          className="px-2 py-1 text-left font-semibold border-b border-gray-700 whitespace-nowrap"
-                        >
-                          {col.label}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row, idx) => (
-                      <tr
-                        key={(row["ticker"] || "") + "-" + idx}
-                        className={idx % 2 === 0 ? "bg-black" : "bg-gray-950"}
-                      >
-                        {columns.map((col) => {
-                          let value = row[col.key] ?? "";
-                          if (
-                            col.key === "long_signal_value" ||
-                            col.key === "short_signal_value"
-                          ) {
-                            value = formatPercentString(value);
-                          }
-                          return (
-                            <td
-                              key={col.key}
-                              className="px-2 py-1 border-b border-gray-900 whitespace-nowrap"
-                            >
-                              {value}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Summary card (yellow box analogue) */}
-              <div className="col-span-3">
-                <div className="bg-yellow-300 text-black rounded-lg p-3 shadow">
-                  <h3 className="font-semibold mb-2 text-sm">
-                    Current vs Last Week (Signals)
-                  </h3>
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr>
-                        <th className="text-left">Signal</th>
-                        <th className="text-right">Current</th>
-                        <th className="text-right">Last</th>
-                        <th className="text-right">Δ</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {summary.rowsSummary.map((r) => (
-                        <tr key={r.label}>
-                          <td>{r.label}</td>
-                          <td className="text-right">{r.current}</td>
-                          <td className="text-right">{r.last}</td>
-                          <td
-                            className={
-                              "text-right " +
-                              (r.delta > 0
-                                ? "text-green-700"
-                                : r.delta < 0
-                                ? "text-red-700"
-                                : "")
-                            }
-                          >
-                            {r.delta > 0 ? "+" : ""}
-                            {r.delta}
-                          </td>
-                        </tr>
-                      ))}
-                      <tr className="font-semibold border-t border-yellow-600">
-                        <td>Total</td>
-                        <td className="text-right">{summary.totals.current}</td>
-                        <td className="text-right">{summary.totals.last}</td>
-                        <td className="text-right">
-                          {summary.totals.current - summary.totals.last}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </section>
-        );
-      })}
+      <KrjTabsClient groups={groupsData} columns={columns} />
     </div>
   );
 }
