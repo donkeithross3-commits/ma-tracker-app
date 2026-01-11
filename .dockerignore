@@ -1,0 +1,54 @@
+# Python-related (not needed for Next.js build)
+.venv/
+python-service/
+requirements.txt
+*.py
+query_source_monitors.py
+extract-all-deals.py
+extract-current-yields.py
+
+# Node.js dependencies and build artifacts (recreated during build)
+node_modules/
+.next/
+out/
+dist/
+build-test.log
+
+# Development and IDE files
+.git/
+.github/
+*.log
+.logs/
+.claude/
+.cursor/
+.cursorrules
+.vercelignore
+
+# Documentation (not needed in container)
+*.md
+docs/
+!README.md
+
+# OS and system files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Environment files (handled via env_file in docker-compose)
+.env*
+!.env.local
+
+# Remote agent and staging files
+remote-agent/
+*.bat
+
+# Test and debug files
+jest.config.js
+jest.setup.js
+test-*.sh
+
+# Temporary and backup files
+*.tmp
+*.bak
+*~
