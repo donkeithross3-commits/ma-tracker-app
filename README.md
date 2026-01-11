@@ -15,6 +15,8 @@ A Next.js application for tracking merger arbitrage deals with version control a
 
 - Node.js 20+ (installed via nvm)
 - PostgreSQL database
+- Python 3.11+ (for M&A Options Scanner)
+- Interactive Brokers TWS or IB Gateway (for options data)
 
 ### Initial Setup
 
@@ -38,6 +40,59 @@ A Next.js application for tracking merger arbitrage deals with version control a
    ```
 
    Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+3. **Start Python Service** (Required for M&A Options Scanner)
+
+   ```bash
+   ./scripts/start-python-service.sh
+   ```
+
+   This starts the FastAPI service on `http://localhost:8000` which connects to IB TWS for options data.
+
+   **Note**: Make sure IB TWS is running with API enabled on port 7497 before starting the Python service.
+
+## KRJ Dev URL & External Access
+
+### Stable URL (Named Tunnel - Recommended)
+
+The KRJ UI is accessible at a stable URL: **`https://krj-dev.dr3-dashboard.com/krj`**
+
+**One-time setup:**
+```bash
+# 1. Authenticate with Cloudflare
+cloudflared tunnel login
+
+# 2. Run setup script
+./scripts/setup-named-tunnel.sh
+```
+
+**Daily usage:**
+```bash
+# Terminal 1: Start dev server
+npm run dev
+
+# Terminal 2: Start named tunnel
+./scripts/start-tunnel.sh
+```
+
+The stable URL never changes and is protected by Cloudflare Access (email-based authentication).
+
+### Quick Tunnel (Temporary URLs)
+
+For quick demos without setup:
+```bash
+./scripts/start-tunnel.sh --quick
+```
+
+This generates a temporary URL (e.g., `https://random-words.trycloudflare.com/krj`) that changes each session.
+
+### Documentation
+
+- **Full setup guide:** [docs/CLOUDFLARE_TUNNEL_SETUP.md](docs/CLOUDFLARE_TUNNEL_SETUP.md)
+- **Cloudflare Access configuration:** See "Cloudflare Access" section in the setup guide
+- **Troubleshooting:** See the setup guide
+
+**Note:** The Python service backend uses ngrok (see `python-service/start_with_ngrok.sh`). Cloudflare Tunnel is specifically for the Next.js UI on port 3000.
 
 ### Available Scripts
 
@@ -175,3 +230,15 @@ For detailed technology documentation, see [TECH_STACK.md](./docs/TECH_STACK.md)
 - Python options scanner runs on local machine with IB Gateway connection
 - UI components follow shadcn/ui patterns for accessibility
 
+
+## Development Workflow
+
+This project is part of a unified trading platform development workflow. See the parent directory `~/projects/trading-platform/` for:
+
+- Unified `Makefile` commands (`make sync`, `make deploy`, etc.)
+- Cross-project scripts and automation
+- Multi-device development setup
+
+For detailed setup instructions, see: `../py_proj/LAPTOP_SETUP.md`
+
+Last updated: January 2026
