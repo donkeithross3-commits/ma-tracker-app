@@ -159,21 +159,21 @@ export default function KrjPage() {
   drc: computeSummary(dataByGroup.drc),
   };
 
-  const columns: { key: string; label: string }[] = [
-    { key: "ticker", label: "Ticker" },
-    { key: "c", label: "Friday Close" },
-    { key: "weekly_low", label: "Last Week Low" },
-    { key: "25DMA", label: "25 DMA" },
-    { key: "25DMA_shifted", label: "25 DMA (shifted 3 weeks)" },
-    { key: "long_signal_value", label: "Long Signal Value" },
-    { key: "short_signal_value", label: "Short Signal Value" },
-    { key: "signal", label: "Current Week Signal" },
-    { key: "signal_status_prior_week", label: "Last Week Signal" },
-    { key: "vol_ratio", label: "Vol Ratio (to SP500)" },
-    { key: "25DMA_range_bps", label: "Avg Daily Range (25 DMA)" },
-    { key: "25D_ADV_Shares_MM", label: "ADV (25 DMA - MM Shares)" },
-    { key: "25D_ADV_nortional_B", label: "ADV (25 DMA - $B)" },
-    { key: "avg_trade_size", label: "Average Trade Size" },
+  const columns: { key: string; label: string; description: string }[] = [
+    { key: "ticker", label: "Ticker", description: "Stock or ETF symbol" },
+    { key: "c", label: "Friday Close", description: "Closing price on Friday (or last trading day of the week)" },
+    { key: "weekly_low", label: "Last Week Low", description: "Lowest price reached during the trading week" },
+    { key: "25DMA", label: "25 DMA", description: "25-day simple moving average of closing prices" },
+    { key: "25DMA_shifted", label: "25 DMA (shifted 3 weeks)", description: "25-day moving average as it was 15 trading days ago; used for stop-loss levels" },
+    { key: "long_signal_value", label: "Long Signal Value", description: "(Weekly Low - 25DMA) / 25DMA; positive values indicate strength above the moving average" },
+    { key: "short_signal_value", label: "Short Signal Value", description: "(Friday Close - 25DMA) / 25DMA; negative values indicate weakness below the moving average" },
+    { key: "signal", label: "Current Week Signal", description: "Long if weekly low >= 3% above 25DMA; Short if Friday close <= 3% below 25DMA; otherwise Neutral" },
+    { key: "signal_status_prior_week", label: "Last Week Signal", description: "Signal status from the prior week" },
+    { key: "vol_ratio", label: "Vol Ratio (to SP500)", description: "Stock's average daily range divided by SPY's daily range; measures relative volatility" },
+    { key: "25DMA_range_bps", label: "Avg Daily Range (25 DMA)", description: "25-day average of daily high-low range in basis points" },
+    { key: "25D_ADV_Shares_MM", label: "ADV (25 DMA - MM Shares)", description: "25-day average daily volume in millions of shares" },
+    { key: "25D_ADV_nortional_B", label: "ADV (25 DMA - $B)", description: "25-day average daily notional volume in billions of dollars" },
+    { key: "avg_trade_size", label: "Average Trade Size", description: "Average number of shares per trade (volume / number of trades)" },
   ];
 
   const groupsData = GROUPS.map(group => ({

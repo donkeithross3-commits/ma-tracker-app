@@ -30,7 +30,7 @@ type GroupData = {
 
 interface KrjTabsClientProps {
   groups: GroupData[];
-  columns: Array<{ key: string; label: string }>;
+  columns: Array<{ key: string; label: string; description: string }>;
 }
 
 // Signal filter types
@@ -464,7 +464,8 @@ export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
                     return (
                       <th
                         key={col.key}
-                        className={`px-1 py-1 ${isNumeric ? 'text-right' : 'text-left'} font-bold text-gray-100 border-b border-gray-600 whitespace-normal max-w-[50px] text-[14px] leading-tight`}
+                        title={col.description}
+                        className={`px-1 py-1 ${isNumeric ? 'text-right' : 'text-left'} font-bold text-gray-100 border-b border-gray-600 whitespace-normal max-w-[50px] text-[14px] leading-tight cursor-help`}
                       >
                         {col.label}
                       </th>
