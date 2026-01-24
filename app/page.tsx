@@ -19,7 +19,7 @@ export default function Home() {
                 <div>
                   <h2 className="text-2xl font-semibold mb-2">KRJ Dashboard</h2>
                   <p className="text-slate-400">
-                    Weekly market signals and backtesting results
+                    Weekly market signals
                   </p>
                 </div>
                 <span className="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full">

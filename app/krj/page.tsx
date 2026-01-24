@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import Papa from "papaparse";
-import Link from "next/link";
 import KrjTabsClient from "@/components/KrjTabsClient";
 
 // Force dynamic rendering to ensure metadata.json is read at request time
@@ -195,12 +194,6 @@ export default function KrjPage() {
             </span>
           </h1>
         </div>
-        <Link
-          href="/ma-options"
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-semibold transition-colors"
-        >
-          M&A Options Scanner →
-        </Link>
       </div>
 
       <KrjTabsClient groups={groupsData} columns={columns} />
