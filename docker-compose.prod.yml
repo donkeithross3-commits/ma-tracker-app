@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: ./ma-tracker-app
+      dockerfile: Dockerfile.prod
+    image: ma-tracker-app-prod:latest
+    container_name: ma-tracker-app-web
+    ports:
+      - "3000:3000"
+    volumes:
+      # KRJ data directory - read-only for safety
+      # CRITICAL: This path must not change - KRJ data flow depends on it
+      - ./data/krj:/app/data/krj:ro
+    environment:
+      - NODE_ENV=production
+    # Load environment variables from .env.local
+    # Must contain: KRJ_BASIC_USER, KRJ_BASIC_PASS, DATABASE_URL
+    env_file:
+      - ./ma-tracker-app/.env.local
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  krj-batch:
+    build:
+      context: ./py_proj
+      dockerfile: Dockerfile
+    image: krj-batch:latest
+    container_name: krj-batch
+    volumes:
+      # Output directory - write access
+      # CRITICAL: This path must not change - KRJ data flow depends on it
+      - ./data/krj:/data/krj
+      # Input directory - read-only for safety
+      # CRITICAL: This path must not change - KRJ data flow depends on it
+      - ./py_proj/daily_data:/root/Documents/daily_data:ro
+    environment:
+      - KRJ_DATA_DIR=/root/Documents/daily_data
+      - KRJ_OUTPUT_DIR=/data/krj
+    restart: "no"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+

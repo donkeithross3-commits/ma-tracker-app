@@ -1,44 +1,39 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-function unauthorizedResponse() {
-  const res = new NextResponse("Authentication required", { status: 401 });
-  res.headers.set("WWW-Authenticate", 'Basic realm="KRJ Reports"');
-  return res;
-}
+/**
+ * Middleware for the KRJ application
+ * 
+ * PHASE 2 UPDATE (Dec 2025):
+ * - Removed Basic Auth (now handled by Cloudflare Access as outer gate)
+ * - Cloudflare Access provides authentication before requests reach the app
+ * - Future: Will add NextAuth session checks here for app-level user management
+ * 
+ * For now, this middleware is a pass-through. Cloudflare Access handles:
+ * - Email-based authentication (One-Time PIN)
+ * - Access control to krj-dev.dr3-dashboard.com
+ * - Identity headers (CF-Access-Authenticated-User-Email)
+ */
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Only protect /krj (and any subpaths if we add them later)
+  // Only apply middleware to /krj routes
   if (!pathname.startsWith("/krj")) {
     return NextResponse.next();
   }
 
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Basic ")) {
-    return unauthorizedResponse();
+  // Optional: Log Cloudflare Access identity (for debugging)
+  if (process.env.NODE_ENV === "development") {
+    const cfEmail = req.headers.get("CF-Access-Authenticated-User-Email");
+    if (cfEmail) {
+      console.log(`[KRJ Access] User: ${cfEmail}`);
+    }
   }
 
-  const base64Credentials = authHeader.split(" ")[1];
-
-  let decoded: string;
-  try {
-    decoded = Buffer.from(base64Credentials, "base64").toString("utf8");
-  } catch {
-    return unauthorizedResponse();
-  }
-
-  const [user, pass] = decoded.split(":");
-
-  const expectedUser = process.env.KRJ_BASIC_USER || "krj";
-  const expectedPass = process.env.KRJ_BASIC_PASS || "changeme";
-
-  if (user === expectedUser && pass === expectedPass) {
-    return NextResponse.next();
-  }
-
-  return unauthorizedResponse();
+  // Pass through - Cloudflare Access handles outer authentication
+  // Future: Add NextAuth session check here for app-level user preferences
+  return NextResponse.next();
 }
 
 // Tell Next which paths use this middleware

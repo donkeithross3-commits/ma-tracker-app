@@ -1,0 +1,444 @@
+"""
+Options Scanner API Routes
+"""
+
+from fastapi import APIRouter, HTTPException
+from datetime import datetime
+from typing import List
+import logging
+import uuid
+
+from ..options.ib_client import IBClient
+from ..options.models import (
+    AvailabilityCheckResponse,
+    FetchChainRequest,
+    FetchChainResponse,
+    GenerateStrategiesRequest,
+    GenerateStrategiesResponse,
+    PriceSpreadsRequest,
+    PriceSpreadsResponse,
+    OptionContract,
+    CandidateStrategy,
+    StrategyLeg,
+    SpreadPrice,
+    ScanParameters,
+)
+from ..scanner import MergerArbAnalyzer, DealInput
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/options", tags=["options"])
+
+
+@router.get("/ib-status")
+async def get_ib_status():
+    """
+    Check IB TWS connection status
+    """
+    try:
+        ib_client = IBClient()
+        is_connected = ib_client.is_connected()
+        
+        # If not connected, try to connect
+        if not is_connected:
+            logger.info("IB not connected, attempting to connect...")
+            is_connected = ib_client.connect()
+        
+        return {
+            "connected": is_connected,
+            "message": "IB TWS connected" if is_connected else "IB TWS not connected"
+        }
+    except Exception as e:
+        logger.error(f"Error checking IB status: {e}")
+        return {
+            "connected": False,
+            "message": f"Error checking IB status: {str(e)}"
+        }
+
+
+@router.post("/ib-reconnect")
+async def reconnect_ib():
+    """
+    Force reconnect to IB TWS
+    """
+    try:
+        ib_client = IBClient()
+        
+        # Disconnect if already connected
+        if ib_client.is_connected():
+            logger.info("Disconnecting existing IB connection...")
+            ib_client.disconnect()
+        
+        # Connect with new client ID
+        logger.info("Reconnecting to IB TWS...")
+        connected = ib_client.connect()
+        
+        return {
+            "success": connected,
+            "connected": connected,
+            "message": "Reconnected to IB TWS" if connected else "Failed to reconnect to IB TWS"
+        }
+    except Exception as e:
+        logger.error(f"Error reconnecting to IB: {e}")
+        return {
+            "success": False,
+            "connected": False,
+            "message": f"Error reconnecting: {str(e)}"
+        }
+
+
+@router.get("/check-availability")
+async def check_availability(ticker: str) -> AvailabilityCheckResponse:
+    """
+    Check if listed options exist for a ticker
+    """
+    try:
+        logger.info(f"Checking option availability for {ticker}")
+        
+        # Get IB client
+        ib_client = IBClient()
+        if not ib_client.is_connected():
+            ib_client.connect()
+        
+        scanner = ib_client.get_scanner()
+        if not scanner:
+            return AvailabilityCheckResponse(
+                available=False,
+                expirationCount=0,
+                error="IB TWS not connected"
+            )
+        
+        # Resolve contract
+        contract_id = scanner.resolve_contract(ticker)
+        if not contract_id:
+            return AvailabilityCheckResponse(
+                available=False,
+                expirationCount=0,
+                error=f"Could not resolve ticker {ticker}"
+            )
+        
+        # Get available expirations
+        expirations = scanner.get_available_expirations(ticker, contract_id)
+        
+        return AvailabilityCheckResponse(
+            available=len(expirations) > 0,
+            expirationCount=len(expirations)
+        )
+    
+    except Exception as e:
+        logger.error(f"Error checking availability: {e}")
+        return AvailabilityCheckResponse(
+            available=False,
+            expirationCount=0,
+            error=str(e)
+        )
+
+
+@router.post("/chain")
+async def fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
+    """
+    Fetch option chain from IB TWS
+    """
+    try:
+        logger.info(f"Fetching option chain for {request.ticker}")
+        
+        # Get IB client
+        ib_client = IBClient()
+        if not ib_client.is_connected():
+            logger.info("IB not connected, attempting connection...")
+            connected = ib_client.connect()
+            if not connected:
+                raise HTTPException(status_code=503, detail="Failed to connect to IB TWS. Please ensure TWS/Gateway is running and accepting API connections on port 7497.")
+        
+        scanner = ib_client.get_scanner()
+        if not scanner:
+            raise HTTPException(status_code=503, detail="IB TWS scanner not available")
+        
+        # Fetch underlying data
+        underlying_data = scanner.fetch_underlying_data(request.ticker)
+        if not underlying_data['price']:
+            raise HTTPException(status_code=404, detail=f"Could not fetch price for {request.ticker}")
+        
+        spot_price = underlying_data['price']
+        
+        # Parse expected close date
+        try:
+            close_date = datetime.strptime(request.expectedCloseDate, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        
+        # Use scan parameters if provided, otherwise use defaults
+        params = request.scanParams or ScanParameters()
+        
+        logger.info(f"Fetching chain with params: days_before_close={params.daysBeforeClose}, "
+                   f"strike_lower={params.strikeLowerBound}%, strike_upper={params.strikeUpperBound}%")
+        
+        # Fetch option chain with custom parameters
+        options = scanner.fetch_option_chain(
+            request.ticker,
+            expiry_months=6,
+            current_price=spot_price,
+            deal_close_date=close_date,
+            days_before_close=params.daysBeforeClose,
+            deal_price=request.dealPrice
+        )
+        
+        # Convert to response format
+        contracts = []
+        expirations = set()
+        
+        for opt in options:
+            expirations.add(opt.expiry)
+            contracts.append(OptionContract(
+                symbol=opt.symbol,
+                strike=opt.strike,
+                expiry=opt.expiry,
+                right=opt.right,
+                bid=opt.bid,
+                ask=opt.ask,
+                mid=opt.mid_price,
+                last=opt.last,
+                volume=opt.volume,
+                open_interest=opt.open_interest,
+                implied_vol=opt.implied_vol,
+                delta=opt.delta,
+                bid_size=opt.bid_size,
+                ask_size=opt.ask_size
+            ))
+        
+        return FetchChainResponse(
+            ticker=request.ticker,
+            spotPrice=spot_price,
+            expirations=sorted(list(expirations)),
+            contracts=contracts
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching chain: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-strategies")
+async def generate_strategies(request: GenerateStrategiesRequest) -> GenerateStrategiesResponse:
+    """
+    Generate candidate strategies from option chain data
+    """
+    try:
+        logger.info(f"Generating strategies for {request.ticker}")
+        
+        # Parse expected close date
+        try:
+            close_date = datetime.strptime(request.expectedCloseDate, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        
+        # Use scan parameters if provided, otherwise use defaults
+        params = request.scanParams or ScanParameters()
+        
+        # Create deal input
+        deal_input = DealInput(
+            ticker=request.ticker,
+            deal_price=request.dealPrice,
+            expected_close_date=close_date,
+            confidence=params.dealConfidence
+        )
+        
+        # Convert chain data to OptionData objects
+        from ..scanner import OptionData
+        options = []
+        
+        chain_contracts = request.chainData.get('contracts', [])
+        for contract in chain_contracts:
+            options.append(OptionData(
+                symbol=contract.get('symbol', request.ticker),
+                strike=contract['strike'],
+                expiry=contract['expiry'],
+                right=contract['right'],
+                bid=contract['bid'],
+                ask=contract['ask'],
+                last=contract.get('last', 0),
+                volume=contract.get('volume', 0),
+                open_interest=contract.get('open_interest', 0),
+                implied_vol=contract.get('implied_vol', 0.30),
+                delta=contract.get('delta', 0),
+                gamma=0,
+                theta=0,
+                vega=0
+            ))
+        
+        # Analyze opportunities with custom parameters
+        analyzer = MergerArbAnalyzer(deal_input)
+        current_price = request.chainData.get('spotPrice', request.dealPrice)
+        
+        logger.info(f"Generating strategies with params: short_strike_lower={params.shortStrikeLower}%, "
+                   f"short_strike_upper={params.shortStrikeUpper}%, top_n={params.topStrategiesPerExpiration}")
+        
+        opportunities = analyzer.find_best_opportunities(
+            options, 
+            current_price, 
+            top_n=params.topStrategiesPerExpiration,
+            short_strike_lower_pct=params.shortStrikeLower / 100.0,
+            short_strike_upper_pct=params.shortStrikeUpper / 100.0
+        )
+        
+        # Convert to response format
+        candidates = []
+        for opp in opportunities:
+            legs = []
+            for i, contract in enumerate(opp.contracts):
+                # Determine side based on strategy
+                if opp.strategy == 'call':
+                    side = 'BUY'
+                elif opp.strategy == 'spread':
+                    side = 'BUY' if i == 0 else 'SELL'
+                elif opp.strategy == 'put_spread':
+                    side = 'BUY' if i == 0 else 'SELL'
+                else:
+                    side = 'BUY'
+                
+                legs.append(StrategyLeg(
+                    symbol=contract.symbol,
+                    strike=contract.strike,
+                    right=contract.right,
+                    quantity=1,
+                    side=side,
+                    bid=contract.bid,
+                    ask=contract.ask,
+                    mid=contract.mid_price,
+                    volume=contract.volume,
+                    openInterest=contract.open_interest,
+                    bidSize=contract.bid_size,
+                    askSize=contract.ask_size
+                ))
+            
+            # Calculate liquidity score
+            avg_bid_ask_spread = sum((leg.ask - leg.bid) / leg.mid if leg.mid > 0 else 0 for leg in legs) / len(legs)
+            avg_volume = sum(leg.volume for leg in legs) / len(legs)
+            avg_oi = sum(leg.openInterest for leg in legs) / len(legs)
+            
+            spread_score = 1 / (1 + avg_bid_ask_spread)
+            volume_score = min(avg_volume / 100, 1)
+            oi_score = min(avg_oi / 1000, 1)
+            liquidity_score = (spread_score * 0.5 + volume_score * 0.25 + oi_score * 0.25) * 100
+            
+            candidate_strategy = CandidateStrategy(
+                id=str(uuid.uuid4()),
+                strategyType=opp.strategy,
+                expiration=opp.contracts[0].expiry,
+                legs=legs,
+                netPremium=opp.entry_cost,
+                netPremiumFarTouch=opp.entry_cost_ft,
+                maxProfit=opp.max_profit,
+                maxLoss=abs(opp.entry_cost),
+                returnOnRisk=opp.edge_vs_market,
+                annualizedYield=opp.annualized_return,
+                annualizedYieldFarTouch=opp.annualized_return_ft,
+                liquidityScore=liquidity_score,
+                notes=opp.notes
+            )
+            
+            # Debug logging for first few strategies
+            if len(candidates) < 3:
+                logger.info(f"Strategy {len(candidates)+1}: {opp.strategy} - "
+                          f"annualized_return={opp.annualized_return:.4f}, "
+                          f"annualized_return_ft={opp.annualized_return_ft:.4f}")
+            
+            candidates.append(candidate_strategy)
+        
+        return GenerateStrategiesResponse(candidates=candidates)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating strategies: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/price-spreads")
+async def price_spreads(request: PriceSpreadsRequest) -> PriceSpreadsResponse:
+    """
+    Get current pricing for multiple spreads
+    """
+    try:
+        logger.info(f"Pricing {len(request.spreads)} spreads")
+        
+        # Get IB client
+        ib_client = IBClient()
+        if not ib_client.is_connected():
+            ib_client.connect()
+        
+        scanner = ib_client.get_scanner()
+        if not scanner:
+            raise HTTPException(status_code=503, detail="IB TWS not connected")
+        
+        prices = []
+        
+        for spread in request.spreads:
+            try:
+                # Fetch current prices for each leg
+                leg_prices = []
+                net_premium = 0.0
+                
+                for leg in spread.legs:
+                    # Parse option symbol to get strike, expiry, right
+                    # Assuming symbol format: TICKER YYMMDD C/P STRIKE
+                    parts = leg.symbol.split()
+                    if len(parts) >= 4:
+                        ticker = parts[0]
+                        expiry = parts[1]
+                        right = parts[2]
+                        strike = float(parts[3])
+                        
+                        # Fetch option data
+                        option_data = scanner.get_option_data(ticker, expiry, strike, right)
+                        
+                        if option_data:
+                            leg_prices.append(OptionContract(
+                                symbol=option_data.symbol,
+                                strike=option_data.strike,
+                                expiry=option_data.expiry,
+                                right=option_data.right,
+                                bid=option_data.bid,
+                                ask=option_data.ask,
+                                mid=option_data.mid_price,
+                                last=option_data.last,
+                                volume=option_data.volume,
+                                open_interest=option_data.open_interest,
+                                implied_vol=option_data.implied_vol,
+                                delta=option_data.delta,
+                                bid_size=option_data.bid_size,
+                                ask_size=option_data.ask_size
+                            ))
+                            
+                            # Calculate net premium
+                            if leg.side == 'BUY':
+                                net_premium -= option_data.mid_price
+                            else:
+                                net_premium += option_data.mid_price
+                
+                prices.append(SpreadPrice(
+                    spreadId=spread.spreadId,
+                    premium=abs(net_premium),
+                    timestamp=datetime.now().isoformat(),
+                    legs=leg_prices if leg_prices else None
+                ))
+            
+            except Exception as e:
+                logger.error(f"Error pricing spread {spread.spreadId}: {e}")
+                # Add with zero premium on error
+                prices.append(SpreadPrice(
+                    spreadId=spread.spreadId,
+                    premium=0.0,
+                    timestamp=datetime.now().isoformat()
+                ))
+        
+        return PriceSpreadsResponse(prices=prices)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error pricing spreads: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

@@ -52,6 +52,13 @@ python-service/token.json
 # Claude Code session state (local only, don't commit)
 .claude-session
 
+# Cloudflare Tunnel (local only, don't commit credentials)
+.cloudflared/credentials.json
+.cloudflared/tunnel.log
+.cloudflared/cert.pem
+.cloudflared/*.json
+.cloudflared/config.yml
+
 # Test/diagnostic scripts (temporary, don't commit)
 test_*.py
 check_*.py

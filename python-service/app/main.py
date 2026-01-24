@@ -28,6 +28,7 @@ from .api.edgar_routes import router as edgar_router
 from .api.intelligence_routes import router as intelligence_router
 from .api.webhooks import router as webhooks_router
 from .api.halt_routes import router as halt_router
+from .api.options_routes import router as options_router
 from .edgar.database import EdgarDatabase
 
 # Configure logging
@@ -60,6 +61,9 @@ app.include_router(webhooks_router)
 
 # Include Halt monitoring routes
 app.include_router(halt_router)
+
+# Include Options scanner routes
+app.include_router(options_router)
 
 # Configure CORS - allow requests from Next.js frontend
 app.add_middleware(

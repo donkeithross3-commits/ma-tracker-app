@@ -57,3 +57,130 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ============================================
+   KRJ Print Styles
+   ============================================ */
+
+/* Screen-only: Hide print layout */
+@media screen {
+  .print-layout {
+    display: none;
+  }
+}
+
+/* Print styles */
+@media print {
+  /* Page setup for portrait */
+  @page {
+    size: portrait;
+    margin: 0.5in 0.5in;
+  }
+
+  /* Force white background and black text */
+  * {
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Hide screen-only elements */
+  .screen-only,
+  .no-print,
+  nav,
+  header,
+  button,
+  [role="tablist"],
+  .print-button,
+  [role="dialog"],
+  [data-radix-dialog-overlay],
+  [data-radix-dialog-content] {
+    display: none !important;
+  }
+
+  /* Show print layout only */
+  .print-layout {
+    display: block !important;
+  }
+
+  /* Print group styling */
+  .print-group {
+    margin-bottom: 1rem;
+    page-break-inside: avoid;
+  }
+
+  .print-group-title {
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 0.25rem;
+    color: black !important;
+  }
+
+  /* Print summary card */
+  .print-summary {
+    font-size: 10px;
+    margin-bottom: 0.5rem;
+    padding: 4px 8px;
+    background-color: #ffffcc !important;
+    border: 1px solid #999 !important;
+    display: inline-block;
+    color: black !important;
+  }
+
+  /* Print table styling */
+  .print-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+    line-height: 1.3;
+    margin-bottom: 1rem;
+  }
+
+  .print-table thead {
+    display: table-header-group; /* Repeat headers on each page */
+  }
+
+  .print-table th,
+  .print-table td {
+    border: 1px solid #333 !important;
+    padding: 3px 4px;
+    text-align: left;
+    white-space: normal; /* Allow wrapping */
+    word-wrap: break-word;
+    color: black !important;
+    background: white !important;
+  }
+
+  .print-table th {
+    background-color: #f0f0f0 !important;
+    font-weight: bold;
+    font-size: 9px;
+    line-height: 1.2;
+    color: black !important;
+  }
+
+  .print-table td.numeric,
+  .print-table th.numeric {
+    text-align: right;
+  }
+
+  .print-table tr {
+    page-break-inside: avoid;
+  }
+
+  /* Page breaks */
+  .page-break {
+    page-break-after: always;
+  }
+
+  /* Hide unnecessary elements in print */
+  a[href]:after {
+    content: none !important;
+  }
+}

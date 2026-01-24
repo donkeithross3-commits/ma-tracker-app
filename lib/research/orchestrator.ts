@@ -31,15 +31,16 @@ export async function generateResearchReport(
   const startTime = Date.now();
 
   // Get deal data from database
+  // TODO: Re-enable secFilings when model is added to Prisma schema
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     include: {
-      secFilings: {
-        where: {
-          fetchStatus: "fetched",
-        },
-        orderBy: { filingDate: "desc" },
-      },
+      // secFilings: {
+      //   where: {
+      //     fetchStatus: "fetched",
+      //   },
+      //   orderBy: { filingDate: "desc" },
+      // },
       versions: {
         where: { isCurrentVersion: true },
         take: 1,
@@ -51,11 +52,12 @@ export async function generateResearchReport(
     throw new Error(`Deal not found: ${dealId}`);
   }
 
-  if (deal.secFilings.length === 0) {
-    throw new Error(
-      "No SEC filings available. Run /api/research/fetch-filings first."
-    );
-  }
+  // TODO: Re-enable when secFilings model is added
+  // if (deal.secFilings.length === 0) {
+  //   throw new Error(
+  //     "No SEC filings available. Run /api/research/fetch-filings first."
+  //   );
+  // }
 
   // Get current version for deal terms
   const currentVersion = deal.versions[0];
@@ -68,13 +70,14 @@ export async function generateResearchReport(
     acquirerCompany: deal.acquirorName || deal.acquirorTicker || "Unknown",
     dealPrice: currentVersion?.cashPerShare?.toNumber() || 0,
     dealAnnounced: currentVersion?.announcedDate || new Date(),
-    filings: deal.secFilings.map((f) => ({
-      id: f.id,
-      type: f.filingType,
-      date: f.filingDate,
-      content: f.textExtracted || f.htmlText || "",
-      url: f.edgarUrl,
-    })),
+    filings: [], // TODO: Re-enable when secFilings model is added
+    // filings: deal.secFilings.map((f) => ({
+    //   id: f.id,
+    //   type: f.filingType,
+    //   date: f.filingDate,
+    //   content: f.textExtracted || f.htmlText || "",
+    //   url: f.edgarUrl,
+    // })),
   };
 
   // Create or update report record (delete existing if present)
@@ -309,24 +312,26 @@ export async function isDealReadyForAnalysis(dealId: string): Promise<{
 }> {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
-    include: {
-      secFilings: {
-        where: { fetchStatus: "fetched" },
-      },
-    },
+    // TODO: Re-enable when secFilings model is added
+    // include: {
+    //   secFilings: {
+    //     where: { fetchStatus: "fetched" },
+    //   },
+    // },
   });
 
   if (!deal) {
     return { ready: false, reason: "Deal not found", filingsCount: 0 };
   }
 
-  if (deal.secFilings.length === 0) {
-    return {
-      ready: false,
-      reason: "No SEC filings fetched yet",
-      filingsCount: 0,
-    };
-  }
+  // TODO: Re-enable when secFilings model is added
+  // if (deal.secFilings.length === 0) {
+  //   return {
+  //     ready: false,
+  //     reason: "No SEC filings fetched yet",
+  //     filingsCount: 0,
+  //   };
+  // }
 
-  return { ready: true, filingsCount: deal.secFilings.length };
+  return { ready: true, filingsCount: 0 }; // Temporarily return 0 filings
 }

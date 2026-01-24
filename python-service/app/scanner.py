@@ -72,6 +72,8 @@ class OptionData:
     gamma: float
     theta: float
     vega: float
+    bid_size: int = 0
+    ask_size: int = 0
 
     @property
     def mid_price(self) -> float:
@@ -133,35 +135,108 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         # Thread pool for parallel requests
         self.executor = ThreadPoolExecutor(max_workers=10)
+        
+        # Connection state tracking
+        self.connection_lost = False
+        self.last_heartbeat = time.time()
+        self.connection_start_time = None
 
     def connect_to_ib(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1):
         """Connect to IB Gateway or TWS"""
-        print(f"Connecting to IB at {host}:{port}...")
-        self.connect(host, port, client_id)
+        print(f"Connecting to IB at {host}:{port} with client_id={client_id}...")
+        
+        try:
+            self.connect(host, port, client_id)
+        except Exception as e:
+            print(f"ERROR: Exception during connect: {e}")
+            return False
 
         # Start message processing thread
         api_thread = Thread(target=self.run, daemon=True)
         api_thread.start()
+        print("Message processing thread started, waiting for connection...")
 
-        # Wait for connection with timeout
-        for i in range(10):  # 10 second timeout
+        # Wait for connection with shorter timeout for faster feedback
+        for i in range(5):  # 5 second timeout
             time.sleep(1)
             if self.isConnected():
-                print("Connected to Interactive Brokers successfully")
+                print(f"✅ Connected to IB successfully (took {i+1}s)")
                 return True
+            if i < 4:  # Don't print on last iteration
+                print(f"  Waiting... ({i+1}/5)")
 
-        print("ERROR: Failed to connect to IB. Please ensure TWS/Gateway is running.")
+        print("❌ ERROR: Failed to connect to IB after 5 seconds")
+        print("   Possible issues:")
+        print("   1. TWS API not enabled (File → Global Configuration → API → Settings)")
+        print("   2. Client ID conflict - TWS may have too many connections")
+        print("   3. TWS needs to be restarted")
         return False
 
     def nextValidId(self, orderId: int):
-        """Callback when connected"""
+        """Callback when connected - acts as heartbeat"""
         print("=" * 80)
         print(f"NEXT VALID ID CALLBACK FIRED! orderId={orderId}")
         print("=" * 80)
         super().nextValidId(orderId)
         self.next_req_id = orderId
-        print(f"Ready with next order ID: {orderId}")
+        
+        # Update connection state
+        self.connection_lost = False
+        self.last_heartbeat = time.time()
+        if self.connection_start_time is None:
+            self.connection_start_time = time.time()
+        
+        print(f"✅ Connection healthy - ready with next order ID: {orderId}")
 
+    def connectionClosed(self):
+        """Callback when connection is closed by IB or network"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning("⚠️  IB TWS connection closed!")
+        print("=" * 80)
+        print("⚠️  CONNECTION TO IB TWS LOST!")
+        print("=" * 80)
+        self.connection_lost = True
+        self.connection_start_time = None
+    
+    def error(self, reqId, errorCode, errorString, advancedOrderRejectJson=""):
+        """Enhanced error handling with connection state tracking"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Critical connection errors
+        if errorCode in [1100, 1101, 1102, 2110]:
+            if errorCode == 1100:
+                # Connection lost
+                logger.warning(f"Connection lost (error {errorCode}): {errorString}")
+                print(f"⚠️  Connection event {errorCode}: {errorString}")
+                self.connection_lost = True
+            elif errorCode == 1101:
+                # Connection restored but data lost
+                logger.warning(f"Connection restored - data lost (error {errorCode}): {errorString}")
+                print(f"🔄 Connection event {errorCode}: {errorString}")
+                self.connection_lost = False
+                self.last_heartbeat = time.time()
+            elif errorCode == 1102:
+                # Connection restored with data maintained
+                logger.info(f"Connection restored - data OK (error {errorCode}): {errorString}")
+                print(f"✅ Connection event {errorCode}: {errorString}")
+                self.connection_lost = False
+                self.last_heartbeat = time.time()
+            elif errorCode == 2110:
+                # Connectivity issues
+                logger.warning(f"Connectivity issue (error {errorCode}): {errorString}")
+                print(f"⚠️  Connectivity event {errorCode}: {errorString}")
+        
+        # Informational messages (2104, 2106, 2158) - don't log as errors
+        elif errorCode in [2104, 2106, 2158]:
+            # These are actually "OK" messages from IB
+            logger.info(f"IB Info {errorCode}: {errorString}")
+        else:
+            # Other errors
+            logger.error(f"IB Error {reqId}/{errorCode}: {errorString}")
+            print(f"ERROR {reqId}/{errorCode}: {errorString}")
+    
     def get_next_req_id(self) -> int:
         """Get next request ID"""
         req_id = self.next_req_id
@@ -186,8 +261,8 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         self.reqContractDetails(req_id, contract)
 
-        # Wait for response - reduced from 2s to 0.5s
-        time.sleep(0.5)
+        # Wait for response - increased from 0.5s to 2.0s for better reliability
+        time.sleep(2.0)
 
         if self.contract_details:
             con_id = self.contract_details.contract.conId
@@ -210,6 +285,12 @@ class IBMergerArbScanner(EWrapper, EClient):
     def fetch_underlying_data(self, ticker: str) -> Dict:
         """Fetch current underlying stock data"""
         print(f"Fetching underlying data for {ticker}...")
+        
+        # Reset current data to avoid using stale values
+        self.underlying_price = None
+        self.underlying_bid = None
+        self.underlying_ask = None
+        self.historical_vol = None
 
         # Create stock contract
         contract = Contract()
@@ -224,8 +305,8 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         self.reqMktData(req_id, contract, "", False, False, [])
 
-        # Wait for data - reduced from 2s to 0.5s
-        time.sleep(0.5)
+        # Wait for data - increased from 0.5s to 2.0s for better reliability
+        time.sleep(2.0)
 
         # Cancel market data
         self.cancelMktData(req_id)
@@ -257,14 +338,25 @@ class IBMergerArbScanner(EWrapper, EClient):
                     self.option_chain[reqId]['last'] = price
 
     def tickSize(self, reqId: TickerId, tickType: int, size: int):
-        """Handle size updates (volume, open interest)"""
+        """Handle size updates (volume, open interest, bid/ask sizes)"""
+        logger = logging.getLogger(__name__)
         if reqId in self.option_chain:
-            if tickType == 8:  # Volume
+            if tickType == 0:  # Bid size
+                logger.info(f"📊 Received BID SIZE: reqId={reqId}, size={size}")
+                self.option_chain[reqId]['bid_size'] = size
+            elif tickType == 3:  # Ask size
+                logger.info(f"📊 Received ASK SIZE: reqId={reqId}, size={size}")
+                self.option_chain[reqId]['ask_size'] = size
+            elif tickType == 8:  # Volume
                 self.option_chain[reqId]['volume'] = size
             elif tickType == 27:  # Open Interest
                 self.option_chain[reqId]['open_interest'] = size
+        else:
+            # Log all tickSize calls for debugging
+            if tickType in [0, 3]:
+                logger.debug(f"tickSize for unknown reqId: {reqId}, tickType={tickType}, size={size}")
 
-    def fetch_option_chain(self, ticker: str, expiry_months: int = 6, current_price: float = None, deal_close_date: datetime = None, days_before_close: int = 0, deal_price: float = None) -> List[OptionData]:
+    def fetch_option_chain(self, ticker: str, expiry_months: int = 6, current_price: float = None, deal_close_date: datetime = None, days_before_close: int = 0, deal_price: float = None, strike_lower_pct: float = 0.20, strike_upper_pct: float = 0.10) -> List[OptionData]:
         """Fetch option chain from IB - LIMITED to avoid 100+ instrument limit
 
         If deal_close_date is provided, fetches expirations around that date.
@@ -295,8 +387,8 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
 
-        # Wait for response - reduced from 3s to 1s
-        time.sleep(1)
+        # Wait for response - increased from 1s to 2s for better reliability
+        time.sleep(2)
 
         # Now request specific option contracts - LIMITED
         options = []
@@ -340,10 +432,13 @@ class IBMergerArbScanner(EWrapper, EClient):
                         selected_expiries.append(expiries_before[-1])  # Last one (closest to close date)
                         print(f"Selected expiration BEFORE close: {expiries_before[-1]}")
 
-                    # Get ONLY the EARLIEST expiration at or after deal close
+                    # Get expirations after deal close (price agent mode)
                     if expiries_at_or_after:
-                        selected_expiries.append(expiries_at_or_after[0])  # First one (closest after close date)
-                        print(f"Selected expiration AT/AFTER close: {expiries_at_or_after[0]}")
+                        # Limit to first 3 expirations after close for faster updates
+                        # The UI will get frequent updates, so we don't need deep coverage
+                        after_close = expiries_at_or_after[:3]
+                        selected_expiries.extend(after_close)
+                        print(f"Selected {len(after_close)} expirations AT/AFTER close: {after_close}")
 
                     print(f"Selected expirations around deal close date {deal_close_date.strftime('%Y-%m-%d')}: {selected_expiries}")
                 else:
@@ -370,14 +465,17 @@ class IBMergerArbScanner(EWrapper, EClient):
                     available_strikes = self.available_strikes[expiry]
                     print(f"Using {len(available_strikes)} strikes from IB for {expiry}")
 
-                    # Filter strikes: 20% below deal price to 10% above
-                    # This captures all potential call spreads for merger arb
+                    # Filter strikes using configurable bounds
+                    # For merger arb: focus on strikes near current price up to deal price
+                    # We don't need deep OTM strikes below current price
                     if deal_price:
-                        min_strike = deal_price * 0.80  # 20% below deal price
-                        max_strike = max(price_to_use, deal_price) * 1.10  # 10% above current/deal
+                        # Start from 10% below current price (not deal price)
+                        min_strike = price_to_use * 0.90
+                        # Go up to 15% above deal price to capture protective strategies
+                        max_strike = deal_price * 1.15
                     else:
-                        min_strike = price_to_use * 0.80
-                        max_strike = price_to_use * 1.10
+                        min_strike = price_to_use * (1 - strike_lower_pct)
+                        max_strike = price_to_use * (1 + strike_upper_pct)
 
                     relevant_strikes = [s for s in available_strikes if min_strike <= s <= max_strike]
 
@@ -462,8 +560,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         # reqId, underlyingSymbol, futFopExchange, underlyingSecType, underlyingConId
         self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
 
-        # Wait for response - reduced from 3s to 1s
-        time.sleep(1)
+        # Wait for response - increased from 2s to 3s for better reliability
+        time.sleep(3)
 
         if not self.available_expirations:
             print(f"Warning: IB expiration lookup failed for {ticker} (contract ID: {contract_id})")
@@ -597,14 +695,16 @@ class IBMergerArbScanner(EWrapper, EClient):
             'delta': 0,
             'gamma': 0,
             'theta': 0,
-            'vega': 0
+            'vega': 0,
+            'bid_size': 0,
+            'ask_size': 0
         }
 
         # Request market data and Greeks with RTH=False for after-hours data
         self.reqMktData(req_id, contract, "100,101,104,106", False, False, [])
 
-        # Reduced wait time - IB typically responds within 0.3-0.5s
-        time.sleep(0.3)
+        # Wait time increased to allow bid/ask size data to arrive
+        time.sleep(1.5)
 
         # Cancel market data
         self.cancelMktData(req_id)
@@ -612,6 +712,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Return populated option data
         data = self.option_chain.get(req_id)
         if data and (data['bid'] > 0 or data['last'] > 0):
+            logger = logging.getLogger(__name__)
+            logger.info(f"✅ Option data for {ticker} {expiry} {strike}{right}: bid_size={data.get('bid_size', 0)}, ask_size={data.get('ask_size', 0)}")
             return OptionData(**data)
 
         return None
@@ -628,7 +730,7 @@ class IBMergerArbScanner(EWrapper, EClient):
             List of OptionData objects (None for failed requests)
         """
         logger = logging.getLogger(__name__)
-        batch_size = 50  # IB limit to avoid overwhelming API
+        batch_size = 10  # Reduced from 50 to avoid IB rate limits
         results = []
 
         # Process in batches
@@ -667,32 +769,38 @@ class IBMergerArbScanner(EWrapper, EClient):
                     'delta': 0,
                     'gamma': 0,
                     'theta': 0,
-                    'vega': 0
+                    'vega': 0,
+                    'bid_size': 0,
+                    'ask_size': 0
                 }
 
                 self.reqMktData(req_id, contract, "100,101,104,106", False, False, [])
                 batch_req_ids.append(req_id)
 
-                # Tiny delay between submissions to avoid rate limit
-                time.sleep(0.05)
+                # Increased delay between submissions to avoid rate limit
+                time.sleep(0.15)  # Increased from 0.05s to 0.15s
 
             # Wait for all batch responses (longer for larger batches)
-            wait_time = min(2.0, 0.5 + len(batch) * 0.02)
+            # Increased base wait time to allow bid/ask size data to arrive
+            wait_time = min(5.0, 2.0 + len(batch) * 0.1)  # Increased from 4.0/1.5/0.05
             logger.info(f"Waiting {wait_time:.2f}s for batch responses...")
             time.sleep(wait_time)
 
             # Cancel all requests and collect results
-            for req_id in batch_req_ids:
+            for idx, req_id in enumerate(batch_req_ids):
                 self.cancelMktData(req_id)
                 data = self.option_chain.get(req_id)
                 if data and (data['bid'] > 0 or data['last'] > 0):
                     results.append(OptionData(**data))
                 else:
+                    # Log which contract failed
+                    expiry, strike, right = batch[idx]
+                    logger.debug(f"No valid data for {ticker} {expiry} {strike}{right}")
                     results.append(None)
 
-            # Small delay between batches
+            # Increased delay between batches
             if i + batch_size < len(requests):
-                time.sleep(0.2)
+                time.sleep(0.5)  # Increased from 0.2s to 0.5s
 
         logger.info(f"Batch processing complete: {len([r for r in results if r])} / {len(requests)} successful")
         return results
@@ -825,11 +933,19 @@ class MergerArbAnalyzer:
         breakeven_mid = long_call.strike + spread_cost_mid
 
         years_to_expiry = self.deal.days_to_close / 365
+        # Annualized return = (return / cost) / years (not * years)
+        # This gives the return per year, which is what we want for annualized return
         annualized_return_mid = (expected_return_mid / spread_cost_mid) / years_to_expiry if years_to_expiry > 0 and spread_cost_mid > 0 else 0
 
         # FAR-TOUCH calculations
         expected_return_ft = value_at_deal_close - spread_cost_ft
         annualized_return_ft = (expected_return_ft / spread_cost_ft) / years_to_expiry if years_to_expiry > 0 and spread_cost_ft > 0 else 0
+        
+        # Debug logging for far touch
+        print(f"DEBUG FT CALL: {long_call.strike}/{short_call.strike}")
+        print(f"  spread_cost_ft={spread_cost_ft:.2f}, expected_return_ft={expected_return_ft:.2f}")
+        print(f"  years_to_expiry={years_to_expiry:.3f}, days_to_close={self.deal.days_to_close}")
+        print(f"  annualized_return_mid={annualized_return_mid:.4f}, annualized_return_ft={annualized_return_ft:.4f}")
 
         # Probability (based on midpoint breakeven)
         prob_above_breakeven = self.calculate_probability_above(
@@ -913,6 +1029,12 @@ class MergerArbAnalyzer:
         years_to_expiry = self.deal.days_to_close / 365
         annualized_return_mid = (expected_return_mid / max_loss_mid) / years_to_expiry if years_to_expiry > 0 and max_loss_mid > 0 else 0
         annualized_return_ft = (expected_return_ft / max_loss_ft) / years_to_expiry if years_to_expiry > 0 and max_loss_ft > 0 else 0
+        
+        # Debug logging for far touch
+        print(f"DEBUG PUT FT: {long_put.strike}/{short_put.strike}")
+        print(f"  max_loss_ft={max_loss_ft:.2f}, expected_return_ft={expected_return_ft:.2f}")
+        print(f"  years_to_expiry={years_to_expiry:.3f}, days_to_close={self.deal.days_to_close}")
+        print(f"  annualized_return_mid={annualized_return_mid:.4f}, annualized_return_ft={annualized_return_ft:.4f}")
 
         # Breakeven = short strike - credit
         breakeven_mid = short_put.strike - credit_mid
@@ -980,11 +1102,23 @@ class MergerArbAnalyzer:
 
     def find_best_opportunities(self, options: List[OptionData],
                                current_price: float,
-                               top_n: int = 10) -> List[TradeOpportunity]:
-        """Find the best opportunities from option chain"""
+                               top_n: int = 10,
+                               short_strike_lower_pct: float = 0.10,
+                               short_strike_upper_pct: float = 0.20) -> List[TradeOpportunity]:
+        """
+        Find the best opportunities from option chain
+        
+        Args:
+            short_strike_lower_pct: Percentage BELOW deal price (e.g., 0.10 = 10% below)
+            short_strike_upper_pct: Percentage ABOVE deal price (e.g., 0.20 = 20% above)
+        """
         from collections import defaultdict
 
         opportunities = []
+
+        # Convert percentage below/above to actual multipliers
+        short_strike_lower_multiplier = 1.0 - short_strike_lower_pct  # e.g., 0.10 -> 0.90
+        short_strike_upper_multiplier = 1.0 + short_strike_upper_pct  # e.g., 0.20 -> 1.20
 
         # Analyze single calls - ONLY analyze actual call options
         calls_only = [opt for opt in options if opt.right == 'C']
@@ -1001,7 +1135,7 @@ class MergerArbAnalyzer:
 
         print(f"DEBUG: Analyzing spreads for {len(options_by_expiry)} expirations")
         print(f"DEBUG: Deal price: ${self.deal.total_deal_value:.2f}")
-        print(f"DEBUG: Short strike range: ${self.deal.total_deal_value * 0.95:.2f} - ${self.deal.total_deal_value + 0.50:.2f}")
+        print(f"DEBUG: Short strike range: ${self.deal.total_deal_value * short_strike_lower_multiplier:.2f} - ${self.deal.total_deal_value * short_strike_upper_multiplier:.2f}")
 
         # Analyze CALL SPREADS - only within same expiration month
         # Collect spreads per expiration to ensure we show top 5 from each
@@ -1025,10 +1159,9 @@ class MergerArbAnalyzer:
 
                     # For merger arbitrage, only consider spreads where short strike is at or near deal price
                     # Stock will converge to deal price, not exceed it
-                    # Allow short strike from 95% of deal price up to deal price + $0.50 buffer
-                    # This captures at-the-money spreads without including far OTM short strikes
-                    if (short_call.strike >= self.deal.total_deal_value * 0.95 and
-                        short_call.strike <= self.deal.total_deal_value + 0.50):
+                    # Use configurable short strike bounds (both as percentages)
+                    if (short_call.strike >= self.deal.total_deal_value * short_strike_lower_multiplier and
+                        short_call.strike <= self.deal.total_deal_value * short_strike_upper_multiplier):
                         print(f"DEBUG: Analyzing {expiry} {long_call.strike}/{short_call.strike} spread")
                         opp = self.analyze_call_spread(long_call, short_call, current_price)
                         if opp:  # Changed: accept any valid spread analysis (removed expected_return > 0 filter)
@@ -1076,9 +1209,9 @@ class MergerArbAnalyzer:
 
                     # For merger arbitrage credit put spreads:
                     # Sell put at/near deal price, buy put below
-                    # Short strike should be at or near deal price (same range as call spreads)
-                    if (short_put.strike >= self.deal.total_deal_value * 0.95 and
-                        short_put.strike <= self.deal.total_deal_value + 0.50):
+                    # Use configurable short strike bounds (both as percentages, same as call spreads)
+                    if (short_put.strike >= self.deal.total_deal_value * short_strike_lower_multiplier and
+                        short_put.strike <= self.deal.total_deal_value * short_strike_upper_multiplier):
                         print(f"DEBUG PUT: Analyzing {expiry} {long_put.strike}/{short_put.strike} put spread")
                         opp = self.analyze_put_spread(long_put, short_put, current_price)
                         if opp:
