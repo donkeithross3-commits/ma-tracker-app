@@ -362,69 +362,15 @@ export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
             </Button>
           </div>
 
-          {/* Filter toolbar */}
-          <div className="flex items-center gap-3 mb-2 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-gray-400" />
-              <select
-                value={filterColumn || "none"}
-                onChange={(e) => handleFilterColumnChange(e.target.value)}
-                className="bg-gray-800 border border-gray-600 text-gray-100 text-sm rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="none">No Filter</option>
-                <option value="signal">Current Week Signal</option>
-                <option value="signal_status_prior_week">Last Week Signal</option>
-              </select>
-            </div>
-
-            {filterColumn && (
-              <>
-                <div className="flex items-center gap-3">
-                  {SIGNAL_VALUES.map((signal) => (
-                    <label key={signal} className="flex items-center gap-1.5 cursor-pointer">
-                      <Checkbox
-                        checked={filterValues.includes(signal)}
-                        onCheckedChange={() => handleToggleFilterValue(signal)}
-                        className="border-gray-500"
-                      />
-                      <span className={`text-sm ${
-                        signal === "Long" ? "text-blue-400" : 
-                        signal === "Short" ? "text-red-400" : 
-                        "text-gray-300"
-                      }`}>
-                        {signal}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-
-                <Button
-                  onClick={handleClearFilter}
-                  variant="ghost"
-                  size="sm"
-                  className="text-gray-400 hover:text-gray-100 hover:bg-gray-700 h-7 px-2"
-                >
-                  <X className="h-3 w-3 mr-1" />
-                  Clear
-                </Button>
-              </>
-            )}
-
-            {isFilterActive && (
-              <span className="text-sm text-gray-500 ml-auto">
-                Showing filtered results
-              </span>
-            )}
-          </div>
-
       {groups.map((group) => {
         const filteredRows = getFilteredRows(group.rows);
         const displaySummary = isFilterActive ? computeSummaryFromRows(filteredRows) : group.summary;
         
         return (
         <TabsContent key={group.key} value={group.key} className="mt-0">
-          {/* Summary card - larger size for better readability */}
-          <div className="mb-1 flex items-center gap-3">
+          {/* Summary card and filter controls - same row */}
+          <div className="mb-1 flex items-center gap-4 flex-wrap">
+            {/* Yellow summary box */}
             <div className="bg-yellow-300 text-black rounded px-4 py-2 inline-block text-[18px] font-semibold">
               {displaySummary.rowsSummary.map((r, idx) => {
                 // Color coding: Long=blue, Neutral=black, Short=red
@@ -446,6 +392,52 @@ export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
               })}
               {" | Tot:"}{displaySummary.totals.current}
             </div>
+
+            {/* Filter controls */}
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-gray-400" />
+              <select
+                value={filterColumn || "none"}
+                onChange={(e) => handleFilterColumnChange(e.target.value)}
+                className="bg-gray-800 border border-gray-600 text-gray-100 text-sm rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="none">No Filter</option>
+                <option value="signal">Current Week</option>
+                <option value="signal_status_prior_week">Last Week</option>
+              </select>
+            </div>
+
+            {filterColumn && (
+              <>
+                <div className="flex items-center gap-2">
+                  {SIGNAL_VALUES.map((signal) => (
+                    <label key={signal} className="flex items-center gap-1 cursor-pointer">
+                      <Checkbox
+                        checked={filterValues.includes(signal)}
+                        onCheckedChange={() => handleToggleFilterValue(signal)}
+                        className="border-gray-500 h-4 w-4"
+                      />
+                      <span className={`text-sm ${
+                        signal === "Long" ? "text-blue-400" : 
+                        signal === "Short" ? "text-red-400" : 
+                        "text-gray-300"
+                      }`}>
+                        {signal}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <Button
+                  onClick={handleClearFilter}
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-400 hover:text-gray-100 hover:bg-gray-700 h-6 px-2"
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </>
+            )}
+
             {isFilterActive && (
               <span className="text-sm text-gray-400">
                 ({filteredRows.length} of {group.rows.length} rows)
