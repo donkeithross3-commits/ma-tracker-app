@@ -1,0 +1,36 @@
+# ma-tracker-app rules
+
+## Multi-Device Sync Workflow
+- Before ending a session, ensure all changes are committed and pushed.
+- Use `pushall` command to sync both repos before switching machines.
+- After making significant changes, commit with descriptive messages and push to GitHub.
+- Production domain: https://dr3-dashboard.com
+- Droplet: 134.199.204.12 (SSH alias: `droplet`)
+- To deploy changes to droplet:
+  1. Push to GitHub
+  2. SSH to droplet and pull changes
+  3. Rebuild Docker: `cd /home/don/apps/ma-tracker-app && docker build -t ma-tracker-app-dev . && cd .. && docker compose up -d web`
+
+## Framework
+- This is a Next.js 16 app using the App Router.
+- /app/krj/page.tsx:
+  - Reads CSVs from data/krj/*.csv.
+  - Should remain read-only (no mutations), just a report viewer for KRJ signals.
+  - Do not change the CSV location or naming scheme without explicit instruction.
+- middleware.ts:
+  - Provides basic auth for /krj using KRJ_BASIC_USER and KRJ_BASIC_PASS from .env.local.
+  - Do not remove or relax this auth without explicit instruction.
+- Styling:
+  - Use Tailwind utility classes consistent with existing patterns.
+
+- /app/krj/page.tsx is a trader-facing report. Follow docs/krj_ui_style.md:
+  - High information density.
+  - Right-aligned numeric columns.
+  - Limited decimals and compact units.
+  - Dark, high-contrast theme, no decorative fluff.
+- Do not change CSV loading or data logic without explicit request.
+- Styling changes should be implemented via Tailwind classes and small formatting helpers only.
+
+- For trader tables, avoid horizontal scroll by:
+  - Allowing header labels to wrap.
+  - Placing summary elements above/below the table rather than at the side.
