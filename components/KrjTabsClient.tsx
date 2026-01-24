@@ -34,7 +34,7 @@ interface KrjTabsClientProps {
 }
 
 // Signal filter types
-type FilterColumn = "signal" | "signal_status_prior_week" | null;
+type FilterColumn = "signal" | "signal_status_prior_week" | "both" | null;
 const SIGNAL_VALUES = ["Long", "Neutral", "Short"] as const;
 
 // Formatting helper functions
@@ -125,6 +125,12 @@ export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
   const getFilteredRows = (rows: RawRow[]): RawRow[] => {
     if (!filterColumn || filterValues.length === 0) return rows;
     return rows.filter(row => {
+      if (filterColumn === "both") {
+        // Match if EITHER current week OR last week signal matches any selected value
+        const currentWeek = (row["signal"] || "").trim();
+        const lastWeek = (row["signal_status_prior_week"] || "").trim();
+        return filterValues.includes(currentWeek) || filterValues.includes(lastWeek);
+      }
       const value = (row[filterColumn] || "").trim();
       return filterValues.includes(value);
     });
@@ -136,7 +142,8 @@ export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
   // Get filter description for display
   const getFilterDescription = (): string => {
     if (!isFilterActive) return "";
-    const colLabel = filterColumn === "signal" ? "Current Week" : "Last Week";
+    const colLabel = filterColumn === "signal" ? "Current Week" : 
+                     filterColumn === "both" ? "Either Week" : "Last Week";
     return `${colLabel}: ${filterValues.join(", ")}`;
   };
 
@@ -404,6 +411,7 @@ export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
                 <option value="none">No Filter</option>
                 <option value="signal">Current Week</option>
                 <option value="signal_status_prior_week">Last Week</option>
+                <option value="both">Either Week</option>
               </select>
             </div>
 
