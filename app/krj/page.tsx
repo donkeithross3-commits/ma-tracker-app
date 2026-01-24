@@ -161,8 +161,8 @@ export default function KrjPage() {
 
   const columns: { key: string; label: string; description: string }[] = [
     { key: "ticker", label: "Ticker", description: "Stock or ETF symbol" },
-    { key: "c", label: "Friday Close", description: "Closing price on Friday (or last trading day of the week)" },
-    { key: "weekly_low", label: "Last Week Low", description: "Lowest price reached during the trading week" },
+    { key: "c", label: "Friday Close", description: `Closing price on last trading day of the week ending ${dataDate}` },
+    { key: "weekly_low", label: "Last Week Low", description: `Lowest trade price during the week ending ${dataDate}` },
     { key: "25DMA", label: "25 DMA", description: "25-day simple moving average of closing prices" },
     { key: "25DMA_shifted", label: "25 DMA (shifted 3 weeks)", description: "25-day moving average as it was 15 trading days ago; used for stop-loss levels" },
     { key: "long_signal_value", label: "Long Signal Value", description: "(Weekly Low - 25DMA) / 25DMA; positive values indicate strength above the moving average" },
