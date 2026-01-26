@@ -48,14 +48,12 @@ function formatPercentInteger(x: string | undefined): string {
   return Math.round(num * 100) + "%";
 }
 
-function formatBasisPoints(x: string | undefined): string {
+function formatDailyRange(x: string | undefined): string {
   if (!x) return "";
   const num = Number(x);
   if (Number.isNaN(num)) return x;
-  // Format to 2 significant figures
-  if (num >= 100) return Math.round(num).toString();
-  if (num >= 10) return num.toFixed(1);
-  return num.toFixed(2);
+  // Format as percentage with 2 decimal places (e.g., 0.68%)
+  return (num * 100).toFixed(2) + "%";
 }
 
 function formatMillions(x: string | undefined): string {
@@ -177,7 +175,7 @@ export default function KrjPrintLayout({ groups, columns, filterDescription }: K
                     } else if (col.key === "vol_ratio") {
                       value = formatPercentInteger(value);
                     } else if (col.key === "25DMA_range_bps") {
-                      value = formatBasisPoints(value);
+                      value = formatDailyRange(value);
                     } else if (col.key === "25D_ADV_Shares_MM") {
                       value = formatMillions(value);
                     } else if (col.key === "25D_ADV_nortional_B") {
