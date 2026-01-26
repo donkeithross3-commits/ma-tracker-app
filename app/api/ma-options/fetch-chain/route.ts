@@ -191,14 +191,8 @@ export async function POST(request: NextRequest) {
         (closeDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
       );
 
-      // Update deal's last options check
-      await prisma.deal.update({
-        where: { id: dealId },
-        data: {
-          noOptionsAvailable: contracts.length === 0,
-          lastOptionsCheck: new Date(),
-        },
-      });
+      // Note: ScannerDeal doesn't have noOptionsAvailable/lastOptionsCheck fields
+      // The snapshot creation below serves as the audit trail
 
       // Save snapshot to database
       const snapshot = await prisma.optionChainSnapshot.create({
@@ -260,15 +254,6 @@ export async function POST(request: NextRequest) {
         contractCount: chainData.length,
       });
 
-      // Update deal's last options check
-      await prisma.deal.update({
-        where: { id: dealId },
-        data: {
-          noOptionsAvailable: chainData.length === 0,
-          lastOptionsCheck: new Date(),
-        },
-      });
-
       return NextResponse.json({
         snapshotId: recentSnapshot.id,
         ticker: recentSnapshot.ticker,
@@ -303,15 +288,6 @@ export async function POST(request: NextRequest) {
         const ageMinutes = Math.floor(ageMs / 60000);
         
         console.log(`✓ Returning fresh agent data for ${ticker} (${chainData.length} contracts)`);
-        
-        // Update deal's last options check
-        await prisma.deal.update({
-          where: { id: dealId },
-          data: {
-            noOptionsAvailable: chainData.length === 0,
-            lastOptionsCheck: new Date(),
-          },
-        });
         
         return NextResponse.json({
           snapshotId: newSnapshot.id,
@@ -393,19 +369,6 @@ export async function POST(request: NextRequest) {
       (closeDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    // Check if no options were found
-    const hasOptions = chainData.contracts && chainData.contracts.length > 0;
-
-    // IMPORTANT: Only mark as "no options available" if we successfully connected to IB
-    // If IB wasn't connected, we don't know whether options exist or not
-    await prisma.deal.update({
-      where: { id: dealId },
-      data: {
-        noOptionsAvailable: !hasOptions,
-        lastOptionsCheck: new Date(),
-      },
-    });
-
     // Save snapshot to database (even if empty, for audit trail)
     const snapshot = await prisma.optionChainSnapshot.create({
       data: {
@@ -455,15 +418,6 @@ export async function POST(request: NextRequest) {
           
           const chainData = anyCachedSnapshot.chainData as any[];
           const expirations = [...new Set(chainData.map((c: any) => c.expiry))];
-          
-          // Update deal's last options check
-          await prisma.deal.update({
-            where: { id: dealId },
-            data: {
-              noOptionsAvailable: chainData.length === 0,
-              lastOptionsCheck: new Date(),
-            },
-          });
           
           return NextResponse.json({
             snapshotId: anyCachedSnapshot.id,
