@@ -10,6 +10,8 @@ export interface ScannerDealDTO {
   daysToClose: number;
   notes: string | null;
   isActive: boolean;
+  noOptionsAvailable: boolean;
+  lastOptionsCheck: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,6 +44,8 @@ export async function GET() {
         daysToClose,
         notes: deal.notes,
         isActive: deal.isActive,
+        noOptionsAvailable: deal.noOptionsAvailable,
+        lastOptionsCheck: deal.lastOptionsCheck?.toISOString() || null,
         createdAt: deal.createdAt.toISOString(),
         updatedAt: deal.updatedAt.toISOString(),
       };
@@ -109,6 +113,8 @@ export async function POST(request: NextRequest) {
       daysToClose,
       notes: deal.notes,
       isActive: deal.isActive,
+      noOptionsAvailable: deal.noOptionsAvailable,
+      lastOptionsCheck: deal.lastOptionsCheck?.toISOString() || null,
       createdAt: deal.createdAt.toISOString(),
       updatedAt: deal.updatedAt.toISOString(),
     };

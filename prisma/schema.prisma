@@ -268,6 +268,8 @@ model ScannerDeal {
   expectedCloseDate  DateTime        @map("expected_close_date") @db.Date
   notes              String?
   isActive           Boolean         @default(true) @map("is_active")
+  noOptionsAvailable Boolean         @default(false) @map("no_options_available")
+  lastOptionsCheck   DateTime?       @map("last_options_check")
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
   watchedSpreads     WatchedSpread[]

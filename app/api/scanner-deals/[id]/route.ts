@@ -11,7 +11,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { ticker, targetName, expectedClosePrice, expectedCloseDate, notes, isActive } =
+    const { ticker, targetName, expectedClosePrice, expectedCloseDate, notes, isActive, noOptionsAvailable, lastOptionsCheck } =
       body;
 
     // Check if deal exists
@@ -47,6 +47,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         }),
         ...(notes !== undefined && { notes: notes || null }),
         ...(isActive !== undefined && { isActive }),
+        ...(noOptionsAvailable !== undefined && { noOptionsAvailable }),
+        ...(lastOptionsCheck !== undefined && { 
+          lastOptionsCheck: lastOptionsCheck ? new Date(lastOptionsCheck) : null 
+        }),
       },
     });
 
@@ -65,6 +69,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       daysToClose,
       notes: deal.notes,
       isActive: deal.isActive,
+      noOptionsAvailable: deal.noOptionsAvailable,
+      lastOptionsCheck: deal.lastOptionsCheck?.toISOString() || null,
       createdAt: deal.createdAt.toISOString(),
       updatedAt: deal.updatedAt.toISOString(),
     };

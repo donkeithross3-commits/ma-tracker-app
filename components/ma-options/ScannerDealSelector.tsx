@@ -19,6 +19,7 @@ export default function ScannerDealSelector({
   onDealDeleted,
 }: ScannerDealSelectorProps) {
   const [filter, setFilter] = useState("");
+  const [hideNoOptions, setHideNoOptions] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     expectedClosePrice: "",
@@ -33,8 +34,11 @@ export default function ScannerDealSelector({
     const matchesText =
       deal.ticker.toLowerCase().includes(filter.toLowerCase()) ||
       (deal.targetName?.toLowerCase().includes(filter.toLowerCase()) ?? false);
-    return matchesText;
+    const matchesOptionsFilter = hideNoOptions ? !deal.noOptionsAvailable : true;
+    return matchesText && matchesOptionsFilter;
   });
+
+  const noOptionsCount = deals.filter((d) => d.noOptionsAvailable).length;
 
   const startEditing = (deal: ScannerDeal) => {
     setEditingId(deal.id);
@@ -127,6 +131,24 @@ export default function ScannerDealSelector({
         className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm mb-3"
       />
 
+      {/* Toggle Filters */}
+      {noOptionsCount > 0 && (
+        <div className="mb-3 pb-3 border-b border-gray-700">
+          <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300 hover:text-gray-100 select-none">
+            <input
+              type="checkbox"
+              checked={hideNoOptions}
+              onChange={(e) => setHideNoOptions(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+            />
+            <span>Hide tickers with no options</span>
+            <span className="text-xs text-orange-400 px-2 py-0.5 bg-orange-900/30 border border-orange-700 rounded">
+              {noOptionsCount}
+            </span>
+          </label>
+        </div>
+      )}
+
       {/* Deals Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -158,7 +180,7 @@ export default function ScannerDealSelector({
                 key={deal.id}
                 className={`border-b border-gray-800 hover:bg-gray-800 ${
                   selectedDeal?.id === deal.id ? "bg-gray-800" : ""
-                }`}
+                } ${deal.noOptionsAvailable ? "opacity-60" : ""}`}
               >
                 {editingId === deal.id ? (
                   // Edit mode
@@ -228,7 +250,23 @@ export default function ScannerDealSelector({
                   // View mode
                   <>
                     <td className="py-2 px-2 text-gray-100 font-mono">
-                      {deal.ticker}
+                      <div className="flex items-center gap-2">
+                        {deal.ticker}
+                        {deal.noOptionsAvailable && (
+                          <span
+                            className="text-xs text-orange-400 border border-orange-400 px-1 rounded"
+                            title={`No options found${
+                              deal.lastOptionsCheck
+                                ? ` (checked ${new Date(
+                                    deal.lastOptionsCheck
+                                  ).toLocaleDateString()})`
+                                : ""
+                            }`}
+                          >
+                            No Options
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-2 px-2 text-gray-300">
                       {deal.targetName || "—"}

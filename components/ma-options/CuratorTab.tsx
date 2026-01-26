@@ -95,6 +95,27 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       const chainResult: OptionChainResponse = await chainResponse.json();
       setChainData(chainResult);
 
+      // Update noOptionsAvailable flag based on scan results
+      const hasOptions = chainResult.contracts && chainResult.contracts.length > 0;
+      try {
+        await fetch(`/api/scanner-deals/${selectedDeal.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            noOptionsAvailable: !hasOptions,
+            lastOptionsCheck: new Date().toISOString(),
+          }),
+        });
+        // Update local deal state
+        handleDealUpdated({
+          ...selectedDeal,
+          noOptionsAvailable: !hasOptions,
+          lastOptionsCheck: new Date().toISOString(),
+        });
+      } catch (updateErr) {
+        console.warn("Failed to update deal options flag:", updateErr);
+      }
+
       // Generate candidate strategies with parameters
       // Always pass chainData directly - this avoids database lookup issues
       // and works for both ws-relay and agent sources

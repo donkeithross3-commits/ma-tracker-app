@@ -152,6 +152,8 @@ export interface ScannerDeal {
   daysToClose: number;
   notes: string | null;
   isActive: boolean;
+  noOptionsAvailable: boolean;
+  lastOptionsCheck: string | null;
   createdAt: string;
   updatedAt: string;
 }
