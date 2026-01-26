@@ -60,6 +60,8 @@ export async function GET(request: NextRequest) {
         dealId: spread.scannerDealId,
         dealTicker: spread.scannerDeal.ticker,
         dealTargetName: spread.scannerDeal.targetName || "",
+        dealPrice: spread.scannerDeal.expectedClosePrice.toNumber(),
+        dealExpectedCloseDate: spread.scannerDeal.expectedCloseDate.toISOString().split("T")[0],
         strategyType: spread.strategyType,
         expiration: spread.expiration.toISOString(),
         legs: spread.legs as any,

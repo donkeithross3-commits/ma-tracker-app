@@ -135,8 +135,11 @@ export default function WatchedSpreadsTable({
                 >
                   <td className="py-2 px-1 text-gray-100">
                     <div className="font-mono">{spread.dealTicker}</div>
-                    <div className="text-gray-400 text-xs">
+                    <div className="text-gray-400 text-xs truncate max-w-[120px]" title={spread.dealTargetName}>
                       {spread.dealTargetName}
+                    </div>
+                    <div className="text-gray-500 text-[10px] mt-0.5">
+                      ${spread.dealPrice?.toFixed(2) || "—"} | {spread.dealExpectedCloseDate ? new Date(spread.dealExpectedCloseDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
                     </div>
                   </td>
                   <td className="py-2 px-1 text-gray-300">

@@ -53,6 +53,8 @@ export interface WatchedSpreadDTO {
   dealId: string;
   dealTicker: string;
   dealTargetName: string;
+  dealPrice: number;
+  dealExpectedCloseDate: string;
   strategyType: string;
   expiration: string;
   legs: StrategyLeg[];

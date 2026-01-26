@@ -17,7 +17,7 @@ export default function OptionsScannerTabs({
   onDealsChange,
   onRefreshDeals,
 }: OptionsScannerTabsProps) {
-  const [activeTab, setActiveTab] = useState("curate");
+  const [activeTab, setActiveTab] = useState("monitor");
 
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab}>
