@@ -102,7 +102,8 @@ class IBDataAgent:
                 return await self._handle_ib_status()
             
             elif request_type == "fetch_chain":
-                return await self._handle_fetch_chain(payload)
+                # Run in thread pool to not block heartbeats
+                return await self._run_in_thread(self._handle_fetch_chain_sync, payload)
             
             elif request_type == "check_availability":
                 return await self._handle_check_availability(payload)
@@ -119,6 +120,13 @@ class IBDataAgent:
         except Exception as e:
             logger.error(f"Error handling request {request_type}: {e}")
             return {"error": str(e)}
+    
+    async def _run_in_thread(self, func, *args):
+        """Run a blocking function in a thread pool to not block the event loop"""
+        import concurrent.futures
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            return await loop.run_in_executor(pool, func, *args)
     
     async def _handle_ib_status(self) -> dict:
         """Check IB connection status"""
@@ -271,8 +279,8 @@ class IBDataAgent:
             logger.error(f"Error fetching futures: {e}")
             return {"error": str(e)}
 
-    async def _handle_fetch_chain(self, payload: dict) -> dict:
-        """Fetch option chain from IB"""
+    def _handle_fetch_chain_sync(self, payload: dict) -> dict:
+        """Fetch option chain from IB (synchronous version for thread pool)"""
         ticker = payload.get("ticker", "").upper()
         deal_price = payload.get("dealPrice", 0)
         expected_close_date = payload.get("expectedCloseDate", "")
@@ -339,6 +347,10 @@ class IBDataAgent:
             "contracts": contracts
         }
     
+    async def _handle_fetch_chain(self, payload: dict) -> dict:
+        """Async wrapper for fetch chain - kept for compatibility"""
+        return self._handle_fetch_chain_sync(payload)
+    
     async def send_heartbeat(self):
         """Send periodic heartbeats to keep connection alive"""
         while self.running and self.websocket:
@@ -350,8 +362,38 @@ class IBDataAgent:
                 logger.error(f"Heartbeat error: {e}")
                 break
     
+    async def _process_request(self, request_id: str, data: dict):
+        """Process a single request and send response (runs as separate task)"""
+        try:
+            result = await self.handle_request(data)
+            
+            # Send response
+            response = {
+                "type": "response",
+                "request_id": request_id,
+                "success": "error" not in result,
+                "data": result if "error" not in result else None,
+                "error": result.get("error")
+            }
+            if self.websocket:
+                await self.websocket.send(json.dumps(response))
+        except Exception as e:
+            logger.error(f"Error processing request {request_id}: {e}")
+            try:
+                if self.websocket:
+                    await self.websocket.send(json.dumps({
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": False,
+                        "error": str(e)
+                    }))
+            except:
+                pass
+
     async def message_handler(self):
         """Handle incoming messages from the relay"""
+        pending_tasks = set()
+        
         while self.running and self.websocket:
             try:
                 message = await self.websocket.recv()
@@ -364,21 +406,11 @@ class IBDataAgent:
                     pass
                 
                 elif msg_type == "request":
-                    # Handle data request
+                    # Handle data request in background task (don't block message loop)
                     request_id = data.get("request_id")
-                    
-                    # Process request (this may take a few seconds for IB calls)
-                    result = await self.handle_request(data)
-                    
-                    # Send response
-                    response = {
-                        "type": "response",
-                        "request_id": request_id,
-                        "success": "error" not in result,
-                        "data": result if "error" not in result else None,
-                        "error": result.get("error")
-                    }
-                    await self.websocket.send(json.dumps(response))
+                    task = asyncio.create_task(self._process_request(request_id, data))
+                    pending_tasks.add(task)
+                    task.add_done_callback(pending_tasks.discard)
                     
                 else:
                     logger.warning(f"Unknown message type: {msg_type}")
@@ -388,6 +420,10 @@ class IBDataAgent:
                 break
             except Exception as e:
                 logger.error(f"Message handler error: {e}")
+        
+        # Cancel any pending tasks on shutdown
+        for task in pending_tasks:
+            task.cancel()
     
     async def connect_to_relay(self) -> bool:
         """Connect to the WebSocket relay on the droplet"""
