@@ -592,11 +592,11 @@ async def relay_ib_status():
             
     except Exception as e:
         logger.error(f"Relay IB status error: {e}")
-            return {
-                "connected": False,
-                "source": "error",
-                "message": str(e)
-            }
+        return {
+            "connected": False,
+            "source": "error",
+            "message": str(e)
+        }
 
 
 from pydantic import BaseModel
