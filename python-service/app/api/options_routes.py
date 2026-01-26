@@ -476,7 +476,7 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
                 "expectedCloseDate": request.expectedCloseDate,
                 "scanParams": request.scanParams.dict() if request.scanParams else {}
             },
-            timeout=60.0  # IB requests can take a while
+            timeout=120.0  # IB option chain fetches can take 60+ seconds
         )
         
         # Check for errors in response
