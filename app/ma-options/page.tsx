@@ -2,6 +2,9 @@ import { prisma } from "@/lib/db";
 import MAOptionsContent from "@/components/ma-options/MAOptionsContent";
 import type { ScannerDeal } from "@/types/ma-options";
 
+// Force dynamic rendering - this page requires database access
+export const dynamic = 'force-dynamic';
+
 export default async function MAOptionsPage() {
   // Fetch active scanner deals
   const deals = await prisma.scannerDeal.findMany({
