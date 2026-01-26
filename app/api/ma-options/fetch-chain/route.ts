@@ -191,26 +191,12 @@ export async function POST(request: NextRequest) {
         (closeDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
       );
 
-      // Note: ScannerDeal doesn't have noOptionsAvailable/lastOptionsCheck fields
-      // The snapshot creation below serves as the audit trail
-
-      // Save snapshot to database
-      const snapshot = await prisma.optionChainSnapshot.create({
-        data: {
-          dealId,
-          ticker: ticker.toUpperCase(),
-          spotPrice: chainData.spotPrice || 0,
-          dealPrice,
-          daysToClose,
-          chainData: contracts as any,
-          expirationCount: expirations.length,
-          strikeCount: new Set(contracts.map((c: any) => c.strike)).size,
-          agentId: "ws-relay",
-        },
-      });
+      // Note: We skip saving to optionChainSnapshot because it has a foreign key
+      // to the old 'deals' table, but we're now using ScannerDeal IDs.
+      // The data is returned directly to the frontend.
 
       return NextResponse.json({
-        snapshotId: snapshot.id,
+        snapshotId: `ws-relay-${Date.now()}`, // Temporary ID for relay responses
         ticker: chainData.ticker || ticker,
         spotPrice: chainData.spotPrice,
         dealPrice,
