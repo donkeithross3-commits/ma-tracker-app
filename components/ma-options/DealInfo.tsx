@@ -212,8 +212,17 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
                 type="number"
                 min="1"
                 max="20"
-                value={params.topStrategiesPerExpiration}
-                onChange={(e) => setParams({ ...params, topStrategiesPerExpiration: parseInt(e.target.value) || 5 })}
+                value={params.topStrategiesPerExpiration === 0 ? "" : params.topStrategiesPerExpiration}
+                onChange={(e) => {
+                  const val = e.target.value === "" ? 0 : parseInt(e.target.value);
+                  setParams({ ...params, topStrategiesPerExpiration: isNaN(val) ? 0 : val });
+                }}
+                onBlur={(e) => {
+                  // Restore default if left empty
+                  if (!e.target.value || parseInt(e.target.value) < 1) {
+                    setParams({ ...params, topStrategiesPerExpiration: 5 });
+                  }
+                }}
                 className={inputClass}
               />
               <span className="text-xs text-gray-500">per expiration</span>
