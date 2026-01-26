@@ -592,9 +592,96 @@ async def relay_ib_status():
             
     except Exception as e:
         logger.error(f"Relay IB status error: {e}")
-        return {
-            "connected": False,
-            "source": "error",
-            "message": str(e)
-        }
+            return {
+                "connected": False,
+                "source": "error",
+                "message": str(e)
+            }
+
+
+from pydantic import BaseModel
+from typing import Optional
+
+class ContractSpec(BaseModel):
+    ticker: str
+    strike: float
+    expiry: str
+    right: str
+
+class FetchPricesRequest(BaseModel):
+    contracts: List[ContractSpec]
+
+class ContractPrice(BaseModel):
+    ticker: str
+    strike: float
+    expiry: str
+    right: str
+    bid: float
+    ask: float
+    mid: float
+    last: float
+
+class FetchPricesResponse(BaseModel):
+    success: bool
+    contracts: List[Optional[ContractPrice]]
+
+@router.post("/relay/fetch-prices")
+async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse:
+    """
+    Fetch prices for specific contracts through WebSocket relay.
+    Used by the Monitor tab to refresh watched spread prices.
+    """
+    try:
+        logger.info(f"Relay: Fetching prices for {len(request.contracts)} contracts")
+        
+        # Check if any provider is connected
+        registry = get_registry()
+        status = registry.get_status()
+        
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        
+        # Send request through WebSocket relay
+        response_data = await send_request_to_provider(
+            request_type="fetch_prices",
+            payload={
+                "contracts": [c.dict() for c in request.contracts]
+            },
+            timeout=60.0  # 60 seconds should be plenty for price fetches
+        )
+        
+        # Check for errors in response
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        
+        # Convert response
+        contracts = []
+        for c in response_data.get("contracts", []):
+            if c:
+                contracts.append(ContractPrice(
+                    ticker=c["ticker"],
+                    strike=c["strike"],
+                    expiry=c["expiry"],
+                    right=c["right"],
+                    bid=c["bid"],
+                    ask=c["ask"],
+                    mid=c["mid"],
+                    last=c["last"]
+                ))
+            else:
+                contracts.append(None)
+        
+        return FetchPricesResponse(
+            success=True,
+            contracts=contracts
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay fetch prices error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 

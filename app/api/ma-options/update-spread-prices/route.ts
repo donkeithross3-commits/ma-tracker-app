@@ -1,103 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { spawn } from 'child_process';
-import path from 'path';
 import type {
   UpdateSpreadPricesRequest,
   UpdateSpreadPricesResponse,
   StrategyLeg,
 } from "@/types/ma-options";
 
+const PYTHON_SERVICE_URL =
+  process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
+
 /**
- * Spawn lightweight price fetcher for specific contracts (OPTIMIZED for Monitor tab)
- * Much faster than full chain scanning - only fetches what we need
+ * Fetch prices for specific contracts via WebSocket relay
  */
-async function spawnPriceFetcher(
-  ticker: string,
+async function fetchPricesViaRelay(
   contracts: Array<{ticker: string, strike: number, expiry: string, right: string}>
 ): Promise<{success: boolean, contracts: any[]} | null> {
-  return new Promise((resolve) => {
-    const pythonServicePath = path.join(process.cwd(), "python-service");
-    const venvPython = path.join(pythonServicePath, ".venv", "bin", "python3");
+  try {
+    console.log(`[PRICE FETCH] Fetching ${contracts.length} contracts via WebSocket relay...`);
     
-    console.log(`[PRICE FETCH] ${ticker}: fetching ${contracts.length} specific contracts...`);
+    const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/fetch-prices`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contracts }),
+    });
     
-    const contractsJson = JSON.stringify(contracts);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.log(`[PRICE FETCH] Relay error: ${errorData.detail || response.status}`);
+      return null;
+    }
     
-    const fetcher = spawn(
-      venvPython,
-      [
-        "price_fetcher.py",
-        "--contracts", contractsJson,
-      ],
-      {
-        cwd: pythonServicePath,
-        env: { ...process.env },
-      }
-    );
-
-    let output = "";
-    let errorOutput = "";
-
-    fetcher.stdout?.on("data", (data) => {
-      output += data.toString();
-    });
-
-    fetcher.stderr?.on("data", (data) => {
-      errorOutput += data.toString();
-    });
-
-    // Set timeout of 30 seconds (should be MUCH faster than full chain)
-    const timeout = setTimeout(() => {
-      console.log(`[PRICE FETCH] Timeout for ${ticker}`);
-      fetcher.kill();
-      resolve(null);
-    }, 30000);
-
-    fetcher.on("close", (code) => {
-      clearTimeout(timeout);
-      
-      if (code === 0) {
-        try {
-          // Find the JSON output (last line that starts with {)
-          const lines = output.split('\n');
-          const jsonLine = lines.filter(l => l.trim().startsWith('{')).pop();
-          
-          if (!jsonLine) {
-            console.log(`[PRICE FETCH] ✗ ${ticker}: no JSON output found`);
-            console.log(`Output preview: ${output.slice(0, 200)}`);
-            resolve(null);
-            return;
-          }
-          
-          const result = JSON.parse(jsonLine);
-          if (result.success) {
-            console.log(`[PRICE FETCH] ✓ ${ticker}: got ${result.contracts.filter((c: any) => c).length} prices`);
-            resolve(result);
-          } else {
-            console.log(`[PRICE FETCH] ✗ ${ticker}: ${result.error}`);
-            resolve(null);
-          }
-        } catch (e) {
-          console.log(`[PRICE FETCH] ✗ ${ticker}: failed to parse output - ${e}`);
-          console.log(`Output: ${output.slice(-500)}`);
-          resolve(null);
-        }
-      } else {
-        console.log(`[PRICE FETCH] ✗ ${ticker}: exit code ${code}`);
-        if (errorOutput) {
-          console.log(`Error: ${errorOutput.slice(-300)}`);
-        }
-        resolve(null);
-      }
-    });
-
-    fetcher.on("error", (error) => {
-      clearTimeout(timeout);
-      console.log(`[PRICE FETCH] ✗ ${ticker}: spawn error - ${error.message}`);
-      resolve(null);
-    });
-  });
+    const data = await response.json();
+    const successful = data.contracts?.filter((c: any) => c !== null).length || 0;
+    console.log(`[PRICE FETCH] ✓ Got ${successful}/${contracts.length} prices via relay`);
+    
+    return data;
+  } catch (error) {
+    console.log(`[PRICE FETCH] ✗ Relay error: ${error}`);
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -155,33 +96,19 @@ export async function POST(request: NextRequest) {
     
     console.log(`[REFRESH PRICES] Need ${contractsNeeded.size} unique contracts`);
     
-    // Group by ticker
-    const contractsByTicker = new Map<string, typeof contractsNeeded>();
-    for (const [key, contract] of contractsNeeded.entries()) {
-      if (!contractsByTicker.has(contract.ticker)) {
-        contractsByTicker.set(contract.ticker, new Map());
-      }
-      contractsByTicker.get(contract.ticker)!.set(key, contract);
-    }
-    
-    // Fetch prices in parallel
-    const fetchPromises = Array.from(contractsByTicker.entries()).map(([ticker, contracts]) =>
-      spawnPriceFetcher(ticker, Array.from(contracts.values()))
-    );
-    
-    const fetchResults = await Promise.all(fetchPromises);
+    // Fetch all prices in one call via relay
+    const allContracts = Array.from(contractsNeeded.values());
+    const fetchResult = await fetchPricesViaRelay(allContracts);
     
     // Build price lookup map
     const priceData = new Map<string, any>();
     let totalFetched = 0;
-    for (const result of fetchResults) {
-      if (result && result.contracts) {
-        for (const contract of result.contracts) {
-          if (contract) {
-            const key = `${contract.ticker}_${contract.strike}_${contract.expiry.replace(/-/g, '')}_${contract.right}`;
-            priceData.set(key, contract);
-            totalFetched++;
-          }
+    if (fetchResult && fetchResult.contracts) {
+      for (const contract of fetchResult.contracts) {
+        if (contract) {
+          const key = `${contract.ticker}_${contract.strike}_${contract.expiry.replace(/-/g, '')}_${contract.right}`;
+          priceData.set(key, contract);
+          totalFetched++;
         }
       }
     }

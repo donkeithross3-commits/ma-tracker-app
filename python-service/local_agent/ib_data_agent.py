@@ -114,6 +114,10 @@ class IBDataAgent:
             elif request_type == "test_futures":
                 return await self._handle_test_futures(payload)
             
+            elif request_type == "fetch_prices":
+                # Run in thread pool to not block heartbeats
+                return await self._run_in_thread(self._handle_fetch_prices_sync, payload)
+            
             else:
                 return {"error": f"Unknown request type: {request_type}"}
                 
@@ -350,6 +354,59 @@ class IBDataAgent:
     async def _handle_fetch_chain(self, payload: dict) -> dict:
         """Async wrapper for fetch chain - kept for compatibility"""
         return self._handle_fetch_chain_sync(payload)
+    
+    def _handle_fetch_prices_sync(self, payload: dict) -> dict:
+        """Fetch prices for specific contracts (for monitor tab refresh)"""
+        contracts = payload.get("contracts", [])
+        
+        if not contracts:
+            return {"error": "No contracts specified"}
+        
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": "IB not connected"}
+        
+        logger.info(f"Fetching prices for {len(contracts)} specific contracts")
+        
+        results = []
+        for contract_spec in contracts:
+            ticker = contract_spec.get("ticker", "").upper()
+            strike = float(contract_spec.get("strike", 0))
+            expiry = contract_spec.get("expiry", "")
+            right = contract_spec.get("right", "C").upper()
+            
+            # Normalize expiry format (YYYYMMDD)
+            expiry_normalized = expiry.replace("-", "")
+            
+            try:
+                # Use scanner's get_option_data method
+                option_data = self.scanner.get_option_data(ticker, expiry_normalized, strike, right)
+                
+                if option_data and (option_data.bid > 0 or option_data.ask > 0):
+                    results.append({
+                        "ticker": ticker,
+                        "strike": strike,
+                        "expiry": expiry_normalized,
+                        "right": right,
+                        "bid": option_data.bid,
+                        "ask": option_data.ask,
+                        "mid": option_data.mid_price,
+                        "last": option_data.last,
+                    })
+                else:
+                    logger.warning(f"No price data for {ticker} {strike} {expiry_normalized} {right}")
+                    results.append(None)
+                    
+            except Exception as e:
+                logger.error(f"Error fetching price for {ticker} {strike}: {e}")
+                results.append(None)
+        
+        successful = len([r for r in results if r is not None])
+        logger.info(f"Fetched {successful}/{len(contracts)} contract prices")
+        
+        return {
+            "success": True,
+            "contracts": results
+        }
     
     async def send_heartbeat(self):
         """Send periodic heartbeats to keep connection alive"""
