@@ -36,29 +36,35 @@ export default function IBConnectionStatus() {
     }
   };
 
-  if (isChecking) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-gray-400">
-        <div className="w-2 h-2 bg-gray-500 rounded-full animate-pulse"></div>
-        <span>Checking IB connection...</span>
-      </div>
-    );
-  }
+  // Show initial loading state only, not during background polling
+  const showInitialLoading = isChecking && !futuresQuote;
 
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 text-xs">
         <div
           className={`w-2 h-2 rounded-full ${
-            isConnected ? "bg-green-500" : "bg-red-500"
+            isChecking
+              ? "bg-gray-500 animate-pulse"
+              : isConnected
+              ? "bg-green-500"
+              : "bg-red-500"
           }`}
           title={isConnected ? "IB TWS connected" : "IB TWS not connected"}
         ></div>
         <span
-          className={isConnected ? "text-green-400" : "text-red-400"}
+          className={
+            isChecking
+              ? "text-gray-400"
+              : isConnected
+              ? "text-green-400"
+              : "text-red-400"
+          }
           title={isConnected ? "IB TWS connected" : "IB TWS not connected"}
         >
-          IB TWS: {isConnected ? "Connected" : "Disconnected"}
+          {showInitialLoading
+            ? "Checking IB connection..."
+            : `IB TWS: ${isConnected ? "Connected" : "Disconnected"}`}
         </span>
         <button
           onClick={() => checkConnection()}
@@ -79,17 +85,36 @@ export default function IBConnectionStatus() {
           </button>
         )}
       </div>
-      
+
       {futuresQuote && (
         <div className="text-xs ml-4 mt-1">
           {futuresQuote.success ? (
             <div className="flex items-center gap-3 text-gray-300 bg-gray-800 rounded px-2 py-1">
-              <span className="font-medium text-blue-400">{futuresQuote.contract}</span>
-              <span>Bid: <span className="text-green-400">{futuresQuote.bid?.toFixed(2)}</span></span>
-              <span>Ask: <span className="text-red-400">{futuresQuote.ask?.toFixed(2)}</span></span>
-              <span>Last: <span className="text-yellow-400">{futuresQuote.last?.toFixed(2)}</span></span>
+              <span className="font-medium text-blue-400">
+                {futuresQuote.contract}
+              </span>
+              <span>
+                Bid:{" "}
+                <span className="text-green-400">
+                  {futuresQuote.bid?.toFixed(2)}
+                </span>
+              </span>
+              <span>
+                Ask:{" "}
+                <span className="text-red-400">
+                  {futuresQuote.ask?.toFixed(2)}
+                </span>
+              </span>
+              <span>
+                Last:{" "}
+                <span className="text-yellow-400">
+                  {futuresQuote.last?.toFixed(2)}
+                </span>
+              </span>
               <span className="text-gray-500 text-[10px]">
-                {futuresQuote.timestamp ? new Date(futuresQuote.timestamp).toLocaleTimeString() : ""}
+                {futuresQuote.timestamp
+                  ? new Date(futuresQuote.timestamp).toLocaleTimeString()
+                  : ""}
               </span>
             </div>
           ) : (

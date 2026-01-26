@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from "react";
 
 interface IBConnectionContextType {
   isConnected: boolean;
@@ -15,9 +15,17 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const hasInitialized = useRef(false);
 
   const checkConnection = async (forceReconnect: boolean = false) => {
-    setIsChecking(true);
+    // Only show "checking" state on initial load or manual refresh
+    // Background polling should be silent to avoid UI jitter
+    const isInitialLoad = !hasInitialized.current;
+    
+    if (isInitialLoad || forceReconnect) {
+      setIsChecking(true);
+    }
+    
     try {
       // If force reconnect requested, call reconnect endpoint first
       if (forceReconnect) {
@@ -28,6 +36,7 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
           const data = await reconnectResponse.json();
           setIsConnected(data.connected);
           setLastChecked(new Date());
+          hasInitialized.current = true;
           setIsChecking(false);
           return;
         }
@@ -45,14 +54,15 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       setIsConnected(false);
     } finally {
+      hasInitialized.current = true;
       setIsChecking(false);
     }
   };
 
   useEffect(() => {
     checkConnection();
-    // Check every 10 seconds
-    const interval = setInterval(checkConnection, 10000);
+    // Check every 10 seconds silently (no isChecking state change)
+    const interval = setInterval(() => checkConnection(false), 10000);
     return () => clearInterval(interval);
   }, []);
 
