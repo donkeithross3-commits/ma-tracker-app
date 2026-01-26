@@ -139,12 +139,23 @@ The M&A Tracker uses a modern, scalable stack optimized for financial data proce
   - Company filings (DEFM14A, 8-K, etc.)
   - 10 requests/second limit
 
-### Tunneling (Development)
-- **ngrok** - Secure tunnels
-  - Exposes localhost to internet
-  - HTTPS support
-  - Free tier (URL changes on restart)
-  - Paid tier (persistent URLs)
+### Tunneling & Access (Development)
+- **Cloudflare Tunnel** - Secure tunnels for Next.js UI
+  - Named Tunnel: Stable URL at `krj-dev.dr3-dashboard.com`
+  - Quick Tunnel: Temporary URLs for demos
+  - Free tier with unlimited usage
+  - Integrated with Cloudflare Access for authentication
+  
+- **Cloudflare Access** - Authentication layer
+  - Email-based authentication (One-Time PIN)
+  - Access control before requests reach the app
+  - Identity headers for app-level user management
+  - Free tier (up to 50 users)
+  
+- **ngrok** - Secure tunnels for Python service
+  - Exposes Python webhook service (port 8000)
+  - Used for email webhooks
+  - Separate from Next.js UI access
 
 ### AI (Planned)
 - **Anthropic Claude API** - LLM for document analysis
@@ -156,6 +167,18 @@ The M&A Tracker uses a modern, scalable stack optimized for financial data proce
 ---
 
 ## Development Tools
+
+### External Access
+- **Cloudflare Tunnel** - Expose Next.js UI (port 3000) externally
+  - **Named Tunnel (Default):** Stable URL at `krj-dev.dr3-dashboard.com`
+  - **Quick Tunnel (Fallback):** Temporary public URLs for demos
+  - Protected by Cloudflare Access (email-based authentication)
+  - Scripts: `./scripts/start-tunnel.sh` (named) or `./scripts/start-tunnel.sh --quick`
+  
+- **ngrok** - Expose Python service (port 8000) for email webhooks
+  - Used for backend webhook functionality
+  - Separate from Next.js UI access
+  - Python service only (not for KRJ UI)
 
 ### Version Control
 - **Git** - Source control

@@ -1,0 +1,14 @@
+# Cloudflare Named Tunnel Configuration
+# This is a TEMPLATE - the actual config.yml will be generated after tunnel creation
+
+tunnel: krj-dev-tunnel
+# credentials-file will be set to: /Users/donaldross/dev/ma-tracker-app/.cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  # Route krj-dev.dr3-dashboard.com to local Next.js dev server
+  - hostname: krj-dev.dr3-dashboard.com
+    service: http://localhost:3000
+  
+  # Catch-all rule (required)
+  - service: http_status:404
+

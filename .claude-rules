@@ -1,454 +1,606 @@
-# M&A Tracker Development Rules
-# Auto-loaded by Claude Code at session start
+# ma-tracker-app rules
 
-## Project Overview
-**Name:** M&A Intelligence Tracker
-**Stack:** Next.js (frontend) + FastAPI (backend) + PostgreSQL + Background Monitors
-**Purpose:** Track and analyze M&A deals with real-time intelligence gathering
+- This is a Next.js 16 app using the App Router.
+- /app/krj/page.tsx:
+  - Reads CSVs from data/krj/*.csv.
+  - Should remain read-only (no mutations), just a report viewer for KRJ signals.
+  - Do not change the CSV location or naming scheme without explicit instruction.
+- middleware.ts:
+  - Provides basic auth for /krj using KRJ_BASIC_USER and KRJ_BASIC_PASS from .env.local.
+  - Do not remove or relax this auth without explicit instruction.
+- Styling:
+  - Use Tailwind utility classes consistent with existing patterns.
 
----
+- /app/krj/page.tsx is a trader-facing report. Follow docs/krj_ui_style.md:
+  - High information density.
+  - Right-aligned numeric columns.
+  - Limited decimals and compact units.
+  - Dark, high-contrast theme, no decorative fluff.
+- Do not change CSV loading or data logic without explicit request.
+- Styling changes should be implemented via Tailwind classes and small formatting helpers only.
 
-## Core Development Philosophy
+- For trader tables, avoid horizontal scroll by:
+  - Allowing header labels to wrap.
+  - Placing summary elements above/below the table rather than at the side.
 
-### 1. Fail Early, Fail Often
-- Small, testable steps only
-- Each change must be independently verifiable
-- If a task takes >15 minutes, it's too big - break it down
-- Commit-ready code after each atomic task
+## KRJ Dashboard Deployment (DigitalOcean Droplet)
 
-### 2. Test-First Development
-- Write tests BEFORE implementation (when applicable)
-- Backend: pytest for Python services
-- Frontend: Jest/React Testing Library for Next.js
-- Database: Test migrations in dev before applying to production
+### Architecture Overview
 
-### 3. Explicit Over Implicit
-- Clear error messages
-- Fail fast with validation
-- Log all important events
-- No silent failures
+The KRJ dashboard is deployed on a DigitalOcean droplet (`dr3-ma-dev`, IP: 134.199.204.12) using Docker Compose. The system consists of:
 
----
+1. **Next.js Web App** (`web` service): Serves the KRJ dashboard UI at http://134.199.204.12:3000/krj
+2. **Python Batch Process** (automated via cron): Downloads market data, generates trading signals, and updates CSV files
+3. **Shared Data Volume**: `/home/don/apps/data/krj/` contains signal CSVs and metadata.json
 
-## Architecture Patterns
+### Components
 
-### Dual-Stack Structure
+#### 1. Web Service (Docker)
+- **Image:** `ma-tracker-app-dev` (built from `Dockerfile` in dev mode)
+- **Container:** `ma-tracker-app-web-1`
+- **Port:** 3000 (mapped to host)
+- **Volume Mount:** `/home/don/apps/data/krj:/app/data/krj` (read-only)
+- **Code Location:** Baked into Docker image at `/app/` (NOT volume mounted)
+- **Rebuild Required:** Yes, whenever code changes are made
+
+#### 2. KRJ Batch Process (Automated via Cron)
+- **Script:** `/home/don/apps/scripts/run_krj_weekly.sh`
+- **Schedule:** Every Saturday at 4:00 AM ET (9:00 AM UTC)
+- **Cron Entry:** `0 9 * * 6 /home/don/apps/scripts/run_krj_weekly.sh >> /home/don/apps/py_proj/.krj_data/logs/cron.log 2>&1`
+- **Python Environment:** Virtual environment at `/home/don/apps/py_proj/.venv`
+- **Data Directory:** `/home/don/apps/py_proj/.krj_data/daily_data` (65,588+ historical CSV files)
+- **Output Directory:** `/home/don/apps/data/krj/` (signal CSVs and metadata.json)
+
+### Directory Structure (Droplet)
+
 ```
-/ma-tracker-app
-├── /app                    # Next.js 13+ (App Router)
-├── /components             # React components
-├── /lib                    # Frontend utilities
-├── /python-service         # FastAPI backend
-│   ├── /app               # FastAPI application
-│   ├── /migrations        # SQL migrations (numbered)
-│   └── /tests             # Python tests
-└── /prisma                # Prisma schema (currently unused)
+/home/don/apps/
+├── ma-tracker-app/              # Next.js application (synced from Mac)
+│   ├── app/krj/page.tsx         # KRJ dashboard UI
+│   ├── Dockerfile               # Docker build file (dev mode)
+│   ├── docker-compose.yml       # Docker Compose config
+│   └── data/krj/                # NOT USED (Docker uses /home/don/apps/data/krj instead)
+│
+├── data/krj/                    # Shared data directory (Docker volume mount)
+│   ├── latest_equities.csv      # Signal data for top equities
+│   ├── latest_etfs_fx.csv       # Signal data for ETFs and FX
+│   ├── latest_sp500.csv         # Signal data for S&P 500
+│   ├── latest_sp100.csv         # Signal data for S&P 100
+│   └── metadata.json            # Authoritative signal date and metadata
+│
+├── py_proj/                     # Python KRJ system (synced from Mac ~/Desktop/py_proj)
+│   ├── KRJ_backtester_updated.py  # Main backtester script
+│   ├── dr3_data_libs.py         # Data download library
+│   ├── sync_indexes.py          # Index constituent sync
+│   ├── run_krj_batch.py         # Metadata generator (legacy, not used by cron)
+│   ├── requirements.txt         # Python dependencies
+│   ├── .env                     # Environment variables (POLYGON_API_KEY, etc.)
+│   ├── .venv/                   # Python virtual environment
+│   ├── index_universe/          # Index constituent lists (sp500_tickers.csv, sp100_tickers.csv)
+│   └── .krj_data/
+│       ├── daily_data/          # 65,588+ historical OHLCV CSV files
+│       ├── logs/                # Execution logs (krj_weekly_*.log, cron.log)
+│       └── backups/             # Signal file backups
+│
+└── scripts/
+    ├── run_krj_weekly.sh        # Main weekly update orchestrator (called by cron)
+    ├── check_krj_health.sh      # Health monitoring script
+    └── setup_droplet_dependencies.sh  # Dependency installer
 ```
 
-### Background Services (Python)
-- **EDGAR Monitor**: Scrapes SEC filings every 60s for M&A activity
-- **Intelligence Orchestrator**: Monitors external news sources for deal mentions
-- **Halt Monitor**: Scrapes NASDAQ/NYSE for trading halts every 2s
-- **Research Worker**: Generates deal research reports using Claude AI
-- **Ticker Watch Monitor**: Continuously monitors EDGAR for filings from rumored deal tickers
+### Volume Mounts
 
-All monitors can be controlled via API endpoints (see Intelligence Monitoring section below).
+**CRITICAL:** Only data directories are mounted as volumes. Application code is baked into the Docker image.
 
-### Intelligence Monitoring System
+```yaml
+volumes:
+  - /home/don/apps/data/krj:/app/data/krj:ro  # Read-only for web service
+```
 
-**Active Sources:**
-- ✅ GlobeNewswire M&A (polls every 10 min)
-- ✅ GlobeNewswire Corporate Actions (polls every 15 min)
-- ✅ GlobeNewswire Executive Changes (polls every 30 min)
-- ✅ Seeking Alpha M&A
-- ✅ FTC Early Termination Notices
-- ❌ Reuters M&A (disabled - Cloudflare blocking)
+**What this means:**
+- CSV files and metadata.json are shared between batch process and web app
+- Code changes require Docker image rebuild (`docker build --no-cache`)
+- Simply syncing files to the host is NOT enough to deploy code changes
 
-**How It Works:**
-1. Monitors scrape external sources for M&A mentions
-2. Rule-based detector identifies potential deals (keywords, NER, confidence scoring)
-3. Creates "staged deals" in database (status: pending)
-4. User reviews staged deals at `/staging` page
-5. Approved deals become active in `deal_intelligence` table
-6. System cross-references with EDGAR filings
-7. Ticker watch monitor tracks ongoing EDGAR activity for rumored deals
+### Weekly Update Workflow (Automated)
 
-**Starting/Stopping:**
+**Trigger:** Cron job runs every Saturday at 4:00 AM ET (9:00 AM UTC)
+
+**Process:**
+1. **Index Sync** (`sync_indexes.py`):
+   - Downloads SP500 constituents from SPY ETF holdings
+   - Downloads SP100 constituents from OEF ETF holdings (non-fatal if fails)
+   - Updates `sp500_tickers.csv` and `sp100_tickers.csv`
+
+2. **Date Calculation** (`KRJ_backtester_updated.py`):
+   - Calculates `last_date` as most recent Friday
+   - **Edge Case Handling:** If today is Friday, uses previous Friday (data not yet available)
+
+3. **Data Download** (`dr3_data_libs.get_daily_data`):
+   - Downloads OHLCV data from Polygon API for all tickers
+   - **Skip Existing:** `skip_existing=True` prevents re-downloading existing files
+   - Gracefully handles API errors and missing data
+   - **First run:** 30-60 minutes (downloads new Friday data)
+   - **Subsequent runs:** ~30 seconds (all data exists)
+
+4. **Signal Generation** (`KRJ_backtester_updated.py`):
+   - Runs backtester for all ticker groups (SPY, SP500, SP100, Equities, ETFs/FX)
+   - Generates `KRJ_signals_latest_week_{GROUP}_{YYYY-MM-DD}.csv` files
+
+5. **File Copy** (`run_krj_weekly.sh`):
+   - Backs up existing signal files
+   - Copies new signal files to `/home/don/apps/data/krj/`
+   - Renames to `latest_{group}.csv` format
+
+6. **Metadata Generation** (`run_krj_batch.py`):
+   - Extracts signal date from CSV filenames
+   - Writes `metadata.json` with authoritative signal date
+
+7. **Cleanup**:
+   - Removes data files older than 90 days
+   - Removes backups older than 4 weeks
+
+**Total Runtime:**
+- With new data download: 30-60 minutes
+- Without new data (skip_existing): ~30 seconds
+
+### Common Commands (Droplet)
+
 ```bash
-# Start intelligence monitoring
-curl -X POST http://localhost:8000/intelligence/monitoring/start
+# SSH into droplet
+ssh don@134.199.204.12
 
-# Stop intelligence monitoring
-curl -X POST http://localhost:8000/intelligence/monitoring/stop
+# View cron logs (live)
+tail -f /home/don/apps/py_proj/.krj_data/logs/cron.log
 
-# Check status
-curl http://localhost:8000/intelligence/monitoring/status
+# View latest execution log
+ls -t /home/don/apps/py_proj/.krj_data/logs/krj_weekly_*.log | head -1 | xargs tail -100
+
+# Check cron schedule
+crontab -l
+
+# Run weekly update manually (for testing)
+/home/don/apps/scripts/run_krj_weekly.sh
+
+# Check system health
+/home/don/apps/scripts/check_krj_health.sh
+
+# Restart web container (if needed)
+cd /home/don/apps/ma-tracker-app && docker compose restart web
+
+# Rebuild web container (after code changes)
+cd /home/don/apps/ma-tracker-app && docker compose build --no-cache web && docker compose up -d web
+
+# Check metadata
+cat /home/don/apps/data/krj/metadata.json
+
+# Check CSV files
+ls -lh /home/don/apps/data/krj/latest_*.csv
 ```
 
-**Key Pages:**
-- `/staging` - Review scanned articles and staged deals
-- `/intelligence/deals` - View active intelligence deals
-- `/rumored-deals` - Watch list of rumored/unconfirmed deals
+### Key Files
 
----
+#### On Droplet:
+- `/home/don/apps/py_proj/.env` - Environment variables (POLYGON_API_KEY, data paths)
+- `/home/don/apps/data/krj/metadata.json` - Authoritative signal date
+- `/home/don/apps/scripts/run_krj_weekly.sh` - Main orchestrator script
+- `/home/don/apps/py_proj/.krj_data/logs/cron.log` - Cron execution log
 
-## Database Standards
+#### On Mac (Dev):
+- `/Users/donaldross/dev/ma-tracker-app/app/krj/page.tsx` - KRJ dashboard UI
+- `/Users/donaldross/Desktop/py_proj/KRJ_backtester_updated.py` - Main backtester
+- `/Users/donaldross/Desktop/py_proj/dr3_data_libs.py` - Data download library
+- `/Users/donaldross/update_krj_weekly.sh` - Local weekly update script (for testing)
 
-### Migration Workflow
-1. Create numbered migration: `migrations/XXX_description.sql`
-2. Follow existing pattern (see 001-010 for examples)
-3. Test migration locally with asyncpg:
-   ```python
-   conn = await asyncpg.connect(DATABASE_URL)
-   await conn.execute(sql)
-   ```
-4. Never modify old migrations - create new ones
-5. Use transactions for complex migrations
+### Environment Variables
 
-### Table Naming
-- Snake_case: `deal_intelligence`, `staged_deals`, `halt_events`
-- Use descriptive names, avoid abbreviations
-- Foreign keys: `{table}_id` (e.g., `deal_id`)
-
-### Key Tables
-- `deal_intelligence`: Core M&A deals table
-- `staged_deals`: Deals pending approval
-- `deal_sources`: News sources for each deal
-- `edgar_filings`: SEC filing tracker
-- `halt_events`: Trading halt history
-- `alert_notifications`: System alerts
-- `source_monitors`: Configuration for external sources
-
----
-
-## Python Service (FastAPI) Standards
-
-### Code Style
-- PEP 8 compliance
-- Type hints required: `def func(x: int) -> str:`
-- Docstrings for classes and complex functions
-- Use `async/await` for I/O operations
-
-### API Patterns
-```python
-# Route structure
-@router.get("/resource/{id}")
-async def get_resource(id: str) -> ResourceResponse:
-    """Get resource by ID"""
-    try:
-        # Validate input
-        # Fetch from database
-        # Return response
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+#### Droplet (`/home/don/apps/py_proj/.env`):
+```bash
+POLYGON_API_KEY=6eZKwBEkYlWnict34a6pbTOInsu0hvi4
+KRJ_DATA_DIR=/home/don/apps/py_proj/.krj_data/daily_data
+KRJ_LOG_DIR=/home/don/apps/py_proj/.krj_data/logs
 ```
 
-### Error Handling
-- Use HTTPException for client errors (400s)
-- Log unexpected errors with `exc_info=True`
-- Return structured error responses
-- Never expose internal implementation details in errors
+#### Mac Dev (`.env.local`):
+```bash
+KRJ_BASIC_USER=krj
+KRJ_BASIC_PASS=<password>
+```
 
-### Adding New Monitors
-1. Create class in `/app/monitors/{name}_monitor.py`
-2. Implement `start()` and `stop()` methods
-3. Add to `app/main.py` startup/shutdown events
-4. Use `asyncio.create_task()` for background execution
-5. Add API routes in `/app/api/{name}_routes.py`
+### Important Notes
 
----
+1. **Metadata.json is the source of truth** for the signal date displayed in the UI
+2. **Dynamic rendering is required** (`export const dynamic = 'force-dynamic'`) to ensure metadata.json is read at request time
+3. **Code is baked into Docker image**, not volume mounted - always rebuild after code changes
+4. **Browser caching** can cause stale UI - always hard refresh (Cmd+Shift+R) after deployment
+5. **Friday edge case** is handled - system never tries to download data for current Friday
+6. **Skip existing data** is enabled - system only downloads new data, not existing files
+7. **SP100 sync is non-fatal** - uses existing file if iShares download fails (constituents change rarely)
+8. **Cron runs in UTC** - 4 AM ET = 9 AM UTC (remember daylight saving time changes!)
 
-## Frontend (Next.js) Standards
+### Future Enhancements
 
-### File Structure
-- App Router (Next.js 13+)
-- Server Components by default
-- Use `'use client'` only when needed (state, effects, browser APIs)
+- Set up log rotation (logrotate config already created: `/home/don/apps/py_proj/krj_logrotate.conf`)
+- Add email/Slack notifications for failures
+- Create monitoring dashboard
+- Implement data retention policies
 
-### Component Patterns
-```typescript
-// Prefer server components
-export default async function Page() {
-  const data = await fetchData()
-  return <div>{data}</div>
+### Critical Deployment Notes
+- **Code is baked into Docker image:** The application code for the `web` service is part of its Docker image, not mounted as a volume. This means that any code changes require a Docker image rebuild to take effect.
+- **Volume mounts are for data only:** Only the `/app/data/krj` directory is mounted as a volume to persist data (CSVs, metadata.json).
+- **Always test locally before deploying to droplet**
+- **Docker image must be rebuilt** after syncing code changes
+- **metadata.json must exist** in `/home/don/apps/data/krj/` on droplet
+- **Cache clearing:** `.next/` directory is cleared during Docker build
+- **No downtime:** Web service can be restarted without affecting batch operations
+
+### Troubleshooting
+
+**UI shows wrong date:**
+1. Check `metadata.json` exists and has correct date
+2. Verify `/krj` page has `export const dynamic = 'force-dynamic'`
+3. Rebuild Docker image (don't rely on cache)
+4. Check browser for cached content (hard refresh: Cmd+Shift+R)
+
+**Batch script not generating metadata:**
+1. Check `run_krj_batch.py` is the new version (should have `generate_metadata()` function)
+2. Verify source CSV filenames match pattern: `KRJ_signals_latest_week_*_YYYY-MM-DD.csv`
+3. Check Docker image was rebuilt after script update
+
+**Changes not appearing after deployment:**
+1. Verify files were synced: `ssh don@134.199.204.12 "cat /home/don/apps/ma-tracker-app/app/krj/page.tsx | head -20"`
+2. Rebuild Docker image: `docker build --no-cache -t ma-tracker-app-dev -f Dockerfile .` (ensure `--no-cache` for fresh build)
+3. Restart container: `docker compose down && docker compose up -d web` (to ensure new image is used)
+4. Check container is using new image: `docker compose exec web cat /app/app/krj/page.tsx | head -20`
+5. Hard refresh browser (Cmd+Shift+R or incognito)
+
+**Cron job not running:**
+1. Check cron service: `systemctl status cron`
+2. Check crontab: `crontab -l`
+3. Check system time: `date` (should be UTC)
+4. Check cron logs: `cat /home/don/apps/py_proj/.krj_data/logs/cron.log`
+5. Check system logs: `sudo grep CRON /var/log/syslog | tail -20`
+
+**Data download hanging:**
+1. Check if process is running: `ps aux | grep KRJ_backtester`
+2. Check latest log: `tail -f /home/don/apps/py_proj/.krj_data/logs/krj_weekly_*.log`
+3. Kill hung process: `pkill -f KRJ_backtester`
+4. Check API key: `cat /home/don/apps/py_proj/.env`
+
+**Permission denied errors:**
+1. Check file ownership: `ls -la /home/don/apps/data/krj/`
+2. Fix ownership: `sudo chown -R don:don /home/don/apps/data/krj/`
+
+### UI Style Guidelines
+
+See `docs/KRJ_STYLE_GUIDE.md` for comprehensive styling rules.
+
+**Key Principles:**
+- **Signal Colors:** Long=Blue, Neutral=White, Short=Red
+- **Delta Colors:** Positive=Muted Green, Negative=Muted Red (less prominent)
+- **Font Sizes:** Title=3xl, Date=xl, Tabs=lg, Table Body=16px, Headers=14px
+- **Spacing:** Compact layout with minimal vertical spacing
+- **Layout:** Print button inline with tabs, no empty space
+
+### Deployment Best Practices
+
+See `DEPLOYMENT_KRJ.md` and `DEPLOYMENT_QUICK_REFERENCE.md` for detailed procedures.
+
+**Key Steps:**
+1. Test locally first (`npm run dev`)
+2. Sync files to droplet (`rsync` or `scp`)
+3. Rebuild Docker image (`docker compose build --no-cache web`)
+4. Restart container (`docker compose down && docker compose up -d web`)
+5. Verify deployment (check UI, logs, metadata)
+6. Hard refresh browser (Cmd+Shift+R)
+
+**Use the deployment script:**
+```bash
+./scripts/deploy-to-droplet.sh
+```
+
+### Cron Job Verification (Post-Saturday Run)
+
+See `CRON_VERIFICATION_CHECKLIST.md` for detailed post-run verification steps.
+
+**Quick Checks:**
+1. Check cron log: `cat /home/don/apps/py_proj/.krj_data/logs/cron.log`
+2. Check execution log: `ls -t /home/don/apps/py_proj/.krj_data/logs/krj_weekly_*.log | head -1 | xargs tail -100`
+3. Check metadata: `cat /home/don/apps/data/krj/metadata.json`
+4. Check web UI: http://134.199.204.12:3000/krj (should show new date)
+
+**Expected:**
+- Cron runs at 9:00 AM UTC (4:00 AM ET) every Saturday
+- Pipeline completes in 30-60 minutes (first run with new data)
+- Signal date updates to most recent Friday
+- Web UI reflects new data
+
+**If cron didn't run:**
+- Check cron service: `systemctl status cron`
+- Check crontab: `crontab -l`
+- Check system logs: `sudo grep CRON /var/log/syslog | tail -20`
+- See troubleshooting section in `CRON_VERIFICATION_CHECKLIST.md`
+
+## MA Options Scanner - Distributed Architecture
+
+### Overview
+
+The MA Options Scanner uses a distributed architecture where price agents run on user machines with IB TWS, fetching option prices and sending them to the server. This keeps IB credentials secure on user machines while enabling the scanner to display live market data.
+
+**Key Documentation:**
+- `MA_OPTIONS_DISTRIBUTED_ARCHITECTURE_IMPLEMENTATION.md` - Complete implementation guide
+- `docs/PRICE_AGENT_SETUP.md` - User setup instructions
+
+### Architecture Components
+
+#### 1. Price Agent (User Machine)
+- **Location:** `python-service/price_agent.py`
+- **Purpose:** Fetches option prices from local IB TWS and sends to server
+- **Configuration:** `.env.local` (AGENT_ID, SERVER_URL, AGENT_API_KEY)
+- **IB Connection:** Local only (127.0.0.1:7497)
+- **Security:** IB credentials NEVER leave user machine
+
+**CRITICAL:** Price agent WRAPS existing IB logic, does NOT replace it.
+- `python-service/app/scanner.py` - UNCHANGED (proven IB integration)
+- `python-service/app/options/ib_client.py` - UNCHANGED (proven IB integration)
+- `python-service/app/options/models.py` - UNCHANGED (data structures)
+
+#### 2. Ingestion API (Server)
+- **Location:** `app/api/price-agent/ingest-chain/route.ts`
+- **Purpose:** Receives, validates, and persists price updates from agents
+- **Authentication:** Bearer token (AGENT_API_KEY)
+- **Validation:** Timestamp validation, payload validation, conflict detection
+- **Persistence:** PostgreSQL via Prisma
+
+#### 3. UI Integration
+- **Location:** `app/api/ma-options/fetch-chain/route.ts`
+- **Priority 1:** Check for recent agent data (< 5 minutes)
+- **Priority 2:** Fall back to Python service (gradual migration)
+- **Display:** Shows price age, agent ID, freshness indicators
+
+### Identity Model (Three Concepts)
+
+**CRITICAL:** These are distinct and must not be confused:
+
+1. **userId** (Human User)
+   - Represents a human using the system
+   - Used for: UI customization, watched spreads, saved strategies
+   - Authentication: Username/password (existing system)
+   - Persistence: `users` table
+
+2. **agentId** (Price Agent Instance)
+   - Identifies a running price agent (e.g., "don-macbook-pro")
+   - Used for: Activity tracking, troubleshooting, monitoring
+   - NOT used for: UI permissions, data ownership
+   - Relationship: User may have 0, 1, or many agents
+
+3. **apiKey** (Agent Authentication)
+   - Authenticates agent to server
+   - Scope: Per-agent credential
+   - Distribution: Manual (1Password, secure channel)
+   - Validation: Server-side only
+
+**Boundaries:**
+```
+userId ≠ agentId ≠ apiKey
+
+✅ CORRECT: User "don" owns watched spreads
+✅ CORRECT: Agent "don-mbp" provides prices
+✅ CORRECT: API key authenticates "don-mbp"
+
+❌ WRONG: Infer user from agentId
+❌ WRONG: Use agentId for data ownership
+```
+
+### Timestamp Handling
+
+**Two Timestamps, One Authority:**
+
+1. **agentTimestamp** (Display Only)
+   - When agent fetched data from IB
+   - Used for: Showing data age to user
+   - NOT used for: Ordering, conflict resolution
+
+2. **snapshotDate** (Authoritative)
+   - When server received data (server receipt time)
+   - Used for: Ordering, conflict resolution, freshness checks
+   - Always set by server, never by agent
+
+**Validation:**
+- Reject agent timestamps in the future (> 1 minute tolerance)
+- Use server time for all ordering and conflict resolution
+- Display agent time for user-facing age indicators
+
+### Price Freshness Semantics
+
+**Core Principle: Prices Are NEVER Hidden**
+
+1. Always display last known price (even if days old)
+2. Never invalidate or suppress data due to age
+3. Freshness is metadata only (for display, not filtering)
+4. UI annotates age, doesn't hide data
+
+**Freshness Indicators (Visual Only):**
+- live: < 5 minutes (green dot)
+- recent: 5-30 minutes (yellow dot)
+- stale: 30min-24hr (orange dot)
+- cached: > 24 hours (gray dot)
+
+### Conflict Handling
+
+**Strategy:** Last-Write-Wins (Server Receipt Time)
+
+When multiple agents send data for the same ticker within a 1-minute window:
+1. Compare `snapshotDate` (server receipt time)
+2. Keep newer data, reject older data
+3. Log conflict to application logs (no new tables)
+4. Return 409 to inform agent (not an error, just FYI)
+
+**Logging:**
+- Where: Application logs (console, Docker logs)
+- Format: Structured JSON with agentId, ticker, timestamps
+- NO new tables or monitoring systems
+
+### Database Schema
+
+**OptionChainSnapshot Model:**
+```prisma
+model OptionChainSnapshot {
+  id              String    @id @default(uuid())
+  dealId          String    @map("deal_id")
+  ticker          String
+  snapshotDate    DateTime  @default(now()) @map("snapshot_date")  // Server time (authoritative)
+  agentId         String?   @map("agent_id")                        // Agent identifier
+  agentTimestamp  DateTime? @map("agent_timestamp")                // Agent time (display only)
+  spotPrice       Decimal   @map("spot_price") @db.Decimal(10, 4)
+  // ... other fields ...
+  
+  @@index([ticker, snapshotDate(sort: Desc)])  // Fast latest lookup
 }
-
-// Client components when needed
-'use client'
-export default function InteractiveComponent() {
-  const [state, setState] = useState()
-  return <div onClick={() => setState(...)}/>
-}
 ```
 
-### API Integration
-- Use `fetch()` in Server Components
-- Use React Query/SWR for Client Components
-- API base URL: `http://localhost:8000` (dev)
+### Security Model
 
----
+**What Stays Local (Never Transmitted):**
+- ✅ IB username and password
+- ✅ IB account number
+- ✅ TWS/Gateway session
+- ✅ Agent `.env.local` file
 
-## Git & Commit Standards
+**What Is Transmitted:**
+- ✅ Agent ID (chosen identifier)
+- ✅ Option prices (public market data)
+- ✅ Timestamps
+- ✅ API key (encrypted via HTTPS)
 
-### Commit Messages
-Follow Conventional Commits:
-```
-feat: Add halt monitoring system
-fix: Correct deal deduplication logic
-docs: Update API documentation
-refactor: Simplify EDGAR parsing logic
-test: Add tests for deal approval flow
-```
+**Authentication Flow:**
+1. Agent loads AGENT_API_KEY from .env.local
+2. Agent POSTs to /api/price-agent/ingest-chain with Bearer token
+3. Server validates key against AGENT_API_KEY env var
+4. If valid: process data; If invalid: 403 Forbidden
 
-### Branching
-- `main`: Production-ready code
-- Feature branches: `feature/halt-monitoring`
-- Bug fixes: `fix/edgar-timeout`
-- Keep branches short-lived
+### Environment Variables
 
-### Before Committing
-1. Run tests (if applicable)
-2. Check `git diff` for unintended changes
-3. Verify services still start correctly
-4. Use atomic commits (one logical change)
-5. **Check if .claude-rules needs updating** - If commit adds:
-   - New deployment workflow or script
-   - New service/monitor with start/stop commands
-   - New API endpoints that will be commonly used
-   - New database tables or major schema changes
-   - New pages or important UI routes
-   - Platform-specific requirements or workarounds
-   - Critical troubleshooting steps
-
-   Then update `.claude-rules` in the SAME commit so context stays synchronized.
-
----
-
-## Development → Staging Workflow
-
-### Platform-Specific Deployment
-
-**macOS/Linux:**
+**Server (Droplet):**
 ```bash
-./deploy-staging.sh      # Use this on Mac/Unix systems
+AGENT_API_KEY=<generated-key>  # Generate with: openssl rand -hex 32
 ```
 
-**Windows:**
+**Agent (User Machine):**
 ```bash
-deploy-staging.bat       # Use this on Windows systems
+AGENT_ID=your-agent-id
+SERVER_URL=https://134.199.204.12:3000
+AGENT_API_KEY=<same-as-server>
+IB_HOST=127.0.0.1
+IB_PORT=7497
+IB_CLIENT_ID=100
 ```
 
-### What the Deploy Script Does
-1. **Stops all services** (dev-stop.sh/bat)
-2. **Pulls latest code** from `origin/main` via `git reset --hard`
-3. **Cleans Python cache** (removes __pycache__ and .pyc files)
-4. **Cleans Next.js cache** (removes .next directory) ← CRITICAL for UI updates!
-5. **Cleans logs** (removes old log files)
-6. **Starts all services** (dev-start.sh/bat)
-7. **Auto-starts intelligence monitoring** via API call
+### Common Commands
 
-### Important: Next.js Cache Clearing
-
-**Problem**: Next.js caches compiled pages in `.next/`. If this isn't cleared after pulling code, UI changes won't appear.
-
-**Solution**: Always delete `.next/` before restarting Next.js:
+**Run Price Agent (User Machine):**
 ```bash
-rm -rf .next && npm run dev
+cd python-service
+source .venv/bin/activate
+python3 price_agent.py --ticker CSGS --deal-price 81.34 --close-date 2026-06-30
 ```
 
-The deploy scripts now handle this automatically.
-
-### Manual Cache Clear (if needed)
+**Dry Run (Test Without Sending):**
 ```bash
-# If changes don't appear after deployment:
-rm -rf .next           # Clear Next.js cache
-rm -rf python-service/__pycache__  # Clear Python cache
+python3 price_agent.py --ticker CSGS --deal-price 81.34 --close-date 2026-06-30 --dry-run
 ```
 
----
-
-## Service Management
-
-### Starting Services
-
-**Quick Start (Recommended):**
+**View Ingestion Logs (Droplet):**
 ```bash
-./dev-start.sh           # Mac/Linux
-dev-start.bat            # Windows
+docker logs ma-tracker-app-web --tail 100 | grep "Price data ingested"
+docker logs ma-tracker-app-web --tail 100 | grep "Price conflict"
 ```
 
-**Manual Start:**
-```bash
-# Frontend (from /ma-tracker-app)
-npm run dev              # Port 3000
+### Implementation Guardrails
 
-# Backend (from /ma-tracker-app/python-service)
-/Users/donaldross/opt/anaconda3/bin/python3 start_server.py  # Port 8000
-```
+**NEVER CHANGE (Proven IB Logic):**
+- ❌ `python-service/app/scanner.py`
+- ❌ `python-service/app/options/ib_client.py`
+- ❌ `python-service/app/options/models.py`
 
-**Note**: Always use the absolute Python path (`/Users/donaldross/opt/anaconda3/bin/python3`) to ensure correct environment.
+**If you think you need to change these files, you are wrong. Wrap them instead.**
 
-### Stopping Services
-```bash
-./dev-stop.sh            # Mac/Linux
-dev-stop.bat             # Windows
-```
+**Scope Control:**
+- ✅ No message queues
+- ✅ No consensus protocols
+- ✅ No service mesh
+- ✅ No API gateway
+- ✅ No load balancers
 
-### Health Checks
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8000/health
-- Staging page: http://localhost:3000/staging
-- Monitors: Check `/edgar/status`, `/halts/status`, `/intelligence/monitoring/status`
+**Backward Compatibility:**
+- ✅ Old Python service path still works
+- ✅ Gradual migration supported
+- ✅ No breaking changes to UI
 
-### Database
-- PostgreSQL (Neon hosted - cloud database)
-- Connection string in `.env` (never commit!)
-- Use asyncpg for Python connections
-- Database migrations: Numbered SQL files in `python-service/migrations/`
+### IB TWS Client ID Allocation
 
----
+**CRITICAL**: Each connection to IB TWS must use a unique client ID.
 
-## Common Patterns
+**ID Range Allocation:**
+- **100**: Manual testing / local scripts (hardcoded in `.env.local`)
+- **200-299**: Status checks (randomized on each check)
+- **300-399**: Price agents (randomized on spawn)
 
-### Adding a New Deal Source
-1. Add source to `source_monitors` table
-2. Create monitor class extending base pattern
-3. Implement scraping logic
-4. Parse into `StagedDeal` format
-5. Add API endpoints for manual triggering
-6. Add to orchestrator startup
+**Implementation:**
+- `app/api/ib-connection/status/route.ts` uses `random.randint(200, 299)`
+- `python-service/price_agent.py` uses `random.randint(300, 399)`
+- Manual scripts can use `IB_CLIENT_ID=100` from config
 
-### Adding API Endpoint
-1. Create route in appropriate `/app/api/` file
-2. Add Pydantic models for request/response
-3. Include in router and register in `main.py`
-4. Add error handling
-5. Test with curl/Postman
-6. Document in API docs (future)
+**Why Random?**
+- No central ID allocator needed
+- Supports concurrent operations
+- Prevents conflicts between status checks and agents
 
-### Database Schema Changes
-1. Create new migration file (next number)
-2. Include both forward and (if possible) rollback logic
-3. Test on dev database
-4. Apply to production via Python script
-5. Update any affected code
-6. Commit migration + code changes together
+**Documentation**: See `docs/IB_CLIENT_ID_GUIDE.md` for full details.
 
----
+### Troubleshooting
 
-## Never Do
+**Client ID Already in Use:**
+1. Wait 10 seconds for stale connections to clean up
+2. Check for zombie processes: `ps aux | grep price_agent`
+3. Restart TWS to clear all connection records
+4. Verify agent is using random IDs (300-399) in logs
 
-- ❌ Modify existing migrations
-- ❌ Commit `.env` files or secrets
-- ❌ Mix refactoring with feature changes
-- ❌ Break existing API contracts without versioning
-- ❌ Delete tests
-- ❌ Make database changes without migrations
-- ❌ Deploy without testing migrations first
-- ❌ Use `SELECT *` in production queries
-- ❌ Store passwords in plain text
-- ❌ Ignore TypeScript/Python errors
+**Agent Cannot Connect to IB TWS:**
+1. Ensure TWS/Gateway is running
+2. Enable API in TWS: File > Global Configuration > API > Settings
+3. Check port matches `.env.local` (default 7497)
+4. Add 127.0.0.1 to Trusted IP Addresses
+5. Restart TWS/Gateway
 
----
+**Server Rejects API Key:**
+1. Verify AGENT_API_KEY in agent's `.env.local` matches server's env var
+2. Check for extra spaces or quotes
+3. Regenerate key if compromised
+4. Restart server after changing env var
 
-## Always Do
+**Future Timestamp Error:**
+1. Sync system clock: `sudo ntpdate -s time.apple.com` (Mac)
+2. Check timezone settings
+3. Ensure agent and server clocks are synchronized
 
-- ✅ Write descriptive commit messages
-- ✅ Use type hints/annotations
-- ✅ Handle errors explicitly
-- ✅ Log important operations
-- ✅ Validate user input
-- ✅ Use transactions for multi-table updates
-- ✅ Test migrations before applying
-- ✅ Follow existing code patterns
-- ✅ Ask when uncertain
-- ✅ Keep functions small and focused
+**Deal Not Found:**
+1. Verify ticker exists in MA Options Scanner
+2. Add deal to scanner first
+3. Check ticker spelling (case-insensitive)
 
----
+### Deployment Status
 
-## Execution Philosophy
+- ✅ Local implementation complete
+- ✅ Database schema updated (local)
+- ⏳ Production deployment pending user testing
+- ⏳ User setup pending (IB TWS configuration)
 
-### Never Ask Permission to Proceed
-- **NEVER** ask "Can I proceed?" or "Should I continue?"
-- **ALWAYS** just proceed with the work
-- User will interrupt if they want you to stop
-- Asking permission wastes time and breaks flow
-- The only exception: Major architectural changes that could break production
+### Future Enhancements (Out of Scope)
 
-### When Uncertain About Implementation Details
-
-1. Check existing code for patterns
-2. Review recent commits: `git log --oneline -10`
-3. Make a reasonable choice and document it
-4. Write a test to explore behavior
-5. Start with smallest possible change
-
----
-
-## Emergency Procedures
-
-### If Service Won't Start
-1. Check logs for error messages
-2. Verify DATABASE_URL is set
-3. Check port conflicts: `lsof -i :8000`
-4. Try restarting services
-5. Check recent git changes
-
-### If Database Migration Fails
-1. **DO NOT** manually edit production database
-2. Check migration SQL syntax
-3. Test migration on dev database copy
-4. Create rollback migration if needed
-5. Document the issue
-
-### If Monitor Stops Working
-1. Check service status endpoint
-2. Review logs for errors
-3. Verify external service availability
-4. Check database connections
-5. Restart Python service if needed
-
----
-
-## Testing Philosophy
-
-### Python Tests
-```python
-# tests/test_feature.py
-import pytest
-
-def test_feature():
-    # Arrange
-    input_data = {...}
-
-    # Act
-    result = function(input_data)
-
-    # Assert
-    assert result == expected
-```
-
-### Integration Tests
-- Test full request/response cycle
-- Use test database
-- Clean up after tests
-- Mock external API calls
-
----
-
-## Performance Guidelines
-
-- Use database indexes for frequently queried fields
-- Batch database operations when possible
-- Cache expensive computations
-- Use async for I/O-bound operations
-- Monitor for N+1 query problems
-- Keep API response times <500ms
-
----
-
-*Last updated: 2025-01-09*
-*For questions or clarifications, check git history or ask*
+These are intentionally NOT implemented:
+- ❌ API key revocation system (manual deletion for now)
+- ❌ Agent auto-discovery (manual configuration is fine)
+- ❌ Rate limiting (not needed with small user base)
+- ❌ Monitoring dashboards (use application logs)
+- ❌ User authentication improvements (separate project)

@@ -1,5 +1,8 @@
 # Automated Email Forwarding Setup
 
+> **Note:** This guide is for the Python service backend (port 8000) email webhook functionality.  
+> For exposing the Next.js UI (port 3000), see [../docs/CLOUDFLARE_TUNNEL_SETUP.md](../docs/CLOUDFLARE_TUNNEL_SETUP.md).
+
 This guide sets up **fully automated** email forwarding from Gmail to your M&A Tracker webhook. Emails from trusted senders will be automatically processed and added to your deal intelligence platform.
 
 ## Quick Start (5 minutes)

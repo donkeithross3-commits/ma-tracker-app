@@ -1,0 +1,97 @@
+
+> ma-tracker-app@0.1.0 build
+> prisma generate && next build
+
+Environment variables loaded from .env
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v6.18.0) to ./node_modules/@prisma/client in 178ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Need your database queries to be 1000x faster? Accelerate offers you that and more: https://pris.ly/tip-2-accelerate
+
+   ▲ Next.js 16.0.10 (Turbopack)
+   - Environments: .env.local, .env
+
+ ⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 6.2s
+   Skipping validation of types
+   Collecting page data using 11 workers ...
+   Generating static pages using 11 workers (0/38) ...
+   Generating static pages using 11 workers (9/38) 
+   Generating static pages using 11 workers (18/38) 
+   Generating static pages using 11 workers (28/38) 
+MA Options Scanner: Loaded 67 deals
+[PERF] StagingPage component mounting at 2025-12-25T20:44:50.989Z
+ ✓ Generating static pages using 11 workers (38/38) in 740.0ms
+   Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /api/auth/[...nextauth]
+├ ƒ /api/deals
+├ ƒ /api/deals/prepare
+├ ƒ /api/edgar/filings
+├ ƒ /api/edgar/filings/[filingId]/create-deal
+├ ƒ /api/edgar/monitoring/start
+├ ƒ /api/edgar/monitoring/status
+├ ƒ /api/edgar/monitoring/stop
+├ ƒ /api/edgar/staged-deals
+├ ƒ /api/edgar/staged-deals/[dealId]/reject
+├ ƒ /api/edgar/staged-deals/[dealId]/review
+├ ƒ /api/halts/recent
+├ ƒ /api/ib-connection/reconnect
+├ ƒ /api/ib-connection/status
+├ ƒ /api/intelligence/articles/recent
+├ ƒ /api/intelligence/deals
+├ ƒ /api/intelligence/deals/[dealId]/reject
+├ ƒ /api/intelligence/deals/[dealId]/ticker
+├ ƒ /api/intelligence/monitoring/start
+├ ƒ /api/intelligence/monitoring/status
+├ ƒ /api/intelligence/monitoring/stop
+├ ƒ /api/intelligence/rumored-deals
+├ ƒ /api/intelligence/sources
+├ ƒ /api/intelligence/suggestions/[suggestionId]/accept
+├ ƒ /api/intelligence/suggestions/[suggestionId]/reject
+├ ƒ /api/intelligence/suggestions/by-deal/[dealId]
+├ ƒ /api/intelligence/watch-list
+├ ƒ /api/intelligence/watch-list/[ticker]
+├ ƒ /api/ma-options/check-availability
+├ ƒ /api/ma-options/deals
+├ ƒ /api/ma-options/fetch-chain
+├ ƒ /api/ma-options/generate-candidates
+├ ƒ /api/ma-options/update-spread-prices
+├ ƒ /api/ma-options/watch-spread
+├ ƒ /api/ma-options/watched-spreads
+├ ƒ /api/ma-options/watched-spreads/[id]
+├ ƒ /api/options/scan
+├ ƒ /api/research/fetch-filings
+├ ƒ /api/research/generate-report
+├ ƒ /deals
+├ ƒ /deals/[id]
+├ ƒ /deals/[id]/cvr/[cvrId]/edit
+├ ƒ /deals/[id]/cvr/new
+├ ƒ /deals/[id]/edit
+├ ƒ /deals/[id]/position/new
+├ ƒ /deals/[id]/price/new
+├ ƒ /deals/edit/[dealId]
+├ ○ /deals/new
+├ ○ /edgar/filings
+├ ƒ /intelligence/deals/[dealId]
+├ ○ /krj
+├ ƒ /login
+├ ○ /ma-options
+├ ƒ /portfolio
+├ ○ /rumored-deals
+├ ○ /staging
+└ ƒ /staging/[id]
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

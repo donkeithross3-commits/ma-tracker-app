@@ -110,6 +110,9 @@ class IBDataAgent:
             elif request_type == "fetch_underlying":
                 return await self._handle_fetch_underlying(payload)
             
+            elif request_type == "test_futures":
+                return await self._handle_test_futures(payload)
+            
             else:
                 return {"error": f"Unknown request type: {request_type}"}
                 
@@ -160,6 +163,114 @@ class IBDataAgent:
             "ask": data.get("ask")
         }
     
+    async def _handle_test_futures(self, payload: dict) -> dict:
+        """Fetch ES futures quote as a connectivity test"""
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": "IB not connected"}
+        
+        # Get contract month from payload or use front month
+        contract_month = payload.get("contract_month", "")
+        
+        # If no contract month specified, calculate front month
+        if not contract_month:
+            from datetime import datetime
+            now = datetime.now()
+            # ES futures expire 3rd Friday, so use next month if we're past 15th
+            if now.day > 15:
+                month = now.month + 1
+                year = now.year
+                if month > 12:
+                    month = 1
+                    year += 1
+            else:
+                month = now.month
+                year = now.year
+            # ES contracts are Mar (H), Jun (M), Sep (U), Dec (Z)
+            # Find the next quarterly month
+            quarterly_months = [3, 6, 9, 12]
+            for qm in quarterly_months:
+                if qm >= month:
+                    month = qm
+                    break
+            else:
+                month = 3
+                year += 1
+            contract_month = f"{year}{month:02d}"
+        
+        logger.info(f"Fetching ES futures quote for contract month {contract_month}")
+        
+        try:
+            # Create ES futures contract
+            from ibapi.contract import Contract
+            contract = Contract()
+            contract.symbol = "ES"
+            contract.secType = "FUT"
+            contract.exchange = "CME"
+            contract.currency = "USD"
+            contract.lastTradeDateOrContractMonth = contract_month
+            
+            # Request market data
+            req_id = self.scanner.get_next_req_id()
+            
+            # Store data
+            futures_data = {"bid": None, "ask": None, "last": None}
+            data_received = False
+            
+            # Override tickPrice temporarily
+            original_tickPrice = self.scanner.tickPrice
+            
+            def handle_tick(reqId, tickType, price, attrib):
+                nonlocal futures_data, data_received
+                if reqId == req_id:
+                    if tickType == 1:  # Bid
+                        futures_data["bid"] = price
+                    elif tickType == 2:  # Ask
+                        futures_data["ask"] = price
+                    elif tickType == 4:  # Last
+                        futures_data["last"] = price
+                        data_received = True
+            
+            self.scanner.tickPrice = handle_tick
+            
+            # Request snapshot data
+            self.scanner.reqMktData(req_id, contract, "", True, False, [])
+            
+            # Wait for data (up to 5 seconds)
+            import time
+            for _ in range(50):
+                time.sleep(0.1)
+                if data_received and futures_data["bid"] and futures_data["ask"]:
+                    break
+            
+            # Cancel and restore
+            self.scanner.cancelMktData(req_id)
+            self.scanner.tickPrice = original_tickPrice
+            
+            if not data_received and not futures_data["bid"]:
+                return {"error": "No futures data received - market may be closed"}
+            
+            # Format contract name
+            month_codes = {3: 'H', 6: 'M', 9: 'U', 12: 'Z'}
+            year_digit = contract_month[3]
+            month_num = int(contract_month[4:6])
+            month_code = month_codes.get(month_num, '?')
+            contract_name = f"ES{month_code}{year_digit}"
+            
+            return {
+                "success": True,
+                "contract": contract_name,
+                "contract_month": contract_month,
+                "bid": futures_data["bid"],
+                "ask": futures_data["ask"],
+                "last": futures_data["last"],
+                "mid": (futures_data["bid"] + futures_data["ask"]) / 2 if futures_data["bid"] and futures_data["ask"] else None,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching futures: {e}")
+            return {"error": str(e)}
+
     async def _handle_fetch_chain(self, payload: dict) -> dict:
         """Fetch option chain from IB"""
         ticker = payload.get("ticker", "").upper()

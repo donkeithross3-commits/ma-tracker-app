@@ -517,6 +517,41 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/relay/test-futures")
+async def relay_test_futures():
+    """
+    Test ES futures quote through WebSocket relay.
+    Useful for verifying IB connectivity when options markets are closed.
+    """
+    try:
+        registry = get_registry()
+        status = registry.get_status()
+        
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        
+        # Send request through WebSocket relay
+        response_data = await send_request_to_provider(
+            request_type="test_futures",
+            payload={},
+            timeout=15.0
+        )
+        
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay test futures error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/relay/ib-status")
 async def relay_ib_status():
     """
