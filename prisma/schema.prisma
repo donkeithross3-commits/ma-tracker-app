@@ -50,7 +50,6 @@ model Deal {
   updatedBy            User?                 @relation("DealsUpdated", fields: [updatedById], references: [id])
   optionChainSnapshots OptionChainSnapshot[]
   portfolioPositions   PortfolioPosition[]
-  watchedSpreads       WatchedSpread[]
 
   @@index([ticker])
   @@index([status])
@@ -231,46 +230,47 @@ model OptionChainSnapshot {
 }
 
 model WatchedSpread {
-  id              String    @id @default(uuid())
-  dealId          String    @map("deal_id")
-  curatedBy       String?   @map("curated_by")
-  strategyType    String    @map("strategy_type")
-  expiration      DateTime  @db.Date
+  id              String      @id @default(uuid())
+  scannerDealId   String      @map("scanner_deal_id")
+  curatedBy       String?     @map("curated_by")
+  strategyType    String      @map("strategy_type")
+  expiration      DateTime    @db.Date
   legs            Json
-  entryPremium    Decimal   @map("entry_premium") @db.Decimal(10, 4)
-  entryDate       DateTime  @default(now()) @map("entry_date")
-  maxProfit       Decimal   @map("max_profit") @db.Decimal(10, 4)
-  maxLoss         Decimal   @map("max_loss") @db.Decimal(10, 4)
-  returnOnRisk    Decimal   @map("return_on_risk") @db.Decimal(10, 4)
-  annualizedYield Decimal   @map("annualized_yield") @db.Decimal(10, 4)
-  currentPremium  Decimal?  @map("current_premium") @db.Decimal(10, 4)
-  lastUpdated     DateTime? @map("last_updated")
-  avgBidAskSpread Decimal?  @map("avg_bid_ask_spread") @db.Decimal(10, 6)
-  avgVolume       Int?      @map("avg_volume")
-  avgOpenInterest Int?      @map("avg_open_interest")
-  status          String    @default("active")
+  entryPremium    Decimal     @map("entry_premium") @db.Decimal(10, 4)
+  entryDate       DateTime    @default(now()) @map("entry_date")
+  maxProfit       Decimal     @map("max_profit") @db.Decimal(10, 4)
+  maxLoss         Decimal     @map("max_loss") @db.Decimal(10, 4)
+  returnOnRisk    Decimal     @map("return_on_risk") @db.Decimal(10, 4)
+  annualizedYield Decimal     @map("annualized_yield") @db.Decimal(10, 4)
+  currentPremium  Decimal?    @map("current_premium") @db.Decimal(10, 4)
+  lastUpdated     DateTime?   @map("last_updated")
+  avgBidAskSpread Decimal?    @map("avg_bid_ask_spread") @db.Decimal(10, 6)
+  avgVolume       Int?        @map("avg_volume")
+  avgOpenInterest Int?        @map("avg_open_interest")
+  status          String      @default("active")
   notes           String?
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  curator         User?     @relation(fields: [curatedBy], references: [id])
-  deal            Deal      @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  curator         User?       @relation(fields: [curatedBy], references: [id])
+  scannerDeal     ScannerDeal @relation(fields: [scannerDealId], references: [id], onDelete: Cascade)
 
-  @@index([dealId])
+  @@index([scannerDealId])
   @@index([status])
   @@index([expiration])
   @@map("watched_spreads")
 }
 
 model ScannerDeal {
-  id                 String   @id @default(uuid())
-  ticker             String   @unique
-  targetName         String?  @map("target_name")
-  expectedClosePrice Decimal  @map("expected_close_price") @db.Decimal(10, 4)
-  expectedCloseDate  DateTime @map("expected_close_date") @db.Date
+  id                 String          @id @default(uuid())
+  ticker             String          @unique
+  targetName         String?         @map("target_name")
+  expectedClosePrice Decimal         @map("expected_close_price") @db.Decimal(10, 4)
+  expectedCloseDate  DateTime        @map("expected_close_date") @db.Date
   notes              String?
-  isActive           Boolean  @default(true) @map("is_active")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  isActive           Boolean         @default(true) @map("is_active")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+  watchedSpreads     WatchedSpread[]
 
   @@index([isActive])
   @@index([ticker])

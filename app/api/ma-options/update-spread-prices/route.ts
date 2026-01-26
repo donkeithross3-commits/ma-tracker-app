@@ -114,18 +114,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch spreads with deal info
+    // Fetch spreads with scanner deal info
     const spreads = await prisma.watchedSpread.findMany({
       where: { id: { in: spreadIds } },
       include: {
-        deal: {
-          include: {
-            versions: {
-              where: { isCurrentVersion: true },
-              take: 1,
-            },
-          },
-        },
+        scannerDeal: true,
       },
     });
 
@@ -139,9 +132,9 @@ export async function POST(request: NextRequest) {
     const contractsNeeded = new Map<string, {ticker: string, strike: number, expiry: string, right: string}>();
     
     for (const spread of spreads) {
-      if (!spread.deal) continue;
+      if (!spread.scannerDeal) continue;
       
-      const ticker = spread.deal.ticker;
+      const ticker = spread.scannerDeal.ticker;
       const legs = spread.legs as unknown as StrategyLeg[];
       const expiry = typeof spread.expiration === 'string' 
         ? spread.expiration 
@@ -211,7 +204,7 @@ export async function POST(request: NextRequest) {
       const updatedLegs = JSON.parse(JSON.stringify(legs)) as StrategyLeg[];
       
       for (const leg of updatedLegs) {
-        const contractKey = `${spread.deal!.ticker}_${leg.strike}_${expiryNorm}_${leg.right}`;
+        const contractKey = `${spread.scannerDeal!.ticker}_${leg.strike}_${expiryNorm}_${leg.right}`;
         const price = priceData.get(contractKey);
         
         if (price) {

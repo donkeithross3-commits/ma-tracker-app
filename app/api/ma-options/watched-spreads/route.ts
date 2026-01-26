@@ -5,26 +5,19 @@ import type { WatchedSpreadDTO } from "@/types/ma-options";
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const dealId = searchParams.get("dealId");
+    const scannerDealId = searchParams.get("dealId");
 
     // Build where clause
     const where: any = {};
-    if (dealId) {
-      where.dealId = dealId;
+    if (scannerDealId) {
+      where.scannerDealId = scannerDealId;
     }
 
-    // Fetch watched spreads
+    // Fetch watched spreads with scanner deal info
     const spreads = await prisma.watchedSpread.findMany({
       where,
       include: {
-        deal: {
-          include: {
-            versions: {
-              where: { isCurrentVersion: true },
-              take: 1,
-            },
-          },
-        },
+        scannerDeal: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -33,8 +26,7 @@ export async function GET(request: NextRequest) {
 
     // Transform to DTO format
     const spreadsDTO: WatchedSpreadDTO[] = spreads.map((spread) => {
-      const version = spread.deal.versions[0];
-      const expectedCloseDate = version?.expectedCloseDate;
+      const expectedCloseDate = spread.scannerDeal.expectedCloseDate;
 
       // Calculate days to close
       let daysToClose = 0;
@@ -65,9 +57,9 @@ export async function GET(request: NextRequest) {
 
       return {
         id: spread.id,
-        dealId: spread.dealId,
-        dealTicker: spread.deal.ticker,
-        dealTargetName: spread.deal.targetName || "",
+        dealId: spread.scannerDealId,
+        dealTicker: spread.scannerDeal.ticker,
+        dealTargetName: spread.scannerDeal.targetName || "",
         strategyType: spread.strategyType,
         expiration: spread.expiration.toISOString(),
         legs: spread.legs as any,
@@ -96,4 +88,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

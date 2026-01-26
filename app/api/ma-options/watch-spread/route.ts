@@ -8,9 +8,9 @@ import type {
 export async function POST(request: NextRequest) {
   try {
     const body: WatchSpreadRequest = await request.json();
-    const { dealId, strategy, notes } = body;
+    const { dealId: scannerDealId, strategy, notes } = body;
 
-    if (!dealId || !strategy) {
+    if (!scannerDealId || !strategy) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     // Create watched spread
     const spread = await prisma.watchedSpread.create({
       data: {
-        dealId,
+        scannerDealId,
         strategyType: strategy.strategyType,
         expiration: expirationDate,
         legs: strategy.legs as any,
