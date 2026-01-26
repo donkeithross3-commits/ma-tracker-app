@@ -364,8 +364,17 @@ class IBDataAgent:
     
     async def _process_request(self, request_id: str, data: dict):
         """Process a single request and send response (runs as separate task)"""
+        request_type = data.get("request_type", "unknown")
         try:
+            logger.info(f"Processing request {request_id} ({request_type})...")
             result = await self.handle_request(data)
+            
+            # Log result summary
+            if "error" in result:
+                logger.error(f"Request {request_id} ({request_type}) failed: {result.get('error')}")
+            else:
+                contracts_count = len(result.get("contracts", [])) if "contracts" in result else "N/A"
+                logger.info(f"Request {request_id} ({request_type}) completed. Contracts: {contracts_count}")
             
             # Send response
             response = {
@@ -375,10 +384,17 @@ class IBDataAgent:
                 "data": result if "error" not in result else None,
                 "error": result.get("error")
             }
+            
             if self.websocket:
-                await self.websocket.send(json.dumps(response))
+                response_json = json.dumps(response)
+                logger.info(f"Sending response for {request_id} ({request_type}), size: {len(response_json)} bytes")
+                await self.websocket.send(response_json)
+                logger.info(f"Response sent for {request_id} ({request_type})")
+            else:
+                logger.error(f"Cannot send response for {request_id}: WebSocket is None")
+                
         except Exception as e:
-            logger.error(f"Error processing request {request_id}: {e}")
+            logger.error(f"Error processing request {request_id} ({request_type}): {e}", exc_info=True)
             try:
                 if self.websocket:
                     await self.websocket.send(json.dumps({
@@ -387,8 +403,8 @@ class IBDataAgent:
                         "success": False,
                         "error": str(e)
                     }))
-            except:
-                pass
+            except Exception as send_error:
+                logger.error(f"Failed to send error response: {send_error}")
 
     async def message_handler(self):
         """Handle incoming messages from the relay"""
