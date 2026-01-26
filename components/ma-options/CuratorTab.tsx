@@ -96,6 +96,7 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       setChainData(chainResult);
 
       // Generate candidate strategies with parameters
+      // Pass chainData directly for ws-relay results (snapshotId won't be in database)
       const candidatesResponse = await fetch(
         "/api/ma-options/generate-candidates",
         {
@@ -105,6 +106,14 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
             snapshotId: chainResult.snapshotId,
             dealId: selectedDeal.id,
             scanParams: params,
+            // Include chain data for ws-relay sources where snapshot isn't in DB
+            chainData: chainResult.source === "ws-relay" ? {
+              ticker: chainResult.ticker,
+              spotPrice: chainResult.spotPrice,
+              dealPrice: chainResult.dealPrice,
+              expectedCloseDate: selectedDeal.expectedCloseDate,
+              contracts: chainResult.contracts,
+            } : undefined,
           }),
         }
       );
