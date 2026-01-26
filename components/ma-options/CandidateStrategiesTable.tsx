@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import type { CandidateStrategy } from "@/types/ma-options";
-import { StrategyTableHeader, StrategyMetricsCells, type StrategyMetrics } from "./StrategyColumns";
+import { StrategyTableHeader, StrategyMetricsCells, type StrategyMetrics, type StrategyType } from "./StrategyColumns";
 
 interface CandidateStrategiesTableProps {
   candidates: CandidateStrategy[];
@@ -151,7 +151,11 @@ export default function CandidateStrategiesTable({
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead className="bg-gray-900">
-                            <StrategyTableHeader onSort={handleSort} sortKey={sortKey} />
+                            <StrategyTableHeader 
+                              onSort={handleSort} 
+                              sortKey={sortKey} 
+                              strategyType={strategyType as StrategyType}
+                            />
                             <tr className="border-b border-gray-700">
                               <th className="text-center py-2 px-2 text-gray-400">Action</th>
                             </tr>
@@ -174,8 +178,11 @@ export default function CandidateStrategiesTable({
                                   key={candidate.id}
                                   className="border-b border-gray-800 hover:bg-gray-800"
                                 >
-                                  {/* Shared strategy metrics columns */}
-                                  <StrategyMetricsCells metrics={metrics} />
+                                  {/* Strategy metrics columns - type-specific */}
+                                  <StrategyMetricsCells 
+                                    metrics={metrics} 
+                                    strategyType={strategyType as StrategyType}
+                                  />
 
                                   {/* Action button */}
                                   <td className="py-2 px-2 text-center">
