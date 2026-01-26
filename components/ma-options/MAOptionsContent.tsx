@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { ScannerDeal } from "@/types/ma-options";
 import { IBConnectionProvider } from "./IBConnectionContext";
 import IBConnectionStatus from "./IBConnectionStatus";
@@ -24,6 +24,11 @@ export default function MAOptionsContent({ initialDeals }: MAOptionsContentProps
       console.error("Failed to refresh deals:", error);
     }
   }, []);
+
+  // Fetch fresh data on mount to ensure noOptionsAvailable flags are current
+  useEffect(() => {
+    refreshDeals();
+  }, [refreshDeals]);
 
   const handleDealsChange = useCallback((newDeals: ScannerDeal[]) => {
     setDeals(newDeals);
