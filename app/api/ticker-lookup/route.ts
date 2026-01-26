@@ -16,7 +16,7 @@ let cachedCompanies: SECCompany[] | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
-const SEC_EDGAR_BASE_URL = "https://data.sec.gov";
+const SEC_EDGAR_BASE_URL = "https://www.sec.gov";
 const USER_AGENT =
   process.env.SEC_EDGAR_USER_AGENT || "MA-Tracker-App admin@matracker.dev";
 
