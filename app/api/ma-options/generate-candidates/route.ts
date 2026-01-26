@@ -38,7 +38,10 @@ export async function POST(request: NextRequest) {
     const body: GenerateCandidatesRequest = await request.json();
     const { snapshotId, dealId, scanParams, chainData: directChainData } = body;
 
+    console.log(`generate-candidates: snapshotId=${snapshotId}, dealId=${dealId}, hasChainData=${!!directChainData}`);
+
     if (!snapshotId || !dealId) {
+      console.log("generate-candidates: Missing required fields");
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
@@ -53,6 +56,7 @@ export async function POST(request: NextRequest) {
 
     // If direct chain data is provided (from ws-relay), use it
     if (directChainData) {
+      console.log(`generate-candidates: Using direct chain data for ${directChainData.ticker}, contracts: ${directChainData.contracts?.length || 0}`);
       ticker = directChainData.ticker;
       dealPrice = directChainData.dealPrice;
       spotPrice = directChainData.spotPrice;
@@ -99,6 +103,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Call Python service to generate strategies
+    console.log(`generate-candidates: Calling Python service at ${PYTHON_SERVICE_URL}/options/generate-strategies`);
+    console.log(`generate-candidates: Payload - ticker=${ticker}, dealPrice=${dealPrice}, closeDate=${formattedCloseDate}, contracts=${contracts?.length || 0}`);
     try {
       const response = await fetch(
         `${PYTHON_SERVICE_URL}/options/generate-strategies`,
@@ -122,11 +128,13 @@ export async function POST(request: NextRequest) {
         }
       );
 
+      console.log(`generate-candidates: Python service response status: ${response.status}`);
       if (!response.ok) {
         throw new Error(`Python service returned ${response.status}`);
       }
 
       const data: { candidates: CandidateStrategy[] } = await response.json();
+      console.log(`generate-candidates: Got ${data.candidates?.length || 0} candidates`);
 
       const result: GenerateCandidatesResponse = {
         candidates: data.candidates,
