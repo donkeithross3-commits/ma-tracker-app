@@ -789,16 +789,16 @@ class IBMergerArbScanner(EWrapper, EClient):
                     'ask_size': 0
                 }
 
-                # Use snapshot mode (True) for faster data retrieval - good for scanning
-                self.reqMktData(req_id, contract, "100,101,104,106", True, False, [])
+                # Use streaming mode (False) - snapshot mode requires specific subscriptions
+                self.reqMktData(req_id, contract, "100,101,104,106", False, False, [])
                 batch_req_ids.append(req_id)
 
                 # Small delay between submissions (IB allows ~50 req/sec)
                 time.sleep(0.05)  # Reduced from 0.15s for faster scanning
 
-            # Wait for snapshot responses (faster than streaming mode)
-            # Snapshot mode returns data quickly, so we need less wait time
-            wait_time = min(3.0, 1.0 + len(batch) * 0.05)  # Reduced for snapshot mode
+            # Wait for streaming responses
+            # Larger batches need more time, but cap at 4 seconds
+            wait_time = min(4.0, 1.5 + len(batch) * 0.08)
             logger.info(f"Waiting {wait_time:.2f}s for batch responses...")
             time.sleep(wait_time)
 
