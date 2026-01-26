@@ -97,6 +97,10 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
 
       // Generate candidate strategies with parameters
       // Pass chainData directly for ws-relay results (snapshotId won't be in database)
+      console.log("CuratorTab: chainResult.source =", chainResult.source, "snapshotId =", chainResult.snapshotId);
+      const isWsRelay = chainResult.source === "ws-relay";
+      console.log("CuratorTab: isWsRelay =", isWsRelay, "contracts =", chainResult.contracts?.length);
+      
       const candidatesResponse = await fetch(
         "/api/ma-options/generate-candidates",
         {

@@ -93,7 +93,7 @@ export interface OptionChainResponse {
   daysToClose?: number;
   expirations: string[];
   contracts: OptionContract[];
-  source?: "agent" | "python-service";
+  source?: "agent" | "python-service" | "ws-relay";
   agentId?: string;
   timestamp?: string;
   agentTimestamp?: string;
