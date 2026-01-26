@@ -408,46 +408,51 @@ class IBMergerArbScanner(EWrapper, EClient):
                     all_expiries = self.get_expiries(ticker, deal_close_date + timedelta(days=90))
 
                 # Find expirations relative to deal close date and days_before_close parameter
-                if days_before_close == 0:
-                    # Select ONLY the latest expiration before/at close AND earliest after close
-                    # This gives us exactly 2 expirations bracketing the deal close
-                    sorted_expiries = sorted(all_expiries)
+                # Deduplicate and sort all expirations
+                sorted_expiries = sorted(all_expiries)
+                seen = set()
+                unique_expiries = [x for x in sorted_expiries if not (x in seen or seen.add(x))]
 
-                    # Deduplicate while preserving order (remove exchange duplicates)
-                    seen = set()
-                    unique_expiries = [x for x in sorted_expiries if not (x in seen or seen.add(x))]
+                print(f"DEBUG: {len(unique_expiries)} unique expirations for {ticker}: {unique_expiries}")
+                print(f"DEBUG: Deal close date: {deal_close_date.strftime('%Y-%m-%d')}")
 
-                    print(f"DEBUG: {len(unique_expiries)} unique expirations for {ticker}: {unique_expiries}")
-                    print(f"DEBUG: Deal close date: {deal_close_date.strftime('%Y-%m-%d')}")
+                # Parse close date for comparison (date only, ignore time)
+                close_date_only = deal_close_date.date()
 
-                    expiries_before = [exp for exp in unique_expiries if datetime.strptime(exp, '%Y%m%d') < deal_close_date]
-                    expiries_at_or_after = [exp for exp in unique_expiries if datetime.strptime(exp, '%Y%m%d') >= deal_close_date]
+                # Categorize expirations relative to close date
+                expiries_on_close = [exp for exp in unique_expiries 
+                                     if datetime.strptime(exp, '%Y%m%d').date() == close_date_only]
+                expiries_after = [exp for exp in unique_expiries 
+                                  if datetime.strptime(exp, '%Y%m%d').date() > close_date_only]
 
-                    print(f"DEBUG: {len(expiries_before)} expirations BEFORE close: {expiries_before}")
-                    print(f"DEBUG: {len(expiries_at_or_after)} expirations AT/AFTER close: {expiries_at_or_after}")
+                print(f"DEBUG: {len(expiries_on_close)} expirations ON close: {expiries_on_close}")
+                print(f"DEBUG: {len(expiries_after)} expirations AFTER close: {expiries_after}")
 
-                    selected_expiries = []
-                    # Get ONLY the LATEST expiration before deal close (closest to deal date)
-                    if expiries_before:
-                        selected_expiries.append(expiries_before[-1])  # Last one (closest to close date)
-                        print(f"Selected expiration BEFORE close: {expiries_before[-1]}")
+                # ALWAYS get exactly 2 expirations AFTER the close date
+                selected_expiries = expiries_after[:2]
+                print(f"Selected 2 expirations AFTER close: {selected_expiries}")
 
-                    # Get expirations after deal close (price agent mode)
-                    if expiries_at_or_after:
-                        # Limit to first 3 expirations after close for faster updates
-                        # The UI will get frequent updates, so we don't need deep coverage
-                        after_close = expiries_at_or_after[:3]
-                        selected_expiries.extend(after_close)
-                        print(f"Selected {len(after_close)} expirations AT/AFTER close: {after_close}")
+                # Add expiration exactly ON close date if it exists
+                if expiries_on_close:
+                    selected_expiries = expiries_on_close + selected_expiries
+                    print(f"Added expiration ON close date: {expiries_on_close}")
 
-                    print(f"Selected expirations around deal close date {deal_close_date.strftime('%Y-%m-%d')}: {selected_expiries}")
-                else:
-                    # Allow expirations N days before deal close
-                    earliest_date = deal_close_date - timedelta(days=days_before_close)
-                    expiries_valid = [exp for exp in all_expiries if datetime.strptime(exp, '%Y%m%d') >= earliest_date]
-                    # Select 2-3 expirations in the valid range
-                    selected_expiries = expiries_valid[:3] if expiries_valid else []
-                    print(f"Selected expirations from {earliest_date.strftime('%Y-%m-%d')} to beyond deal close {deal_close_date.strftime('%Y-%m-%d')}: {selected_expiries}")
+                # If days_before_close > 0, include expirations in the window before close
+                if days_before_close > 0:
+                    earliest_date = (deal_close_date - timedelta(days=days_before_close)).date()
+                    expiries_in_window = [exp for exp in unique_expiries 
+                                          if earliest_date <= datetime.strptime(exp, '%Y%m%d').date() < close_date_only]
+                    print(f"DEBUG: {len(expiries_in_window)} expirations in window ({earliest_date} to {close_date_only}): {expiries_in_window}")
+                    
+                    # Add any not already included (avoid duplicates)
+                    for exp in expiries_in_window:
+                        if exp not in selected_expiries:
+                            selected_expiries.append(exp)
+                    
+                    # Sort final list
+                    selected_expiries = sorted(selected_expiries)
+
+                print(f"Selected expirations for deal close {deal_close_date.strftime('%Y-%m-%d')}: {selected_expiries}")
 
                 expiries = selected_expiries
             else:

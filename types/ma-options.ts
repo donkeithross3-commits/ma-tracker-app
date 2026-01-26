@@ -108,12 +108,11 @@ export interface AvailabilityCheckResponse {
 
 export interface ScanParameters {
   daysBeforeClose: number;
-  strikeLowerBound: number; // % below deal price
-  strikeUpperBound: number; // % above deal/spot price
-  shortStrikeLower: number; // % below deal price
-  shortStrikeUpper: number; // % above deal price
+  strikeLowerBound: number; // % below deal price for long leg
+  strikeUpperBound: number; // % above deal price for long leg
+  shortStrikeLower: number; // % below deal price for short leg
+  shortStrikeUpper: number; // % above deal price for short leg
   topStrategiesPerExpiration: number;
-  dealConfidence: number; // 0-1
 }
 
 export interface GenerateCandidatesResponse {

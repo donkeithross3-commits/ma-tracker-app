@@ -6,12 +6,11 @@ import type { ScannerDeal } from "@/types/ma-options";
 export interface ScanParameters {
   dealPrice: number; // User-editable deal price
   daysBeforeClose: number;
-  strikeLowerBound: number; // percentage below deal price (e.g., 20 = 20%)
-  strikeUpperBound: number; // percentage above deal/spot (e.g., 10 = 10%)
-  shortStrikeLower: number; // percentage below deal price (e.g., 10 = 10%)
-  shortStrikeUpper: number; // percentage above deal price (e.g., 20 = 20%)
+  strikeLowerBound: number; // percentage below deal price for long leg (e.g., 20 = 20%)
+  strikeUpperBound: number; // percentage above deal price for long leg (e.g., 10 = 10%)
+  shortStrikeLower: number; // percentage below deal price for short leg (e.g., 10 = 10%)
+  shortStrikeUpper: number; // percentage above deal price for short leg (e.g., 20 = 20%)
   topStrategiesPerExpiration: number;
-  dealConfidence: number; // 0-1 (e.g., 0.75 = 75%)
 }
 
 interface DealInfoProps {
@@ -29,6 +28,7 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
   useEffect(() => {
     setDealPrice(deal.expectedClosePrice);
   }, [deal.id, deal.expectedClosePrice]);
+
   const [params, setParams] = useState<ScanParameters>({
     dealPrice: deal.expectedClosePrice,
     daysBeforeClose: 60,
@@ -37,8 +37,10 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
     shortStrikeLower: 10,
     shortStrikeUpper: 20,
     topStrategiesPerExpiration: 5,
-    dealConfidence: 0.75,
   });
+
+  const inputClass = "w-20 px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
+
   return (
     <div className="bg-gray-900 border-2 border-blue-600 rounded p-4 shadow-lg">
       <div className="flex justify-between items-start mb-4">
@@ -108,165 +110,138 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
         </div>
       </div>
 
-      {/* Advanced Parameters */}
+      {/* Scan Parameters - Compact Layout */}
       {showAdvanced && (
-        <div className="border-t border-gray-700 pt-4 mt-4">
-          <h3 className="text-sm font-semibold text-gray-100 mb-3">Scan Parameters</h3>
+        <div className="border-t border-gray-700 pt-4 mt-4 space-y-4">
+          <h3 className="text-sm font-semibold text-gray-100">Scan Parameters</h3>
           
+          {/* Row 1: Expirations */}
+          <div className="bg-gray-800/50 rounded p-3">
+            <div className="flex items-center gap-4">
+              <span className="text-xs text-gray-400 w-32">Days Before Close</span>
+              <input
+                type="number"
+                min="0"
+                max="180"
+                value={params.daysBeforeClose}
+                onChange={(e) => setParams({ ...params, daysBeforeClose: parseInt(e.target.value) || 0 })}
+                className={inputClass}
+              />
+              <span className="text-xs text-gray-500">
+                {params.daysBeforeClose === 0 
+                  ? "2 expirations after close + exact match if exists"
+                  : `Expirations from ${params.daysBeforeClose} days before close through 2 after`}
+              </span>
+            </div>
+          </div>
+
+          {/* Row 2: Strike Ranges - Side by Side */}
           <div className="grid grid-cols-2 gap-4">
-            {/* Left Column */}
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Days Before Close
-                  <span className="text-gray-500 ml-1">(0 = bracket close date)</span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="90"
-                  value={params.daysBeforeClose}
-                  onChange={(e) => setParams({ ...params, daysBeforeClose: parseInt(e.target.value) || 0 })}
-                  className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Strike Lower Bound
-                  <span className="text-gray-500 ml-1">(% below deal price)</span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
-                  value={params.strikeLowerBound}
-                  onChange={(e) => setParams({ ...params, strikeLowerBound: parseInt(e.target.value) || 0 })}
-                  className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-                <div className="text-xs text-gray-500 mt-1">
-                  ${(dealPrice * (1 - params.strikeLowerBound / 100)).toFixed(2)}
+            {/* Long Leg (Buy) */}
+            <div className="bg-gray-800/50 rounded p-3">
+              <div className="text-xs font-medium text-blue-400 mb-2">Long Leg (Buy)</div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 w-16">Lower</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="50"
+                    value={params.strikeLowerBound}
+                    onChange={(e) => setParams({ ...params, strikeLowerBound: parseInt(e.target.value) || 0 })}
+                    className={inputClass}
+                  />
+                  <span className="text-xs text-gray-500">% below deal</span>
+                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 - params.strikeLowerBound / 100)).toFixed(0)}</span>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Strike Upper Bound
-                  <span className="text-gray-500 ml-1">(% above deal/spot)</span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
-                  value={params.strikeUpperBound}
-                  onChange={(e) => setParams({ ...params, strikeUpperBound: parseInt(e.target.value) || 0 })}
-                  className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-                <div className="text-xs text-gray-500 mt-1">
-                  ${(dealPrice * (1 + params.strikeUpperBound / 100)).toFixed(2)}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Deal Confidence
-                  <span className="text-gray-500 ml-1">(probability deal closes)</span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={params.dealConfidence}
-                  onChange={(e) => setParams({ ...params, dealConfidence: parseFloat(e.target.value) || 0.75 })}
-                  className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-                <div className="text-xs text-gray-500 mt-1">
-                  {(params.dealConfidence * 100).toFixed(0)}%
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 w-16">Upper</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="50"
+                    value={params.strikeUpperBound}
+                    onChange={(e) => setParams({ ...params, strikeUpperBound: parseInt(e.target.value) || 0 })}
+                    className={inputClass}
+                  />
+                  <span className="text-xs text-gray-500">% above deal</span>
+                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 + params.strikeUpperBound / 100)).toFixed(0)}</span>
                 </div>
               </div>
             </div>
 
-            {/* Right Column */}
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Short Strike Lower
-                  <span className="text-gray-500 ml-1">(% below deal price)</span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
-                  value={params.shortStrikeLower}
-                  onChange={(e) => setParams({ ...params, shortStrikeLower: parseInt(e.target.value) || 10 })}
-                  className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-                <div className="text-xs text-gray-500 mt-1">
-                  ${(dealPrice * (1 - params.shortStrikeLower / 100)).toFixed(2)}
+            {/* Short Leg (Sell) */}
+            <div className="bg-gray-800/50 rounded p-3">
+              <div className="text-xs font-medium text-orange-400 mb-2">Short Leg (Sell)</div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 w-16">Lower</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="50"
+                    value={params.shortStrikeLower}
+                    onChange={(e) => setParams({ ...params, shortStrikeLower: parseInt(e.target.value) || 10 })}
+                    className={inputClass}
+                  />
+                  <span className="text-xs text-gray-500">% below deal</span>
+                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 - params.shortStrikeLower / 100)).toFixed(0)}</span>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Short Strike Upper
-                  <span className="text-gray-500 ml-1">(% above deal price)</span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
-                  value={params.shortStrikeUpper}
-                  onChange={(e) => setParams({ ...params, shortStrikeUpper: parseInt(e.target.value) || 20 })}
-                  className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-                <div className="text-xs text-gray-500 mt-1">
-                  ${(dealPrice * (1 + params.shortStrikeUpper / 100)).toFixed(2)}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 w-16">Upper</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="50"
+                    value={params.shortStrikeUpper}
+                    onChange={(e) => setParams({ ...params, shortStrikeUpper: parseInt(e.target.value) || 20 })}
+                    className={inputClass}
+                  />
+                  <span className="text-xs text-gray-500">% above deal</span>
+                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 + params.shortStrikeUpper / 100)).toFixed(0)}</span>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">
-                  Top Strategies Per Expiration
-                  <span className="text-gray-500 ml-1">(call + put spreads)</span>
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  value={params.topStrategiesPerExpiration}
-                  onChange={(e) => setParams({ ...params, topStrategiesPerExpiration: parseInt(e.target.value) || 5 })}
-                  className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-              </div>
-
-              <div className="pt-2">
-                <button
-                  onClick={() => setParams({
-                    dealPrice: deal.expectedClosePrice,
-                    daysBeforeClose: 0,
-                    strikeLowerBound: 20,
-                    strikeUpperBound: 10,
-                    shortStrikeLower: 95,
-                    shortStrikeUpper: 0.5,
-                    topStrategiesPerExpiration: 5,
-                    dealConfidence: 0.75,
-                  })}
-                  className="w-full px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
-                >
-                  Reset to Defaults
-                </button>
               </div>
             </div>
           </div>
 
-          <div className="mt-3 p-2 bg-gray-800 rounded text-xs text-gray-400">
+          {/* Row 3: Results + Reset */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <span className="text-xs text-gray-400">Top Strategies</span>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={params.topStrategiesPerExpiration}
+                onChange={(e) => setParams({ ...params, topStrategiesPerExpiration: parseInt(e.target.value) || 5 })}
+                className={inputClass}
+              />
+              <span className="text-xs text-gray-500">per expiration</span>
+            </div>
+            <button
+              onClick={() => setParams({
+                dealPrice: deal.expectedClosePrice,
+                daysBeforeClose: 60,
+                strikeLowerBound: 20,
+                strikeUpperBound: 10,
+                shortStrikeLower: 10,
+                shortStrikeUpper: 20,
+                topStrategiesPerExpiration: 5,
+              })}
+              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
+            >
+              Reset to Defaults
+            </button>
+          </div>
+
+          {/* Quick Guide */}
+          <div className="p-2 bg-gray-800 rounded text-xs text-gray-400">
             <strong className="text-gray-300">Quick Guide:</strong>
             <ul className="mt-1 space-y-1 ml-4 list-disc">
-              <li><strong>Days Before Close = 0:</strong> Only 2 expirations (before & after close)</li>
-              <li><strong>Strike Bounds:</strong> Range of strikes to fetch from IB</li>
-              <li><strong>Short Strike Range:</strong> Where to sell the short leg (at-the-money)</li>
-              <li><strong>Top Strategies:</strong> Best N spreads per expiration by annualized return</li>
+              <li><strong>Days Before Close:</strong> Include expirations from N days before close through 2 after (0 = 2 after + exact match only)</li>
+              <li><strong>Long Leg:</strong> Strike range to fetch for the bought option (wider = more spread combinations)</li>
+              <li><strong>Short Leg:</strong> Strike range for the sold option near deal price (where stock converges at close)</li>
+              <li><strong>Top Strategies:</strong> Best N spreads per expiration ranked by annualized return</li>
             </ul>
           </div>
         </div>
@@ -274,4 +249,3 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
     </div>
   );
 }
-
