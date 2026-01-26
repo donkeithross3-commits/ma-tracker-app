@@ -2,37 +2,68 @@
 
 import { useState } from "react";
 import type {
-  DealForScanner,
+  ScannerDeal,
   OptionChainResponse,
   CandidateStrategy,
 } from "@/types/ma-options";
-import DealSelector from "./DealSelector";
+import AddDealForm from "./AddDealForm";
+import ScannerDealSelector from "./ScannerDealSelector";
 import DealInfo, { type ScanParameters } from "./DealInfo";
 import OptionChainViewer from "./OptionChainViewer";
 import CandidateStrategiesTable from "./CandidateStrategiesTable";
-import WatchlistManager from "./WatchlistManager";
 import { useIBConnection } from "./IBConnectionContext";
 
 interface CuratorTabProps {
-  deals: DealForScanner[];
-  onDealsChange?: () => void;
+  deals: ScannerDeal[];
+  onDealsChange?: (deals: ScannerDeal[]) => void;
 }
 
-export default function CuratorTab({ deals, onDealsChange }: CuratorTabProps) {
+export default function CuratorTab({ deals: initialDeals, onDealsChange }: CuratorTabProps) {
   const { isConnected: ibConnected } = useIBConnection();
-  const [selectedDeal, setSelectedDeal] = useState<DealForScanner | null>(null);
+  const [deals, setDeals] = useState<ScannerDeal[]>(initialDeals);
+  const [selectedDeal, setSelectedDeal] = useState<ScannerDeal | null>(null);
   const [chainData, setChainData] = useState<OptionChainResponse | null>(null);
   const [candidates, setCandidates] = useState<CandidateStrategy[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSelectDeal = (deal: DealForScanner) => {
+  const handleSelectDeal = (deal: ScannerDeal) => {
     console.log("Deal selected:", deal);
     setSelectedDeal(deal);
     // Reset previous data when selecting a new deal
     setChainData(null);
     setCandidates([]);
     setError(null);
+  };
+
+  const handleDealAdded = (deal: ScannerDeal) => {
+    const newDeals = [...deals, deal].sort((a, b) => a.ticker.localeCompare(b.ticker));
+    setDeals(newDeals);
+    onDealsChange?.(newDeals);
+  };
+
+  const handleDealUpdated = (updatedDeal: ScannerDeal) => {
+    const newDeals = deals.map((d) => (d.id === updatedDeal.id ? updatedDeal : d));
+    setDeals(newDeals);
+    onDealsChange?.(newDeals);
+    
+    // Update selected deal if it was the one edited
+    if (selectedDeal?.id === updatedDeal.id) {
+      setSelectedDeal(updatedDeal);
+    }
+  };
+
+  const handleDealDeleted = (dealId: string) => {
+    const newDeals = deals.filter((d) => d.id !== dealId);
+    setDeals(newDeals);
+    onDealsChange?.(newDeals);
+    
+    // Clear selection if deleted deal was selected
+    if (selectedDeal?.id === dealId) {
+      setSelectedDeal(null);
+      setChainData(null);
+      setCandidates([]);
+    }
   };
 
   const handleLoadChain = async (params: ScanParameters) => {
@@ -51,7 +82,7 @@ export default function CuratorTab({ deals, onDealsChange }: CuratorTabProps) {
         body: JSON.stringify({
           dealId: selectedDeal.id,
           ticker: selectedDeal.ticker,
-          dealPrice: params.dealPrice, // Use user-edited deal price
+          dealPrice: params.dealPrice,
           expectedCloseDate: selectedDeal.expectedCloseDate,
           scanParams: params,
         }),
@@ -84,11 +115,6 @@ export default function CuratorTab({ deals, onDealsChange }: CuratorTabProps) {
 
       const candidatesResult = await candidatesResponse.json();
       setCandidates(candidatesResult.candidates || []);
-
-      // Refresh deals list to show updated noOptionsAvailable flag
-      if (onDealsChange) {
-        onDealsChange();
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -114,11 +140,6 @@ export default function CuratorTab({ deals, onDealsChange }: CuratorTabProps) {
       }
 
       alert("Added to watchlist!");
-      
-      // Refresh deals list to update watched spreads count badge
-      if (onDealsChange) {
-        onDealsChange();
-      }
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to add to watchlist");
     }
@@ -126,6 +147,9 @@ export default function CuratorTab({ deals, onDealsChange }: CuratorTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* Add Deal Form */}
+      <AddDealForm onDealAdded={handleDealAdded} />
+
       {/* Deal Info - Show at top when selected */}
       {selectedDeal && (
         <DealInfo
@@ -144,7 +168,7 @@ export default function CuratorTab({ deals, onDealsChange }: CuratorTabProps) {
             : "bg-red-900/20 border-red-700 text-red-400"
         }`}>
           <div className="font-semibold mb-1">
-            {error.includes("IB TWS not connected") ? "⚠️ IB TWS Not Connected" : "Error"}
+            {error.includes("IB TWS not connected") ? "IB TWS Not Connected" : "Error"}
           </div>
           <div>{error}</div>
           {error.includes("IB TWS not connected") && (
@@ -157,7 +181,7 @@ export default function CuratorTab({ deals, onDealsChange }: CuratorTabProps) {
                 rel="noopener noreferrer"
                 className="underline hover:text-orange-200"
               >
-                Learn more about IB TWS API →
+                Learn more about IB TWS API
               </a>
             </div>
           )}
@@ -175,16 +199,14 @@ export default function CuratorTab({ deals, onDealsChange }: CuratorTabProps) {
         />
       )}
 
-      {/* Watchlist Manager */}
-      {selectedDeal && <WatchlistManager dealId={selectedDeal.id} />}
-
       {/* Deal Selector - At bottom for easy access to change deals */}
-      <DealSelector
+      <ScannerDealSelector
         deals={deals}
         selectedDeal={selectedDeal}
         onSelectDeal={handleSelectDeal}
+        onDealUpdated={handleDealUpdated}
+        onDealDeleted={handleDealDeleted}
       />
     </div>
   );
 }
-

@@ -143,3 +143,17 @@ export interface UpdateSpreadPricesResponse {
   }>;
 }
 
+// Scanner Deals - lightweight deal management for options scanner
+export interface ScannerDeal {
+  id: string;
+  ticker: string;
+  targetName: string | null;
+  expectedClosePrice: number;
+  expectedCloseDate: string; // YYYY-MM-DD
+  daysToClose: number;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import type { DealForScanner } from "@/types/ma-options";
+import { useState, useEffect } from "react";
+import type { ScannerDeal } from "@/types/ma-options";
 
 export interface ScanParameters {
   dealPrice: number; // User-editable deal price
@@ -15,7 +15,7 @@ export interface ScanParameters {
 }
 
 interface DealInfoProps {
-  deal: DealForScanner;
+  deal: ScannerDeal;
   onLoadChain: (params: ScanParameters) => void;
   loading: boolean;
   ibConnected: boolean;
@@ -23,9 +23,14 @@ interface DealInfoProps {
 
 export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: DealInfoProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [dealPrice, setDealPrice] = useState(deal.dealPrice);
+  const [dealPrice, setDealPrice] = useState(deal.expectedClosePrice);
+  
+  // Reset deal price when deal changes
+  useEffect(() => {
+    setDealPrice(deal.expectedClosePrice);
+  }, [deal.id, deal.expectedClosePrice]);
   const [params, setParams] = useState<ScanParameters>({
-    dealPrice: deal.dealPrice,
+    dealPrice: deal.expectedClosePrice,
     daysBeforeClose: 60,
     strikeLowerBound: 20,
     strikeUpperBound: 10,
@@ -94,12 +99,12 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
           <div className="text-gray-100 font-mono">{deal.daysToClose}</div>
         </div>
         <div>
-          <div className="text-gray-500">Acquiror</div>
-          <div className="text-gray-100">{deal.acquirorName || "—"}</div>
+          <div className="text-gray-500">Expected Close</div>
+          <div className="text-gray-100 font-mono text-xs">{deal.expectedCloseDate}</div>
         </div>
         <div>
-          <div className="text-gray-500">Status</div>
-          <div className="text-gray-100">{deal.status}</div>
+          <div className="text-gray-500">Notes</div>
+          <div className="text-gray-100 text-xs truncate" title={deal.notes || "—"}>{deal.notes || "—"}</div>
         </div>
       </div>
 
@@ -238,7 +243,7 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
               <div className="pt-2">
                 <button
                   onClick={() => setParams({
-                    dealPrice: deal.dealPrice,
+                    dealPrice: deal.expectedClosePrice,
                     daysBeforeClose: 0,
                     strikeLowerBound: 20,
                     strikeUpperBound: 10,

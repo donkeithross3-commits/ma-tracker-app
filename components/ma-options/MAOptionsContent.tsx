@@ -1,21 +1,21 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { DealForScanner } from "@/types/ma-options";
+import type { ScannerDeal } from "@/types/ma-options";
 import { IBConnectionProvider } from "./IBConnectionContext";
 import IBConnectionStatus from "./IBConnectionStatus";
 import OptionsScannerTabs from "./OptionsScannerTabs";
 
 interface MAOptionsContentProps {
-  initialDeals: DealForScanner[];
+  initialDeals: ScannerDeal[];
 }
 
 export default function MAOptionsContent({ initialDeals }: MAOptionsContentProps) {
-  const [deals, setDeals] = useState<DealForScanner[]>(initialDeals);
+  const [deals, setDeals] = useState<ScannerDeal[]>(initialDeals);
 
   const refreshDeals = useCallback(async () => {
     try {
-      const response = await fetch("/api/ma-options/deals");
+      const response = await fetch("/api/scanner-deals");
       if (response.ok) {
         const data = await response.json();
         setDeals(data.deals);
@@ -23,6 +23,10 @@ export default function MAOptionsContent({ initialDeals }: MAOptionsContentProps
     } catch (error) {
       console.error("Failed to refresh deals:", error);
     }
+  }, []);
+
+  const handleDealsChange = useCallback((newDeals: ScannerDeal[]) => {
+    setDeals(newDeals);
   }, []);
 
   return (
@@ -34,11 +38,14 @@ export default function MAOptionsContent({ initialDeals }: MAOptionsContentProps
         <IBConnectionStatus />
       </div>
       <p className="text-sm text-gray-400 mb-6">
-        Curate and monitor options strategies for merger arbitrage deals ({deals.length} deals available)
+        Curate and monitor options strategies for merger arbitrage deals ({deals.length} deal{deals.length !== 1 ? "s" : ""})
       </p>
 
-      <OptionsScannerTabs deals={deals} onDealsChange={refreshDeals} />
+      <OptionsScannerTabs 
+        deals={deals} 
+        onDealsChange={handleDealsChange}
+        onRefreshDeals={refreshDeals}
+      />
     </IBConnectionProvider>
   );
 }
-

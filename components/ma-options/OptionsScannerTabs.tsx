@@ -2,16 +2,21 @@
 
 import { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import type { DealForScanner } from "@/types/ma-options";
+import type { ScannerDeal } from "@/types/ma-options";
 import CuratorTab from "./CuratorTab";
 import MonitoringTab from "./MonitoringTab";
 
 interface OptionsScannerTabsProps {
-  deals: DealForScanner[];
-  onDealsChange: () => void;
+  deals: ScannerDeal[];
+  onDealsChange: (deals: ScannerDeal[]) => void;
+  onRefreshDeals: () => void;
 }
 
-export default function OptionsScannerTabs({ deals, onDealsChange }: OptionsScannerTabsProps) {
+export default function OptionsScannerTabs({ 
+  deals, 
+  onDealsChange,
+  onRefreshDeals,
+}: OptionsScannerTabsProps) {
   const [activeTab, setActiveTab] = useState("curate");
 
   return (
@@ -41,4 +46,3 @@ export default function OptionsScannerTabs({ deals, onDealsChange }: OptionsScan
     </Tabs.Root>
   );
 }
-
