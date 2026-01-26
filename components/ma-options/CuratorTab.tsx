@@ -96,10 +96,9 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       setChainData(chainResult);
 
       // Generate candidate strategies with parameters
-      // Pass chainData directly for ws-relay results (snapshotId won't be in database)
-      console.log("CuratorTab: chainResult.source =", chainResult.source, "snapshotId =", chainResult.snapshotId);
-      const isWsRelay = chainResult.source === "ws-relay";
-      console.log("CuratorTab: isWsRelay =", isWsRelay, "contracts =", chainResult.contracts?.length);
+      // Always pass chainData directly - this avoids database lookup issues
+      // and works for both ws-relay and agent sources
+      console.log("CuratorTab: chainResult.source =", chainResult.source, "snapshotId =", chainResult.snapshotId, "contracts =", chainResult.contracts?.length);
       
       const candidatesResponse = await fetch(
         "/api/ma-options/generate-candidates",
@@ -110,14 +109,14 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
             snapshotId: chainResult.snapshotId,
             dealId: selectedDeal.id,
             scanParams: params,
-            // Include chain data for ws-relay sources where snapshot isn't in DB
-            chainData: chainResult.source === "ws-relay" ? {
+            // Always include chain data to avoid database lookup issues
+            chainData: {
               ticker: chainResult.ticker,
               spotPrice: chainResult.spotPrice,
               dealPrice: chainResult.dealPrice,
               expectedCloseDate: selectedDeal.expectedCloseDate,
               contracts: chainResult.contracts,
-            } : undefined,
+            },
           }),
         }
       );
