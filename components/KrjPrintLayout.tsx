@@ -40,6 +40,24 @@ function formatPercent(x: string | undefined): string {
   return (num * 100).toFixed(1) + "%";
 }
 
+function formatPercentInteger(x: string | undefined): string {
+  if (!x) return "";
+  if (x.includes("%")) return x;
+  const num = Number(x);
+  if (Number.isNaN(num)) return x;
+  return Math.round(num * 100) + "%";
+}
+
+function formatBasisPoints(x: string | undefined): string {
+  if (!x) return "";
+  const num = Number(x);
+  if (Number.isNaN(num)) return x;
+  // Format to 2 significant figures
+  if (num >= 100) return Math.round(num).toString();
+  if (num >= 10) return num.toFixed(1);
+  return num.toFixed(2);
+}
+
 function formatMillions(x: string | undefined): string {
   if (!x) return "";
   const num = Number(x);
@@ -154,8 +172,12 @@ export default function KrjPrintLayout({ groups, columns, filterDescription }: K
                       value = isCurrencyPair(value) ? value.substring(2) : value;
                     } else if (col.key === "c" || col.key === "weekly_low" || col.key === "25DMA" || col.key === "25DMA_shifted") {
                       value = formatPrice(value);
-                    } else if (col.key === "long_signal_value" || col.key === "short_signal_value" || col.key === "vol_ratio" || col.key === "25DMA_range_bps") {
+                    } else if (col.key === "long_signal_value" || col.key === "short_signal_value") {
                       value = formatPercent(value);
+                    } else if (col.key === "vol_ratio") {
+                      value = formatPercentInteger(value);
+                    } else if (col.key === "25DMA_range_bps") {
+                      value = formatBasisPoints(value);
                     } else if (col.key === "25D_ADV_Shares_MM") {
                       value = formatMillions(value);
                     } else if (col.key === "25D_ADV_nortional_B") {
