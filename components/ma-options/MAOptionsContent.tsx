@@ -18,6 +18,9 @@ export default function MAOptionsContent({ initialDeals }: MAOptionsContentProps
       const response = await fetch("/api/scanner-deals");
       if (response.ok) {
         const data = await response.json();
+        console.log("[MAOptionsContent] Fetched deals, noOptionsAvailable flags:", 
+          data.deals.filter((d: ScannerDeal) => d.noOptionsAvailable).map((d: ScannerDeal) => d.ticker)
+        );
         setDeals(data.deals);
       }
     } catch (error) {

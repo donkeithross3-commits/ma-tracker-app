@@ -39,6 +39,12 @@ export default function ScannerDealSelector({
   });
 
   const noOptionsCount = deals.filter((d) => d.noOptionsAvailable).length;
+  
+  // Debug: log noOptionsAvailable status
+  console.log("[ScannerDealSelector] Deals with noOptionsAvailable:", 
+    deals.filter(d => d.noOptionsAvailable).map(d => d.ticker),
+    "Total noOptionsCount:", noOptionsCount
+  );
 
   const startEditing = (deal: ScannerDeal) => {
     setEditingId(deal.id);
