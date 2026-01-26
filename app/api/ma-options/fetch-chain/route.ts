@@ -17,8 +17,8 @@ async function fetchViaWebSocketRelay(
   scanParams?: ScanParameters
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    // Check provider status
-    const statusResponse = await fetch(`${PYTHON_SERVICE_URL}/ws/provider-status`, {
+    // Check provider status via the relay endpoint
+    const statusResponse = await fetch(`${PYTHON_SERVICE_URL}/options/relay/ib-status`, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
     });
@@ -29,7 +29,7 @@ async function fetchViaWebSocketRelay(
 
     const status = await statusResponse.json();
     
-    if (status.providers_connected === 0) {
+    if (!status.connected || !status.providers || status.providers.length === 0) {
       return { success: false, error: "No data provider connected" };
     }
 
