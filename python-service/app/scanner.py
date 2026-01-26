@@ -464,6 +464,10 @@ class IBMergerArbScanner(EWrapper, EClient):
                     all_expiries = self.get_expiries(ticker, datetime.now() + timedelta(days=expiry_months * 30))
                 expiries = all_expiries[:3]
 
+            # OPTIMIZATION: Build ALL batch requests for ALL expirations first, then fetch together
+            # This is much faster than processing each expiration sequentially
+            all_batch_requests = []
+            
             for expiry in expiries:
                 # Try to get actual strikes from IB for this expiration
                 if expiry in self.available_strikes and self.available_strikes[expiry]:
@@ -483,13 +487,20 @@ class IBMergerArbScanner(EWrapper, EClient):
                         max_strike = price_to_use * (1 + strike_upper_pct)
 
                     relevant_strikes = [s for s in available_strikes if min_strike <= s <= max_strike]
-
+                    
+                    # OPTIMIZATION: Filter to $5 strike intervals for faster scanning
+                    # This typically reduces contracts by 50-80% while keeping all practical trades
+                    strike_interval = 5.0 if price_to_use > 50 else 2.5
+                    filtered_strikes = [s for s in relevant_strikes if s % strike_interval == 0]
+                    
+                    # If filtering removed all strikes, keep the original set
+                    if not filtered_strikes:
+                        filtered_strikes = relevant_strikes
+                    
                     print(f"Strike range for {expiry}: ${min_strike:.2f} - ${max_strike:.2f}")
-                    print(f"Found {len(relevant_strikes)} relevant strikes: {relevant_strikes[:10]}...")  # Show first 10
+                    print(f"Found {len(relevant_strikes)} relevant strikes, filtered to {len(filtered_strikes)} at ${strike_interval} intervals")
 
-                    # Use all relevant strikes (don't limit to just 5)
-                    # The analyzer will evaluate all combinations and pick the best
-                    strikes = relevant_strikes
+                    strikes = filtered_strikes
 
                     print(f"Selected {len(strikes)} strikes for {expiry}")
                 else:
@@ -499,31 +510,30 @@ class IBMergerArbScanner(EWrapper, EClient):
                     strikes = [round(s / 5) * 5 for s in strikes]
 
                 # Build batch requests for all strikes (calls and puts)
-                batch_requests = []
                 for strike in strikes:
-                    batch_requests.append((expiry, strike, "C"))  # Call
-                    batch_requests.append((expiry, strike, "P"))  # Put
+                    all_batch_requests.append((expiry, strike, "C"))  # Call
+                    all_batch_requests.append((expiry, strike, "P"))  # Put
 
-                print(f"Fetching {len(batch_requests)} option contracts for {expiry} using batch processing...")
+            print(f"Fetching {len(all_batch_requests)} option contracts across {len(expiries)} expirations...")
 
-                # Fetch all contracts for this expiry in parallel batches
-                batch_results = self.get_option_data_batch(ticker, batch_requests)
+            # Fetch ALL contracts across all expirations in one batch operation
+            batch_results = self.get_option_data_batch(ticker, all_batch_requests)
 
-                # Process results and add to options list
-                for i, option_data in enumerate(batch_results):
-                    if option_data:
-                        options.append(option_data)
-                        # Debug: Show specific options we're interested in
-                        expiry_match = option_data.expiry == '20260618'
-                        strike_match = option_data.strike in [200.0, 210.0]
-                        if expiry_match and strike_match:
-                            print(f"DEBUG: Found {option_data.expiry} {option_data.strike}{option_data.right} - "
-                                  f"bid: {option_data.bid}, ask: {option_data.ask}, mid: {option_data.mid_price}")
-                    else:
-                        # Debug: Show why options are filtered out (only for key strikes)
-                        req = batch_requests[i]
-                        if req[0] == '20260618' and req[1] in [200.0, 210.0]:
-                            print(f"DEBUG: Filtered out {req[0]} {req[1]}{req[2]} - no valid pricing data from IB")
+            # Process results and add to options list
+            for i, option_data in enumerate(batch_results):
+                if option_data:
+                    options.append(option_data)
+                    # Debug: Show specific options we're interested in
+                    expiry_match = option_data.expiry == '20260618'
+                    strike_match = option_data.strike in [200.0, 210.0]
+                    if expiry_match and strike_match:
+                        print(f"DEBUG: Found {option_data.expiry} {option_data.strike}{option_data.right} - "
+                              f"bid: {option_data.bid}, ask: {option_data.ask}, mid: {option_data.mid_price}")
+                else:
+                    # Debug: Show why options are filtered out (only for key strikes)
+                    req = all_batch_requests[i]
+                    if req[0] == '20260618' and req[1] in [200.0, 210.0]:
+                        print(f"DEBUG: Filtered out {req[0]} {req[1]}{req[2]} - no valid pricing data from IB")
 
         print(f"Retrieved {len(options)} option contracts (limited to avoid IB limits)")
 
@@ -735,7 +745,7 @@ class IBMergerArbScanner(EWrapper, EClient):
             List of OptionData objects (None for failed requests)
         """
         logger = logging.getLogger(__name__)
-        batch_size = 10  # Reduced from 50 to avoid IB rate limits
+        batch_size = 25  # Increased from 10 for better performance (IB allows ~50 req/sec)
         results = []
 
         # Process in batches
@@ -779,15 +789,16 @@ class IBMergerArbScanner(EWrapper, EClient):
                     'ask_size': 0
                 }
 
-                self.reqMktData(req_id, contract, "100,101,104,106", False, False, [])
+                # Use snapshot mode (True) for faster data retrieval - good for scanning
+                self.reqMktData(req_id, contract, "100,101,104,106", True, False, [])
                 batch_req_ids.append(req_id)
 
-                # Increased delay between submissions to avoid rate limit
-                time.sleep(0.15)  # Increased from 0.05s to 0.15s
+                # Small delay between submissions (IB allows ~50 req/sec)
+                time.sleep(0.05)  # Reduced from 0.15s for faster scanning
 
-            # Wait for all batch responses (longer for larger batches)
-            # Increased base wait time to allow bid/ask size data to arrive
-            wait_time = min(5.0, 2.0 + len(batch) * 0.1)  # Increased from 4.0/1.5/0.05
+            # Wait for snapshot responses (faster than streaming mode)
+            # Snapshot mode returns data quickly, so we need less wait time
+            wait_time = min(3.0, 1.0 + len(batch) * 0.05)  # Reduced for snapshot mode
             logger.info(f"Waiting {wait_time:.2f}s for batch responses...")
             time.sleep(wait_time)
 
@@ -803,9 +814,9 @@ class IBMergerArbScanner(EWrapper, EClient):
                     logger.debug(f"No valid data for {ticker} {expiry} {strike}{right}")
                     results.append(None)
 
-            # Increased delay between batches
+            # Brief delay between batches
             if i + batch_size < len(requests):
-                time.sleep(0.5)  # Increased from 0.2s to 0.5s
+                time.sleep(0.2)  # Reduced from 0.5s for faster scanning
 
         logger.info(f"Batch processing complete: {len([r for r in results if r])} / {len(requests)} successful")
         return results

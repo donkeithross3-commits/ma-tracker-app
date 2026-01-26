@@ -50,6 +50,44 @@ RELAY_URL = os.environ.get("RELAY_URL", "wss://dr3-dashboard.com/ws/data-provide
 IB_PROVIDER_KEY = os.environ.get("IB_PROVIDER_KEY", "")
 HEARTBEAT_INTERVAL = 10  # seconds
 RECONNECT_DELAY = 5  # seconds
+CACHE_TTL_SECONDS = 60  # How long to cache option chain data
+
+
+class OptionChainCache:
+    """In-memory cache for option chain data with TTL expiration"""
+    
+    def __init__(self, ttl_seconds: int = CACHE_TTL_SECONDS):
+        self.cache = {}
+        self.ttl = ttl_seconds
+    
+    def _make_key(self, ticker: str, deal_price: float, close_date: str, days_before_close: int) -> str:
+        """Create a cache key from request parameters"""
+        return f"{ticker}_{deal_price}_{close_date}_{days_before_close}"
+    
+    def get(self, ticker: str, deal_price: float, close_date: str, days_before_close: int):
+        """Get cached data if not expired"""
+        key = self._make_key(ticker, deal_price, close_date, days_before_close)
+        if key in self.cache:
+            data, timestamp = self.cache[key]
+            age = time.time() - timestamp
+            if age < self.ttl:
+                logger.info(f"Cache HIT for {ticker} (age: {age:.1f}s)")
+                return data
+            else:
+                logger.info(f"Cache EXPIRED for {ticker} (age: {age:.1f}s)")
+                del self.cache[key]
+        return None
+    
+    def set(self, ticker: str, deal_price: float, close_date: str, days_before_close: int, data: dict):
+        """Store data in cache with current timestamp"""
+        key = self._make_key(ticker, deal_price, close_date, days_before_close)
+        self.cache[key] = (data, time.time())
+        logger.info(f"Cache SET for {ticker} ({len(data.get('contracts', []))} contracts)")
+    
+    def clear(self):
+        """Clear all cached data"""
+        self.cache.clear()
+        logger.info("Cache cleared")
 
 
 class IBDataAgent:
@@ -60,6 +98,7 @@ class IBDataAgent:
         self.websocket = None
         self.running = False
         self.provider_id = None
+        self.option_chain_cache = OptionChainCache(ttl_seconds=CACHE_TTL_SECONDS)
         
     def connect_to_ib(self) -> bool:
         """Connect to IB TWS"""
@@ -293,6 +332,17 @@ class IBDataAgent:
         if not self.scanner or not self.scanner.isConnected():
             return {"error": "IB not connected"}
         
+        # Get scan parameters
+        days_before_close = scan_params.get("daysBeforeClose", 60)
+        
+        # Check cache first (before fetching underlying price)
+        cached_data = self.option_chain_cache.get(
+            ticker, deal_price, expected_close_date, days_before_close
+        )
+        if cached_data:
+            logger.info(f"Returning cached chain for {ticker} ({len(cached_data.get('contracts', []))} contracts)")
+            return cached_data
+        
         # Fetch underlying data first
         underlying_data = self.scanner.fetch_underlying_data(ticker)
         if not underlying_data.get("price"):
@@ -305,9 +355,6 @@ class IBDataAgent:
             close_date = datetime.strptime(expected_close_date, "%Y-%m-%d")
         except ValueError:
             return {"error": "Invalid date format. Use YYYY-MM-DD"}
-        
-        # Get scan parameters
-        days_before_close = scan_params.get("daysBeforeClose", 60)
         
         logger.info(f"Fetching chain for {ticker}, spot={spot_price}, deal={deal_price}")
         
@@ -344,12 +391,17 @@ class IBDataAgent:
                 "ask_size": opt.ask_size
             })
         
-        return {
+        result = {
             "ticker": ticker,
             "spotPrice": spot_price,
             "expirations": sorted(list(expirations)),
             "contracts": contracts
         }
+        
+        # Cache the result for subsequent requests
+        self.option_chain_cache.set(ticker, deal_price, expected_close_date, days_before_close, result)
+        
+        return result
     
     async def _handle_fetch_chain(self, payload: dict) -> dict:
         """Async wrapper for fetch chain - kept for compatibility"""
