@@ -24,6 +24,7 @@ from ..options.models import (
     ScanParameters,
 )
 from ..scanner import MergerArbAnalyzer, DealInput
+from .ws_relay import send_request_to_provider, get_registry
 
 logger = logging.getLogger(__name__)
 
@@ -441,4 +442,124 @@ async def price_spreads(request: PriceSpreadsRequest) -> PriceSpreadsResponse:
     except Exception as e:
         logger.error(f"Error pricing spreads: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# WebSocket Relay Routes - Forward requests to remote IB data providers
+# ============================================================================
+
+@router.post("/relay/fetch-chain")
+async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
+    """
+    Fetch option chain through WebSocket relay to remote IB data provider.
+    This is used when IB TWS runs on a different machine than this server.
+    """
+    try:
+        logger.info(f"Relay: Fetching chain for {request.ticker} via WebSocket provider")
+        
+        # Check if any provider is connected
+        registry = get_registry()
+        status = registry.get_status()
+        
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        
+        # Send request through WebSocket relay
+        response_data = await send_request_to_provider(
+            request_type="fetch_chain",
+            payload={
+                "ticker": request.ticker,
+                "dealPrice": request.dealPrice,
+                "expectedCloseDate": request.expectedCloseDate,
+                "scanParams": request.scanParams.dict() if request.scanParams else {}
+            },
+            timeout=60.0  # IB requests can take a while
+        )
+        
+        # Check for errors in response
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        
+        # Convert response to FetchChainResponse format
+        contracts = []
+        for c in response_data.get("contracts", []):
+            contracts.append(OptionContract(
+                symbol=c.get("symbol", request.ticker),
+                strike=c["strike"],
+                expiry=c["expiry"],
+                right=c["right"],
+                bid=c["bid"],
+                ask=c["ask"],
+                mid=c.get("mid", (c["bid"] + c["ask"]) / 2 if c["bid"] and c["ask"] else 0),
+                last=c.get("last", 0),
+                volume=c.get("volume", 0),
+                open_interest=c.get("open_interest", 0),
+                implied_vol=c.get("implied_vol"),
+                delta=c.get("delta"),
+                bid_size=c.get("bid_size", 0),
+                ask_size=c.get("ask_size", 0)
+            ))
+        
+        return FetchChainResponse(
+            ticker=response_data.get("ticker", request.ticker),
+            spotPrice=response_data.get("spotPrice", 0),
+            expirations=response_data.get("expirations", []),
+            contracts=contracts
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay fetch chain error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/relay/ib-status")
+async def relay_ib_status():
+    """
+    Check IB connection status through WebSocket relay.
+    """
+    try:
+        registry = get_registry()
+        status = registry.get_status()
+        
+        if status["providers_connected"] == 0:
+            return {
+                "connected": False,
+                "source": "relay",
+                "message": "No IB data provider connected"
+            }
+        
+        # Ask the provider for IB status
+        try:
+            response_data = await send_request_to_provider(
+                request_type="ib_status",
+                payload={},
+                timeout=10.0
+            )
+            
+            return {
+                "connected": response_data.get("connected", False),
+                "source": "relay",
+                "providers": status["providers"],
+                "message": response_data.get("message", "")
+            }
+        except Exception as e:
+            return {
+                "connected": False,
+                "source": "relay",
+                "providers": status["providers"],
+                "message": f"Provider error: {str(e)}"
+            }
+            
+    except Exception as e:
+        logger.error(f"Relay IB status error: {e}")
+        return {
+            "connected": False,
+            "source": "error",
+            "message": str(e)
+        }
 

@@ -7,6 +7,35 @@ const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
 /**
+ * Check WebSocket relay provider status
+ */
+async function checkRelayProviderStatus(): Promise<{
+  connected: boolean;
+  providers?: any[];
+  message?: string;
+}> {
+  try {
+    const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/ib-status`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!response.ok) {
+      return { connected: false };
+    }
+
+    const data = await response.json();
+    return {
+      connected: data.connected,
+      providers: data.providers,
+      message: data.message,
+    };
+  } catch (error) {
+    return { connected: false };
+  }
+}
+
+/**
  * Test IB TWS connection by spawning a quick Python test
  */
 async function testIBConnection(): Promise<boolean> {
@@ -53,7 +82,19 @@ except Exception as e:
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Test actual IB TWS connection
+    // 1. Check WebSocket relay provider first (preferred for remote setups)
+    const relayStatus = await checkRelayProviderStatus();
+    
+    if (relayStatus.connected) {
+      return NextResponse.json({
+        connected: true,
+        source: "ws-relay",
+        providers: relayStatus.providers,
+        message: relayStatus.message || "IB connected via WebSocket relay",
+      });
+    }
+
+    // 2. Test local IB TWS connection
     const ibConnected = await testIBConnection();
     
     if (ibConnected) {
@@ -76,11 +117,11 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 2. IB not connected, return disconnected
+    // 3. Nothing connected
     return NextResponse.json({
       connected: false,
       source: "none",
-      message: "IB TWS is not connected or not accepting API connections",
+      message: "No IB connection available. Start the local agent or ensure TWS is running.",
     });
   } catch (error) {
     return NextResponse.json({

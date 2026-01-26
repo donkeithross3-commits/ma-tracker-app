@@ -29,6 +29,7 @@ from .api.intelligence_routes import router as intelligence_router
 from .api.webhooks import router as webhooks_router
 from .api.halt_routes import router as halt_router
 from .api.options_routes import router as options_router
+from .api.ws_relay import router as ws_relay_router
 from .edgar.database import EdgarDatabase
 
 # Configure logging
@@ -64,6 +65,9 @@ app.include_router(halt_router)
 
 # Include Options scanner routes
 app.include_router(options_router)
+
+# Include WebSocket relay for remote IB data providers
+app.include_router(ws_relay_router)
 
 # Configure CORS - allow requests from Next.js frontend
 app.add_middleware(

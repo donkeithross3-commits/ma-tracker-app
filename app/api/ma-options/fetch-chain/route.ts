@@ -7,6 +7,63 @@ import path from "path";
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
+/**
+ * Check if a WebSocket data provider is connected and fetch data through it
+ */
+async function fetchViaWebSocketRelay(
+  ticker: string,
+  dealPrice: number,
+  expectedCloseDate: string,
+  scanParams?: ScanParameters
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    // Check provider status
+    const statusResponse = await fetch(`${PYTHON_SERVICE_URL}/ws/provider-status`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!statusResponse.ok) {
+      return { success: false, error: "Could not check provider status" };
+    }
+
+    const status = await statusResponse.json();
+    
+    if (status.providers_connected === 0) {
+      return { success: false, error: "No data provider connected" };
+    }
+
+    console.log(`WebSocket provider available, fetching chain for ${ticker}...`);
+
+    // Send request through the relay
+    // The Python service will route this to the connected provider via WebSocket
+    const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/fetch-chain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker,
+        dealPrice,
+        expectedCloseDate,
+        scanParams: scanParams || {},
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return { 
+        success: false, 
+        error: errorData.detail || `Relay request failed: ${response.status}` 
+      };
+    }
+
+    const data = await response.json();
+    return { success: true, data };
+  } catch (error) {
+    console.log(`WebSocket relay error: ${error}`);
+    return { success: false, error: String(error) };
+  }
+}
+
 interface ScanParameters {
   daysBeforeClose?: number;
   strikeLowerBound?: number;
@@ -110,6 +167,71 @@ export async function POST(request: NextRequest) {
     // Convert ISO date to YYYY-MM-DD format
     const closeDateObj = new Date(expectedCloseDate);
     const formattedCloseDate = closeDateObj.toISOString().split('T')[0];
+
+    // PRIORITY 0: Try WebSocket relay (remote IB data provider)
+    // This is the preferred method when IB TWS runs on a different machine
+    const relayResult = await fetchViaWebSocketRelay(
+      ticker,
+      dealPrice,
+      formattedCloseDate,
+      scanParams
+    );
+
+    if (relayResult.success && relayResult.data) {
+      console.log(`✓ Got data via WebSocket relay for ${ticker}`);
+      
+      const chainData = relayResult.data;
+      const contracts = chainData.contracts || [];
+      const expirations = chainData.expirations || [];
+      
+      // Calculate days to close
+      const today = new Date();
+      const closeDate = new Date(expectedCloseDate);
+      const daysToClose = Math.ceil(
+        (closeDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      // Update deal's last options check
+      await prisma.deal.update({
+        where: { id: dealId },
+        data: {
+          noOptionsAvailable: contracts.length === 0,
+          lastOptionsCheck: new Date(),
+        },
+      });
+
+      // Save snapshot to database
+      const snapshot = await prisma.optionChainSnapshot.create({
+        data: {
+          dealId,
+          ticker: ticker.toUpperCase(),
+          spotPrice: chainData.spotPrice || 0,
+          dealPrice,
+          daysToClose,
+          chainData: contracts as any,
+          expirationCount: expirations.length,
+          strikeCount: new Set(contracts.map((c: any) => c.strike)).size,
+          agentId: "ws-relay",
+        },
+      });
+
+      return NextResponse.json({
+        snapshotId: snapshot.id,
+        ticker: chainData.ticker || ticker,
+        spotPrice: chainData.spotPrice,
+        dealPrice,
+        daysToClose,
+        expirations,
+        contracts,
+        source: "ws-relay",
+        timestamp: new Date(),
+      });
+    }
+
+    // Log relay failure reason for debugging
+    if (relayResult.error && relayResult.error !== "No data provider connected") {
+      console.log(`WebSocket relay failed for ${ticker}: ${relayResult.error}`);
+    }
 
     // PRIORITY 1: Check for recent data from price agents
     // Only use cached data if just fetched (2 second debounce for double-clicks)

@@ -1,0 +1,5 @@
+# Requirements for the local IB Data Agent
+# Install with: pip install -r requirements.txt
+
+websockets>=11.0
+ibapi>=9.81.1
