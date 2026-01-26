@@ -400,8 +400,8 @@ class IBDataAgent:
         try:
             self.websocket = await websockets.connect(
                 RELAY_URL,
-                ping_interval=20,
-                ping_timeout=10
+                ping_interval=30,
+                ping_timeout=60  # Allow time for long option chain fetches
             )
             
             # Send authentication

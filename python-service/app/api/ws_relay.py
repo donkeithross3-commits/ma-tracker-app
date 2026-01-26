@@ -29,8 +29,8 @@ router = APIRouter(prefix="/ws", tags=["websocket"])
 
 # Configuration
 PROVIDER_API_KEY = os.environ.get("IB_PROVIDER_API_KEY", "dev-key-change-in-production")
-REQUEST_TIMEOUT_SECONDS = 30
-HEARTBEAT_INTERVAL_SECONDS = 15
+REQUEST_TIMEOUT_SECONDS = 120  # Option chain fetches can take 60+ seconds
+HEARTBEAT_INTERVAL_SECONDS = 30  # Longer interval to avoid timeout during long requests
 
 
 @dataclass
