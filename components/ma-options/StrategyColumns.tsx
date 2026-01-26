@@ -125,7 +125,7 @@ export function BidAskGrids({ legs }: { legs: StrategyLeg[] }) {
                 ${leg.ask.toFixed(2)}
               </div>
               {/* Bid price */}
-              <div className="bg-green-900/20 px-2 py-0.5 text-right text-green-400">
+              <div className="bg-blue-900/20 px-2 py-0.5 text-right text-blue-400">
                 ${leg.bid.toFixed(2)}
               </div>
             </div>
@@ -242,7 +242,7 @@ export function StrategyMetricsCells({ metrics }: { metrics: StrategyMetrics }) 
       </td>
 
       {/* Midpoint Entry - IRR */}
-      <td className="py-2 px-2 text-right text-blue-400 font-mono text-[11px]">
+      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
         {(midMetrics.irr * 100).toFixed(1)}%
       </td>
 
@@ -257,7 +257,7 @@ export function StrategyMetricsCells({ metrics }: { metrics: StrategyMetrics }) 
       </td>
 
       {/* Far Touch Entry - IRR */}
-      <td className="py-2 px-2 text-right text-blue-400 font-mono text-[11px]">
+      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
         {(farMetrics.irr * 100).toFixed(1)}%
       </td>
     </>
