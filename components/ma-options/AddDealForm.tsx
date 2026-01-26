@@ -1,10 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { ScannerDeal } from "@/types/ma-options";
 
 interface AddDealFormProps {
   onDealAdded: (deal: ScannerDeal) => void;
+}
+
+interface TickerMatch {
+  ticker: string;
+  name: string;
 }
 
 export default function AddDealForm({ onDealAdded }: AddDealFormProps) {
@@ -17,9 +22,99 @@ export default function AddDealForm({ onDealAdded }: AddDealFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Autocomplete state
+  const [suggestions, setSuggestions] = useState<TickerMatch[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const tickerInputRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  // Debounced ticker search
+  useEffect(() => {
+    if (!ticker || ticker.length < 1) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const response = await fetch(
+          `/api/ticker-lookup?q=${encodeURIComponent(ticker)}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          setSuggestions(data.matches || []);
+          setShowSuggestions(data.matches?.length > 0);
+          setSelectedIndex(-1);
+        }
+      } catch (err) {
+        console.error("Ticker lookup error:", err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [ticker]);
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        suggestionsRef.current &&
+        !suggestionsRef.current.contains(e.target as Node) &&
+        tickerInputRef.current &&
+        !tickerInputRef.current.contains(e.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleTickerChange = (value: string) => {
+    setTicker(value.toUpperCase());
+    // Clear target name if user is typing a new ticker
+    if (targetName && value.toUpperCase() !== ticker) {
+      // Don't clear if they just selected from dropdown
+    }
+  };
+
+  const handleSelectSuggestion = (match: TickerMatch) => {
+    setTicker(match.ticker);
+    setTargetName(match.name);
+    setShowSuggestions(false);
+    setSuggestions([]);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!showSuggestions || suggestions.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIndex((prev) =>
+        prev < suggestions.length - 1 ? prev + 1 : prev
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : -1));
+    } else if (e.key === "Enter" && selectedIndex >= 0) {
+      e.preventDefault();
+      handleSelectSuggestion(suggestions[selectedIndex]);
+    } else if (e.key === "Escape") {
+      setShowSuggestions(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setShowSuggestions(false);
 
     if (!ticker.trim()) {
       setError("Ticker is required");
@@ -61,6 +156,7 @@ export default function AddDealForm({ onDealAdded }: AddDealFormProps) {
       setExpectedClosePrice("");
       setExpectedCloseDate("");
       setNotes("");
+      setSuggestions([]);
       setIsExpanded(false);
 
       // Notify parent
@@ -105,19 +201,54 @@ export default function AddDealForm({ onDealAdded }: AddDealFormProps) {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Ticker */}
-          <div>
+          {/* Ticker with Autocomplete */}
+          <div className="relative">
             <label className="block text-sm text-gray-400 mb-1">
               Ticker <span className="text-red-400">*</span>
             </label>
-            <input
-              type="text"
-              value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              placeholder="AAPL"
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm focus:border-blue-500 focus:outline-none"
-              disabled={isSubmitting}
-            />
+            <div className="relative">
+              <input
+                ref={tickerInputRef}
+                type="text"
+                value={ticker}
+                onChange={(e) => handleTickerChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                placeholder="AAPL"
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm focus:border-blue-500 focus:outline-none"
+                disabled={isSubmitting}
+                autoComplete="off"
+              />
+              {isSearching && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div className="w-4 h-4 border-2 border-gray-500 border-t-blue-500 rounded-full animate-spin"></div>
+                </div>
+              )}
+            </div>
+
+            {/* Suggestions Dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div
+                ref={suggestionsRef}
+                className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-60 overflow-y-auto"
+              >
+                {suggestions.map((match, index) => (
+                  <button
+                    key={match.ticker}
+                    type="button"
+                    onClick={() => handleSelectSuggestion(match)}
+                    className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-700 flex items-center gap-2 ${
+                      index === selectedIndex ? "bg-gray-700" : ""
+                    }`}
+                  >
+                    <span className="font-mono text-blue-400 font-medium min-w-[60px]">
+                      {match.ticker}
+                    </span>
+                    <span className="text-gray-300 truncate">{match.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Target Name */}
@@ -129,7 +260,7 @@ export default function AddDealForm({ onDealAdded }: AddDealFormProps) {
               type="text"
               value={targetName}
               onChange={(e) => setTargetName(e.target.value)}
-              placeholder="Apple Inc."
+              placeholder="Auto-filled from lookup"
               className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm focus:border-blue-500 focus:outline-none"
               disabled={isSubmitting}
             />
