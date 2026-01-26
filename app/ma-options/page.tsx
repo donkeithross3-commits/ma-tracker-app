@@ -33,6 +33,8 @@ export default async function MAOptionsPage() {
       daysToClose,
       notes: deal.notes,
       isActive: deal.isActive,
+      noOptionsAvailable: deal.noOptionsAvailable,
+      lastOptionsCheck: deal.lastOptionsCheck?.toISOString() || null,
       createdAt: deal.createdAt.toISOString(),
       updatedAt: deal.updatedAt.toISOString(),
     };
