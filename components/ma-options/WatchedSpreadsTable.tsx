@@ -16,10 +16,13 @@ interface WatchedSpreadsTableProps {
   failedSpreads?: Map<string, SpreadUpdateFailure>;
 }
 
-interface GroupedSpreads {
-  [ticker: string]: {
-    [expiration: string]: WatchedSpreadDTO[];
-  };
+interface GroupedSpread extends WatchedSpreadDTO {
+  isFirstInTicker: boolean;
+  isLastInTicker: boolean;
+  isFirstInExpiration: boolean;
+  isLastInExpiration: boolean;
+  tickerRowSpan: number;
+  expirationRowSpan: number;
 }
 
 export default function WatchedSpreadsTable({
@@ -35,29 +38,25 @@ export default function WatchedSpreadsTable({
   const [sortKey, setSortKey] = useState<string>("annualizedYield");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [analyzingSpread, setAnalyzingSpread] = useState<WatchedSpreadDTO | null>(null);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  // Group spreads by ticker, then by expiration
+  // Group and sort spreads by ticker, then by expiration, then by sort key
   const groupedSpreads = useMemo(() => {
-    const grouped: GroupedSpreads = {};
+    // First, group by ticker then expiration
+    const byTicker: { [ticker: string]: { [exp: string]: WatchedSpreadDTO[] } } = {};
     
     spreads.forEach((spread) => {
       const ticker = spread.dealTicker;
-      const expirationKey = new Date(spread.expiration).toISOString().split('T')[0];
+      const exp = new Date(spread.expiration).toISOString().split('T')[0];
       
-      if (!grouped[ticker]) {
-        grouped[ticker] = {};
-      }
-      if (!grouped[ticker][expirationKey]) {
-        grouped[ticker][expirationKey] = [];
-      }
-      grouped[ticker][expirationKey].push(spread);
+      if (!byTicker[ticker]) byTicker[ticker] = {};
+      if (!byTicker[ticker][exp]) byTicker[ticker][exp] = [];
+      byTicker[ticker][exp].push(spread);
     });
 
-    // Sort spreads within each group by the selected sort key
-    Object.keys(grouped).forEach((ticker) => {
-      Object.keys(grouped[ticker]).forEach((expiration) => {
-        grouped[ticker][expiration].sort((a, b) => {
+    // Sort within each group
+    Object.keys(byTicker).forEach((ticker) => {
+      Object.keys(byTicker[ticker]).forEach((exp) => {
+        byTicker[ticker][exp].sort((a, b) => {
           const aVal = (a as any)[sortKey] ?? 0;
           const bVal = (b as any)[sortKey] ?? 0;
           return sortDir === "asc" ? aVal - bVal : bVal - aVal;
@@ -65,13 +64,38 @@ export default function WatchedSpreadsTable({
       });
     });
 
-    return grouped;
-  }, [spreads, sortKey, sortDir]);
+    // Flatten into ordered array with grouping metadata
+    const result: GroupedSpread[] = [];
+    const sortedTickers = Object.keys(byTicker).sort();
+    
+    sortedTickers.forEach((ticker) => {
+      const expirations = Object.keys(byTicker[ticker]).sort();
+      const tickerSpreads: WatchedSpreadDTO[] = [];
+      
+      expirations.forEach((exp) => {
+        tickerSpreads.push(...byTicker[ticker][exp]);
+      });
+      
+      let tickerIdx = 0;
+      expirations.forEach((exp) => {
+        const expSpreads = byTicker[ticker][exp];
+        expSpreads.forEach((spread, expIdx) => {
+          result.push({
+            ...spread,
+            isFirstInTicker: tickerIdx === 0,
+            isLastInTicker: tickerIdx === tickerSpreads.length - 1,
+            isFirstInExpiration: expIdx === 0,
+            isLastInExpiration: expIdx === expSpreads.length - 1,
+            tickerRowSpan: tickerIdx === 0 ? tickerSpreads.length : 0,
+            expirationRowSpan: expIdx === 0 ? expSpreads.length : 0,
+          });
+          tickerIdx++;
+        });
+      });
+    });
 
-  // Sort tickers alphabetically
-  const sortedTickers = useMemo(() => {
-    return Object.keys(groupedSpreads).sort();
-  }, [groupedSpreads]);
+    return result;
+  }, [spreads, sortKey, sortDir]);
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -82,37 +106,27 @@ export default function WatchedSpreadsTable({
     }
   };
 
-  const toggleGroup = (groupKey: string) => {
-    const newExpanded = new Set(expandedGroups);
-    if (newExpanded.has(groupKey)) {
-      newExpanded.delete(groupKey);
-    } else {
-      newExpanded.add(groupKey);
-    }
-    setExpandedGroups(newExpanded);
-  };
-
   const formatStrategyType = (spread: WatchedSpreadDTO): string => {
     if (spread.strategyType === "spread") {
-      return spread.legs[0]?.right === "C" ? "Call Spread" : "Put Spread";
+      return spread.legs[0]?.right === "C" ? "call sprd" : "put sprd";
     }
     const typeMap: { [key: string]: string } = {
-      'long_call': 'Long Call',
-      'long_put': 'Long Put',
-      'call': 'Long Call',
-      'put': 'Long Put',
-      'put_spread': 'Put Spread',
+      'long_call': 'long call',
+      'long_put': 'long put',
+      'call': 'long call',
+      'put': 'long put',
+      'put_spread': 'put sprd',
     };
     return typeMap[spread.strategyType] || spread.strategyType;
   };
 
   const formatExpiration = (expiration: string): string => {
     const date = new Date(expiration + "T00:00:00");
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
   // Calculate metrics for a spread
-  const calculateMetrics = (spread: WatchedSpreadDTO) => {
+  const calculateMetrics = (spread: WatchedSpreadDTO): StrategyMetrics => {
     const isSingleLeg = spread.legs.length === 1 || 
       spread.strategyType === "long_call" || 
       spread.strategyType === "long_put" ||
@@ -148,7 +162,7 @@ export default function WatchedSpreadsTable({
       annualizedYield: spread.annualizedYield,
       annualizedYieldFarTouch: farTouchIRR,
       liquidityScore: spread.liquidityScore,
-    } as StrategyMetrics;
+    };
   };
 
   return (
@@ -177,211 +191,137 @@ export default function WatchedSpreadsTable({
         </div>
       </div>
 
-      <div className="space-y-4">
-        {sortedTickers.map((ticker) => {
-          const expirationsByTicker = groupedSpreads[ticker];
-          const sortedExpirations = Object.keys(expirationsByTicker).sort();
-          const totalForTicker = Object.values(expirationsByTicker).reduce(
-            (sum, spreads) => sum + spreads.length,
-            0
-          );
-          
-          // Get deal info from first spread
-          const firstSpread = expirationsByTicker[sortedExpirations[0]][0];
-          const dealInfo = firstSpread ? {
-            targetName: firstSpread.dealTargetName,
-            price: firstSpread.dealPrice,
-            closeDate: firstSpread.dealExpectedCloseDate,
-          } : null;
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead className="sticky top-0 bg-gray-900">
+            <tr className="border-b border-gray-700">
+              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Ticker</th>
+              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Exp</th>
+              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Type</th>
+              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Strikes</th>
+              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Leg Prices</th>
+              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Market</th>
+              <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>
+                Midpoint Entry
+              </th>
+              <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>
+                Far Touch Entry
+              </th>
+              <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>Action</th>
+            </tr>
+            <tr className="border-b border-gray-700">
+              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
+              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
+              <th
+                className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200"
+                onClick={() => handleSort("annualizedYield")}
+              >
+                IRR {sortKey === "annualizedYield" && (sortDir === "desc" ? "↓" : "↑")}
+              </th>
+              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
+              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
+              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groupedSpreads.map((spread) => {
+              const metrics = calculateMetrics(spread);
+              const expStr = new Date(spread.expiration).toISOString().split('T')[0];
 
-          return (
-            <div key={ticker} className="border border-gray-700 rounded">
-              {/* Ticker Header */}
-              <div className="bg-gray-800 px-4 py-2">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <span className="text-base font-semibold text-gray-100 font-mono">{ticker}</span>
-                    {dealInfo && (
-                      <span className="text-gray-400 text-sm ml-3">
-                        {dealInfo.targetName}
-                      </span>
-                    )}
-                    <span className="text-gray-500 ml-2 text-sm">
-                      ({totalForTicker} {totalForTicker === 1 ? 'position' : 'positions'})
-                    </span>
-                  </div>
-                  {dealInfo && (
-                    <div className="text-xs text-gray-400">
-                      Deal: ${dealInfo.price?.toFixed(2)} | Close: {dealInfo.closeDate ? formatExpiration(dealInfo.closeDate) : "—"}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Expiration Groups */}
-              {sortedExpirations.map((expiration) => {
-                const spreadsInExpiry = expirationsByTicker[expiration];
-                const groupKey = `${ticker}-${expiration}`;
-                const isExpanded = expandedGroups.has(groupKey);
-                
-                // Find best IRR in this group
-                const bestIRR = Math.max(...spreadsInExpiry.map(s => s.annualizedYield || 0));
-
-                return (
-                  <div key={expiration} className="border-t border-gray-700">
-                    {/* Expiration Header */}
-                    <div
-                      className="bg-gray-850 px-4 py-2 flex justify-between items-center cursor-pointer hover:bg-gray-800"
-                      onClick={() => toggleGroup(groupKey)}
+              return (
+                <tr
+                  key={spread.id}
+                  className={`
+                    hover:bg-gray-800
+                    ${spread.isFirstInTicker ? 'border-t-2 border-t-blue-600' : ''}
+                    ${spread.isFirstInExpiration && !spread.isFirstInTicker ? 'border-t border-t-gray-600' : ''}
+                    ${!spread.isFirstInExpiration ? 'border-t border-t-gray-800' : ''}
+                  `}
+                >
+                  {/* Ticker - only show on first row of ticker group */}
+                  {spread.tickerRowSpan > 0 ? (
+                    <td 
+                      className="py-2 px-2 text-gray-100 font-mono font-semibold border-l-2 border-l-blue-600 bg-gray-850"
+                      rowSpan={spread.tickerRowSpan}
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-400">
-                          {isExpanded ? "▼" : "▶"}
-                        </span>
-                        <span className="text-sm font-medium text-gray-200">
-                          {formatExpiration(expiration)}
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          ({spreadsInExpiry.length} {spreadsInExpiry.length === 1 ? 'strategy' : 'strategies'})
-                        </span>
+                      <div>{spread.dealTicker}</div>
+                      <div className="text-[10px] text-gray-500 font-normal">
+                        ${spread.dealPrice?.toFixed(2)}
                       </div>
-                      <div className="text-xs text-gray-400">
-                        Best: <span className={bestIRR > 0 ? "text-green-400" : "text-red-400"}>
-                          {(bestIRR * 100).toFixed(1)}%
-                        </span> annualized
+                    </td>
+                  ) : null}
+
+                  {/* Expiration - only show on first row of expiration group */}
+                  {spread.expirationRowSpan > 0 ? (
+                    <td 
+                      className="py-2 px-2 text-gray-300 border-l border-l-gray-600"
+                      rowSpan={spread.expirationRowSpan}
+                    >
+                      {formatExpiration(expStr)}
+                    </td>
+                  ) : null}
+
+                  {/* Strategy Type */}
+                  <td className="py-2 px-2 text-gray-300">
+                    {formatStrategyType(spread)}
+                  </td>
+
+                  {/* Strategy metrics columns */}
+                  <StrategyMetricsCells metrics={metrics} />
+
+                  {/* Actions */}
+                  <td className="py-2 px-2 text-center">
+                    <div className="flex gap-1 justify-center items-center">
+                      <div className="relative">
+                        <button
+                          onClick={() => onRefreshSingle(spread.id)}
+                          disabled={refreshingSpreads.has(spread.id)}
+                          className={`w-6 h-6 flex items-center justify-center hover:bg-gray-700 rounded transition-colors ${
+                            refreshingSpreads.has(spread.id) 
+                              ? 'animate-spin text-gray-400' 
+                              : failedSpreads.has(spread.id)
+                                ? 'text-yellow-400 hover:text-yellow-300'
+                                : 'text-gray-400 hover:text-white'
+                          }`}
+                          title={failedSpreads.has(spread.id) 
+                            ? `Update failed: ${failedSpreads.get(spread.id)?.reason}` 
+                            : "Refresh this spread"
+                          }
+                        >
+                          ↻
+                        </button>
+                        {failedSpreads.has(spread.id) && !refreshingSpreads.has(spread.id) && (
+                          <span 
+                            className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-500 rounded-full text-[8px] text-black font-bold flex items-center justify-center"
+                            title={failedSpreads.get(spread.id)?.reason}
+                          >
+                            !
+                          </span>
+                        )}
                       </div>
+                      <button
+                        onClick={() => setAnalyzingSpread(spread)}
+                        className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded"
+                        title="Compare spread vs stock ownership"
+                      >
+                        Analyze
+                      </button>
+                      {spread.status === "active" && (
+                        <button
+                          onClick={() => onDeactivate(spread.id)}
+                          className="w-6 h-6 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors"
+                          title="Deactivate spread"
+                        >
+                          ×
+                        </button>
+                      )}
                     </div>
-
-                    {/* Strategies Table (Collapsible) */}
-                    {isExpanded && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead className="bg-gray-900">
-                            <tr className="border-b border-gray-700">
-                              <th className="text-left py-2 px-2 text-gray-400">Strategy</th>
-                              <th className="text-left py-2 px-2 text-gray-400">Strikes</th>
-                              <th className="text-left py-2 px-2 text-gray-400">Leg Prices</th>
-                              <th className="text-left py-2 px-2 text-gray-400">Market Data</th>
-                              <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>
-                                Midpoint Entry
-                              </th>
-                              <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>
-                                Far Touch Entry
-                              </th>
-                              <th className="text-left py-2 px-2 text-gray-400">Updated</th>
-                              <th className="text-center py-2 px-2 text-gray-400">Action</th>
-                            </tr>
-                            <tr className="border-b border-gray-700">
-                              <th></th>
-                              <th></th>
-                              <th></th>
-                              <th></th>
-                              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
-                              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
-                              <th
-                                className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200"
-                                onClick={() => handleSort("annualizedYield")}
-                              >
-                                IRR {sortKey === "annualizedYield" && (sortDir === "desc" ? "↓" : "↑")}
-                              </th>
-                              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
-                              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
-                              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
-                              <th></th>
-                              <th></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {spreadsInExpiry.map((spread) => {
-                              const metrics = calculateMetrics(spread);
-
-                              return (
-                                <tr
-                                  key={spread.id}
-                                  className="border-b border-gray-800 hover:bg-gray-800"
-                                >
-                                  <td className="py-2 px-2 text-gray-300">
-                                    {formatStrategyType(spread)}
-                                  </td>
-
-                                  {/* Strategy metrics columns */}
-                                  <StrategyMetricsCells metrics={metrics} />
-
-                                  {/* Last Updated */}
-                                  <td className="py-2 px-2 text-gray-400 text-[10px]">
-                                    {spread.lastUpdated
-                                      ? new Date(spread.lastUpdated).toLocaleString('en-US', {
-                                          month: 'numeric',
-                                          day: 'numeric',
-                                          hour: 'numeric',
-                                          minute: '2-digit',
-                                          hour12: true
-                                        })
-                                      : "—"}
-                                  </td>
-
-                                  {/* Actions */}
-                                  <td className="py-2 px-2 text-center">
-                                    <div className="flex gap-1 justify-center items-center">
-                                      {/* Refresh button */}
-                                      <div className="relative">
-                                        <button
-                                          onClick={() => onRefreshSingle(spread.id)}
-                                          disabled={refreshingSpreads.has(spread.id)}
-                                          className={`w-6 h-6 flex items-center justify-center hover:bg-gray-700 rounded transition-colors ${
-                                            refreshingSpreads.has(spread.id) 
-                                              ? 'animate-spin text-gray-400' 
-                                              : failedSpreads.has(spread.id)
-                                                ? 'text-yellow-400 hover:text-yellow-300'
-                                                : 'text-gray-400 hover:text-white'
-                                          }`}
-                                          title={failedSpreads.has(spread.id) 
-                                            ? `Update failed: ${failedSpreads.get(spread.id)?.reason}` 
-                                            : "Refresh this spread"
-                                          }
-                                        >
-                                          ↻
-                                        </button>
-                                        {failedSpreads.has(spread.id) && !refreshingSpreads.has(spread.id) && (
-                                          <span 
-                                            className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-500 rounded-full text-[8px] text-black font-bold flex items-center justify-center"
-                                            title={failedSpreads.get(spread.id)?.reason}
-                                          >
-                                            !
-                                          </span>
-                                        )}
-                                      </div>
-                                      <button
-                                        onClick={() => setAnalyzingSpread(spread)}
-                                        className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded"
-                                        title="Compare spread vs stock ownership"
-                                      >
-                                        Analyze
-                                      </button>
-                                      {spread.status === "active" && (
-                                        <button
-                                          onClick={() => onDeactivate(spread.id)}
-                                          className="w-6 h-6 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors"
-                                          title="Deactivate spread"
-                                        >
-                                          ×
-                                        </button>
-                                      )}
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
 
         {spreads.length === 0 && (
           <div className="text-center py-8 text-gray-500 text-sm">
