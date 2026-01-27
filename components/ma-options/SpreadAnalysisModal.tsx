@@ -89,6 +89,8 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
       }
       
       const data = await response.json();
+      console.log("[QUOTE] API response:", data);
+      console.log("[QUOTE] Timestamp from API:", data.timestamp);
       setStockQuote({
         price: data.price,
         bid: data.bid,
