@@ -173,13 +173,13 @@ export function BidAskGrids({ legs }: { legs: StrategyLeg[] }) {
         const legLabel = `${leg.side} ${strikeDisplay}${leg.right}`;
         
         return (
-          <div key={idx} className="border border-gray-700 rounded w-[70px]">
+          <div key={idx} className="border border-gray-700 rounded w-[72px]">
             {/* Leg label */}
-            <div className="bg-gray-800 px-1 py-0.5 text-center text-[9px] text-gray-400 border-b border-gray-700 truncate">
+            <div className="bg-gray-800 px-1 py-0.5 text-center text-[10px] text-gray-400 border-b border-gray-700 truncate">
               {legLabel}
             </div>
             {/* Bid/Ask prices only (no quantities) */}
-            <div className="flex flex-col text-[10px]">
+            <div className="flex flex-col text-xs">
               {/* Ask price */}
               <div className="bg-red-900/20 px-2 py-0.5 text-center text-red-400">
                 ${leg.ask.toFixed(2)}
@@ -349,54 +349,54 @@ export function DebitStrategyMetricsCells({ metrics }: { metrics: StrategyMetric
   return (
     <>
       {/* Strikes */}
-      <td className="py-2 px-2 text-gray-100 font-mono text-[11px]">
+      <td className="py-1 px-2 text-gray-100 font-mono text-sm">
         {strikes}
       </td>
 
       {/* Leg Prices */}
-      <td className="py-2 px-2 text-gray-300 text-[10px]">
+      <td className="py-1 px-2 text-gray-300 text-xs">
         <div className="flex items-center gap-1" title={`Midpoint: ${legPricesMid}`}>
-          <span className="text-gray-500 text-[9px]">Mid:</span>
+          <span className="text-gray-500 text-[10px]">Mid:</span>
           <span>{legPricesMid}</span>
         </div>
         <div className="flex items-center gap-1 text-gray-500" title={`Far Touch: ${legPricesFar}`}>
-          <span className="text-[9px]">Far:</span>
+          <span className="text-[10px]">Far:</span>
           <span>{legPricesFar}</span>
         </div>
       </td>
 
       {/* Market Data - Bid/Ask Grids */}
-      <td className="py-2 px-2">
+      <td className="py-1 px-2">
         <BidAskGrids legs={metrics.legs} />
       </td>
 
       {/* Midpoint Entry - Cost */}
-      <td className="py-2 px-2 text-right text-gray-100 font-mono text-[11px]">
+      <td className="py-1 px-2 text-right text-gray-100 font-mono text-sm">
         ${midMetrics.cost.toFixed(2)}
       </td>
 
       {/* Midpoint Entry - Profit */}
-      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(midMetrics.profit)}`}>
+      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(midMetrics.profit)}`}>
         ${midMetrics.profit.toFixed(2)}
       </td>
 
       {/* Midpoint Entry - IRR */}
-      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(midMetrics.irr)}`}>
+      <td className={`py-1 px-2 text-right font-mono text-sm font-semibold ${getProfitColorClass(midMetrics.irr)}`}>
         {(midMetrics.irr * 100).toFixed(1)}%
       </td>
 
       {/* Far Touch Entry - Cost */}
-      <td className="py-2 px-2 text-right text-gray-100 font-mono text-[11px]">
+      <td className="py-1 px-2 text-right text-gray-100 font-mono text-sm">
         ${farMetrics.cost.toFixed(2)}
       </td>
 
       {/* Far Touch Entry - Profit */}
-      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(farMetrics.profit)}`}>
+      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.profit)}`}>
         ${farMetrics.profit.toFixed(2)}
       </td>
 
       {/* Far Touch Entry - IRR */}
-      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(farMetrics.irr)}`}>
+      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.irr)}`}>
         {(farMetrics.irr * 100).toFixed(1)}%
       </td>
     </>
@@ -417,54 +417,54 @@ export function CreditStrategyMetricsCells({ metrics }: { metrics: StrategyMetri
   return (
     <>
       {/* Strikes */}
-      <td className="py-2 px-2 text-gray-100 font-mono text-[11px]">
+      <td className="py-1 px-2 text-gray-100 font-mono text-sm">
         {strikes}
       </td>
 
       {/* Leg Prices */}
-      <td className="py-2 px-2 text-gray-300 text-[10px]">
+      <td className="py-1 px-2 text-gray-300 text-xs">
         <div className="flex items-center gap-1" title={`Midpoint: ${legPricesMid}`}>
-          <span className="text-gray-500 text-[9px]">Mid:</span>
+          <span className="text-gray-500 text-[10px]">Mid:</span>
           <span>{legPricesMid}</span>
         </div>
         <div className="flex items-center gap-1 text-gray-500" title={`Far Touch: ${legPricesFar}`}>
-          <span className="text-[9px]">Far:</span>
+          <span className="text-[10px]">Far:</span>
           <span>{legPricesFar}</span>
         </div>
       </td>
 
       {/* Market Data - Bid/Ask Grids */}
-      <td className="py-2 px-2">
+      <td className="py-1 px-2">
         <BidAskGrids legs={metrics.legs} />
       </td>
 
       {/* Midpoint Entry - Credit (max gain) */}
-      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(midMetrics.credit)}`}>
+      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(midMetrics.credit)}`}>
         ${midMetrics.credit.toFixed(2)}
       </td>
 
       {/* Midpoint Entry - Max Loss */}
-      <td className="py-2 px-2 text-right text-red-400 font-mono text-[11px]">
+      <td className="py-1 px-2 text-right text-red-400 font-mono text-sm">
         ${midMetrics.maxLoss.toFixed(2)}
       </td>
 
       {/* Midpoint Entry - IRR */}
-      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(midMetrics.irr)}`}>
+      <td className={`py-1 px-2 text-right font-mono text-sm font-semibold ${getProfitColorClass(midMetrics.irr)}`}>
         {(midMetrics.irr * 100).toFixed(1)}%
       </td>
 
       {/* Far Touch Entry - Credit (max gain) */}
-      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(farMetrics.credit)}`}>
+      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.credit)}`}>
         ${farMetrics.credit.toFixed(2)}
       </td>
 
       {/* Far Touch Entry - Max Loss */}
-      <td className="py-2 px-2 text-right text-red-400 font-mono text-[11px]">
+      <td className="py-1 px-2 text-right text-red-400 font-mono text-sm">
         ${farMetrics.maxLoss.toFixed(2)}
       </td>
 
       {/* Far Touch Entry - IRR */}
-      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(farMetrics.irr)}`}>
+      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.irr)}`}>
         {(farMetrics.irr * 100).toFixed(1)}%
       </td>
     </>

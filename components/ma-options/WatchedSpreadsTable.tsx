@@ -241,11 +241,11 @@ export default function WatchedSpreadsTable({
                   {/* Ticker - only show on first row of ticker group */}
                   {spread.tickerRowSpan > 0 ? (
                     <td 
-                      className="py-2 px-2 text-gray-100 font-mono font-semibold border-l-2 border-l-blue-600 bg-gray-850"
+                      className="py-1 px-2 text-gray-100 font-mono font-bold text-sm border-l-2 border-l-blue-600 bg-gray-850"
                       rowSpan={spread.tickerRowSpan}
                     >
                       <div>{spread.dealTicker}</div>
-                      <div className="text-[10px] text-gray-500 font-normal">
+                      <div className="text-xs text-gray-500 font-normal">
                         ${spread.dealPrice?.toFixed(2)}
                       </div>
                     </td>
@@ -254,7 +254,7 @@ export default function WatchedSpreadsTable({
                   {/* Expiration - only show on first row of expiration group */}
                   {spread.expirationRowSpan > 0 ? (
                     <td 
-                      className="py-2 px-2 text-gray-300 border-l border-l-gray-600"
+                      className="py-1 px-2 text-gray-300 text-sm border-l border-l-gray-600"
                       rowSpan={spread.expirationRowSpan}
                     >
                       {formatExpiration(expStr)}
@@ -262,7 +262,7 @@ export default function WatchedSpreadsTable({
                   ) : null}
 
                   {/* Strategy Type */}
-                  <td className="py-2 px-2 text-gray-300">
+                  <td className="py-1 px-2 text-gray-300 text-sm">
                     {formatStrategyType(spread)}
                   </td>
 
@@ -270,7 +270,7 @@ export default function WatchedSpreadsTable({
                   <StrategyMetricsCells metrics={metrics} />
 
                   {/* Actions */}
-                  <td className="py-2 px-2 text-center">
+                  <td className="py-1 px-2 text-center">
                     <div className="flex gap-1 justify-center items-center">
                       <div className="relative">
                         <button
