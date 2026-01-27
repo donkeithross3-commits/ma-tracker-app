@@ -152,21 +152,34 @@ export async function POST(request: NextRequest) {
     
     // Update spreads
     const updates = [];
+    const failures: Array<{spreadId: string, ticker: string, reason: string}> = [];
     const now = new Date();
     
     for (const spread of spreads) {
+      const ticker = spread.scannerDeal?.ticker || "UNKNOWN";
       const legs = spread.legs as unknown as StrategyLeg[];
       const expiry = typeof spread.expiration === 'string' 
         ? spread.expiration 
         : (spread.expiration as Date).toISOString().split('T')[0];
       const expiryNorm = expiry.replace(/-/g, '');
       
+      // Check if no scanner deal is linked
+      if (!spread.scannerDeal) {
+        failures.push({
+          spreadId: spread.id,
+          ticker: "UNKNOWN",
+          reason: "No deal linked to spread"
+        });
+        continue;
+      }
+      
       let netPremium = 0;
       let allLegsFound = true;
+      const missingContracts: string[] = [];
       const updatedLegs = JSON.parse(JSON.stringify(legs)) as StrategyLeg[];
       
       for (const leg of updatedLegs) {
-        const contractKey = `${spread.scannerDeal!.ticker}_${leg.strike}_${expiryNorm}_${leg.right}`;
+        const contractKey = `${ticker}_${leg.strike}_${expiryNorm}_${leg.right}`;
         const price = priceData.get(contractKey);
         
         if (price) {
@@ -177,13 +190,12 @@ export async function POST(request: NextRequest) {
           netPremium += (leg.side === "BUY" ? legPremium : -legPremium);
         } else {
           console.log(`[REFRESH PRICES] Missing: ${contractKey}`);
+          missingContracts.push(`${leg.strike}${leg.right}`);
           allLegsFound = false;
-          break;
         }
       }
       
       if (allLegsFound) {
-        const ticker = spread.scannerDeal!.ticker;
         const underlyingPrice = stockPrices.get(ticker);
         
         const updated = await prisma.watchedSpread.update({
@@ -202,17 +214,29 @@ export async function POST(request: NextRequest) {
           underlyingPrice: updated.underlyingPrice?.toNumber() || null,
           lastUpdated: updated.lastUpdated?.toISOString() || "",
         });
+      } else {
+        // Record the failure with specific missing contracts
+        failures.push({
+          spreadId: spread.id,
+          ticker,
+          reason: `Contract(s) unavailable: ${missingContracts.join(", ")}`
+        });
       }
     }
     
     const durationMs = Date.now() - startTime;
     console.log(`[REFRESH PRICES] Updated ${updates.length}/${spreads.length} spreads in ${Math.round(durationMs/1000)}s`);
+    if (failures.length > 0) {
+      console.log(`[REFRESH PRICES] Failures: ${failures.map(f => `${f.ticker}: ${f.reason}`).join(", ")}`);
+    }
     
     return NextResponse.json({ 
       updates,
+      failures,
       metadata: {
         totalSpreads: spreads.length,
         updatedSpreads: updates.length,
+        failedSpreads: failures.length,
         contractsFetched: totalFetched,
         contractsNeeded: contractsNeeded.size,
         durationSeconds: Math.round(durationMs / 1000),

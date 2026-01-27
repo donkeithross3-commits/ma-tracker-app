@@ -144,12 +144,28 @@ export interface UpdateSpreadPricesRequest {
   spreadIds: string[];
 }
 
+export interface SpreadUpdateFailure {
+  spreadId: string;
+  ticker: string;
+  reason: string;
+}
+
 export interface UpdateSpreadPricesResponse {
   updates: Array<{
     spreadId: string;
     currentPremium: number;
+    underlyingPrice?: number | null;
     lastUpdated: string;
   }>;
+  failures?: SpreadUpdateFailure[];
+  metadata?: {
+    totalSpreads: number;
+    updatedSpreads: number;
+    failedSpreads: number;
+    contractsFetched: number;
+    contractsNeeded: number;
+    durationSeconds: number;
+  };
 }
 
 // Scanner Deals - lightweight deal management for options scanner

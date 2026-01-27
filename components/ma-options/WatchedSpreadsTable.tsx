@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { WatchedSpreadDTO } from "@/types/ma-options";
+import type { WatchedSpreadDTO, SpreadUpdateFailure } from "@/types/ma-options";
 import { StrategyTableHeader, StrategyMetricsCells, type StrategyMetrics } from "./StrategyColumns";
 import SpreadAnalysisModal from "./SpreadAnalysisModal";
 
@@ -13,6 +13,7 @@ interface WatchedSpreadsTableProps {
   isRefreshing?: boolean;
   refreshingSpreads?: Set<string>;
   refreshStatus?: string;
+  failedSpreads?: Map<string, SpreadUpdateFailure>;
 }
 
 export default function WatchedSpreadsTable({
@@ -23,6 +24,7 @@ export default function WatchedSpreadsTable({
   isRefreshing = false,
   refreshingSpreads = new Set(),
   refreshStatus = "",
+  failedSpreads = new Map(),
 }: WatchedSpreadsTableProps) {
   const [sortKey, setSortKey] = useState<string>("pnlPercent");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -177,16 +179,35 @@ export default function WatchedSpreadsTable({
                   {/* Action */}
                   <td className="py-2 px-1 text-center">
                     <div className="flex gap-1 justify-center items-center">
-                      <button
-                        onClick={() => onRefreshSingle(spread.id)}
-                        disabled={refreshingSpreads.has(spread.id)}
-                        className={`w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors ${
-                          refreshingSpreads.has(spread.id) ? 'animate-spin' : ''
-                        }`}
-                        title="Refresh this spread"
-                      >
-                        ↻
-                      </button>
+                      {/* Refresh button with failure indicator */}
+                      <div className="relative">
+                        <button
+                          onClick={() => onRefreshSingle(spread.id)}
+                          disabled={refreshingSpreads.has(spread.id)}
+                          className={`w-6 h-6 flex items-center justify-center hover:bg-gray-700 rounded transition-colors ${
+                            refreshingSpreads.has(spread.id) 
+                              ? 'animate-spin text-gray-400' 
+                              : failedSpreads.has(spread.id)
+                                ? 'text-yellow-400 hover:text-yellow-300'
+                                : 'text-gray-400 hover:text-white'
+                          }`}
+                          title={failedSpreads.has(spread.id) 
+                            ? `Update failed: ${failedSpreads.get(spread.id)?.reason}` 
+                            : "Refresh this spread"
+                          }
+                        >
+                          ↻
+                        </button>
+                        {/* Warning badge for failed spreads */}
+                        {failedSpreads.has(spread.id) && !refreshingSpreads.has(spread.id) && (
+                          <span 
+                            className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-500 rounded-full text-[8px] text-black font-bold flex items-center justify-center"
+                            title={failedSpreads.get(spread.id)?.reason}
+                          >
+                            !
+                          </span>
+                        )}
+                      </div>
                       <button
                         onClick={() => setAnalyzingSpread(spread)}
                         className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded"

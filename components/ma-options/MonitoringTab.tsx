@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { WatchedSpreadDTO } from "@/types/ma-options";
+import type { WatchedSpreadDTO, SpreadUpdateFailure } from "@/types/ma-options";
 import WatchedSpreadsTable from "./WatchedSpreadsTable";
 import DealFilter from "./DealFilter";
 
@@ -14,6 +14,8 @@ export default function MonitoringTab() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshingSpreads, setRefreshingSpreads] = useState<Set<string>>(new Set());
   const [refreshStatus, setRefreshStatus] = useState<string>("");
+  // Track failures by spreadId for per-row indicators
+  const [failedSpreads, setFailedSpreads] = useState<Map<string, SpreadUpdateFailure>>(new Map());
 
   useEffect(() => {
     loadSpreads();
@@ -127,16 +129,35 @@ export default function MonitoringTab() {
           })
         );
         
-        // Show success message
+        // Track failures for per-row indicators
+        const failures = data.failures as SpreadUpdateFailure[] || [];
+        if (failures.length > 0) {
+          const failureMap = new Map<string, SpreadUpdateFailure>();
+          for (const f of failures) {
+            failureMap.set(f.spreadId, f);
+          }
+          setFailedSpreads(failureMap);
+        } else {
+          // Clear failures on successful full refresh
+          setFailedSpreads(new Map());
+        }
+        
+        // Show success/partial success message
         const meta = data.metadata;
         if (meta) {
-          setRefreshStatus(`✓ Updated ${meta.updatedSpreads}/${meta.totalSpreads} spreads in ${meta.durationSeconds}s`);
+          if (failures.length > 0) {
+            // Show which tickers failed
+            const failedTickers = [...new Set(failures.map(f => f.ticker))].join(", ");
+            setRefreshStatus(`⚠ Updated ${meta.updatedSpreads}/${meta.totalSpreads} spreads (${failedTickers}: unavailable)`);
+          } else {
+            setRefreshStatus(`✓ Updated ${meta.updatedSpreads}/${meta.totalSpreads} spreads in ${meta.durationSeconds}s`);
+          }
         } else {
           setRefreshStatus(`✓ Updated ${data.updates.length} spreads`);
         }
         
-        // Clear success message after 3 seconds
-        setTimeout(() => setRefreshStatus(""), 3000);
+        // Keep status visible longer if there were failures
+        setTimeout(() => setRefreshStatus(""), failures.length > 0 ? 8000 : 3000);
         
         // #region agent log
         fetch('http://127.0.0.1:7243/ingest/1e2c4934-9031-43dd-950a-350ecf67fcc4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonitoringTab.tsx:140',message:'REFRESH: State update complete',data:{spreadsUpdated:data.updates?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'UI_UPDATE'})}).catch(()=>{});
@@ -173,6 +194,26 @@ export default function MonitoringTab() {
       if (response.ok) {
         const data = await response.json();
         console.log("[SINGLE REFRESH] Response data:", data);
+        
+        // Check for failures
+        const failures = data.failures as SpreadUpdateFailure[] || [];
+        if (failures.length > 0) {
+          // Add failure to tracking map
+          setFailedSpreads(prev => {
+            const newMap = new Map(prev);
+            for (const f of failures) {
+              newMap.set(f.spreadId, f);
+            }
+            return newMap;
+          });
+        } else {
+          // Clear this spread from failures if it succeeded
+          setFailedSpreads(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(spreadId);
+            return newMap;
+          });
+        }
         
         // Update the single spread with new prices
         setSpreads((prevSpreads) =>
@@ -263,6 +304,7 @@ export default function MonitoringTab() {
           isRefreshing={isRefreshing}
           refreshingSpreads={refreshingSpreads}
           refreshStatus={refreshStatus}
+          failedSpreads={failedSpreads}
         />
       )}
     </div>
