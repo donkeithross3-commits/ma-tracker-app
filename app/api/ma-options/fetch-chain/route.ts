@@ -66,10 +66,14 @@ async function fetchViaWebSocketRelay(
 
 interface ScanParameters {
   daysBeforeClose?: number;
-  strikeLowerBound?: number;
-  strikeUpperBound?: number;
+  // Call spread params
+  callLongStrikeLower?: number;
+  callLongStrikeUpper?: number;
   callShortStrikeLower?: number;
   callShortStrikeUpper?: number;
+  // Put spread params
+  putLongStrikeLower?: number;
+  putLongStrikeUpper?: number;
   putShortStrikeLower?: number;
   putShortStrikeUpper?: number;
   topStrategiesPerExpiration?: number;

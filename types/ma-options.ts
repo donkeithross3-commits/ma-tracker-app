@@ -110,12 +110,16 @@ export interface AvailabilityCheckResponse {
 
 export interface ScanParameters {
   daysBeforeClose: number;
-  strikeLowerBound: number; // % below min(current, deal) for fetching option chain
-  strikeUpperBound: number; // % above deal price for fetching option chain
-  callShortStrikeLower: number; // Call spread: % below deal price for short leg
-  callShortStrikeUpper: number; // Call spread: % above deal price for short leg (higher offer buffer)
-  putShortStrikeLower: number;  // Put spread: % below deal price for short leg
-  putShortStrikeUpper: number;  // Put spread: % above deal price for short leg
+  // Call spread params
+  callLongStrikeLower: number;   // % below deal for long call (deepest ITM)
+  callLongStrikeUpper: number;   // % below deal for long call (shallowest, hardcoded 0 = at deal)
+  callShortStrikeLower: number;  // % below deal for short call
+  callShortStrikeUpper: number;  // % above deal for short call (higher offer buffer)
+  // Put spread params
+  putLongStrikeLower: number;    // % below deal for long put (deepest OTM)
+  putLongStrikeUpper: number;    // % below deal for long put (shallowest, hardcoded 0 = at deal)
+  putShortStrikeLower: number;   // % below deal for short put
+  putShortStrikeUpper: number;   // % above deal for short put
   topStrategiesPerExpiration: number;
 }
 

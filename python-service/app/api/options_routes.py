@@ -172,16 +172,27 @@ async def fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
         params = request.scanParams or ScanParameters()
         
         logger.info(f"Fetching chain with params: days_before_close={params.daysBeforeClose}, "
-                   f"strike_lower={params.strikeLowerBound}%, strike_upper={params.strikeUpperBound}%")
+                   f"call_long={params.callLongStrikeLower}%-{params.callLongStrikeUpper}%, "
+                   f"call_short={params.callShortStrikeLower}%-{params.callShortStrikeUpper}%, "
+                   f"put_long={params.putLongStrikeLower}%-{params.putLongStrikeUpper}%, "
+                   f"put_short={params.putShortStrikeLower}%-{params.putShortStrikeUpper}%")
         
-        # Fetch option chain with custom parameters
+        # Fetch option chain with all 8 strategy params (fetch range derived from them)
         options = scanner.fetch_option_chain(
             request.ticker,
             expiry_months=6,
             current_price=spot_price,
             deal_close_date=close_date,
             days_before_close=params.daysBeforeClose,
-            deal_price=request.dealPrice
+            deal_price=request.dealPrice,
+            call_long_strike_lower_pct=params.callLongStrikeLower / 100.0,
+            call_long_strike_upper_pct=params.callLongStrikeUpper / 100.0,
+            call_short_strike_lower_pct=params.callShortStrikeLower / 100.0,
+            call_short_strike_upper_pct=params.callShortStrikeUpper / 100.0,
+            put_long_strike_lower_pct=params.putLongStrikeLower / 100.0,
+            put_long_strike_upper_pct=params.putLongStrikeUpper / 100.0,
+            put_short_strike_lower_pct=params.putShortStrikeLower / 100.0,
+            put_short_strike_upper_pct=params.putShortStrikeUpper / 100.0
         )
         
         # Convert to response format
@@ -274,8 +285,9 @@ async def generate_strategies(request: GenerateStrategiesRequest) -> GenerateStr
         current_price = request.chainData.get('spotPrice', request.dealPrice)
         
         logger.info(f"Generating strategies with params: "
-                   f"long_lower={params.strikeLowerBound}%, "
+                   f"call_long={params.callLongStrikeLower}%-{params.callLongStrikeUpper}%, "
                    f"call_short={params.callShortStrikeLower}%-{params.callShortStrikeUpper}%, "
+                   f"put_long={params.putLongStrikeLower}%-{params.putLongStrikeUpper}%, "
                    f"put_short={params.putShortStrikeLower}%-{params.putShortStrikeUpper}%, "
                    f"top_n={params.topStrategiesPerExpiration}")
         
@@ -283,9 +295,12 @@ async def generate_strategies(request: GenerateStrategiesRequest) -> GenerateStr
             options, 
             current_price, 
             top_n=params.topStrategiesPerExpiration,
-            long_strike_lower_pct=params.strikeLowerBound / 100.0,
+            call_long_strike_lower_pct=params.callLongStrikeLower / 100.0,
+            call_long_strike_upper_pct=params.callLongStrikeUpper / 100.0,
             call_short_strike_lower_pct=params.callShortStrikeLower / 100.0,
             call_short_strike_upper_pct=params.callShortStrikeUpper / 100.0,
+            put_long_strike_lower_pct=params.putLongStrikeLower / 100.0,
+            put_long_strike_upper_pct=params.putLongStrikeUpper / 100.0,
             put_short_strike_lower_pct=params.putShortStrikeLower / 100.0,
             put_short_strike_upper_pct=params.putShortStrikeUpper / 100.0
         )
