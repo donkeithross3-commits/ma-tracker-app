@@ -706,3 +706,62 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
         logger.error(f"Relay fetch prices error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class StockQuoteRequest(BaseModel):
+    ticker: str
+
+class StockQuoteResponse(BaseModel):
+    ticker: str
+    price: float
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+    timestamp: str
+
+@router.post("/relay/stock-quote")
+async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
+    """
+    Fetch current stock quote through WebSocket relay.
+    Uses the fetch_underlying request type which is already implemented in the local agent.
+    """
+    try:
+        logger.info(f"Relay: Fetching stock quote for {request.ticker}")
+        
+        # Check if any provider is connected
+        registry = get_registry()
+        status = registry.get_status()
+        
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        
+        # Send request through WebSocket relay
+        response_data = await send_request_to_provider(
+            request_type="fetch_underlying",
+            payload={"ticker": request.ticker.upper()},
+            timeout=15.0  # Stock quote should be quick
+        )
+        
+        # Check for errors in response
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        
+        price = response_data.get("price")
+        if price is None:
+            raise HTTPException(status_code=404, detail=f"Could not get price for {request.ticker}")
+        
+        return StockQuoteResponse(
+            ticker=request.ticker.upper(),
+            price=price,
+            bid=response_data.get("bid"),
+            ask=response_data.get("ask"),
+            timestamp=datetime.now().isoformat()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay stock quote error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { WatchedSpreadDTO } from "@/types/ma-options";
 import { StrategyTableHeader, StrategyMetricsCells, type StrategyMetrics } from "./StrategyColumns";
+import SpreadAnalysisModal from "./SpreadAnalysisModal";
 
 interface WatchedSpreadsTableProps {
   spreads: WatchedSpreadDTO[];
@@ -21,6 +22,7 @@ export default function WatchedSpreadsTable({
 }: WatchedSpreadsTableProps) {
   const [sortKey, setSortKey] = useState<string>("pnlPercent");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [analyzingSpread, setAnalyzingSpread] = useState<WatchedSpreadDTO | null>(null);
 
   const sortedSpreads = [...spreads].sort((a, b) => {
     const aVal = (a as any)[sortKey];
@@ -170,14 +172,23 @@ export default function WatchedSpreadsTable({
 
                   {/* Action */}
                   <td className="py-2 px-1 text-center">
-                    {spread.status === "active" && (
+                    <div className="flex gap-1 justify-center">
                       <button
-                        onClick={() => onDeactivate(spread.id)}
-                        className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
+                        onClick={() => setAnalyzingSpread(spread)}
+                        className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded"
+                        title="Compare spread vs stock ownership"
                       >
-                        Deactivate
+                        Analyze
                       </button>
-                    )}
+                      {spread.status === "active" && (
+                        <button
+                          onClick={() => onDeactivate(spread.id)}
+                          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
+                        >
+                          Deactivate
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
@@ -191,6 +202,14 @@ export default function WatchedSpreadsTable({
           </div>
         )}
       </div>
+      
+      {/* Analysis Modal */}
+      {analyzingSpread && (
+        <SpreadAnalysisModal
+          spread={analyzingSpread}
+          onClose={() => setAnalyzingSpread(null)}
+        />
+      )}
     </div>
   );
 }
