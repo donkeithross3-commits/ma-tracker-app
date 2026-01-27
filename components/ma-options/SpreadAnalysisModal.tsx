@@ -365,8 +365,12 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                   </tr>
                   <tr className="border-b border-gray-700/50">
                     <td className="py-2 px-3 text-gray-400">Max Profit (deal closes)</td>
-                    <td className={`py-2 px-3 text-right font-mono ${getProfitColorClass(metrics.stock.maxProfit)}`}>{formatCurrency(metrics.stock.maxProfit)}</td>
-                    <td className={`py-2 px-3 text-right font-mono ${getProfitColorClass(metrics.spread.maxProfit)}`}>{formatCurrency(metrics.spread.maxProfit)}</td>
+                    <td className={`py-2 px-3 text-right font-mono ${getProfitColorClass(metrics.stock.maxProfit)}`}>
+                      {formatCurrency(metrics.stock.maxProfit)} <span className="text-gray-500">({(metrics.stock.maxProfit / metrics.stock.capitalRequired * 100).toFixed(1)}%)</span>
+                    </td>
+                    <td className={`py-2 px-3 text-right font-mono ${getProfitColorClass(metrics.spread.maxProfit)}`}>
+                      {formatCurrency(metrics.spread.maxProfit)} <span className="text-gray-500">({(metrics.spread.maxProfit / metrics.spread.capitalRequired * 100).toFixed(1)}%)</span>
+                    </td>
                     <td className="py-2 px-3 text-right">
                       {metrics.stock.maxProfit > metrics.spread.maxProfit ? (
                         <span className="text-blue-400">Stock +{formatCurrency(metrics.stock.maxProfit - metrics.spread.maxProfit)}</span>
@@ -377,8 +381,12 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                   </tr>
                   <tr className="border-b border-gray-700/50">
                     <td className="py-2 px-3 text-gray-400">Max Loss (deal breaks)</td>
-                    <td className="py-2 px-3 text-right font-mono text-red-400">{formatCurrency(-metrics.stock.maxLoss)}</td>
-                    <td className="py-2 px-3 text-right font-mono text-red-400">{formatCurrency(-metrics.spread.maxLoss)}</td>
+                    <td className="py-2 px-3 text-right font-mono text-red-400">
+                      {formatCurrency(-metrics.stock.maxLoss)} <span className="text-gray-500">({(metrics.stock.maxLoss / metrics.stock.capitalRequired * 100).toFixed(1)}%)</span>
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono text-red-400">
+                      {formatCurrency(-metrics.spread.maxLoss)} <span className="text-gray-500">({(metrics.spread.maxLoss / metrics.spread.capitalRequired * 100).toFixed(1)}%)</span>
+                    </td>
                     <td className="py-2 px-3 text-right">
                       {metrics.stock.maxLoss > metrics.spread.maxLoss ? (
                         <span className="text-purple-400">Spread saves {formatCurrency(metrics.stock.maxLoss - metrics.spread.maxLoss)}</span>
