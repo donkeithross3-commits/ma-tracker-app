@@ -91,12 +91,14 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
       const data = await response.json();
       console.log("[QUOTE] API response:", data);
       console.log("[QUOTE] Timestamp from API:", data.timestamp);
-      setStockQuote({
+      const newQuote = {
         price: data.price,
         bid: data.bid,
         ask: data.ask,
         timestamp: data.timestamp,
-      });
+      };
+      console.log("[QUOTE] Setting stockQuote to:", newQuote);
+      setStockQuote(newQuote);
       
       // Only update break price if user hasn't manually changed it
       if (!userModifiedBreakPrice) {
@@ -333,17 +335,14 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
               ) : stockQuote ? (
                 <>
                   <div className="text-xl font-mono text-gray-100">${stockQuote.price.toFixed(2)}</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {stockQuote.bid && stockQuote.ask 
-                      ? `Bid: $${stockQuote.bid.toFixed(2)} | Ask: $${stockQuote.ask.toFixed(2)}`
-                      : formatQuoteTimestamp(stockQuote.timestamp)
-                    }
-                  </div>
                   {stockQuote.bid && stockQuote.ask && (
-                    <div className="text-xs text-gray-500">
-                      {formatQuoteTimestamp(stockQuote.timestamp)}
+                    <div className="text-xs text-gray-500 mt-1">
+                      Bid: ${stockQuote.bid.toFixed(2)} | Ask: ${stockQuote.ask.toFixed(2)}
                     </div>
                   )}
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {formatQuoteTimestamp(stockQuote.timestamp)}
+                  </div>
                 </>
               ) : null}
             </div>
