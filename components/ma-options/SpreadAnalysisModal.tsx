@@ -14,20 +14,35 @@ function getProfitColorClass(value: number): string {
 }
 
 /**
- * Format quote timestamp for display
- * Shows "as of X:XX PM" for today, or "Jan 11, X:XX PM" for other days
+ * Format quote timestamp for display in Eastern Time
+ * Shows "as of X:XX PM ET" for today, or "Jan 11, X:XX PM ET" for other days
  */
 function formatQuoteTimestamp(timestamp: string): string {
   if (timestamp === "saved") return "saved";
   
   const date = new Date(timestamp);
-  const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
+  const options: Intl.DateTimeFormatOptions = { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    timeZone: 'America/New_York'
+  };
+  
+  // Check if date is today in Eastern Time
+  const nowET = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const dateET = date.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const isToday = nowET === dateET;
+  
+  const timeStr = date.toLocaleTimeString('en-US', options);
   
   if (isToday) {
-    return `as of ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    return `as of ${timeStr} ET`;
   } else {
-    return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    const dateStr = date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      timeZone: 'America/New_York'
+    });
+    return `${dateStr}, ${timeStr} ET`;
   }
 }
 
@@ -89,16 +104,12 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
       }
       
       const data = await response.json();
-      console.log("[QUOTE] API response:", data);
-      console.log("[QUOTE] Timestamp from API:", data.timestamp);
-      const newQuote = {
+      setStockQuote({
         price: data.price,
         bid: data.bid,
         ask: data.ask,
         timestamp: data.timestamp,
-      };
-      console.log("[QUOTE] Setting stockQuote to:", newQuote);
-      setStockQuote(newQuote);
+      });
       
       // Only update break price if user hasn't manually changed it
       if (!userModifiedBreakPrice) {
