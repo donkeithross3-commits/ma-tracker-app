@@ -165,6 +165,7 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
         body: JSON.stringify({
           dealId: selectedDeal.id,
           strategy,
+          underlyingPrice: chainData?.spotPrice,
         }),
       });
 

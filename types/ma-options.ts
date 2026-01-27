@@ -60,6 +60,7 @@ export interface WatchedSpreadDTO {
   legs: StrategyLeg[];
   entryPremium: number;
   currentPremium: number | null;
+  underlyingPrice: number | null;
   maxProfit: number;
   maxLoss: number;
   returnOnRisk: number;
@@ -130,6 +131,7 @@ export interface GenerateCandidatesResponse {
 export interface WatchSpreadRequest {
   dealId: string;
   strategy: CandidateStrategy;
+  underlyingPrice?: number;
   notes?: string;
 }
 

@@ -243,6 +243,7 @@ model WatchedSpread {
   returnOnRisk    Decimal     @map("return_on_risk") @db.Decimal(10, 4)
   annualizedYield Decimal     @map("annualized_yield") @db.Decimal(10, 4)
   currentPremium  Decimal?    @map("current_premium") @db.Decimal(10, 4)
+  underlyingPrice Decimal?    @map("underlying_price") @db.Decimal(10, 4)
   lastUpdated     DateTime?   @map("last_updated")
   avgBidAskSpread Decimal?    @map("avg_bid_ask_spread") @db.Decimal(10, 6)
   avgVolume       Int?        @map("avg_volume")

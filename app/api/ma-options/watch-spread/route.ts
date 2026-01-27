@@ -8,7 +8,7 @@ import type {
 export async function POST(request: NextRequest) {
   try {
     const body: WatchSpreadRequest = await request.json();
-    const { dealId: scannerDealId, strategy, notes } = body;
+    const { dealId: scannerDealId, strategy, underlyingPrice, notes } = body;
 
     if (!scannerDealId || !strategy) {
       return NextResponse.json(
@@ -53,6 +53,7 @@ export async function POST(request: NextRequest) {
         maxLoss: strategy.maxLoss,
         returnOnRisk: strategy.returnOnRisk,
         annualizedYield: strategy.annualizedYield,
+        underlyingPrice: underlyingPrice || null,
         avgBidAskSpread:
           strategy.legs.reduce(
             (sum, leg) => sum + (leg.ask - leg.bid) / leg.mid,

@@ -67,6 +67,7 @@ export async function GET(request: NextRequest) {
         legs: spread.legs as any,
         entryPremium,
         currentPremium,
+        underlyingPrice: spread.underlyingPrice?.toNumber() || null,
         maxProfit: spread.maxProfit.toNumber(),
         maxLoss: spread.maxLoss.toNumber(),
         returnOnRisk: spread.returnOnRisk.toNumber(),

@@ -40,7 +40,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
   const [quoteError, setQuoteError] = useState<string | null>(null);
   
   // User inputs
-  const [dealProbability, setDealProbability] = useState(75); // 75% default
+  const [dealProbability, setDealProbability] = useState(95); // 95% default
   const [breakPrice, setBreakPrice] = useState<number | null>(null);
   
   // Fetch stock quote on mount
@@ -69,9 +69,9 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
           timestamp: data.timestamp,
         });
         
-        // Set default break price to 75% of current stock price
+        // Set default break price to 80% of current stock price (20% discount)
         if (!breakPrice) {
-          setBreakPrice(Math.round(data.price * 0.75 * 100) / 100);
+          setBreakPrice(Math.round(data.price * 0.80 * 100) / 100);
         }
       } catch (error) {
         setQuoteError(error instanceof Error ? error.message : "Failed to fetch quote");

@@ -41,6 +41,29 @@ async function fetchPricesViaRelay(
   }
 }
 
+/**
+ * Fetch underlying stock quote via WebSocket relay
+ */
+async function fetchStockQuote(ticker: string): Promise<{price: number} | null> {
+  try {
+    const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/stock-quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker }),
+    });
+    
+    if (!response.ok) {
+      return null;
+    }
+    
+    const data = await response.json();
+    return { price: data.price };
+  } catch (error) {
+    console.log(`[STOCK QUOTE] Error fetching ${ticker}: ${error}`);
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   
@@ -115,6 +138,18 @@ export async function POST(request: NextRequest) {
     
     console.log(`[REFRESH PRICES] Fetched ${totalFetched}/${contractsNeeded.size} prices`);
     
+    // Fetch underlying stock prices for all unique tickers
+    const uniqueTickers = [...new Set(spreads.map(s => s.scannerDeal?.ticker).filter(Boolean))] as string[];
+    const stockPrices = new Map<string, number>();
+    
+    for (const ticker of uniqueTickers) {
+      const quote = await fetchStockQuote(ticker);
+      if (quote) {
+        stockPrices.set(ticker, quote.price);
+        console.log(`[REFRESH PRICES] Stock quote for ${ticker}: $${quote.price}`);
+      }
+    }
+    
     // Update spreads
     const updates = [];
     const now = new Date();
@@ -148,10 +183,14 @@ export async function POST(request: NextRequest) {
       }
       
       if (allLegsFound) {
+        const ticker = spread.scannerDeal!.ticker;
+        const underlyingPrice = stockPrices.get(ticker);
+        
         const updated = await prisma.watchedSpread.update({
           where: { id: spread.id },
           data: {
             currentPremium: netPremium,
+            underlyingPrice: underlyingPrice || undefined,
             lastUpdated: now,
             legs: updatedLegs as any,
           },
@@ -160,6 +199,7 @@ export async function POST(request: NextRequest) {
         updates.push({
           spreadId: updated.id,
           currentPremium: updated.currentPremium?.toNumber() || 0,
+          underlyingPrice: updated.underlyingPrice?.toNumber() || null,
           lastUpdated: updated.lastUpdated?.toISOString() || "",
         });
       }
