@@ -213,10 +213,16 @@ export default function IBConnectionStatus() {
         >
           <span>{showAgentPanel ? "▼" : "▶"}</span>
           <span>Use Your Own IB Account</span>
+          <span className="ml-1 px-1.5 py-0.5 bg-yellow-600/30 text-yellow-400 rounded text-[9px] font-medium">
+            ALPHA
+          </span>
         </button>
 
         {showAgentPanel && (
           <div className="mt-2 bg-gray-800 rounded p-3 text-xs">
+            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded px-2 py-1.5 mb-3 text-yellow-300 text-[10px]">
+              This feature is under development and in alpha testing (dev team only).
+            </div>
             <p className="text-gray-300 mb-3">
               Run a local agent to get market data from your personal IB account.
             </p>
