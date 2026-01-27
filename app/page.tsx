@@ -40,7 +40,7 @@ export default function Home() {
                   </p>
                 </div>
                 <span className="text-xs bg-yellow-500/20 text-yellow-400 px-3 py-1 rounded-full">
-                  Development
+                  Beta Testing
                 </span>
               </div>
             </Link>
