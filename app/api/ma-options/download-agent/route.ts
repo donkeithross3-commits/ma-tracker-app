@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/lib/db";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import archiver from "archiver";
-import { Readable } from "stream";
+
+// Default user ID for single-user mode
+const DEFAULT_USER_ID = "default-user";
 
 /**
  * Generate a secure random API key
@@ -18,20 +18,11 @@ function generateApiKey(): string {
 
 /**
  * GET /api/ma-options/download-agent
- * Download the IB Data Agent as a ZIP file with the user's API key pre-configured.
+ * Download the IB Data Agent as a ZIP file with the API key pre-configured.
  */
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const userId = session.user.id;
+    const userId = DEFAULT_USER_ID;
 
     // Get or create API key
     let agentKey = await prisma.agentApiKey.findUnique({

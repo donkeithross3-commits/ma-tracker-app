@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/lib/db";
 import crypto from "crypto";
+
+// Default user ID for single-user mode (since this app doesn't have multi-user auth)
+const DEFAULT_USER_ID = "default-user";
 
 /**
  * Generate a secure random API key
@@ -15,20 +16,11 @@ function generateApiKey(): string {
 
 /**
  * GET /api/ma-options/agent-key
- * Get the current user's agent API key, creating one if it doesn't exist.
+ * Get the agent API key, creating one if it doesn't exist.
  */
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const userId = session.user.id;
+    const userId = DEFAULT_USER_ID;
 
     // Try to find existing key
     let agentKey = await prisma.agentApiKey.findUnique({
@@ -61,20 +53,11 @@ export async function GET() {
 
 /**
  * POST /api/ma-options/agent-key
- * Regenerate the user's agent API key.
+ * Regenerate the agent API key.
  */
 export async function POST() {
   try {
-    const session = await getServerSession(authOptions);
-    
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const userId = session.user.id;
+    const userId = DEFAULT_USER_ID;
     const newKey = generateApiKey();
 
     // Upsert: update existing or create new
@@ -108,20 +91,11 @@ export async function POST() {
 
 /**
  * DELETE /api/ma-options/agent-key
- * Delete the user's agent API key (disconnects any active agents).
+ * Delete the agent API key (disconnects any active agents).
  */
 export async function DELETE() {
   try {
-    const session = await getServerSession(authOptions);
-    
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const userId = session.user.id;
+    const userId = DEFAULT_USER_ID;
 
     await prisma.agentApiKey.deleteMany({
       where: { userId },
