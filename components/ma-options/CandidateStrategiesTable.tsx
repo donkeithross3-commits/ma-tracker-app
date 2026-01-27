@@ -44,9 +44,24 @@ export default function CandidateStrategiesTable({
     const netPremiumFarTouch = candidate.netPremiumFarTouch; // Far touch entry cost
     
     // Calculate days to expiration
-    const expiryDate = candidate.expiration instanceof Date 
-      ? candidate.expiration 
-      : new Date(candidate.expiration);
+    let expiryDate: Date;
+    if (candidate.expiration instanceof Date) {
+      expiryDate = candidate.expiration;
+    } else if (typeof candidate.expiration === 'string') {
+      // Handle YYYYMMDD format (e.g., "20260515")
+      if (/^\d{8}$/.test(candidate.expiration)) {
+        const year = parseInt(candidate.expiration.substring(0, 4));
+        const month = parseInt(candidate.expiration.substring(4, 6)) - 1; // 0-indexed
+        const day = parseInt(candidate.expiration.substring(6, 8));
+        expiryDate = new Date(year, month, day);
+      } else {
+        // Try ISO format or other parseable formats
+        expiryDate = new Date(candidate.expiration);
+      }
+    } else {
+      expiryDate = new Date(candidate.expiration);
+    }
+    
     const daysToExpiry = Math.max(1, Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
     const yearsToExpiry = daysToExpiry / 365;
     
