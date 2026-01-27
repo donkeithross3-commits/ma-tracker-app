@@ -508,14 +508,50 @@ class IBMergerArbScanner(EWrapper, EClient):
                     max_strike = max(call_max_strike, put_max_strike)
                     relevant_strikes = [s for s in available_strikes if min_strike <= s <= max_strike]
                     
-                    # OPTIMIZATION: Filter to $5 strike intervals for faster scanning
-                    # This typically reduces contracts by 50-80% while keeping all practical trades
-                    strike_interval = 5.0 if price_to_use > 50 else 2.5
-                    filtered_strikes = [s for s in relevant_strikes if s % strike_interval == 0]
+                    # #region agent log
+                    import json
+                    with open('/Users/donaldross/Desktop/py_proj/.cursor/debug.log', 'a') as f:
+                        f.write(json.dumps({"location": "scanner.py:509", "message": "relevant_strikes before filtering", "data": {"ticker": ticker, "expiry": expiry, "relevant_strikes": relevant_strikes, "min_strike": min_strike, "max_strike": max_strike, "price_to_use": price_to_use}, "timestamp": int(__import__('time').time()*1000), "sessionId": "debug-session", "hypothesisId": "A"}) + '\n')
+                    # #endregion
+                    
+                    # OPTIMIZATION: Detect actual strike interval from available strikes
+                    # This ensures we don't skip $1 strikes when they exist (common for low-priced stocks)
+                    if len(relevant_strikes) >= 2:
+                        sorted_strikes = sorted(relevant_strikes)
+                        # Calculate minimum difference between consecutive strikes
+                        min_diff = min(sorted_strikes[i+1] - sorted_strikes[i] for i in range(len(sorted_strikes)-1))
+                        # Use detected interval, but cap at $5 for high-priced stocks to avoid too many requests
+                        if price_to_use > 100:
+                            strike_interval = max(min_diff, 5.0)
+                        elif price_to_use > 50:
+                            strike_interval = max(min_diff, 2.5)
+                        else:
+                            # For low-priced stocks, use the actual minimum interval (could be $1 or $0.50)
+                            strike_interval = min_diff
+                    else:
+                        strike_interval = 5.0 if price_to_use > 50 else 2.5
+                    
+                    # #region agent log
+                    with open('/Users/donaldross/Desktop/py_proj/.cursor/debug.log', 'a') as f:
+                        f.write(json.dumps({"location": "scanner.py:530", "message": "detected strike_interval", "data": {"ticker": ticker, "strike_interval": strike_interval, "price_to_use": price_to_use}, "timestamp": int(__import__('time').time()*1000), "sessionId": "debug-session", "hypothesisId": "B"}) + '\n')
+                    # #endregion
+                    
+                    # Filter strikes to the detected interval
+                    # Use a tolerance for floating point comparison
+                    def is_on_interval(strike, interval):
+                        remainder = strike % interval
+                        return remainder < 0.01 or (interval - remainder) < 0.01
+                    
+                    filtered_strikes = [s for s in relevant_strikes if is_on_interval(s, strike_interval)]
                     
                     # If filtering removed all strikes, keep the original set
                     if not filtered_strikes:
                         filtered_strikes = relevant_strikes
+                    
+                    # #region agent log
+                    with open('/Users/donaldross/Desktop/py_proj/.cursor/debug.log', 'a') as f:
+                        f.write(json.dumps({"location": "scanner.py:545", "message": "filtered_strikes after interval filter", "data": {"ticker": ticker, "expiry": expiry, "filtered_strikes": filtered_strikes, "strike_interval": strike_interval}, "timestamp": int(__import__('time').time()*1000), "sessionId": "debug-session", "hypothesisId": "C"}) + '\n')
+                    # #endregion
                     
                     print(f"Call strike range for {expiry}: ${call_min_strike:.2f} - ${call_max_strike:.2f}")
                     print(f"Put strike range for {expiry}: ${put_min_strike:.2f} - ${put_max_strike:.2f}")
