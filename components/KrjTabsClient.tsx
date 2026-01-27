@@ -467,6 +467,11 @@ export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
                 ({filteredRows.length} of {group.rows.length} rows)
               </span>
             )}
+
+            {/* Tooltip hint */}
+            <span className="text-xs text-gray-500 ml-auto">
+              hold mouse motionless over column titles until &apos;?&apos; changes to text box to see more
+            </span>
           </div>
 
           {/* Main table */}
