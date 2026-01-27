@@ -1126,6 +1126,7 @@ class MergerArbAnalyzer:
     def find_best_opportunities(self, options: List[OptionData],
                                current_price: float,
                                top_n: int = 10,
+                               long_strike_lower_pct: float = 0.25,
                                call_short_strike_lower_pct: float = 0.05,
                                call_short_strike_upper_pct: float = 0.10,
                                put_short_strike_lower_pct: float = 0.05,
@@ -1134,6 +1135,7 @@ class MergerArbAnalyzer:
         Find the best opportunities from option chain
         
         Args:
+            long_strike_lower_pct: % BELOW deal price for long leg minimum (e.g., 0.25 = 25% below, deeper ITM for downside protection)
             call_short_strike_lower_pct: Call spread - % BELOW deal price for short leg (e.g., 0.05 = 5% below)
             call_short_strike_upper_pct: Call spread - % ABOVE deal price for short leg (e.g., 0.10 = 10% above, higher offer buffer)
             put_short_strike_lower_pct: Put spread - % BELOW deal price for short leg (e.g., 0.05 = 5% below)
@@ -1142,6 +1144,9 @@ class MergerArbAnalyzer:
         from collections import defaultdict
 
         opportunities = []
+
+        # Long leg lower bound (deepest ITM to consider - provides downside protection if deal breaks)
+        long_lower_bound = self.deal.total_deal_value * (1.0 - long_strike_lower_pct)  # e.g., 0.25 -> 0.75
 
         # Convert percentage below/above to actual multipliers for CALL spreads
         call_short_lower_mult = 1.0 - call_short_strike_lower_pct  # e.g., 0.05 -> 0.95
@@ -1166,6 +1171,7 @@ class MergerArbAnalyzer:
 
         print(f"DEBUG: Analyzing spreads for {len(options_by_expiry)} expirations")
         print(f"DEBUG: Deal price: ${self.deal.total_deal_value:.2f}")
+        print(f"DEBUG: Long leg strike range: ${long_lower_bound:.2f} - ${self.deal.total_deal_value:.2f}")
         print(f"DEBUG: Call short strike range: ${self.deal.total_deal_value * call_short_lower_mult:.2f} - ${self.deal.total_deal_value * call_short_upper_mult:.2f}")
         print(f"DEBUG: Put short strike range: ${self.deal.total_deal_value * put_short_lower_mult:.2f} - ${self.deal.total_deal_value * put_short_upper_mult:.2f}")
 
@@ -1182,8 +1188,9 @@ class MergerArbAnalyzer:
             for i in range(len(sorted_calls) - 1):
                 long_call = sorted_calls[i]
 
-                # Only consider long strikes below deal price
-                if long_call.strike >= self.deal.total_deal_value:
+                # Long leg must be between lower bound and deal price
+                # Deeper ITM options provide downside protection if deal breaks
+                if long_call.strike < long_lower_bound or long_call.strike >= self.deal.total_deal_value:
                     continue
 
                 for j in range(i + 1, min(i + 5, len(sorted_calls))):  # Look at next 4 strikes
@@ -1231,8 +1238,9 @@ class MergerArbAnalyzer:
             for i in range(len(sorted_puts) - 1):
                 long_put = sorted_puts[i]  # Buy lower strike put
 
-                # Only consider long strikes below deal price
-                if long_put.strike >= self.deal.total_deal_value:
+                # Long leg must be between lower bound and deal price
+                # Deeper ITM options provide downside protection if deal breaks
+                if long_put.strike < long_lower_bound or long_put.strike >= self.deal.total_deal_value:
                     continue
 
                 for j in range(i + 1, min(i + 5, len(sorted_puts))):  # Look at next 4 strikes

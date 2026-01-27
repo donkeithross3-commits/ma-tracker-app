@@ -274,6 +274,7 @@ async def generate_strategies(request: GenerateStrategiesRequest) -> GenerateStr
         current_price = request.chainData.get('spotPrice', request.dealPrice)
         
         logger.info(f"Generating strategies with params: "
+                   f"long_lower={params.strikeLowerBound}%, "
                    f"call_short={params.callShortStrikeLower}%-{params.callShortStrikeUpper}%, "
                    f"put_short={params.putShortStrikeLower}%-{params.putShortStrikeUpper}%, "
                    f"top_n={params.topStrategiesPerExpiration}")
@@ -282,6 +283,7 @@ async def generate_strategies(request: GenerateStrategiesRequest) -> GenerateStr
             options, 
             current_price, 
             top_n=params.topStrategiesPerExpiration,
+            long_strike_lower_pct=params.strikeLowerBound / 100.0,
             call_short_strike_lower_pct=params.callShortStrikeLower / 100.0,
             call_short_strike_upper_pct=params.callShortStrikeUpper / 100.0,
             put_short_strike_lower_pct=params.putShortStrikeLower / 100.0,

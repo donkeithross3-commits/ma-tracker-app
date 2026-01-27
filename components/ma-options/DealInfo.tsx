@@ -139,9 +139,9 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
             </div>
           </div>
 
-          {/* Row 2: Option Chain Fetch Range */}
+          {/* Row 2: Long Leg & Fetch Range */}
           <div className="bg-gray-800/50 rounded p-3">
-            <div className="text-xs font-medium text-gray-300 mb-2">Option Chain Fetch Range</div>
+            <div className="text-xs font-medium text-blue-400 mb-2">Long Leg Range (also controls fetch)</div>
             <div className="grid grid-cols-2 gap-4">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-400 w-16">Lower</span>
@@ -153,7 +153,7 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
                   onChange={(e) => setParams({ ...params, strikeLowerBound: parseInt(e.target.value) || 0 })}
                   className={inputClass}
                 />
-                <span className="text-xs text-gray-500">% below</span>
+                <span className="text-xs text-gray-500">% below deal</span>
                 <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 - params.strikeLowerBound / 100)).toFixed(0)}</span>
               </div>
               <div className="flex items-center gap-2">
@@ -166,10 +166,11 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
                   onChange={(e) => setParams({ ...params, strikeUpperBound: parseInt(e.target.value) || 0 })}
                   className={inputClass}
                 />
-                <span className="text-xs text-gray-500">% above</span>
+                <span className="text-xs text-gray-500">% above deal</span>
                 <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 + params.strikeUpperBound / 100)).toFixed(0)}</span>
               </div>
             </div>
+            <div className="text-[10px] text-gray-500 mt-2">Deeper ITM long legs provide downside protection if deal breaks</div>
           </div>
 
           {/* Row 3: Short Strike Ranges - Call vs Put */}
@@ -289,7 +290,7 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
             <strong className="text-gray-300">Quick Guide:</strong>
             <ul className="mt-1 space-y-1 ml-4 list-disc">
               <li><strong>Days Before Close:</strong> Include expirations from N days before close through 2 after (0 = 2 after + exact match only)</li>
-              <li><strong>Fetch Range:</strong> Which strikes to retrieve from IB (wider = more data but slower)</li>
+              <li><strong>Long Leg Range:</strong> Controls which bought strikes to consider - deeper ITM costs more but protects if deal breaks</li>
               <li><strong>Call Spread Short:</strong> Range for sold call strike - wider upper bound allows buffer for higher offers</li>
               <li><strong>Put Spread Short:</strong> Range for sold put strike - tighter upper bound keeps it near deal price</li>
               <li><strong>Top Strategies:</strong> Best N spreads per expiration ranked by annualized return</li>
