@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ScannerDeal } from "@/types/ma-options";
 
 export interface ScanParameters {
@@ -30,6 +30,14 @@ interface DealInfoProps {
 
 export default function DealInfo({ deal, onLoadChain, loading, ibConnected, dealPrice, onDealPriceChange }: DealInfoProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  
+  // Local string state for the input to preserve decimal points while typing
+  const [dealPriceInput, setDealPriceInput] = useState(dealPrice.toString());
+  
+  // Sync local input when external dealPrice changes (e.g., reset button, deal selection)
+  useEffect(() => {
+    setDealPriceInput(dealPrice.toString());
+  }, [dealPrice]);
   
   // Track if deal price has been modified from original
   const dealPriceModified = dealPrice !== deal.expectedClosePrice;
@@ -119,17 +127,24 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected, deal
             <input
               type="text"
               inputMode="decimal"
-              value={dealPrice}
+              value={dealPriceInput}
               onChange={(e) => {
                 const val = e.target.value;
-                // Allow empty or partial input while typing
-                if (val === '' || val === '.') {
-                  onDealPriceChange(0);
-                } else {
+                // Allow valid numeric patterns including trailing decimals
+                if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                  setDealPriceInput(val);
+                  // Update parent with numeric value (0 for empty/partial)
                   const parsed = parseFloat(val);
-                  if (!isNaN(parsed)) {
-                    onDealPriceChange(parsed);
-                  }
+                  onDealPriceChange(isNaN(parsed) ? 0 : parsed);
+                }
+              }}
+              onBlur={() => {
+                // Clean up the display on blur (remove trailing decimal if no digits after)
+                const parsed = parseFloat(dealPriceInput);
+                if (!isNaN(parsed)) {
+                  setDealPriceInput(parsed.toString());
+                } else {
+                  setDealPriceInput(dealPrice.toString());
                 }
               }}
               className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 font-mono text-sm"
