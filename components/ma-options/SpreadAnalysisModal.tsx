@@ -35,18 +35,31 @@ interface ComparisonMetrics {
 }
 
 export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisModalProps) {
-  const [stockQuote, setStockQuote] = useState<StockQuote | null>(null);
-  const [quoteLoading, setQuoteLoading] = useState(true);
+  // Initialize with saved price if available for instant rendering
+  const [stockQuote, setStockQuote] = useState<StockQuote | null>(
+    spread.underlyingPrice 
+      ? { price: spread.underlyingPrice, bid: null, ask: null, timestamp: "saved" }
+      : null
+  );
+  // Only show loading if we don't have a saved price
+  const [quoteLoading, setQuoteLoading] = useState(!spread.underlyingPrice);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [isLiveQuote, setIsLiveQuote] = useState(false);
   
-  // User inputs
+  // User inputs - initialize breakPrice from saved price if available
   const [dealProbability, setDealProbability] = useState(95); // 95% default
-  const [breakPrice, setBreakPrice] = useState<number | null>(null);
+  const [breakPrice, setBreakPrice] = useState<number | null>(
+    spread.underlyingPrice ? Math.round(spread.underlyingPrice * 0.80 * 100) / 100 : null
+  );
+  const [userModifiedBreakPrice, setUserModifiedBreakPrice] = useState(false);
   
-  // Fetch stock quote on mount
+  // Fetch live stock quote on mount (updates the saved price)
   useEffect(() => {
     async function fetchQuote() {
-      setQuoteLoading(true);
+      // If we have a saved price, we're "updating" not "loading"
+      if (!spread.underlyingPrice) {
+        setQuoteLoading(true);
+      }
       setQuoteError(null);
       
       try {
@@ -68,13 +81,18 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
           ask: data.ask,
           timestamp: data.timestamp,
         });
+        setIsLiveQuote(true);
         
-        // Set default break price to 80% of current stock price (20% discount)
-        if (!breakPrice) {
+        // Only update break price if user hasn't manually changed it
+        if (!userModifiedBreakPrice && !breakPrice) {
           setBreakPrice(Math.round(data.price * 0.80 * 100) / 100);
         }
       } catch (error) {
-        setQuoteError(error instanceof Error ? error.message : "Failed to fetch quote");
+        // Only set error if we don't have any price data
+        if (!stockQuote) {
+          setQuoteError(error instanceof Error ? error.message : "Failed to fetch quote");
+        }
+        // If we have saved data, the error is less critical - just mark as not live
       } finally {
         setQuoteLoading(false);
       }
@@ -284,12 +302,21 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
             {/* Current Stock Price */}
             <div className="bg-gray-800 rounded p-3">
               <div className="text-xs text-gray-500 mb-1">Current Stock Price</div>
-              {quoteLoading ? (
+              {quoteLoading && !stockQuote ? (
                 <div className="text-gray-400">Loading...</div>
-              ) : quoteError ? (
+              ) : quoteError && !stockQuote ? (
                 <div className="text-red-400 text-sm">{quoteError}</div>
               ) : stockQuote ? (
-                <div className="text-xl font-mono text-gray-100">${stockQuote.price.toFixed(2)}</div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xl font-mono text-gray-100">${stockQuote.price.toFixed(2)}</span>
+                  {quoteLoading ? (
+                    <span className="text-xs text-yellow-400">(updating...)</span>
+                  ) : isLiveQuote ? (
+                    <span className="text-xs text-green-400">(live)</span>
+                  ) : (
+                    <span className="text-xs text-gray-500">(saved)</span>
+                  )}
+                </div>
               ) : null}
               {stockQuote && (
                 <div className="text-xs text-gray-500 mt-1">
@@ -331,7 +358,10 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                   type="number"
                   step="0.01"
                   value={breakPrice ?? ""}
-                  onChange={(e) => setBreakPrice(parseFloat(e.target.value) || null)}
+                  onChange={(e) => {
+                    setBreakPrice(parseFloat(e.target.value) || null);
+                    setUserModifiedBreakPrice(true);
+                  }}
                   className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-gray-100 text-sm"
                   placeholder="e.g., stock price without deal premium"
                 />
@@ -392,33 +422,46 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                   <tr className="border-b border-gray-700/50">
                     <td className="py-2 px-3 text-gray-400">Max Profit (deal closes)</td>
                     <td className={`py-2 px-3 text-right font-mono ${getProfitColorClass(metrics.stock.maxProfit)}`}>
-                      {formatCurrency(metrics.stock.maxProfit)} <span className="text-gray-500">({(metrics.stock.maxProfit / metrics.stock.capitalRequired * 100).toFixed(1)}%)</span>
+                      +{(metrics.stock.maxProfit / metrics.stock.capitalRequired * 100).toFixed(1)}% <span className="text-gray-500">({formatCurrency(metrics.stock.maxProfit)})</span>
                     </td>
                     <td className={`py-2 px-3 text-right font-mono ${getProfitColorClass(metrics.spread.maxProfit)}`}>
-                      {formatCurrency(metrics.spread.maxProfit)} <span className="text-gray-500">({(metrics.spread.maxProfit / metrics.spread.capitalRequired * 100).toFixed(1)}%)</span>
+                      +{(metrics.spread.maxProfit / metrics.spread.capitalRequired * 100).toFixed(1)}% <span className="text-gray-500">({formatCurrency(metrics.spread.maxProfit)})</span>
                     </td>
                     <td className="py-2 px-3 text-right">
-                      {metrics.stock.maxProfit > metrics.spread.maxProfit ? (
-                        <span className="text-blue-400">Stock +{formatCurrency(metrics.stock.maxProfit - metrics.spread.maxProfit)}</span>
-                      ) : (
-                        <span className="text-purple-400">Spread +{formatCurrency(metrics.spread.maxProfit - metrics.stock.maxProfit)}</span>
-                      )}
+                      {(() => {
+                        const stockProfitPct = metrics.stock.maxProfit / metrics.stock.capitalRequired * 100;
+                        const spreadProfitPct = metrics.spread.maxProfit / metrics.spread.capitalRequired * 100;
+                        if (spreadProfitPct > stockProfitPct) {
+                          return <span className="text-purple-400">Spread +{(spreadProfitPct - stockProfitPct).toFixed(1)}pp</span>;
+                        } else if (stockProfitPct > spreadProfitPct) {
+                          return <span className="text-blue-400">Stock +{(stockProfitPct - spreadProfitPct).toFixed(1)}pp</span>;
+                        } else {
+                          return <span className="text-gray-400">—</span>;
+                        }
+                      })()}
                     </td>
                   </tr>
                   <tr className="border-b border-gray-700/50">
                     <td className="py-2 px-3 text-gray-400">Max Loss (deal breaks)</td>
                     <td className="py-2 px-3 text-right font-mono text-red-400">
-                      {formatCurrency(-metrics.stock.maxLoss)} <span className="text-gray-500">({(metrics.stock.maxLoss / metrics.stock.capitalRequired * 100).toFixed(1)}%)</span>
+                      -{(metrics.stock.maxLoss / metrics.stock.capitalRequired * 100).toFixed(1)}% <span className="text-gray-500">({formatCurrency(-metrics.stock.maxLoss)})</span>
                     </td>
                     <td className="py-2 px-3 text-right font-mono text-red-400">
-                      {formatCurrency(-metrics.spread.maxLoss)} <span className="text-gray-500">({(metrics.spread.maxLoss / metrics.spread.capitalRequired * 100).toFixed(1)}%)</span>
+                      -{(metrics.spread.maxLoss / metrics.spread.capitalRequired * 100).toFixed(1)}% <span className="text-gray-500">({formatCurrency(-metrics.spread.maxLoss)})</span>
                     </td>
                     <td className="py-2 px-3 text-right">
-                      {metrics.stock.maxLoss > metrics.spread.maxLoss ? (
-                        <span className="text-purple-400">Spread saves {formatCurrency(metrics.stock.maxLoss - metrics.spread.maxLoss)}</span>
-                      ) : (
-                        <span className="text-blue-400">Stock saves {formatCurrency(metrics.spread.maxLoss - metrics.stock.maxLoss)}</span>
-                      )}
+                      {(() => {
+                        const stockLossPct = metrics.stock.maxLoss / metrics.stock.capitalRequired * 100;
+                        const spreadLossPct = metrics.spread.maxLoss / metrics.spread.capitalRequired * 100;
+                        // Lower % loss is better
+                        if (spreadLossPct < stockLossPct) {
+                          return <span className="text-purple-400">Spread -{(stockLossPct - spreadLossPct).toFixed(1)}pp</span>;
+                        } else if (stockLossPct < spreadLossPct) {
+                          return <span className="text-blue-400">Stock -{(spreadLossPct - stockLossPct).toFixed(1)}pp</span>;
+                        } else {
+                          return <span className="text-gray-400">—</span>;
+                        }
+                      })()}
                     </td>
                   </tr>
                   <tr className="border-b border-gray-700/50">
@@ -520,10 +563,10 @@ function PayoffChart({ data }: PayoffChartProps) {
   const minPL = Math.min(...points.flatMap(p => [p.stockPL, p.spreadPL]));
   const maxPL = Math.max(...points.flatMap(p => [p.stockPL, p.spreadPL]));
   
-  // SVG dimensions
+  // SVG dimensions - increased bottom padding for X-axis label
   const width = 600;
-  const height = 250;
-  const padding = { top: 20, right: 20, bottom: 40, left: 60 };
+  const height = 270;
+  const padding = { top: 20, right: 20, bottom: 55, left: 70 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
   
@@ -601,6 +644,27 @@ function PayoffChart({ data }: PayoffChartProps) {
       </text>
       <text x={padding.left - 10} y={scaleY(minPL)} textAnchor="end" dominantBaseline="middle" className="text-[10px] fill-gray-500">
         ${Math.round(minPL)}
+      </text>
+      
+      {/* Y-axis title (rotated) */}
+      <text
+        x={15}
+        y={(padding.top + height - padding.bottom) / 2}
+        transform={`rotate(-90, 15, ${(padding.top + height - padding.bottom) / 2})`}
+        textAnchor="middle"
+        className="text-[11px] fill-gray-400"
+      >
+        Payoff ($)
+      </text>
+      
+      {/* X-axis title */}
+      <text
+        x={(padding.left + width - padding.right) / 2}
+        y={height - 10}
+        textAnchor="middle"
+        className="text-[11px] fill-gray-400"
+      >
+        Stock Price ($)
       </text>
       
       {/* Legend */}
