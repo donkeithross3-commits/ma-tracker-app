@@ -149,8 +149,10 @@ export function BidAskGrids({ legs }: { legs: StrategyLeg[] }) {
   return (
     <div className="flex gap-2">
       {legs.map((leg, idx) => {
-        // Create leg label: e.g., "BUY 145C" or "SELL 150C"
-        const legLabel = `${leg.side} ${leg.strike.toFixed(0)}${leg.right}`;
+        // Create leg label: e.g., "BUY 145.50C" or "SELL 150C"
+        // Show full strike price (no rounding) to avoid confusion
+        const strikeDisplay = leg.strike % 1 === 0 ? leg.strike.toFixed(0) : leg.strike.toFixed(2);
+        const legLabel = `${leg.side} ${strikeDisplay}${leg.right}`;
         
         return (
           <div key={idx} className="border border-gray-700 rounded">

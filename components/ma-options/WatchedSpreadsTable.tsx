@@ -139,11 +139,13 @@ export default function WatchedSpreadsTable({
                       {spread.dealTargetName}
                     </div>
                     <div className="text-gray-500 text-[10px] mt-0.5">
-                      ${spread.dealPrice?.toFixed(2) || "—"} | {spread.dealExpectedCloseDate ? new Date(spread.dealExpectedCloseDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                      ${spread.dealPrice?.toFixed(2) || "—"} | {spread.dealExpectedCloseDate ? new Date(spread.dealExpectedCloseDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
                     </div>
                   </td>
                   <td className="py-2 px-1 text-gray-300">
-                    {spread.strategyType}
+                    {spread.strategyType === "spread" 
+                      ? (spread.legs[0]?.right === "C" ? "call spread" : "put spread")
+                      : spread.strategyType}
                   </td>
                   <td className="py-2 px-1 text-gray-300">
                     {new Date(spread.expiration).toLocaleDateString()}
