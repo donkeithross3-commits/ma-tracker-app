@@ -25,6 +25,7 @@ model User {
   dealsUpdated       Deal[]              @relation("DealsUpdated")
   portfolioPositions PortfolioPosition[]
   curatedSpreads     WatchedSpread[]
+  agentApiKey        AgentApiKey?
 
   @@map("users")
 }
@@ -278,4 +279,16 @@ model ScannerDeal {
   @@index([isActive])
   @@index([ticker])
   @@map("scanner_deals")
+}
+
+model AgentApiKey {
+  id        String    @id @default(uuid())
+  userId    String    @unique @map("user_id")
+  key       String    @unique
+  createdAt DateTime  @default(now()) @map("created_at")
+  lastUsed  DateTime? @map("last_used")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([key])
+  @@map("agent_api_keys")
 }

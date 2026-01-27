@@ -1,0 +1,5 @@
+# IB Data Agent - Required Dependencies
+# ======================================
+# Note: ibapi is bundled in the ibapi/ folder, no need to install it.
+
+websockets>=11.0

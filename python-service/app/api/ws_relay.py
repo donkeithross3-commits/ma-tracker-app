@@ -8,6 +8,7 @@ Architecture:
 - Local agents connect via WSS and register as data providers
 - Frontend HTTP requests are routed to connected providers
 - Responses are relayed back to waiting HTTP requests
+- Supports multi-user API keys stored in the database
 """
 
 import asyncio
@@ -22,15 +23,49 @@ from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
+import httpx
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
 
 # Configuration
-PROVIDER_API_KEY = os.environ.get("IB_PROVIDER_API_KEY", "dev-key-change-in-production")
+# Legacy single API key (still supported for backwards compatibility)
+LEGACY_PROVIDER_API_KEY = os.environ.get("IB_PROVIDER_API_KEY", "")
+# Base URL for API key validation (the Next.js app)
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:3000")
 REQUEST_TIMEOUT_SECONDS = 120  # Option chain fetches can take 60+ seconds
 HEARTBEAT_INTERVAL_SECONDS = 30  # Longer interval to avoid timeout during long requests
+
+
+async def validate_api_key(api_key: str) -> Optional[str]:
+    """
+    Validate an API key against the database.
+    
+    Returns the user_id if valid, None if invalid.
+    Also supports legacy single-key mode for backwards compatibility.
+    """
+    # Check legacy key first (for backwards compatibility)
+    if LEGACY_PROVIDER_API_KEY and api_key == LEGACY_PROVIDER_API_KEY:
+        logger.info("Using legacy API key authentication")
+        return "legacy"
+    
+    # Validate against database via internal API
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{API_BASE_URL}/api/ma-options/validate-agent-key",
+                json={"key": api_key},
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("valid"):
+                    return data.get("userId")
+    except Exception as e:
+        logger.error(f"Error validating API key: {e}")
+    
+    return None
 
 
 @dataclass
@@ -48,6 +83,7 @@ class DataProvider:
     """A connected data provider (local agent)"""
     provider_id: str
     websocket: WebSocket
+    user_id: str  # The user this provider belongs to
     connected_at: float = field(default_factory=time.time)
     last_heartbeat: float = field(default_factory=time.time)
     is_active: bool = True
@@ -61,15 +97,16 @@ class ProviderRegistry:
         self.pending_requests: Dict[str, PendingRequest] = {}
         self._lock = asyncio.Lock()
     
-    async def register_provider(self, provider_id: str, websocket: WebSocket) -> DataProvider:
+    async def register_provider(self, provider_id: str, websocket: WebSocket, user_id: str) -> DataProvider:
         """Register a new data provider"""
         async with self._lock:
             provider = DataProvider(
                 provider_id=provider_id,
-                websocket=websocket
+                websocket=websocket,
+                user_id=user_id
             )
             self.providers[provider_id] = provider
-            logger.info(f"Provider registered: {provider_id}")
+            logger.info(f"Provider registered: {provider_id} for user {user_id}")
             return provider
     
     async def unregister_provider(self, provider_id: str):
@@ -86,12 +123,24 @@ class ProviderRegistry:
                             Exception("Provider disconnected")
                         )
     
-    async def get_active_provider(self) -> Optional[DataProvider]:
-        """Get an active provider to handle a request"""
+    async def get_active_provider(self, user_id: Optional[str] = None) -> Optional[DataProvider]:
+        """Get an active provider to handle a request.
+        
+        If user_id is specified, tries to find a provider for that user first.
+        Falls back to any active provider (for shared/legacy mode).
+        """
         async with self._lock:
+            # First try to find a provider for the specific user
+            if user_id:
+                for provider in self.providers.values():
+                    if provider.is_active and provider.user_id == user_id:
+                        return provider
+            
+            # Fall back to any active provider (legacy/shared mode)
             for provider in self.providers.values():
                 if provider.is_active:
                     return provider
+            
             return None
     
     async def add_pending_request(self, request: PendingRequest):
@@ -124,6 +173,7 @@ class ProviderRegistry:
             "providers": [
                 {
                     "id": p.provider_id,
+                    "user_id": p.user_id,
                     "connected_at": datetime.fromtimestamp(p.connected_at).isoformat(),
                     "last_heartbeat": datetime.fromtimestamp(p.last_heartbeat).isoformat(),
                     "is_active": p.is_active
@@ -190,8 +240,11 @@ async def data_provider_websocket(websocket: WebSocket):
             await websocket.close()
             return
         
-        # Validate API key
-        if auth_msg.get("api_key") != PROVIDER_API_KEY:
+        # Validate API key (supports both legacy and per-user keys)
+        api_key = auth_msg.get("api_key", "")
+        user_id = await validate_api_key(api_key)
+        
+        if not user_id:
             logger.warning(f"Invalid API key from provider")
             await websocket.send_json({
                 "type": "auth_response", 
@@ -201,9 +254,9 @@ async def data_provider_websocket(websocket: WebSocket):
             await websocket.close()
             return
         
-        # Generate provider ID and register
+        # Generate provider ID and register with user association
         provider_id = str(uuid.uuid4())[:8]
-        provider = await registry.register_provider(provider_id, websocket)
+        provider = await registry.register_provider(provider_id, websocket, user_id)
         
         await websocket.send_json({
             "type": "auth_response",
@@ -211,7 +264,7 @@ async def data_provider_websocket(websocket: WebSocket):
             "provider_id": provider_id
         })
         
-        logger.info(f"Provider {provider_id} authenticated and connected")
+        logger.info(f"Provider {provider_id} authenticated for user {user_id}")
         
         # Main message loop
         while True:

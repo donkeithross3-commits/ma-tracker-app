@@ -14,10 +14,21 @@ interface FuturesQuote {
   error?: string;
 }
 
+interface AgentKey {
+  key: string;
+  createdAt: string;
+  lastUsed: string | null;
+}
+
 export default function IBConnectionStatus() {
   const { isConnected, isChecking, checkConnection } = useIBConnection();
   const [futuresQuote, setFuturesQuote] = useState<FuturesQuote | null>(null);
   const [isFetchingFutures, setIsFetchingFutures] = useState(false);
+  const [showAgentPanel, setShowAgentPanel] = useState(false);
+  const [agentKey, setAgentKey] = useState<AgentKey | null>(null);
+  const [isLoadingKey, setIsLoadingKey] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
 
   const testFuturesQuote = async () => {
     setIsFetchingFutures(true);
@@ -33,6 +44,75 @@ export default function IBConnectionStatus() {
       });
     } finally {
       setIsFetchingFutures(false);
+    }
+  };
+
+  const fetchAgentKey = async () => {
+    setIsLoadingKey(true);
+    setKeyError(null);
+    try {
+      const response = await fetch("/api/ma-options/agent-key");
+      if (!response.ok) throw new Error("Failed to fetch key");
+      const data = await response.json();
+      setAgentKey(data);
+    } catch (error) {
+      setKeyError(error instanceof Error ? error.message : "Failed to load key");
+    } finally {
+      setIsLoadingKey(false);
+    }
+  };
+
+  const regenerateKey = async () => {
+    if (!confirm("Regenerate API key? This will disconnect any active agents.")) {
+      return;
+    }
+    setIsLoadingKey(true);
+    setKeyError(null);
+    try {
+      const response = await fetch("/api/ma-options/agent-key", { method: "POST" });
+      if (!response.ok) throw new Error("Failed to regenerate key");
+      const data = await response.json();
+      setAgentKey(data);
+    } catch (error) {
+      setKeyError(error instanceof Error ? error.message : "Failed to regenerate");
+    } finally {
+      setIsLoadingKey(false);
+    }
+  };
+
+  const downloadAgent = async () => {
+    setIsDownloading(true);
+    try {
+      const response = await fetch("/api/ma-options/download-agent");
+      if (!response.ok) throw new Error("Download failed");
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "ib-data-agent.zip";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Download failed");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const toggleAgentPanel = () => {
+    if (!showAgentPanel && !agentKey) {
+      fetchAgentKey();
+    }
+    setShowAgentPanel(!showAgentPanel);
+  };
+
+  const copyKey = () => {
+    if (agentKey?.key) {
+      navigator.clipboard.writeText(agentKey.key);
+      alert("API key copied to clipboard");
     }
   };
 
@@ -124,6 +204,86 @@ export default function IBConnectionStatus() {
           )}
         </div>
       )}
+
+      {/* Local Agent Section */}
+      <div className="mt-2 border-t border-gray-700 pt-2">
+        <button
+          onClick={toggleAgentPanel}
+          className="text-xs text-gray-400 hover:text-gray-200 flex items-center gap-1"
+        >
+          <span>{showAgentPanel ? "▼" : "▶"}</span>
+          <span>Use Your Own IB Account</span>
+        </button>
+
+        {showAgentPanel && (
+          <div className="mt-2 bg-gray-800 rounded p-3 text-xs">
+            <p className="text-gray-300 mb-3">
+              Run a local agent to get market data from your personal IB account.
+            </p>
+
+            {/* Download Button */}
+            <button
+              onClick={downloadAgent}
+              disabled={isDownloading}
+              className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded mb-3 disabled:opacity-50"
+            >
+              {isDownloading ? "Downloading..." : "Download Local Agent"}
+            </button>
+
+            {/* API Key Section */}
+            <div className="border-t border-gray-700 pt-2 mt-2">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-400">Your API Key:</span>
+                <button
+                  onClick={regenerateKey}
+                  disabled={isLoadingKey}
+                  className="text-yellow-500 hover:text-yellow-400 text-[10px]"
+                >
+                  {isLoadingKey ? "..." : "Regenerate"}
+                </button>
+              </div>
+              
+              {keyError && (
+                <div className="text-red-400 text-[10px] mb-2">{keyError}</div>
+              )}
+              
+              {isLoadingKey ? (
+                <div className="text-gray-500">Loading...</div>
+              ) : agentKey ? (
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-gray-900 px-2 py-1 rounded font-mono text-[10px] text-gray-300 truncate">
+                    {agentKey.key.slice(0, 8)}...{agentKey.key.slice(-8)}
+                  </code>
+                  <button
+                    onClick={copyKey}
+                    className="text-gray-400 hover:text-white px-1"
+                    title="Copy full key"
+                  >
+                    📋
+                  </button>
+                </div>
+              ) : null}
+              
+              {agentKey?.lastUsed && (
+                <div className="text-gray-500 text-[10px] mt-1">
+                  Last used: {new Date(agentKey.lastUsed).toLocaleString()}
+                </div>
+              )}
+            </div>
+
+            {/* Setup Instructions */}
+            <div className="border-t border-gray-700 pt-2 mt-3">
+              <div className="text-gray-400 mb-1">Quick Setup:</div>
+              <ol className="text-gray-500 text-[10px] list-decimal list-inside space-y-1">
+                <li>Download and extract the agent ZIP</li>
+                <li>Run <code className="bg-gray-900 px-1">python install.py</code></li>
+                <li>Start IB TWS (port 7497)</li>
+                <li>Run <code className="bg-gray-900 px-1">start_windows.bat</code> or <code className="bg-gray-900 px-1">./start_unix.sh</code></li>
+              </ol>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
