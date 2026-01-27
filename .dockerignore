@@ -1,6 +1,7 @@
 # Python-related (not needed for Next.js build)
 .venv/
 python-service/
+!python-service/standalone_agent/
 requirements.txt
 *.py
 query_source_monitors.py
