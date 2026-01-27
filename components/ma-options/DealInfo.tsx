@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { ScannerDeal } from "@/types/ma-options";
 
 export interface ScanParameters {
@@ -24,16 +24,15 @@ interface DealInfoProps {
   onLoadChain: (params: ScanParameters) => void;
   loading: boolean;
   ibConnected: boolean;
+  dealPrice: number;
+  onDealPriceChange: (price: number) => void;
 }
 
-export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: DealInfoProps) {
+export default function DealInfo({ deal, onLoadChain, loading, ibConnected, dealPrice, onDealPriceChange }: DealInfoProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [dealPrice, setDealPrice] = useState(deal.expectedClosePrice);
   
-  // Reset deal price when deal changes
-  useEffect(() => {
-    setDealPrice(deal.expectedClosePrice);
-  }, [deal.id, deal.expectedClosePrice]);
+  // Track if deal price has been modified from original
+  const dealPriceModified = dealPrice !== deal.expectedClosePrice;
 
   const [params, setParams] = useState<ScanParameters>({
     dealPrice: deal.expectedClosePrice,
@@ -105,15 +104,36 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
 
       <div className="grid grid-cols-4 gap-4 text-sm mb-4">
         <div>
-          <div className="text-gray-500 mb-1">Deal Price</div>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={dealPrice}
-            onChange={(e) => setDealPrice(parseFloat(e.target.value) || 0)}
-            className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 font-mono text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          />
+          <div className="text-gray-500 mb-1 flex items-center gap-2">
+            Deal Price
+            {dealPriceModified && (
+              <>
+                <span className="text-xs text-yellow-500">(modified)</span>
+                <span className={`text-xs ${dealPrice > deal.expectedClosePrice ? 'text-green-400' : 'text-red-400'}`}>
+                  {dealPrice > deal.expectedClosePrice ? '+' : ''}{((dealPrice - deal.expectedClosePrice) / deal.expectedClosePrice * 100).toFixed(1)}%
+                </span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={dealPrice}
+              onChange={(e) => onDealPriceChange(parseFloat(e.target.value) || 0)}
+              className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 font-mono text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+            {dealPriceModified && (
+              <button
+                onClick={() => onDealPriceChange(deal.expectedClosePrice)}
+                className="text-yellow-500 hover:text-yellow-400 text-sm px-1"
+                title={`Reset to original: $${deal.expectedClosePrice.toFixed(2)}`}
+              >
+                ↺
+              </button>
+            )}
+          </div>
         </div>
         <div>
           <div className="text-gray-500">Days to Close</div>

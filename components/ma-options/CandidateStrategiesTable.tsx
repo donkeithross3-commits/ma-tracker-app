@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { CandidateStrategy } from "@/types/ma-options";
 import { StrategyTableHeader, StrategyMetricsCells, type StrategyMetrics, type StrategyType } from "./StrategyColumns";
 
 interface CandidateStrategiesTableProps {
   candidates: CandidateStrategy[];
   onWatch: (strategy: CandidateStrategy) => void;
+  dealPrice: number;
+  daysToClose: number;
 }
 
 interface GroupedStrategies {
@@ -15,13 +17,114 @@ interface GroupedStrategies {
   };
 }
 
+interface RecalculatedMetrics {
+  maxProfit: number;
+  maxProfitFarTouch: number;
+  annualizedYield: number;
+  annualizedYieldFarTouch: number;
+}
+
 export default function CandidateStrategiesTable({
   candidates,
   onWatch,
+  dealPrice,
+  daysToClose,
 }: CandidateStrategiesTableProps) {
   const [sortKey, setSortKey] = useState<string>("annualizedYield");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  /**
+   * Recalculate metrics for a strategy based on the current deal price
+   * This mirrors the logic in Python scanner.py
+   */
+  const recalculateMetrics = useCallback((candidate: CandidateStrategy): RecalculatedMetrics => {
+    const legs = candidate.legs;
+    const netPremium = candidate.netPremium; // Midpoint entry cost
+    const netPremiumFarTouch = candidate.netPremiumFarTouch; // Far touch entry cost
+    
+    // Calculate days to expiration
+    const expiryDate = candidate.expiration instanceof Date 
+      ? candidate.expiration 
+      : new Date(candidate.expiration);
+    const daysToExpiry = Math.max(1, Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+    const yearsToExpiry = daysToExpiry / 365;
+    
+    let valueAtDealClose: number;
+    
+    if (candidate.strategyType === 'spread' || candidate.strategyType === 'call_vertical') {
+      // Call spread: Buy lower strike, sell higher strike
+      const buyLeg = legs.find(l => l.side === 'BUY');
+      const sellLeg = legs.find(l => l.side === 'SELL');
+      
+      if (buyLeg && sellLeg) {
+        const buyStrike = buyLeg.strike;
+        const sellStrike = sellLeg.strike;
+        
+        // Value at deal close (same logic as Python scanner.py lines 992-1001)
+        if (dealPrice >= sellStrike) {
+          valueAtDealClose = sellStrike - buyStrike; // Full width
+        } else if (dealPrice > buyStrike) {
+          valueAtDealClose = dealPrice - buyStrike; // Partial
+        } else {
+          valueAtDealClose = 0; // OTM
+        }
+      } else {
+        valueAtDealClose = 0;
+      }
+    } else if (candidate.strategyType === 'call' || candidate.strategyType === 'long_call') {
+      // Long call: profit = intrinsic value at deal price - premium
+      const strike = legs[0]?.strike || 0;
+      valueAtDealClose = Math.max(0, dealPrice - strike);
+    } else if (candidate.strategyType === 'put' || candidate.strategyType === 'long_put') {
+      // Long put: profit = intrinsic value at deal price - premium
+      // For M&A deals, we assume deal closes at deal price, so put is worthless
+      const strike = legs[0]?.strike || 0;
+      valueAtDealClose = Math.max(0, strike - dealPrice);
+    } else if (candidate.strategyType === 'put_spread' || candidate.strategyType === 'put_vertical') {
+      // Put credit spread: Max profit is the credit received (doesn't change with deal price)
+      // Since it's a credit spread, maxProfit = credit received when deal closes above short strike
+      // For now, keep original profit since put spreads profit when deal closes
+      return {
+        maxProfit: candidate.maxProfit,
+        maxProfitFarTouch: candidate.maxProfit, // Far touch profit is same for credit spreads
+        annualizedYield: candidate.annualizedYield,
+        annualizedYieldFarTouch: candidate.annualizedYieldFarTouch,
+      };
+    } else {
+      // Unknown strategy type, return original
+      return {
+        maxProfit: candidate.maxProfit,
+        maxProfitFarTouch: candidate.maxProfit,
+        annualizedYield: candidate.annualizedYield,
+        annualizedYieldFarTouch: candidate.annualizedYieldFarTouch,
+      };
+    }
+    
+    // Calculate profits
+    const maxProfit = valueAtDealClose - netPremium;
+    const maxProfitFarTouch = valueAtDealClose - netPremiumFarTouch;
+    
+    // Calculate annualized yields
+    const annualizedYield = netPremium > 0 ? (maxProfit / netPremium) / yearsToExpiry : 0;
+    const annualizedYieldFarTouch = netPremiumFarTouch > 0 ? (maxProfitFarTouch / netPremiumFarTouch) / yearsToExpiry : 0;
+    
+    return {
+      maxProfit,
+      maxProfitFarTouch,
+      annualizedYield,
+      annualizedYieldFarTouch,
+    };
+  }, [dealPrice]);
+
+  // Create a map of candidate ID to recalculated metrics
+  const recalculatedMetricsMap = useMemo(() => {
+    const map = new Map<string, RecalculatedMetrics>();
+    candidates.forEach((candidate) => {
+      map.set(candidate.id, recalculateMetrics(candidate));
+    });
+    return map;
+  }, [candidates, recalculateMetrics]);
 
   // Group strategies by expiration, then by strategy type
   const groupedStrategies = useMemo(() => {
@@ -42,19 +145,32 @@ export default function CandidateStrategiesTable({
       grouped[expirationKey][candidate.strategyType].push(candidate);
     });
 
-    // Sort strategies within each group
+    // Sort strategies within each group using recalculated metrics
     Object.keys(grouped).forEach((expiration) => {
       Object.keys(grouped[expiration]).forEach((strategyType) => {
         grouped[expiration][strategyType].sort((a, b) => {
-          const aVal = (a as any)[sortKey];
-          const bVal = (b as any)[sortKey];
+          // Use recalculated annualizedYield for sorting when that's the sort key
+          let aVal: number;
+          let bVal: number;
+          
+          if (sortKey === 'annualizedYield') {
+            aVal = recalculatedMetricsMap.get(a.id)?.annualizedYield ?? a.annualizedYield;
+            bVal = recalculatedMetricsMap.get(b.id)?.annualizedYield ?? b.annualizedYield;
+          } else if (sortKey === 'maxProfit') {
+            aVal = recalculatedMetricsMap.get(a.id)?.maxProfit ?? a.maxProfit;
+            bVal = recalculatedMetricsMap.get(b.id)?.maxProfit ?? b.maxProfit;
+          } else {
+            aVal = (a as any)[sortKey];
+            bVal = (b as any)[sortKey];
+          }
+          
           return sortDir === "asc" ? aVal - bVal : bVal - aVal;
         });
       });
     });
 
     return grouped;
-  }, [candidates, sortKey, sortDir]);
+  }, [candidates, sortKey, sortDir, recalculatedMetricsMap]);
 
   // Sort expirations chronologically
   const sortedExpirations = useMemo(() => {
@@ -142,7 +258,7 @@ export default function CandidateStrategiesTable({
                         </span>
                       </div>
                       <div className="text-xs text-gray-400">
-                        Best: {(strategies[0].annualizedYield * 100).toFixed(1)}% annualized
+                        Best: {((recalculatedMetricsMap.get(strategies[0].id)?.annualizedYield ?? strategies[0].annualizedYield) * 100).toFixed(1)}% annualized
                       </div>
                     </div>
 
@@ -162,14 +278,18 @@ export default function CandidateStrategiesTable({
                           </thead>
                           <tbody>
                             {strategies.map((candidate) => {
-                              // Convert candidate to StrategyMetrics format
+                              // Get recalculated metrics for this candidate
+                              const recalculated = recalculatedMetricsMap.get(candidate.id);
+                              
+                              // Convert candidate to StrategyMetrics format with recalculated values
                               const metrics: StrategyMetrics = {
                                 legs: candidate.legs as any,
                                 netPremium: candidate.netPremium,
                                 netPremiumFarTouch: candidate.netPremiumFarTouch,
-                                maxProfit: candidate.maxProfit,
-                                annualizedYield: candidate.annualizedYield,
-                                annualizedYieldFarTouch: candidate.annualizedYieldFarTouch,
+                                maxProfit: recalculated?.maxProfit ?? candidate.maxProfit,
+                                maxProfitFarTouch: recalculated?.maxProfitFarTouch,
+                                annualizedYield: recalculated?.annualizedYield ?? candidate.annualizedYield,
+                                annualizedYieldFarTouch: recalculated?.annualizedYieldFarTouch ?? candidate.annualizedYieldFarTouch,
                                 liquidityScore: candidate.liquidityScore,
                               };
 

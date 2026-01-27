@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type {
   ScannerDeal,
   OptionChainResponse,
@@ -27,6 +27,18 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
   const [candidates, setCandidates] = useState<CandidateStrategy[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Editable deal price for real-time metric recalculation
+  const [editableDealPrice, setEditableDealPrice] = useState<number | null>(null);
+  
+  // Reset editable deal price when deal changes
+  useEffect(() => {
+    if (selectedDeal) {
+      setEditableDealPrice(selectedDeal.expectedClosePrice);
+    } else {
+      setEditableDealPrice(null);
+    }
+  }, [selectedDeal?.id, selectedDeal?.expectedClosePrice]);
 
   const handleSelectDeal = (deal: ScannerDeal) => {
     console.log("Deal selected:", deal);
@@ -302,12 +314,14 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       <AddDealForm onDealAdded={handleDealAdded} />
 
       {/* Deal Info - Show at top when selected */}
-      {selectedDeal && (
+      {selectedDeal && editableDealPrice !== null && (
         <DealInfo
           deal={selectedDeal}
           onLoadChain={handleLoadChain}
           loading={loading}
           ibConnected={ibConnected}
+          dealPrice={editableDealPrice}
+          onDealPriceChange={setEditableDealPrice}
         />
       )}
 
@@ -348,10 +362,12 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       )}
 
       {/* Candidate Strategies */}
-      {candidates.length > 0 && (
+      {candidates.length > 0 && selectedDeal && editableDealPrice !== null && (
         <CandidateStrategiesTable
           candidates={candidates}
           onWatch={handleWatchSpread}
+          dealPrice={editableDealPrice}
+          daysToClose={selectedDeal.daysToClose}
         />
       )}
 

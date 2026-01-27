@@ -25,6 +25,7 @@ export interface StrategyMetrics {
   netPremium: number; // Midpoint cost (debit) or max loss (credit)
   netPremiumFarTouch: number; // Far touch cost/max loss
   maxProfit: number; // Max profit (debit) or credit received (credit)
+  maxProfitFarTouch?: number; // Far touch max profit (optional, calculated if not provided)
   annualizedYield: number; // Midpoint IRR
   annualizedYieldFarTouch: number; // Far touch IRR
   liquidityScore: number;
@@ -102,10 +103,17 @@ export function calculateFarMetrics(metrics: StrategyMetrics) {
   const midProfit = metrics.maxProfit || 0;
   const farCost = Math.abs(metrics.netPremiumFarTouch || 0);
   
-  // For spreads: Profit = Strike Width - Entry Cost
-  // Can be negative if cost exceeds strike width (guaranteed loss)
-  const strikeWidth = midProfit + midCost;
-  const farProfit = strikeWidth - farCost;
+  // Use provided far touch profit if available, otherwise calculate from strike width
+  let farProfit: number;
+  if (metrics.maxProfitFarTouch !== undefined) {
+    farProfit = metrics.maxProfitFarTouch;
+  } else {
+    // For spreads: Profit = Strike Width - Entry Cost
+    // Can be negative if cost exceeds strike width (guaranteed loss)
+    const strikeWidth = midProfit + midCost;
+    farProfit = strikeWidth - farCost;
+  }
+  
   const farReturn = farCost > 0 ? farProfit / farCost : 0;
   const farIRR = metrics.annualizedYieldFarTouch || 0;
 
