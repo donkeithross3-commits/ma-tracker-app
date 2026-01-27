@@ -3,6 +3,16 @@
 import { useState, useEffect, useCallback } from "react";
 import type { WatchedSpreadDTO } from "@/types/ma-options";
 
+/**
+ * Get color class for profit/return values
+ * Positive = green, Zero = gray, Negative = red
+ */
+function getProfitColorClass(value: number): string {
+  if (value > 0) return "text-green-400";
+  if (value < 0) return "text-red-400";
+  return "text-gray-400";
+}
+
 interface SpreadAnalysisModalProps {
   spread: WatchedSpreadDTO;
   onClose: () => void;
@@ -372,8 +382,8 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                   </tr>
                   <tr className="border-b border-gray-700/50">
                     <td className="py-2 px-3 text-gray-400">Max Profit (deal closes)</td>
-                    <td className="py-2 px-3 text-right font-mono text-green-400">{formatCurrency(metrics.stock.maxProfit)}</td>
-                    <td className="py-2 px-3 text-right font-mono text-green-400">{formatCurrency(metrics.spread.maxProfit)}</td>
+                    <td className={`py-2 px-3 text-right font-mono ${getProfitColorClass(metrics.stock.maxProfit)}`}>{formatCurrency(metrics.stock.maxProfit)}</td>
+                    <td className={`py-2 px-3 text-right font-mono ${getProfitColorClass(metrics.spread.maxProfit)}`}>{formatCurrency(metrics.spread.maxProfit)}</td>
                     <td className="py-2 px-3 text-right">
                       {metrics.stock.maxProfit > metrics.spread.maxProfit ? (
                         <span className="text-blue-400">Stock +{formatCurrency(metrics.stock.maxProfit - metrics.spread.maxProfit)}</span>
@@ -397,52 +407,56 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                   <tr className="border-b border-gray-700/50 bg-gray-700/30">
                     <td className="py-2 px-3 text-gray-300 font-medium">Expected Value</td>
                     <td className="py-2 px-3 text-right font-mono font-medium">
-                      <span className={metrics.stock.expectedValue >= 0 ? "text-green-400" : "text-red-400"}>
+                      <span className={getProfitColorClass(metrics.stock.expectedValue)}>
                         {formatCurrency(metrics.stock.expectedValue)}
                       </span>
                     </td>
                     <td className="py-2 px-3 text-right font-mono font-medium">
-                      <span className={metrics.spread.expectedValue >= 0 ? "text-green-400" : "text-red-400"}>
+                      <span className={getProfitColorClass(metrics.spread.expectedValue)}>
                         {formatCurrency(metrics.spread.expectedValue)}
                       </span>
                     </td>
                     <td className="py-2 px-3 text-right font-medium">
                       {metrics.stock.expectedValue > metrics.spread.expectedValue ? (
                         <span className="text-blue-400">Stock better</span>
-                      ) : (
+                      ) : metrics.spread.expectedValue > metrics.stock.expectedValue ? (
                         <span className="text-green-400">Spread better</span>
+                      ) : (
+                        <span className="text-gray-400">Equal</span>
                       )}
                     </td>
                   </tr>
                   <tr className="border-b border-gray-700/50">
                     <td className="py-2 px-3 text-gray-400">Expected Return %</td>
                     <td className="py-2 px-3 text-right font-mono">
-                      <span className={metrics.stock.expectedReturnPct >= 0 ? "text-green-400" : "text-red-400"}>
+                      <span className={getProfitColorClass(metrics.stock.expectedReturnPct)}>
                         {formatPercent(metrics.stock.expectedReturnPct)}
                       </span>
                     </td>
                     <td className="py-2 px-3 text-right font-mono">
-                      <span className={metrics.spread.expectedReturnPct >= 0 ? "text-green-400" : "text-red-400"}>
+                      <span className={getProfitColorClass(metrics.spread.expectedReturnPct)}>
                         {formatPercent(metrics.spread.expectedReturnPct)}
                       </span>
                     </td>
                     <td className="py-2 px-3 text-right">
                       {metrics.spread.expectedReturnPct > metrics.stock.expectedReturnPct ? (
                         <span className="text-green-400">+{(metrics.spread.expectedReturnPct - metrics.stock.expectedReturnPct).toFixed(1)}pp</span>
-                      ) : (
+                      ) : metrics.stock.expectedReturnPct > metrics.spread.expectedReturnPct ? (
                         <span className="text-blue-400">+{(metrics.stock.expectedReturnPct - metrics.spread.expectedReturnPct).toFixed(1)}pp</span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
                       )}
                     </td>
                   </tr>
                   <tr className="border-b border-gray-700/50">
                     <td className="py-2 px-3 text-gray-400">Annualized Return</td>
                     <td className="py-2 px-3 text-right font-mono">
-                      <span className={metrics.stock.annualizedReturn >= 0 ? "text-green-400" : "text-red-400"}>
+                      <span className={getProfitColorClass(metrics.stock.annualizedReturn)}>
                         {formatPercent(metrics.stock.annualizedReturn)}
                       </span>
                     </td>
                     <td className="py-2 px-3 text-right font-mono">
-                      <span className={metrics.spread.annualizedReturn >= 0 ? "text-green-400" : "text-red-400"}>
+                      <span className={getProfitColorClass(metrics.spread.annualizedReturn)}>
                         {formatPercent(metrics.spread.annualizedReturn)}
                       </span>
                     </td>

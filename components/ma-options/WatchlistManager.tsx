@@ -96,7 +96,7 @@ export default function WatchlistManager({ dealId }: WatchlistManagerProps) {
                 </td>
                 <td
                   className={`py-2 px-1 text-right font-mono ${
-                    spread.pnlDollar >= 0 ? "text-green-400" : "text-red-400"
+                    spread.pnlDollar > 0 ? "text-green-400" : spread.pnlDollar < 0 ? "text-red-400" : "text-gray-400"
                   }`}
                 >
                   ${spread.pnlDollar.toFixed(2)} ({spread.pnlPercent.toFixed(1)}%)

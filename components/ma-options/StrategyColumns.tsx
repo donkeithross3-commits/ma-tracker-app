@@ -33,6 +33,16 @@ export interface StrategyMetrics {
 export type StrategyType = "spread" | "put_spread" | "call" | "put";
 
 /**
+ * Get color class for profit/return values
+ * Positive = green, Zero = gray, Negative = red
+ */
+export function getProfitColorClass(value: number): string {
+  if (value > 0) return "text-green-400";
+  if (value < 0) return "text-red-400";
+  return "text-gray-400";
+}
+
+/**
  * Render strikes column
  */
 export function renderStrikes(legs: StrategyLeg[]): string {
@@ -360,12 +370,12 @@ export function DebitStrategyMetricsCells({ metrics }: { metrics: StrategyMetric
       </td>
 
       {/* Midpoint Entry - Profit */}
-      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
+      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(midMetrics.profit)}`}>
         ${midMetrics.profit.toFixed(2)}
       </td>
 
       {/* Midpoint Entry - IRR */}
-      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
+      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(midMetrics.irr)}`}>
         {(midMetrics.irr * 100).toFixed(1)}%
       </td>
 
@@ -375,12 +385,12 @@ export function DebitStrategyMetricsCells({ metrics }: { metrics: StrategyMetric
       </td>
 
       {/* Far Touch Entry - Profit */}
-      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
+      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(farMetrics.profit)}`}>
         ${farMetrics.profit.toFixed(2)}
       </td>
 
       {/* Far Touch Entry - IRR */}
-      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
+      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(farMetrics.irr)}`}>
         {(farMetrics.irr * 100).toFixed(1)}%
       </td>
     </>
@@ -423,7 +433,7 @@ export function CreditStrategyMetricsCells({ metrics }: { metrics: StrategyMetri
       </td>
 
       {/* Midpoint Entry - Credit (max gain) */}
-      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
+      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(midMetrics.credit)}`}>
         ${midMetrics.credit.toFixed(2)}
       </td>
 
@@ -433,12 +443,12 @@ export function CreditStrategyMetricsCells({ metrics }: { metrics: StrategyMetri
       </td>
 
       {/* Midpoint Entry - IRR */}
-      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
+      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(midMetrics.irr)}`}>
         {(midMetrics.irr * 100).toFixed(1)}%
       </td>
 
       {/* Far Touch Entry - Credit (max gain) */}
-      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
+      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(farMetrics.credit)}`}>
         ${farMetrics.credit.toFixed(2)}
       </td>
 
@@ -448,7 +458,7 @@ export function CreditStrategyMetricsCells({ metrics }: { metrics: StrategyMetri
       </td>
 
       {/* Far Touch Entry - IRR */}
-      <td className="py-2 px-2 text-right text-green-400 font-mono text-[11px]">
+      <td className={`py-2 px-2 text-right font-mono text-[11px] ${getProfitColorClass(farMetrics.irr)}`}>
         {(farMetrics.irr * 100).toFixed(1)}%
       </td>
     </>
