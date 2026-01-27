@@ -877,8 +877,10 @@ class MergerArbAnalyzer:
         # Calculate expected return
         expected_return = (prob_success * max_profit) - ((1 - prob_success) * cost)
 
-        # Annualized return
-        years_to_expiry = self.deal.days_to_close / 365
+        # Use the earlier of deal close or option expiration for IRR calculation
+        option_expiry_date = datetime.strptime(option.expiry, "%Y%m%d")
+        days_to_exit = min(self.deal.days_to_close, (option_expiry_date - datetime.now()).days)
+        years_to_expiry = max(days_to_exit, 1) / 365  # At least 1 day to avoid division issues
         annualized_return = (expected_return / cost) / years_to_expiry if years_to_expiry > 0 else 0
 
         # Market implied probability
@@ -948,7 +950,10 @@ class MergerArbAnalyzer:
         max_profit_mid = expected_return_mid  # Same as expected return for merger arb
         breakeven_mid = long_call.strike + spread_cost_mid
 
-        years_to_expiry = self.deal.days_to_close / 365
+        # Use the earlier of deal close or option expiration for IRR calculation
+        option_expiry_date = datetime.strptime(long_call.expiry, "%Y%m%d")
+        days_to_exit = min(self.deal.days_to_close, (option_expiry_date - datetime.now()).days)
+        years_to_expiry = max(days_to_exit, 1) / 365  # At least 1 day to avoid division issues
         # Annualized return = (return / cost) / years (not * years)
         # This gives the return per year, which is what we want for annualized return
         annualized_return_mid = (expected_return_mid / spread_cost_mid) / years_to_expiry if years_to_expiry > 0 and spread_cost_mid > 0 else 0
@@ -960,7 +965,7 @@ class MergerArbAnalyzer:
         # Debug logging for far touch
         print(f"DEBUG FT CALL: {long_call.strike}/{short_call.strike}")
         print(f"  spread_cost_ft={spread_cost_ft:.2f}, expected_return_ft={expected_return_ft:.2f}")
-        print(f"  years_to_expiry={years_to_expiry:.3f}, days_to_close={self.deal.days_to_close}")
+        print(f"  years_to_expiry={years_to_expiry:.3f}, days_to_exit={days_to_exit} (deal_close={self.deal.days_to_close}, option_expiry={(option_expiry_date - datetime.now()).days})")
         print(f"  annualized_return_mid={annualized_return_mid:.4f}, annualized_return_ft={annualized_return_ft:.4f}")
 
         # Probability (based on midpoint breakeven)
@@ -1041,15 +1046,17 @@ class MergerArbAnalyzer:
         expected_return_mid = max_gain_mid
         expected_return_ft = max_gain_ft
 
-        # Annualized return (on max loss as capital at risk)
-        years_to_expiry = self.deal.days_to_close / 365
+        # Use the earlier of deal close or option expiration for IRR calculation
+        option_expiry_date = datetime.strptime(long_put.expiry, "%Y%m%d")
+        days_to_exit = min(self.deal.days_to_close, (option_expiry_date - datetime.now()).days)
+        years_to_expiry = max(days_to_exit, 1) / 365  # At least 1 day to avoid division issues
         annualized_return_mid = (expected_return_mid / max_loss_mid) / years_to_expiry if years_to_expiry > 0 and max_loss_mid > 0 else 0
         annualized_return_ft = (expected_return_ft / max_loss_ft) / years_to_expiry if years_to_expiry > 0 and max_loss_ft > 0 else 0
         
         # Debug logging for far touch
         print(f"DEBUG PUT FT: {long_put.strike}/{short_put.strike}")
         print(f"  max_loss_ft={max_loss_ft:.2f}, expected_return_ft={expected_return_ft:.2f}")
-        print(f"  years_to_expiry={years_to_expiry:.3f}, days_to_close={self.deal.days_to_close}")
+        print(f"  years_to_expiry={years_to_expiry:.3f}, days_to_exit={days_to_exit} (deal_close={self.deal.days_to_close}, option_expiry={(option_expiry_date - datetime.now()).days})")
         print(f"  annualized_return_mid={annualized_return_mid:.4f}, annualized_return_ft={annualized_return_ft:.4f}")
 
         # Breakeven = short strike - credit
