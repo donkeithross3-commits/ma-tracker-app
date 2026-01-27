@@ -94,6 +94,8 @@ export function calculateMidMetrics(metrics: StrategyMetrics) {
 
 /**
  * Calculate far touch metrics for debit spreads (call spreads)
+ * Note: Profit CAN be negative if far touch cost exceeds strike width
+ * Max loss for call spread is capped at the premium paid (farCost)
  */
 export function calculateFarMetrics(metrics: StrategyMetrics) {
   const midCost = Math.abs(metrics.netPremium || 0);
@@ -101,8 +103,9 @@ export function calculateFarMetrics(metrics: StrategyMetrics) {
   const farCost = Math.abs(metrics.netPremiumFarTouch || 0);
   
   // For spreads: Profit = Strike Width - Entry Cost
+  // Can be negative if cost exceeds strike width (guaranteed loss)
   const strikeWidth = midProfit + midCost;
-  const farProfit = Math.max(0, strikeWidth - farCost);
+  const farProfit = strikeWidth - farCost;
   const farReturn = farCost > 0 ? farProfit / farCost : 0;
   const farIRR = metrics.annualizedYieldFarTouch || 0;
 
@@ -134,6 +137,8 @@ export function calculateCreditMidMetrics(metrics: StrategyMetrics) {
 
 /**
  * Calculate far touch metrics for credit spreads (put spreads)
+ * Note: Credit CAN be negative if far touch prices are unfavorable
+ * This means the spread would be entered at a net debit (guaranteed loss)
  */
 export function calculateCreditFarMetrics(metrics: StrategyMetrics) {
   const midCredit = metrics.maxProfit || 0;
@@ -141,8 +146,9 @@ export function calculateCreditFarMetrics(metrics: StrategyMetrics) {
   const farMaxLoss = Math.abs(metrics.netPremiumFarTouch || 0);
   
   // For credit spreads: Credit = Strike Width - Max Loss
+  // Can be negative if far touch prices result in net debit
   const strikeWidth = midCredit + midMaxLoss;
-  const farCredit = Math.max(0, strikeWidth - farMaxLoss);
+  const farCredit = strikeWidth - farMaxLoss;
   const farIRR = metrics.annualizedYieldFarTouch || 0;
 
   return {

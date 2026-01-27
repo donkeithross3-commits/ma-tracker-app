@@ -109,9 +109,9 @@ export default function WatchedSpreadsTable({
               }, 0);
 
               // Calculate far touch IRR
-              // For spreads: farProfit = strikeWidth - farCost
+              // For spreads: farProfit = strikeWidth - farCost (can be negative)
               const strikeWidth = spread.maxProfit + Math.abs(spread.entryPremium);
-              const farProfit = Math.max(0, strikeWidth - Math.abs(farTouchCost));
+              const farProfit = strikeWidth - Math.abs(farTouchCost);
               const farReturn = Math.abs(farTouchCost) > 0 ? farProfit / Math.abs(farTouchCost) : 0;
               
               // Annualize the far touch return
