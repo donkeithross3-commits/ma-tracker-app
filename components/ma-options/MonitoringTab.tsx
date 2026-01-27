@@ -158,6 +158,7 @@ export default function MonitoringTab() {
     // Prevent if already refreshing this spread
     if (refreshingSpreads.has(spreadId)) return;
     
+    console.log("[SINGLE REFRESH] Starting refresh for spreadId:", spreadId);
     setRefreshingSpreads(prev => new Set(prev).add(spreadId));
     
     try {
@@ -167,16 +168,21 @@ export default function MonitoringTab() {
         body: JSON.stringify({ spreadIds: [spreadId] }),
       });
       
+      console.log("[SINGLE REFRESH] Response status:", response.status, response.ok);
+      
       if (response.ok) {
         const data = await response.json();
+        console.log("[SINGLE REFRESH] Response data:", data);
         
         // Update the single spread with new prices
         setSpreads((prevSpreads) =>
           prevSpreads.map((spread) => {
-            const update = data.updates.find((u: any) => u.spreadId === spread.id);
+            const update = data.updates?.find((u: any) => u.spreadId === spread.id);
+            console.log("[SINGLE REFRESH] Checking spread:", spread.id, "found update:", update);
             if (update) {
               const pnlDollar = update.currentPremium - spread.entryPremium;
               const pnlPercent = (pnlDollar / spread.entryPremium) * 100;
+              console.log("[SINGLE REFRESH] Updating spread with new premium:", update.currentPremium);
               return {
                 ...spread,
                 currentPremium: update.currentPremium,
@@ -188,9 +194,12 @@ export default function MonitoringTab() {
             return spread;
           })
         );
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("[SINGLE REFRESH] Error response:", errorData);
       }
     } catch (error) {
-      console.error("Error refreshing single spread:", error);
+      console.error("[SINGLE REFRESH] Error:", error);
     } finally {
       setRefreshingSpreads(prev => {
         const newSet = new Set(prev);
