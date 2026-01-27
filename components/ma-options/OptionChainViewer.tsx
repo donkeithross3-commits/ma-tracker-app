@@ -9,7 +9,7 @@ interface OptionChainViewerProps {
 }
 
 export default function OptionChainViewer({ chainData, onWatchSingleLeg }: OptionChainViewerProps) {
-  const [isExpanded, setIsExpanded] = useState(true); // Default to expanded so Watch buttons are visible
+  const [isExpanded, setIsExpanded] = useState(false); // Default to collapsed per user preference
   const [addingContract, setAddingContract] = useState<string | null>(null);
 
   // Helper to get status color

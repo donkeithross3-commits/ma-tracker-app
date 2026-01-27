@@ -340,10 +340,10 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       )}
 
       {/* Option Chain Viewer */}
-      {chainData && (
+      {chainData && selectedDeal && (
         <OptionChainViewer 
           chainData={chainData} 
-          onWatchSingleLeg={selectedDeal ? handleWatchSingleLeg : undefined}
+          onWatchSingleLeg={handleWatchSingleLeg}
         />
       )}
 
