@@ -147,27 +147,29 @@ export function calculateCreditFarMetrics(metrics: StrategyMetrics) {
  */
 export function BidAskGrids({ legs }: { legs: StrategyLeg[] }) {
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-2 justify-center">
       {legs.map((leg, idx) => {
-        // Create leg label: e.g., "BUY 145.50C" or "SELL 150C"
-        // Show full strike price (no rounding) to avoid confusion
-        const strikeDisplay = leg.strike % 1 === 0 ? leg.strike.toFixed(0) : leg.strike.toFixed(2);
+        // Create leg label: e.g., "BUY 17.5C" or "SELL 150C"
+        // Show full strike price without trailing zeros
+        const strikeDisplay = leg.strike % 1 === 0 
+          ? leg.strike.toFixed(0) 
+          : parseFloat(leg.strike.toFixed(2)).toString();
         const legLabel = `${leg.side} ${strikeDisplay}${leg.right}`;
         
         return (
-          <div key={idx} className="border border-gray-700 rounded">
+          <div key={idx} className="border border-gray-700 rounded w-[70px]">
             {/* Leg label */}
-            <div className="bg-gray-800 px-1 py-0.5 text-center text-[9px] text-gray-400 border-b border-gray-700">
+            <div className="bg-gray-800 px-1 py-0.5 text-center text-[9px] text-gray-400 border-b border-gray-700 truncate">
               {legLabel}
             </div>
             {/* Bid/Ask prices only (no quantities) */}
             <div className="flex flex-col text-[10px]">
               {/* Ask price */}
-              <div className="bg-red-900/20 px-2 py-0.5 text-right text-red-400">
+              <div className="bg-red-900/20 px-2 py-0.5 text-center text-red-400">
                 ${leg.ask.toFixed(2)}
               </div>
               {/* Bid price */}
-              <div className="bg-blue-900/20 px-2 py-0.5 text-right text-blue-400">
+              <div className="bg-blue-900/20 px-2 py-0.5 text-center text-blue-400">
                 ${leg.bid.toFixed(2)}
               </div>
             </div>
