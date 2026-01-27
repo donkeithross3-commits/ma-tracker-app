@@ -122,7 +122,13 @@ export default function WatchedSpreadsTable({
 
   const formatExpiration = (expiration: string): string => {
     const date = new Date(expiration + "T00:00:00");
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+  };
+  
+  const formatDealCloseDate = (closeDate: string | null | undefined): string => {
+    if (!closeDate) return "—";
+    const date = new Date(closeDate + "T00:00:00");
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
   };
 
   // Calculate metrics for a spread
@@ -247,7 +253,7 @@ export default function WatchedSpreadsTable({
                     >
                       <div>{spread.dealTicker}</div>
                       <div className="text-xs text-gray-500 font-normal">
-                        ${spread.dealPrice?.toFixed(2)}
+                        ${spread.dealPrice?.toFixed(2)} | {formatDealCloseDate(spread.dealExpectedCloseDate)}
                       </div>
                     </td>
                   ) : null}
