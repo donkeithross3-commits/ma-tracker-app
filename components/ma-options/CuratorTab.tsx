@@ -5,6 +5,7 @@ import type {
   ScannerDeal,
   OptionChainResponse,
   CandidateStrategy,
+  OptionContract,
 } from "@/types/ma-options";
 import AddDealForm from "./AddDealForm";
 import ScannerDealSelector from "./ScannerDealSelector";
@@ -179,6 +180,106 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
     }
   };
 
+  const handleWatchSingleLeg = async (contract: OptionContract) => {
+    if (!selectedDeal || !chainData) return;
+
+    // Calculate single leg metrics
+    const cost = contract.mid;
+    const costFarTouch = contract.ask;
+    const dealPrice = selectedDeal.expectedClosePrice;
+    
+    // For calls: profit = deal price - strike - cost (if deal closes above strike)
+    // For puts: profit = strike - deal price - cost (if deal closes below strike)
+    let maxProfit: number;
+    let maxLoss: number;
+    
+    if (contract.right === "C") {
+      // Long call: max profit if deal closes at deal price
+      const intrinsicAtDeal = Math.max(0, dealPrice - contract.strike);
+      maxProfit = intrinsicAtDeal - cost;
+      maxLoss = cost; // Max loss is premium paid
+    } else {
+      // Long put: max profit if deal fails and stock goes to 0 (theoretical)
+      // More realistic: profit if stock drops below strike
+      const intrinsicAtDeal = Math.max(0, contract.strike - dealPrice);
+      maxProfit = intrinsicAtDeal - cost;
+      maxLoss = cost; // Max loss is premium paid
+    }
+
+    // Calculate days to expiration
+    const expiryDate = new Date(
+      parseInt(contract.expiry.substring(0, 4)),
+      parseInt(contract.expiry.substring(4, 6)) - 1,
+      parseInt(contract.expiry.substring(6, 8))
+    );
+    const daysToExpiry = Math.max(1, Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+    const yearsToExpiry = daysToExpiry / 365;
+
+    // Annualized yield (simple: return / cost / years)
+    const returnOnRisk = maxProfit > 0 && cost > 0 ? maxProfit / cost : 0;
+    const annualizedYield = cost > 0 ? (maxProfit / cost) / yearsToExpiry : 0;
+    const annualizedYieldFarTouch = costFarTouch > 0 ? ((maxProfit + cost - costFarTouch) / costFarTouch) / yearsToExpiry : 0;
+
+    // Build strategy object for the single leg
+    const strategy: CandidateStrategy = {
+      id: crypto.randomUUID(),
+      strategyType: contract.right === "C" ? "long_call" : "long_put",
+      expiration: expiryDate,
+      legs: [{
+        symbol: contract.symbol,
+        strike: contract.strike,
+        right: contract.right,
+        quantity: 1,
+        side: "BUY",
+        bid: contract.bid,
+        ask: contract.ask,
+        mid: contract.mid,
+        volume: contract.volume,
+        openInterest: contract.open_interest,
+        bidSize: contract.bid_size,
+        askSize: contract.ask_size,
+      }],
+      netPremium: cost,
+      netPremiumFarTouch: costFarTouch,
+      maxProfit: maxProfit,
+      maxLoss: maxLoss,
+      returnOnRisk: returnOnRisk,
+      annualizedYield: annualizedYield,
+      annualizedYieldFarTouch: annualizedYieldFarTouch,
+      liquidityScore: calculateLiquidityScore(contract),
+      notes: `Long ${contract.strike}${contract.right} @ $${cost.toFixed(2)} mid ($${costFarTouch.toFixed(2)} ask)`,
+    };
+
+    try {
+      const response = await fetch("/api/ma-options/watch-spread", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dealId: selectedDeal.id,
+          strategy,
+          underlyingPrice: chainData.spotPrice,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to add to watchlist");
+      }
+
+      alert(`Added ${contract.strike}${contract.right} to watchlist!`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add to watchlist");
+    }
+  };
+
+  // Helper to calculate liquidity score for a single contract
+  const calculateLiquidityScore = (contract: OptionContract): number => {
+    const bidAskSpread = contract.mid > 0 ? (contract.ask - contract.bid) / contract.mid : 1;
+    const spreadScore = 1 / (1 + bidAskSpread);
+    const volumeScore = Math.min(contract.volume / 100, 1);
+    const oiScore = Math.min(contract.open_interest / 1000, 1);
+    return (spreadScore * 0.5 + volumeScore * 0.25 + oiScore * 0.25) * 100;
+  };
+
   return (
     <div className="space-y-6">
       {/* Add Deal Form */}
@@ -223,7 +324,12 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       )}
 
       {/* Option Chain Viewer */}
-      {chainData && <OptionChainViewer chainData={chainData} />}
+      {chainData && (
+        <OptionChainViewer 
+          chainData={chainData} 
+          onWatchSingleLeg={selectedDeal ? handleWatchSingleLeg : undefined}
+        />
+      )}
 
       {/* Candidate Strategies */}
       {candidates.length > 0 && (

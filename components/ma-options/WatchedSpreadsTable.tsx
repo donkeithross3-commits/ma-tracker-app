@@ -108,17 +108,35 @@ export default function WatchedSpreadsTable({
           </thead>
           <tbody>
             {sortedSpreads.map((spread) => {
+              // Detect if this is a single leg strategy
+              const isSingleLeg = spread.legs.length === 1 || 
+                spread.strategyType === "long_call" || 
+                spread.strategyType === "long_put" ||
+                spread.strategyType === "call" ||
+                spread.strategyType === "put";
+
               // Calculate far touch entry cost from legs
               const farTouchCost = spread.legs.reduce((total, leg) => {
                 const price = leg.side === "BUY" ? leg.ask : leg.bid;
                 return total + (leg.side === "BUY" ? price : -price) * leg.quantity;
               }, 0);
 
-              // Calculate far touch IRR
-              // For spreads: farProfit = strikeWidth - farCost (can be negative)
-              const strikeWidth = spread.maxProfit + Math.abs(spread.entryPremium);
-              const farProfit = strikeWidth - Math.abs(farTouchCost);
-              const farReturn = Math.abs(farTouchCost) > 0 ? farProfit / Math.abs(farTouchCost) : 0;
+              // Calculate far touch profit and IRR differently for single legs vs spreads
+              let farProfit: number;
+              let farReturn: number;
+              
+              if (isSingleLeg) {
+                // For single legs: farProfit = maxProfit at entry - (farCost - midCost)
+                // Since maxProfit was calculated with mid cost, adjust for far touch
+                const costDiff = Math.abs(farTouchCost) - Math.abs(spread.entryPremium);
+                farProfit = spread.maxProfit - costDiff;
+                farReturn = Math.abs(farTouchCost) > 0 ? farProfit / Math.abs(farTouchCost) : 0;
+              } else {
+                // For spreads: farProfit = strikeWidth - farCost (can be negative)
+                const strikeWidth = spread.maxProfit + Math.abs(spread.entryPremium);
+                farProfit = strikeWidth - Math.abs(farTouchCost);
+                farReturn = Math.abs(farTouchCost) > 0 ? farProfit / Math.abs(farTouchCost) : 0;
+              }
               
               // Annualize the far touch return
               // Assuming daysToClose represents days to expiration
@@ -153,6 +171,14 @@ export default function WatchedSpreadsTable({
                   <td className="py-2 px-1 text-gray-300">
                     {spread.strategyType === "spread" 
                       ? (spread.legs[0]?.right === "C" ? "call spread" : "put spread")
+                      : spread.strategyType === "long_call"
+                      ? "long call"
+                      : spread.strategyType === "long_put"
+                      ? "long put"
+                      : spread.strategyType === "call"
+                      ? "long call"
+                      : spread.strategyType === "put"
+                      ? "long put"
                       : spread.strategyType}
                   </td>
                   <td className="py-2 px-1 text-gray-300">

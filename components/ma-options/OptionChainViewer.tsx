@@ -1,14 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import type { OptionChainResponse } from "@/types/ma-options";
+import type { OptionChainResponse, OptionContract } from "@/types/ma-options";
 
 interface OptionChainViewerProps {
   chainData: OptionChainResponse;
+  onWatchSingleLeg?: (contract: OptionContract) => void;
 }
 
-export default function OptionChainViewer({ chainData }: OptionChainViewerProps) {
+export default function OptionChainViewer({ chainData, onWatchSingleLeg }: OptionChainViewerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [addingContract, setAddingContract] = useState<string | null>(null);
 
   // Helper to get status color
   const getStatusColor = (age: number | undefined) => {
@@ -66,21 +68,61 @@ export default function OptionChainViewer({ chainData }: OptionChainViewerProps)
                 <th className="text-right py-1 px-1 text-gray-400">Mid</th>
                 <th className="text-right py-1 px-1 text-gray-400">Vol</th>
                 <th className="text-right py-1 px-1 text-gray-400">OI</th>
+                {onWatchSingleLeg && (
+                  <th className="text-center py-1 px-1 text-gray-400 w-8">Watch</th>
+                )}
               </tr>
             </thead>
             <tbody>
-              {chainData.contracts.map((contract, idx) => (
-                <tr key={idx} className="border-b border-gray-800 hover:bg-gray-800">
-                  <td className="py-1 px-1 text-gray-300">{contract.expiry}</td>
-                  <td className="py-1 px-1 text-right text-gray-100">{contract.strike}</td>
-                  <td className="py-1 px-1 text-center text-gray-100">{contract.right}</td>
-                  <td className="py-1 px-1 text-right text-gray-100">{contract.bid.toFixed(2)}</td>
-                  <td className="py-1 px-1 text-right text-gray-100">{contract.ask.toFixed(2)}</td>
-                  <td className="py-1 px-1 text-right text-gray-100">{contract.mid.toFixed(2)}</td>
-                  <td className="py-1 px-1 text-right text-gray-300">{contract.volume}</td>
-                  <td className="py-1 px-1 text-right text-gray-300">{contract.open_interest}</td>
-                </tr>
-              ))}
+              {chainData.contracts.map((contract, idx) => {
+                const contractKey = `${contract.expiry}_${contract.strike}_${contract.right}`;
+                const isAdding = addingContract === contractKey;
+                
+                const handleAddClick = async () => {
+                  if (!onWatchSingleLeg) return;
+                  setAddingContract(contractKey);
+                  try {
+                    await onWatchSingleLeg(contract);
+                  } finally {
+                    setAddingContract(null);
+                  }
+                };
+                
+                return (
+                  <tr key={idx} className="border-b border-gray-800 hover:bg-gray-800">
+                    <td className="py-1 px-1 text-gray-300">{contract.expiry}</td>
+                    <td className="py-1 px-1 text-right text-gray-100">{contract.strike}</td>
+                    <td className="py-1 px-1 text-center text-gray-100">{contract.right}</td>
+                    <td className="py-1 px-1 text-right text-gray-100">{contract.bid.toFixed(2)}</td>
+                    <td className="py-1 px-1 text-right text-gray-100">{contract.ask.toFixed(2)}</td>
+                    <td className="py-1 px-1 text-right text-gray-100">{contract.mid.toFixed(2)}</td>
+                    <td className="py-1 px-1 text-right text-gray-300">{contract.volume}</td>
+                    <td className="py-1 px-1 text-right text-gray-300">{contract.open_interest}</td>
+                    {onWatchSingleLeg && (
+                      <td className="py-1 px-1 text-center">
+                        <button
+                          onClick={handleAddClick}
+                          disabled={isAdding || contract.bid <= 0}
+                          className={`w-5 h-5 rounded text-xs font-bold transition-colors ${
+                            isAdding
+                              ? 'bg-gray-600 text-gray-400 cursor-wait'
+                              : contract.bid <= 0
+                              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                              : 'bg-green-700 hover:bg-green-600 text-white cursor-pointer'
+                          }`}
+                          title={
+                            contract.bid <= 0 
+                              ? "No bid - contract may be illiquid" 
+                              : `Add ${contract.strike}${contract.right} to watchlist`
+                          }
+                        >
+                          {isAdding ? '...' : '+'}
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
