@@ -170,8 +170,16 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to add to watchlist");
+        throw new Error(data.error || "Failed to add to watchlist");
+      }
+
+      // Check for duplicate response
+      if (data.duplicate) {
+        alert(data.message || "This spread is already in your watchlist");
+        return;
       }
 
       alert("Added to watchlist!");
@@ -261,8 +269,16 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to add to watchlist");
+        throw new Error(data.error || "Failed to add to watchlist");
+      }
+
+      // Check for duplicate response
+      if (data.duplicate) {
+        alert(data.message || `${contract.strike}${contract.right} is already in your watchlist`);
+        return;
       }
 
       alert(`Added ${contract.strike}${contract.right} to watchlist!`);

@@ -85,6 +85,10 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
   );
   const [userModifiedBreakPrice, setUserModifiedBreakPrice] = useState(false);
   
+  // Editable deal price for what-if analysis
+  const [editableDealPrice, setEditableDealPrice] = useState<number>(spread.dealPrice);
+  const dealPriceModified = editableDealPrice !== spread.dealPrice;
+  
   // Reusable fetch function - can be called on mount and on button click
   const fetchQuote = useCallback(async () => {
     setQuoteLoading(true);
@@ -134,7 +138,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
     
     const prob = dealProbability / 100;
     const currentPrice = stockQuote.price;
-    const dealPrice = spread.dealPrice;
+    const dealPrice = editableDealPrice; // Use editable deal price for what-if analysis
     const daysToClose = spread.daysToClose;
     const yearsToClose = Math.max(daysToClose, 1) / 365;
     
@@ -201,7 +205,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
         annualizedReturn: spreadAnnualized,
       },
     };
-  }, [stockQuote, breakPrice, dealProbability, spread]);
+  }, [stockQuote, breakPrice, dealProbability, spread, editableDealPrice]);
   
   const metrics = calculateMetrics();
   
@@ -210,7 +214,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
     if (!stockQuote || breakPrice === null) return null;
     
     const currentPrice = stockQuote.price;
-    const dealPrice = spread.dealPrice;
+    const dealPrice = editableDealPrice; // Use editable deal price
     
     // Get spread strikes
     const strikes = spread.legs.map(leg => leg.strike).sort((a, b) => a - b);
@@ -284,7 +288,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
         highStrike,
       },
     };
-  }, [stockQuote, breakPrice, spread]);
+  }, [stockQuote, breakPrice, spread, editableDealPrice]);
   
   const payoffData = generatePayoffData();
   
@@ -408,10 +412,34 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
           </div>
           
           {/* Deal Info */}
-          <div className="bg-gray-800/50 rounded p-3 flex gap-6 text-sm">
-            <div>
-              <span className="text-gray-500">Deal Price:</span>{" "}
-              <span className="text-gray-100 font-mono">${spread.dealPrice.toFixed(2)}</span>
+          <div className="bg-gray-800/50 rounded p-3 flex flex-wrap gap-4 text-sm items-center">
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500">Deal Price:</span>
+              <div className="flex items-center gap-1">
+                <span className="text-gray-400">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editableDealPrice}
+                  onChange={(e) => setEditableDealPrice(parseFloat(e.target.value) || spread.dealPrice)}
+                  className="w-20 px-2 py-0.5 bg-gray-700 border border-gray-600 rounded text-gray-100 text-sm font-mono"
+                />
+                {dealPriceModified && (
+                  <button
+                    onClick={() => setEditableDealPrice(spread.dealPrice)}
+                    className="text-xs text-yellow-500 hover:text-yellow-400 ml-1"
+                    title={`Reset to original: $${spread.dealPrice.toFixed(2)}`}
+                  >
+                    ↺
+                  </button>
+                )}
+              </div>
+              {dealPriceModified && (
+                <span className="text-xs text-yellow-500">
+                  ({((editableDealPrice / spread.dealPrice - 1) * 100) >= 0 ? "+" : ""}
+                  {((editableDealPrice / spread.dealPrice - 1) * 100).toFixed(1)}%)
+                </span>
+              )}
             </div>
             <div>
               <span className="text-gray-500">Expected Close:</span>{" "}
@@ -425,7 +453,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
               <div>
                 <span className="text-gray-500">Upside to Deal:</span>{" "}
                 <span className="text-green-400">
-                  {((spread.dealPrice / stockQuote.price - 1) * 100).toFixed(1)}%
+                  {((editableDealPrice / stockQuote.price - 1) * 100).toFixed(1)}%
                 </span>
               </div>
             )}

@@ -3,7 +3,22 @@ import { prisma } from "@/lib/db";
 import type {
   WatchSpreadRequest,
   WatchSpreadResponse,
+  StrategyLeg,
 } from "@/types/ma-options";
+
+/**
+ * Generate a unique signature for spread legs
+ * This allows us to identify duplicate spreads regardless of leg order in JSON
+ */
+function generateLegSignature(legs: StrategyLeg[] | unknown): string {
+  const legArray = legs as StrategyLeg[];
+  if (!Array.isArray(legArray)) return "";
+  
+  return legArray
+    .map(l => `${l.strike}|${l.right}|${l.side}|${l.quantity}`)
+    .sort()
+    .join(',');
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,7 +56,36 @@ export async function POST(request: NextRequest) {
       throw new Error("Invalid expiration date format");
     }
 
-    // Create watched spread
+    // Generate leg signature for the new spread
+    const newLegSignature = generateLegSignature(strategy.legs);
+    console.log("DEBUG: Leg signature:", newLegSignature);
+
+    // Check for existing duplicate spread
+    // We need to check for same deal, strategy type, expiration, and leg signature
+    const existingSpreads = await prisma.watchedSpread.findMany({
+      where: {
+        scannerDealId,
+        strategyType: strategy.strategyType,
+        expiration: expirationDate,
+        status: "active",
+      },
+    });
+
+    // Check if any existing spread has the same leg signature
+    for (const existing of existingSpreads) {
+      const existingLegSig = generateLegSignature(existing.legs);
+      if (existingLegSig === newLegSignature) {
+        console.log("DEBUG: Found duplicate spread:", existing.id);
+        return NextResponse.json({
+          spreadId: existing.id,
+          success: false,
+          duplicate: true,
+          message: "This spread is already in your watchlist",
+        });
+      }
+    }
+
+    // No duplicate found, create the spread
     const spread = await prisma.watchedSpread.create({
       data: {
         scannerDealId,

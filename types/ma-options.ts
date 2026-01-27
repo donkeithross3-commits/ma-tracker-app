@@ -138,6 +138,8 @@ export interface WatchSpreadRequest {
 export interface WatchSpreadResponse {
   spreadId: string;
   success: boolean;
+  duplicate?: boolean;
+  message?: string;
 }
 
 export interface UpdateSpreadPricesRequest {
