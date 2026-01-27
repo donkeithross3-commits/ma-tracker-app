@@ -9,7 +9,9 @@ interface WatchedSpreadsTableProps {
   spreads: WatchedSpreadDTO[];
   onDeactivate: (spreadId: string) => void;
   onRefresh: () => void;
+  onRefreshSingle: (spreadId: string) => void;
   isRefreshing?: boolean;
+  refreshingSpreads?: Set<string>;
   refreshStatus?: string;
 }
 
@@ -17,7 +19,9 @@ export default function WatchedSpreadsTable({
   spreads,
   onDeactivate,
   onRefresh,
+  onRefreshSingle,
   isRefreshing = false,
+  refreshingSpreads = new Set(),
   refreshStatus = "",
 }: WatchedSpreadsTableProps) {
   const [sortKey, setSortKey] = useState<string>("pnlPercent");
@@ -172,7 +176,17 @@ export default function WatchedSpreadsTable({
 
                   {/* Action */}
                   <td className="py-2 px-1 text-center">
-                    <div className="flex gap-1 justify-center">
+                    <div className="flex gap-1 justify-center items-center">
+                      <button
+                        onClick={() => onRefreshSingle(spread.id)}
+                        disabled={refreshingSpreads.has(spread.id)}
+                        className={`w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors ${
+                          refreshingSpreads.has(spread.id) ? 'animate-spin' : ''
+                        }`}
+                        title="Refresh this spread"
+                      >
+                        ↻
+                      </button>
                       <button
                         onClick={() => setAnalyzingSpread(spread)}
                         className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded"
@@ -183,9 +197,10 @@ export default function WatchedSpreadsTable({
                       {spread.status === "active" && (
                         <button
                           onClick={() => onDeactivate(spread.id)}
-                          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
+                          className="w-6 h-6 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors"
+                          title="Deactivate spread"
                         >
-                          Deactivate
+                          ×
                         </button>
                       )}
                     </div>

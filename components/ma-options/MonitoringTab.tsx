@@ -12,6 +12,7 @@ export default function MonitoringTab() {
   const [loading, setLoading] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshingSpreads, setRefreshingSpreads] = useState<Set<string>>(new Set());
   const [refreshStatus, setRefreshStatus] = useState<string>("");
 
   useEffect(() => {
@@ -153,6 +154,52 @@ export default function MonitoringTab() {
     }
   };
 
+  const refreshSingleSpread = async (spreadId: string) => {
+    // Prevent if already refreshing this spread
+    if (refreshingSpreads.has(spreadId)) return;
+    
+    setRefreshingSpreads(prev => new Set(prev).add(spreadId));
+    
+    try {
+      const response = await fetch("/api/ma-options/update-spread-prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spreadIds: [spreadId] }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Update the single spread with new prices
+        setSpreads((prevSpreads) =>
+          prevSpreads.map((spread) => {
+            const update = data.updates.find((u: any) => u.spreadId === spread.id);
+            if (update) {
+              const pnlDollar = update.currentPremium - spread.entryPremium;
+              const pnlPercent = (pnlDollar / spread.entryPremium) * 100;
+              return {
+                ...spread,
+                currentPremium: update.currentPremium,
+                lastUpdated: update.lastUpdated,
+                pnlDollar,
+                pnlPercent,
+              };
+            }
+            return spread;
+          })
+        );
+      }
+    } catch (error) {
+      console.error("Error refreshing single spread:", error);
+    } finally {
+      setRefreshingSpreads(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(spreadId);
+        return newSet;
+      });
+    }
+  };
+
   const handleDeactivate = async (spreadId: string) => {
     try {
       console.log("Deactivating spread:", spreadId);
@@ -203,7 +250,9 @@ export default function MonitoringTab() {
           spreads={filteredSpreads}
           onDeactivate={handleDeactivate}
           onRefresh={refreshPrices}
+          onRefreshSingle={refreshSingleSpread}
           isRefreshing={isRefreshing}
+          refreshingSpreads={refreshingSpreads}
           refreshStatus={refreshStatus}
         />
       )}

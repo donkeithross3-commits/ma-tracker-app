@@ -29,12 +29,9 @@ interface ComparisonMetrics {
   capitalRequired: number;
   maxProfit: number;
   maxLoss: number;
-  expectedValue: number;
   expectedReturnPct: number;
   capitalEfficiency: number;
   annualizedReturn: number;
-  breakevenPrice: number | null;
-  breakevenProbability: number;
 }
 
 export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisModalProps) {
@@ -104,9 +101,6 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
     const stockExpectedReturnPct = (stockExpectedValue / stockCapital) * 100;
     const stockCapitalEfficiency = stockExpectedValue / stockCapital;
     const stockAnnualized = (Math.pow(1 + stockExpectedValue / stockCapital, 1 / yearsToClose) - 1) * 100;
-    // Breakeven: probability where expected value = 0
-    // prob * profit = (1-prob) * loss => prob = loss / (profit + loss)
-    const stockBreakevenProb = stockLossIfBreak / (stockProfitIfClose + stockLossIfBreak) * 100;
     
     // Spread strategy
     // For credit spreads, capital = max loss; for debit spreads, capital = net debit
@@ -117,34 +111,23 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
     const spreadExpectedReturnPct = (spreadExpectedValue / spreadCapital) * 100;
     const spreadCapitalEfficiency = spreadExpectedValue / spreadCapital;
     const spreadAnnualized = (Math.pow(1 + spreadExpectedValue / spreadCapital, 1 / yearsToClose) - 1) * 100;
-    const spreadBreakevenProb = spreadLossIfBreak / (spreadProfitIfClose + spreadLossIfBreak) * 100;
-    
-    // Breakeven price for stock (where P&L = 0)
-    // If deal closes at probability p, we need: p * (deal - current) = (1-p) * (current - break)
-    // Solving for breakeven stock price at purchase time is just current price (simplification)
     
     return {
       stock: {
         capitalRequired: stockCapital,
         maxProfit: stockProfitIfClose,
         maxLoss: stockLossIfBreak,
-        expectedValue: stockExpectedValue,
         expectedReturnPct: stockExpectedReturnPct,
         capitalEfficiency: stockCapitalEfficiency,
         annualizedReturn: stockAnnualized,
-        breakevenPrice: currentPrice, // Buy at current, breakeven is current if held
-        breakevenProbability: stockBreakevenProb,
       },
       spread: {
         capitalRequired: spreadCapital,
         maxProfit: spreadProfitIfClose,
         maxLoss: spreadLossIfBreak,
-        expectedValue: spreadExpectedValue,
         expectedReturnPct: spreadExpectedReturnPct,
         capitalEfficiency: spreadCapitalEfficiency,
         annualizedReturn: spreadAnnualized,
-        breakevenPrice: null, // Spread breakeven depends on strike structure
-        breakevenProbability: spreadBreakevenProb,
       },
     };
   }, [stockQuote, breakPrice, dealProbability, spread]);
@@ -367,7 +350,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                   <tr className="border-b border-gray-700">
                     <th className="text-left py-2 px-3 text-gray-400">Metric</th>
                     <th className="text-right py-2 px-3 text-blue-400">Stock (100 shares)</th>
-                    <th className="text-right py-2 px-3 text-green-400">Spread (1 contract)</th>
+                    <th className="text-right py-2 px-3 text-purple-400">Spread (1 contract)</th>
                     <th className="text-right py-2 px-3 text-gray-400">Advantage</th>
                   </tr>
                 </thead>
@@ -376,7 +359,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                     <td className="py-2 px-3 text-gray-400">Capital Required</td>
                     <td className="py-2 px-3 text-right font-mono">{formatCurrency(metrics.stock.capitalRequired)}</td>
                     <td className="py-2 px-3 text-right font-mono">{formatCurrency(metrics.spread.capitalRequired)}</td>
-                    <td className="py-2 px-3 text-right text-green-400">
+                    <td className="py-2 px-3 text-right text-purple-400">
                       {((1 - metrics.spread.capitalRequired / metrics.stock.capitalRequired) * 100).toFixed(0)}% less
                     </td>
                   </tr>
@@ -388,7 +371,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                       {metrics.stock.maxProfit > metrics.spread.maxProfit ? (
                         <span className="text-blue-400">Stock +{formatCurrency(metrics.stock.maxProfit - metrics.spread.maxProfit)}</span>
                       ) : (
-                        <span className="text-green-400">Spread +{formatCurrency(metrics.spread.maxProfit - metrics.stock.maxProfit)}</span>
+                        <span className="text-purple-400">Spread +{formatCurrency(metrics.spread.maxProfit - metrics.stock.maxProfit)}</span>
                       )}
                     </td>
                   </tr>
@@ -398,31 +381,9 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                     <td className="py-2 px-3 text-right font-mono text-red-400">{formatCurrency(-metrics.spread.maxLoss)}</td>
                     <td className="py-2 px-3 text-right">
                       {metrics.stock.maxLoss > metrics.spread.maxLoss ? (
-                        <span className="text-green-400">Spread saves {formatCurrency(metrics.stock.maxLoss - metrics.spread.maxLoss)}</span>
+                        <span className="text-purple-400">Spread saves {formatCurrency(metrics.stock.maxLoss - metrics.spread.maxLoss)}</span>
                       ) : (
                         <span className="text-blue-400">Stock saves {formatCurrency(metrics.spread.maxLoss - metrics.stock.maxLoss)}</span>
-                      )}
-                    </td>
-                  </tr>
-                  <tr className="border-b border-gray-700/50 bg-gray-700/30">
-                    <td className="py-2 px-3 text-gray-300 font-medium">Expected Value</td>
-                    <td className="py-2 px-3 text-right font-mono font-medium">
-                      <span className={getProfitColorClass(metrics.stock.expectedValue)}>
-                        {formatCurrency(metrics.stock.expectedValue)}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-right font-mono font-medium">
-                      <span className={getProfitColorClass(metrics.spread.expectedValue)}>
-                        {formatCurrency(metrics.spread.expectedValue)}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-right font-medium">
-                      {metrics.stock.expectedValue > metrics.spread.expectedValue ? (
-                        <span className="text-blue-400">Stock better</span>
-                      ) : metrics.spread.expectedValue > metrics.stock.expectedValue ? (
-                        <span className="text-green-400">Spread better</span>
-                      ) : (
-                        <span className="text-gray-400">Equal</span>
                       )}
                     </td>
                   </tr>
@@ -440,7 +401,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                     </td>
                     <td className="py-2 px-3 text-right">
                       {metrics.spread.expectedReturnPct > metrics.stock.expectedReturnPct ? (
-                        <span className="text-green-400">+{(metrics.spread.expectedReturnPct - metrics.stock.expectedReturnPct).toFixed(1)}pp</span>
+                        <span className="text-purple-400">+{(metrics.spread.expectedReturnPct - metrics.stock.expectedReturnPct).toFixed(1)}pp</span>
                       ) : metrics.stock.expectedReturnPct > metrics.spread.expectedReturnPct ? (
                         <span className="text-blue-400">+{(metrics.stock.expectedReturnPct - metrics.spread.expectedReturnPct).toFixed(1)}pp</span>
                       ) : (
@@ -448,7 +409,7 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                       )}
                     </td>
                   </tr>
-                  <tr className="border-b border-gray-700/50">
+                  <tr>
                     <td className="py-2 px-3 text-gray-400">Annualized Return</td>
                     <td className="py-2 px-3 text-right font-mono">
                       <span className={getProfitColorClass(metrics.stock.annualizedReturn)}>
@@ -461,16 +422,6 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                       </span>
                     </td>
                     <td className="py-2 px-3 text-right">—</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 text-gray-400">Breakeven Probability</td>
-                    <td className="py-2 px-3 text-right font-mono">{metrics.stock.breakevenProbability.toFixed(1)}%</td>
-                    <td className="py-2 px-3 text-right font-mono">{metrics.spread.breakevenProbability.toFixed(1)}%</td>
-                    <td className="py-2 px-3 text-right text-gray-500 text-xs">
-                      {dealProbability > Math.max(metrics.stock.breakevenProbability, metrics.spread.breakevenProbability)
-                        ? "Both profitable at your estimate"
-                        : "Check probability estimate"}
-                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -491,18 +442,11 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
               <h3 className="text-gray-300 font-medium mb-2">Key Insights</h3>
               <ul className="space-y-1 text-gray-400">
                 <li>
-                  • The spread requires <span className="text-green-400">{((1 - metrics.spread.capitalRequired / metrics.stock.capitalRequired) * 100).toFixed(0)}% less capital</span> than buying the stock
-                </li>
-                <li>
-                  • At {dealProbability}% deal probability, {metrics.spread.expectedValue > metrics.stock.expectedValue ? (
-                    <span>the <span className="text-green-400">spread has higher expected value</span></span>
-                  ) : (
-                    <span>the <span className="text-blue-400">stock has higher expected value</span></span>
-                  )}
+                  • The spread requires <span className="text-purple-400">{((1 - metrics.spread.capitalRequired / metrics.stock.capitalRequired) * 100).toFixed(0)}% less capital</span> than buying the stock
                 </li>
                 {metrics.spread.capitalEfficiency > metrics.stock.capitalEfficiency && (
                   <li>
-                    • The spread is more <span className="text-green-400">capital efficient</span> ({(metrics.spread.capitalEfficiency * 100).toFixed(1)}% vs {(metrics.stock.capitalEfficiency * 100).toFixed(1)}%)
+                    • The spread is more <span className="text-purple-400">capital efficient</span> ({(metrics.spread.capitalEfficiency * 100).toFixed(1)}% vs {(metrics.stock.capitalEfficiency * 100).toFixed(1)}%)
                   </li>
                 )}
                 {spread.legs[0]?.right === "C" && breakPrice && stockQuote && (
@@ -612,7 +556,7 @@ function PayoffChart({ data }: PayoffChartProps) {
       <path d={stockPath} fill="none" stroke="#3b82f6" strokeWidth="2" />
       
       {/* Spread line */}
-      <path d={spreadPath} fill="none" stroke="#22c55e" strokeWidth="2" />
+      <path d={spreadPath} fill="none" stroke="#a855f7" strokeWidth="2" />
       
       {/* Y-axis labels */}
       <text x={padding.left - 10} y={scaleY(maxPL)} textAnchor="end" dominantBaseline="middle" className="text-[10px] fill-gray-500">
@@ -629,8 +573,8 @@ function PayoffChart({ data }: PayoffChartProps) {
       <g transform={`translate(${width - padding.right - 100}, ${padding.top})`}>
         <line x1="0" y1="5" x2="20" y2="5" stroke="#3b82f6" strokeWidth="2" />
         <text x="25" y="8" className="text-[10px] fill-blue-400">Stock</text>
-        <line x1="0" y1="20" x2="20" y2="20" stroke="#22c55e" strokeWidth="2" />
-        <text x="25" y="23" className="text-[10px] fill-green-400">Spread</text>
+        <line x1="0" y1="20" x2="20" y2="20" stroke="#a855f7" strokeWidth="2" />
+        <text x="25" y="23" className="text-[10px] fill-purple-400">Spread</text>
       </g>
     </svg>
   );
