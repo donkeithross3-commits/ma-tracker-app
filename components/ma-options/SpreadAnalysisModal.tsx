@@ -155,6 +155,11 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
     // For debit spreads (call spreads), capital = entry cost
     // For credit spreads (put spreads), capital = max loss (collateral)
     const spreadCapital = spread.maxLoss * 100; // maxLoss is per share, multiply by 100
+    // #region agent log
+    const buyLegDebug = spread.legs.find(l => l.side === "BUY");
+    const sellLegDebug = spread.legs.find(l => l.side === "SELL");
+    fetch('http://127.0.0.1:7242/ingest/d61d4ff5-9f08-4ba1-a0da-99b8e7b33cdc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SpreadAnalysisModal.tsx:calculateMetrics',message:'H1/H2: Checking spread profit calculation inputs',data:{dealPrice,storedMaxProfit:spread.maxProfit,spreadCapital,buyStrike:buyLegDebug?.strike,sellStrike:sellLegDebug?.strike,entryPremium:spread.entryPremium,strategyType:spread.strategyType,legRight:spread.legs[0]?.right},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1-H2'})}).catch(()=>{});
+    // #endregion
     const spreadProfitIfClose = spread.maxProfit * 100;
     
     // Calculate spread value at break price (accounts for residual intrinsic value)
@@ -162,6 +167,11 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
     const buyLeg = spread.legs.find(l => l.side === "BUY");
     const sellLeg = spread.legs.find(l => l.side === "SELL");
     const isCallSpread = spread.legs[0]?.right === "C";
+    const isSingleLeg = spread.legs.length === 1;
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d61d4ff5-9f08-4ba1-a0da-99b8e7b33cdc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SpreadAnalysisModal.tsx:spreadValueCalc',message:'H1: Calculating spread value at deal price',data:{isCallSpread,isSingleLeg,buyStrike:buyLeg?.strike,sellStrike:sellLeg?.strike,dealPrice,spreadProfitIfClose,strikeWidth:sellLeg&&buyLeg?Math.abs(sellLeg.strike-buyLeg.strike):null},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     
     let spreadValueAtBreak = 0;
     if (buyLeg && sellLeg) {
@@ -186,6 +196,10 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
     const spreadExpectedReturnPct = (spreadExpectedValue / spreadCapital) * 100;
     const spreadCapitalEfficiency = spreadExpectedValue / spreadCapital;
     const spreadAnnualized = (Math.pow(1 + spreadExpectedValue / spreadCapital, 1 / yearsToClose) - 1) * 100;
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/d61d4ff5-9f08-4ba1-a0da-99b8e7b33cdc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SpreadAnalysisModal.tsx:metricsResult',message:'H2: Final metrics being returned',data:{stockMaxProfit:stockProfitIfClose,spreadMaxProfit:spreadProfitIfClose,spreadCapital,spreadExpectedReturnPct,dealPrice},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     
     return {
       stock: {
