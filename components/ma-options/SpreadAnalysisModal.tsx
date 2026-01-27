@@ -103,10 +103,36 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
     const stockAnnualized = (Math.pow(1 + stockExpectedValue / stockCapital, 1 / yearsToClose) - 1) * 100;
     
     // Spread strategy
-    // For credit spreads, capital = max loss; for debit spreads, capital = net debit
+    // For debit spreads (call spreads), capital = entry cost
+    // For credit spreads (put spreads), capital = max loss (collateral)
     const spreadCapital = spread.maxLoss * 100; // maxLoss is per share, multiply by 100
     const spreadProfitIfClose = spread.maxProfit * 100;
-    const spreadLossIfBreak = spread.maxLoss * 100;
+    
+    // Calculate spread value at break price (accounts for residual intrinsic value)
+    // Get strikes from legs
+    const buyLeg = spread.legs.find(l => l.side === "BUY");
+    const sellLeg = spread.legs.find(l => l.side === "SELL");
+    const isCallSpread = spread.legs[0]?.right === "C";
+    
+    let spreadValueAtBreak = 0;
+    if (buyLeg && sellLeg) {
+      if (isCallSpread) {
+        // Call spread: value = max(0, price - buyStrike) - max(0, price - sellStrike)
+        const longCallValue = Math.max(0, breakPrice - buyLeg.strike);
+        const shortCallValue = Math.max(0, breakPrice - sellLeg.strike);
+        spreadValueAtBreak = (longCallValue - shortCallValue) * 100;
+      } else {
+        // Put spread: value = max(0, buyStrike - price) - max(0, sellStrike - price)
+        const longPutValue = Math.max(0, buyLeg.strike - breakPrice);
+        const shortPutValue = Math.max(0, sellLeg.strike - breakPrice);
+        spreadValueAtBreak = (longPutValue - shortPutValue) * 100;
+      }
+    }
+    
+    // Loss at break = entry cost - value at break (for debit spreads)
+    // For call spread: entry cost is spreadCapital, loss is cost minus residual value
+    const spreadLossIfBreak = Math.max(0, spreadCapital - spreadValueAtBreak);
+    
     const spreadExpectedValue = (prob * spreadProfitIfClose) - ((1 - prob) * spreadLossIfBreak);
     const spreadExpectedReturnPct = (spreadExpectedValue / spreadCapital) * 100;
     const spreadCapitalEfficiency = spreadExpectedValue / spreadCapital;
