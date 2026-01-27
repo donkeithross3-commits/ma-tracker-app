@@ -50,6 +50,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Copy public files (if any)
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
+# Copy standalone agent for download
+COPY --from=builder --chown=nextjs:nodejs /app/python-service/standalone_agent ./python-service/standalone_agent
+
 # Create data directory for volume mount
 RUN mkdir -p /app/data/krj && chown nextjs:nodejs /app/data/krj
 
