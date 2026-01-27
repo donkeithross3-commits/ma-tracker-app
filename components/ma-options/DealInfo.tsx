@@ -352,8 +352,8 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
             <ul className="mt-1 space-y-1 ml-4 list-disc">
               <li><strong>Long Leg Lower:</strong> Deepest strike to consider - deeper ITM costs more but protects if deal breaks</li>
               <li><strong>Long Leg Upper:</strong> Shallowest strike (hardcoded at deal price)</li>
-              <li><strong>Short Leg:</strong> Range for sold strike - call spreads need buffer above for higher offers</li>
-              <li><strong>Fetch Range:</strong> Automatically derived from strategy params - no wasted IB requests</li>
+              <li><strong>Short Leg:</strong> Range for sold strike - call spreads may benefit from buffer above for higher offers</li>
+              <li><strong>Fetch Range:</strong> Automatically derived from strategy params</li>
             </ul>
           </div>
         </div>
