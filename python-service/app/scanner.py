@@ -487,21 +487,25 @@ class IBMergerArbScanner(EWrapper, EClient):
                     available_strikes = self.available_strikes[expiry]
                     print(f"Using {len(available_strikes)} strikes from IB for {expiry}")
 
-                    # Derive fetch range from the 8 strategy params
-                    # Lower bound: need deepest of both long legs
-                    # Upper bound: need highest of both short legs
-                    fetch_lower_pct = max(call_long_strike_lower_pct, put_long_strike_lower_pct)
-                    fetch_upper_pct = max(call_short_strike_upper_pct, put_short_strike_upper_pct)
-                    
+                    # Compute SEPARATE fetch ranges for calls vs puts
+                    # This avoids fetching puts at high strikes we'll never use (and vice versa)
                     if deal_price:
-                        # Use the lower of current price or deal price as the base for min_strike
-                        min_strike = min(price_to_use, deal_price) * (1 - fetch_lower_pct)
-                        # Go up to fetch_upper_pct above deal price
-                        max_strike = deal_price * (1 + fetch_upper_pct)
+                        base_price = min(price_to_use, deal_price)
+                        # CALL range: from deep ITM (long leg) to above deal (short leg for higher offers)
+                        call_min_strike = base_price * (1 - call_long_strike_lower_pct)
+                        call_max_strike = deal_price * (1 + call_short_strike_upper_pct)
+                        # PUT range: from deep OTM (long leg) to at/near deal (short leg, tighter)
+                        put_min_strike = base_price * (1 - put_long_strike_lower_pct)
+                        put_max_strike = deal_price * (1 + put_short_strike_upper_pct)
                     else:
-                        min_strike = price_to_use * (1 - fetch_lower_pct)
-                        max_strike = price_to_use * (1 + fetch_upper_pct)
+                        call_min_strike = price_to_use * (1 - call_long_strike_lower_pct)
+                        call_max_strike = price_to_use * (1 + call_short_strike_upper_pct)
+                        put_min_strike = price_to_use * (1 - put_long_strike_lower_pct)
+                        put_max_strike = price_to_use * (1 + put_short_strike_upper_pct)
 
+                    # Overall range for filtering available strikes (union of call and put ranges)
+                    min_strike = min(call_min_strike, put_min_strike)
+                    max_strike = max(call_max_strike, put_max_strike)
                     relevant_strikes = [s for s in available_strikes if min_strike <= s <= max_strike]
                     
                     # OPTIMIZATION: Filter to $5 strike intervals for faster scanning
@@ -513,7 +517,8 @@ class IBMergerArbScanner(EWrapper, EClient):
                     if not filtered_strikes:
                         filtered_strikes = relevant_strikes
                     
-                    print(f"Strike range for {expiry}: ${min_strike:.2f} - ${max_strike:.2f}")
+                    print(f"Call strike range for {expiry}: ${call_min_strike:.2f} - ${call_max_strike:.2f}")
+                    print(f"Put strike range for {expiry}: ${put_min_strike:.2f} - ${put_max_strike:.2f}")
                     print(f"Found {len(relevant_strikes)} relevant strikes, filtered to {len(filtered_strikes)} at ${strike_interval} intervals")
 
                     strikes = filtered_strikes
@@ -524,11 +529,17 @@ class IBMergerArbScanner(EWrapper, EClient):
                     print(f"No IB strikes available for {expiry}, using calculated strikes")
                     strikes = [price_to_use * 0.95, price_to_use, price_to_use * 1.05]
                     strikes = [round(s / 5) * 5 for s in strikes]
+                    # Use same range for calls and puts in fallback
+                    call_min_strike = put_min_strike = min(strikes)
+                    call_max_strike = put_max_strike = max(strikes)
 
-                # Build batch requests for all strikes (calls and puts)
+                # Build batch requests with SEPARATE ranges for calls vs puts
+                # Only fetch calls/puts where they're actually needed
                 for strike in strikes:
-                    all_batch_requests.append((expiry, strike, "C"))  # Call
-                    all_batch_requests.append((expiry, strike, "P"))  # Put
+                    if call_min_strike <= strike <= call_max_strike:
+                        all_batch_requests.append((expiry, strike, "C"))
+                    if put_min_strike <= strike <= put_max_strike:
+                        all_batch_requests.append((expiry, strike, "P"))
 
             print(f"Fetching {len(all_batch_requests)} option contracts across {len(expiries)} expirations...")
 

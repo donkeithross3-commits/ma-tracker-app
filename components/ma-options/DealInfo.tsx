@@ -51,11 +51,11 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
     topStrategiesPerExpiration: 5,
   });
 
-  // Derive fetch range from the 8 params
-  const fetchLowerPct = Math.max(params.callLongStrikeLower, params.putLongStrikeLower);
-  const fetchUpperPct = Math.max(params.callShortStrikeUpper, params.putShortStrikeUpper);
-  const fetchLowerStrike = dealPrice * (1 - fetchLowerPct / 100);
-  const fetchUpperStrike = dealPrice * (1 + fetchUpperPct / 100);
+  // Derive SEPARATE fetch ranges for calls vs puts
+  const callFetchLower = dealPrice * (1 - params.callLongStrikeLower / 100);
+  const callFetchUpper = dealPrice * (1 + params.callShortStrikeUpper / 100);
+  const putFetchLower = dealPrice * (1 - params.putLongStrikeLower / 100);
+  const putFetchUpper = dealPrice * (1 + params.putShortStrikeUpper / 100);
 
   const inputClass = "w-16 px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 text-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
   const disabledInputClass = "w-16 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-gray-500 text-sm text-center cursor-not-allowed";
@@ -289,14 +289,17 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
             </div>
           </div>
 
-          {/* Row 3: Derived Fetch Range (read-only) */}
+          {/* Row 3: Derived Fetch Ranges (read-only) */}
           <div className="bg-gray-800/30 rounded p-2 border border-gray-700">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-500">Derived Fetch Range:</span>
-              <span className="text-gray-400 font-mono">
-                ${fetchLowerStrike.toFixed(0)} - ${fetchUpperStrike.toFixed(0)} 
-                <span className="text-gray-600 ml-2">({fetchLowerPct}% below to {fetchUpperPct}% above deal)</span>
-              </span>
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-green-500/70">Calls fetched:</span>
+                <span className="text-gray-400 font-mono">${callFetchLower.toFixed(0)} - ${callFetchUpper.toFixed(0)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-orange-500/70">Puts fetched:</span>
+                <span className="text-gray-400 font-mono">${putFetchLower.toFixed(0)} - ${putFetchUpper.toFixed(0)}</span>
+              </div>
             </div>
           </div>
 
