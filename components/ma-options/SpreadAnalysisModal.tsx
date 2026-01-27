@@ -13,6 +13,24 @@ function getProfitColorClass(value: number): string {
   return "text-gray-400";
 }
 
+/**
+ * Format quote timestamp for display
+ * Shows "as of X:XX PM" for today, or "Jan 11, X:XX PM" for other days
+ */
+function formatQuoteTimestamp(timestamp: string): string {
+  if (timestamp === "saved") return "saved";
+  
+  const date = new Date(timestamp);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  
+  if (isToday) {
+    return `as of ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  } else {
+    return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  }
+}
+
 interface SpreadAnalysisModalProps {
   spread: WatchedSpreadDTO;
   onClose: () => void;
@@ -44,7 +62,6 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
   // Only show loading if we don't have a saved price
   const [quoteLoading, setQuoteLoading] = useState(!spread.underlyingPrice);
   const [quoteError, setQuoteError] = useState<string | null>(null);
-  const [isLiveQuote, setIsLiveQuote] = useState(false);
   
   // User inputs - initialize breakPrice from saved price if available
   const [dealProbability, setDealProbability] = useState(95); // 95% default
@@ -53,53 +70,47 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
   );
   const [userModifiedBreakPrice, setUserModifiedBreakPrice] = useState(false);
   
-  // Fetch live stock quote on mount (updates the saved price)
-  useEffect(() => {
-    async function fetchQuote() {
-      // If we have a saved price, we're "updating" not "loading"
-      if (!spread.underlyingPrice) {
-        setQuoteLoading(true);
-      }
-      setQuoteError(null);
-      
-      try {
-        const response = await fetch("/api/ma-options/stock-quote", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ticker: spread.dealTicker }),
-        });
-        
-        if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.error || "Failed to fetch quote");
-        }
-        
-        const data = await response.json();
-        setStockQuote({
-          price: data.price,
-          bid: data.bid,
-          ask: data.ask,
-          timestamp: data.timestamp,
-        });
-        setIsLiveQuote(true);
-        
-        // Only update break price if user hasn't manually changed it
-        if (!userModifiedBreakPrice && !breakPrice) {
-          setBreakPrice(Math.round(data.price * 0.80 * 100) / 100);
-        }
-      } catch (error) {
-        // Only set error if we don't have any price data
-        if (!stockQuote) {
-          setQuoteError(error instanceof Error ? error.message : "Failed to fetch quote");
-        }
-        // If we have saved data, the error is less critical - just mark as not live
-      } finally {
-        setQuoteLoading(false);
-      }
-    }
+  // Reusable fetch function - can be called on mount and on button click
+  const fetchQuote = useCallback(async () => {
+    setQuoteLoading(true);
+    setQuoteError(null);
     
+    try {
+      const response = await fetch("/api/ma-options/stock-quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: spread.dealTicker }),
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to fetch quote");
+      }
+      
+      const data = await response.json();
+      setStockQuote({
+        price: data.price,
+        bid: data.bid,
+        ask: data.ask,
+        timestamp: data.timestamp,
+      });
+      
+      // Only update break price if user hasn't manually changed it
+      if (!userModifiedBreakPrice) {
+        setBreakPrice(Math.round(data.price * 0.80 * 100) / 100);
+      }
+    } catch (error) {
+      // Only set error if we don't have any price data
+      setQuoteError(error instanceof Error ? error.message : "Failed to fetch quote");
+    } finally {
+      setQuoteLoading(false);
+    }
+  }, [spread.dealTicker, userModifiedBreakPrice]);
+  
+  // Auto-fetch on mount
+  useEffect(() => {
     fetchQuote();
-  }, [spread.dealTicker]);
+  }, []); // Only run once on mount
   
   // Calculate metrics for both strategies
   const calculateMetrics = useCallback((): { stock: ComparisonMetrics; spread: ComparisonMetrics } | null => {
@@ -301,28 +312,37 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
           <div className="grid grid-cols-3 gap-4">
             {/* Current Stock Price */}
             <div className="bg-gray-800 rounded p-3">
-              <div className="text-xs text-gray-500 mb-1">Current Stock Price</div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-500">Current Stock Price</span>
+                <button
+                  onClick={fetchQuote}
+                  disabled={quoteLoading}
+                  className={`text-gray-400 hover:text-white transition-colors ${quoteLoading ? 'animate-spin' : ''}`}
+                  title="Refresh quote"
+                >
+                  ↻
+                </button>
+              </div>
               {quoteLoading && !stockQuote ? (
                 <div className="text-gray-400">Loading...</div>
               ) : quoteError && !stockQuote ? (
                 <div className="text-red-400 text-sm">{quoteError}</div>
               ) : stockQuote ? (
-                <div className="flex items-baseline gap-2">
-                  <span className="text-xl font-mono text-gray-100">${stockQuote.price.toFixed(2)}</span>
-                  {quoteLoading ? (
-                    <span className="text-xs text-yellow-400">(updating...)</span>
-                  ) : isLiveQuote ? (
-                    <span className="text-xs text-green-400">(live)</span>
-                  ) : (
-                    <span className="text-xs text-gray-500">(saved)</span>
+                <>
+                  <div className="text-xl font-mono text-gray-100">${stockQuote.price.toFixed(2)}</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {stockQuote.bid && stockQuote.ask 
+                      ? `Bid: $${stockQuote.bid.toFixed(2)} | Ask: $${stockQuote.ask.toFixed(2)}`
+                      : formatQuoteTimestamp(stockQuote.timestamp)
+                    }
+                  </div>
+                  {stockQuote.bid && stockQuote.ask && (
+                    <div className="text-xs text-gray-500">
+                      {formatQuoteTimestamp(stockQuote.timestamp)}
+                    </div>
                   )}
-                </div>
+                </>
               ) : null}
-              {stockQuote && (
-                <div className="text-xs text-gray-500 mt-1">
-                  Bid: ${stockQuote.bid?.toFixed(2) || "—"} | Ask: ${stockQuote.ask?.toFixed(2) || "—"}
-                </div>
-              )}
             </div>
             
             {/* Deal Probability Input */}
