@@ -6,10 +6,12 @@ import type { ScannerDeal } from "@/types/ma-options";
 export interface ScanParameters {
   dealPrice: number; // User-editable deal price
   daysBeforeClose: number;
-  strikeLowerBound: number; // percentage below deal price for long leg (e.g., 20 = 20%)
-  strikeUpperBound: number; // percentage above deal price for long leg (e.g., 10 = 10%)
-  shortStrikeLower: number; // percentage below deal price for short leg (e.g., 10 = 10%)
-  shortStrikeUpper: number; // percentage above deal price for short leg (e.g., 20 = 20%)
+  strikeLowerBound: number; // % below min(current, deal) for fetching option chain
+  strikeUpperBound: number; // % above deal price for fetching option chain
+  callShortStrikeLower: number; // Call spread: % below deal price for short leg
+  callShortStrikeUpper: number; // Call spread: % above deal price for short leg (higher offer buffer)
+  putShortStrikeLower: number;  // Put spread: % below deal price for short leg
+  putShortStrikeUpper: number;  // Put spread: % above deal price for short leg
   topStrategiesPerExpiration: number;
 }
 
@@ -32,10 +34,12 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
   const [params, setParams] = useState<ScanParameters>({
     dealPrice: deal.expectedClosePrice,
     daysBeforeClose: 60,
-    strikeLowerBound: 20,
-    strikeUpperBound: 10,
-    shortStrikeLower: 10,
-    shortStrikeUpper: 20,
+    strikeLowerBound: 25,      // Fetch strikes 25% below min(current, deal)
+    strikeUpperBound: 15,      // Fetch strikes 15% above deal
+    callShortStrikeLower: 5,   // Call spread short: 5% below deal
+    callShortStrikeUpper: 10,  // Call spread short: 10% above deal (higher offer buffer)
+    putShortStrikeLower: 5,    // Put spread short: 5% below deal
+    putShortStrikeUpper: 3,    // Put spread short: 3% above deal (tight to deal)
     topStrategiesPerExpiration: 5,
   });
 
@@ -135,72 +139,107 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
             </div>
           </div>
 
-          {/* Row 2: Strike Ranges - Side by Side */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* Long Leg (Buy) */}
-            <div className="bg-gray-800/50 rounded p-3">
-              <div className="text-xs font-medium text-blue-400 mb-2">Long Leg (Buy)</div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 w-16">Lower</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="50"
-                    value={params.strikeLowerBound}
-                    onChange={(e) => setParams({ ...params, strikeLowerBound: parseInt(e.target.value) || 0 })}
-                    className={inputClass}
-                  />
-                  <span className="text-xs text-gray-500">% below deal</span>
-                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 - params.strikeLowerBound / 100)).toFixed(0)}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 w-16">Upper</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="50"
-                    value={params.strikeUpperBound}
-                    onChange={(e) => setParams({ ...params, strikeUpperBound: parseInt(e.target.value) || 0 })}
-                    className={inputClass}
-                  />
-                  <span className="text-xs text-gray-500">% above deal</span>
-                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 + params.strikeUpperBound / 100)).toFixed(0)}</span>
-                </div>
+          {/* Row 2: Option Chain Fetch Range */}
+          <div className="bg-gray-800/50 rounded p-3">
+            <div className="text-xs font-medium text-gray-300 mb-2">Option Chain Fetch Range</div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400 w-16">Lower</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  value={params.strikeLowerBound}
+                  onChange={(e) => setParams({ ...params, strikeLowerBound: parseInt(e.target.value) || 0 })}
+                  className={inputClass}
+                />
+                <span className="text-xs text-gray-500">% below</span>
+                <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 - params.strikeLowerBound / 100)).toFixed(0)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400 w-16">Upper</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  value={params.strikeUpperBound}
+                  onChange={(e) => setParams({ ...params, strikeUpperBound: parseInt(e.target.value) || 0 })}
+                  className={inputClass}
+                />
+                <span className="text-xs text-gray-500">% above</span>
+                <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 + params.strikeUpperBound / 100)).toFixed(0)}</span>
               </div>
             </div>
+          </div>
 
-            {/* Short Leg (Sell) */}
+          {/* Row 3: Short Strike Ranges - Call vs Put */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Call Spread Short Leg */}
             <div className="bg-gray-800/50 rounded p-3">
-              <div className="text-xs font-medium text-orange-400 mb-2">Short Leg (Sell)</div>
+              <div className="text-xs font-medium text-green-400 mb-2">Call Spread - Short Leg</div>
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-400 w-16">Lower</span>
                   <input
                     type="number"
                     min="0"
-                    max="50"
-                    value={params.shortStrikeLower}
-                    onChange={(e) => setParams({ ...params, shortStrikeLower: parseInt(e.target.value) || 10 })}
+                    max="20"
+                    value={params.callShortStrikeLower}
+                    onChange={(e) => setParams({ ...params, callShortStrikeLower: parseInt(e.target.value) || 5 })}
                     className={inputClass}
                   />
                   <span className="text-xs text-gray-500">% below deal</span>
-                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 - params.shortStrikeLower / 100)).toFixed(0)}</span>
+                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 - params.callShortStrikeLower / 100)).toFixed(0)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-400 w-16">Upper</span>
                   <input
                     type="number"
                     min="0"
-                    max="50"
-                    value={params.shortStrikeUpper}
-                    onChange={(e) => setParams({ ...params, shortStrikeUpper: parseInt(e.target.value) || 20 })}
+                    max="20"
+                    value={params.callShortStrikeUpper}
+                    onChange={(e) => setParams({ ...params, callShortStrikeUpper: parseInt(e.target.value) || 10 })}
                     className={inputClass}
                   />
                   <span className="text-xs text-gray-500">% above deal</span>
-                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 + params.shortStrikeUpper / 100)).toFixed(0)}</span>
+                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 + params.callShortStrikeUpper / 100)).toFixed(0)}</span>
                 </div>
               </div>
+              <div className="text-[10px] text-gray-500 mt-2">Buffer above for higher offers</div>
+            </div>
+
+            {/* Put Spread Short Leg */}
+            <div className="bg-gray-800/50 rounded p-3">
+              <div className="text-xs font-medium text-orange-400 mb-2">Put Spread - Short Leg</div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 w-16">Lower</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="20"
+                    value={params.putShortStrikeLower}
+                    onChange={(e) => setParams({ ...params, putShortStrikeLower: parseInt(e.target.value) || 5 })}
+                    className={inputClass}
+                  />
+                  <span className="text-xs text-gray-500">% below deal</span>
+                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 - params.putShortStrikeLower / 100)).toFixed(0)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 w-16">Upper</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="20"
+                    value={params.putShortStrikeUpper}
+                    onChange={(e) => setParams({ ...params, putShortStrikeUpper: parseInt(e.target.value) || 3 })}
+                    className={inputClass}
+                  />
+                  <span className="text-xs text-gray-500">% above deal</span>
+                  <span className="text-xs text-gray-600 ml-auto">${(dealPrice * (1 + params.putShortStrikeUpper / 100)).toFixed(0)}</span>
+                </div>
+              </div>
+              <div className="text-[10px] text-gray-500 mt-2">Tight to deal price</div>
             </div>
           </div>
 
@@ -231,10 +270,12 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
               onClick={() => setParams({
                 dealPrice: deal.expectedClosePrice,
                 daysBeforeClose: 60,
-                strikeLowerBound: 20,
-                strikeUpperBound: 10,
-                shortStrikeLower: 10,
-                shortStrikeUpper: 20,
+                strikeLowerBound: 25,
+                strikeUpperBound: 15,
+                callShortStrikeLower: 5,
+                callShortStrikeUpper: 10,
+                putShortStrikeLower: 5,
+                putShortStrikeUpper: 3,
                 topStrategiesPerExpiration: 5,
               })}
               className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded"
@@ -248,8 +289,9 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected }: De
             <strong className="text-gray-300">Quick Guide:</strong>
             <ul className="mt-1 space-y-1 ml-4 list-disc">
               <li><strong>Days Before Close:</strong> Include expirations from N days before close through 2 after (0 = 2 after + exact match only)</li>
-              <li><strong>Long Leg:</strong> Strike range to fetch for the bought option (wider = more spread combinations)</li>
-              <li><strong>Short Leg:</strong> Strike range for the sold option near deal price (where stock converges at close)</li>
+              <li><strong>Fetch Range:</strong> Which strikes to retrieve from IB (wider = more data but slower)</li>
+              <li><strong>Call Spread Short:</strong> Range for sold call strike - wider upper bound allows buffer for higher offers</li>
+              <li><strong>Put Spread Short:</strong> Range for sold put strike - tighter upper bound keeps it near deal price</li>
               <li><strong>Top Strategies:</strong> Best N spreads per expiration ranked by annualized return</li>
             </ul>
           </div>

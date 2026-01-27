@@ -474,14 +474,14 @@ class IBMergerArbScanner(EWrapper, EClient):
                     available_strikes = self.available_strikes[expiry]
                     print(f"Using {len(available_strikes)} strikes from IB for {expiry}")
 
-                    # Filter strikes using configurable bounds
-                    # For merger arb: focus on strikes near current price up to deal price
-                    # We don't need deep OTM strikes below current price
+                    # Filter strikes using configurable bounds (from UI parameters)
+                    # For merger arb: focus on strikes from below current/deal price up to above deal price
                     if deal_price:
-                        # Start from 10% below current price (not deal price)
-                        min_strike = price_to_use * 0.90
-                        # Go up to 15% above deal price to capture protective strategies
-                        max_strike = deal_price * 1.15
+                        # Use the lower of current price or deal price as the base for min_strike
+                        # This ensures we capture relevant strikes for both call and put spreads
+                        min_strike = min(price_to_use, deal_price) * (1 - strike_lower_pct)
+                        # Go up to strike_upper_pct above deal price to capture higher offer scenarios
+                        max_strike = deal_price * (1 + strike_upper_pct)
                     else:
                         min_strike = price_to_use * (1 - strike_lower_pct)
                         max_strike = price_to_use * (1 + strike_upper_pct)
@@ -1126,22 +1126,30 @@ class MergerArbAnalyzer:
     def find_best_opportunities(self, options: List[OptionData],
                                current_price: float,
                                top_n: int = 10,
-                               short_strike_lower_pct: float = 0.10,
-                               short_strike_upper_pct: float = 0.20) -> List[TradeOpportunity]:
+                               call_short_strike_lower_pct: float = 0.05,
+                               call_short_strike_upper_pct: float = 0.10,
+                               put_short_strike_lower_pct: float = 0.05,
+                               put_short_strike_upper_pct: float = 0.03) -> List[TradeOpportunity]:
         """
         Find the best opportunities from option chain
         
         Args:
-            short_strike_lower_pct: Percentage BELOW deal price (e.g., 0.10 = 10% below)
-            short_strike_upper_pct: Percentage ABOVE deal price (e.g., 0.20 = 20% above)
+            call_short_strike_lower_pct: Call spread - % BELOW deal price for short leg (e.g., 0.05 = 5% below)
+            call_short_strike_upper_pct: Call spread - % ABOVE deal price for short leg (e.g., 0.10 = 10% above, higher offer buffer)
+            put_short_strike_lower_pct: Put spread - % BELOW deal price for short leg (e.g., 0.05 = 5% below)
+            put_short_strike_upper_pct: Put spread - % ABOVE deal price for short leg (e.g., 0.03 = 3% above, tight to deal)
         """
         from collections import defaultdict
 
         opportunities = []
 
-        # Convert percentage below/above to actual multipliers
-        short_strike_lower_multiplier = 1.0 - short_strike_lower_pct  # e.g., 0.10 -> 0.90
-        short_strike_upper_multiplier = 1.0 + short_strike_upper_pct  # e.g., 0.20 -> 1.20
+        # Convert percentage below/above to actual multipliers for CALL spreads
+        call_short_lower_mult = 1.0 - call_short_strike_lower_pct  # e.g., 0.05 -> 0.95
+        call_short_upper_mult = 1.0 + call_short_strike_upper_pct  # e.g., 0.10 -> 1.10
+        
+        # Convert percentage below/above to actual multipliers for PUT spreads
+        put_short_lower_mult = 1.0 - put_short_strike_lower_pct   # e.g., 0.05 -> 0.95
+        put_short_upper_mult = 1.0 + put_short_strike_upper_pct   # e.g., 0.03 -> 1.03
 
         # Analyze single calls - ONLY analyze actual call options
         calls_only = [opt for opt in options if opt.right == 'C']
@@ -1158,7 +1166,8 @@ class MergerArbAnalyzer:
 
         print(f"DEBUG: Analyzing spreads for {len(options_by_expiry)} expirations")
         print(f"DEBUG: Deal price: ${self.deal.total_deal_value:.2f}")
-        print(f"DEBUG: Short strike range: ${self.deal.total_deal_value * short_strike_lower_multiplier:.2f} - ${self.deal.total_deal_value * short_strike_upper_multiplier:.2f}")
+        print(f"DEBUG: Call short strike range: ${self.deal.total_deal_value * call_short_lower_mult:.2f} - ${self.deal.total_deal_value * call_short_upper_mult:.2f}")
+        print(f"DEBUG: Put short strike range: ${self.deal.total_deal_value * put_short_lower_mult:.2f} - ${self.deal.total_deal_value * put_short_upper_mult:.2f}")
 
         # Analyze CALL SPREADS - only within same expiration month
         # Collect spreads per expiration to ensure we show top 5 from each
@@ -1181,10 +1190,9 @@ class MergerArbAnalyzer:
                     short_call = sorted_calls[j]
 
                     # For merger arbitrage, only consider spreads where short strike is at or near deal price
-                    # Stock will converge to deal price, not exceed it
-                    # Use configurable short strike bounds (both as percentages)
-                    if (short_call.strike >= self.deal.total_deal_value * short_strike_lower_multiplier and
-                        short_call.strike <= self.deal.total_deal_value * short_strike_upper_multiplier):
+                    # Use CALL-specific short strike bounds (with buffer for higher offers)
+                    if (short_call.strike >= self.deal.total_deal_value * call_short_lower_mult and
+                        short_call.strike <= self.deal.total_deal_value * call_short_upper_mult):
                         print(f"DEBUG: Analyzing {expiry} {long_call.strike}/{short_call.strike} spread")
                         opp = self.analyze_call_spread(long_call, short_call, current_price)
                         if opp:  # Changed: accept any valid spread analysis (removed expected_return > 0 filter)
@@ -1207,7 +1215,7 @@ class MergerArbAnalyzer:
 
         print(f"DEBUG: Analyzing PUT spreads for {len(options_by_expiry)} expirations")
         print(f"DEBUG PUT: Deal price: ${self.deal.total_deal_value:.2f}")
-        print(f"DEBUG PUT: Short strike range: ${self.deal.total_deal_value * 0.95:.2f} - ${self.deal.total_deal_value + 0.50:.2f}")
+        print(f"DEBUG PUT: Short strike range: ${self.deal.total_deal_value * put_short_lower_mult:.2f} - ${self.deal.total_deal_value * put_short_upper_mult:.2f}")
 
         for expiry, expiry_options in options_by_expiry.items():
             # Separate puts from calls
@@ -1232,9 +1240,9 @@ class MergerArbAnalyzer:
 
                     # For merger arbitrage credit put spreads:
                     # Sell put at/near deal price, buy put below
-                    # Use configurable short strike bounds (both as percentages, same as call spreads)
-                    if (short_put.strike >= self.deal.total_deal_value * short_strike_lower_multiplier and
-                        short_put.strike <= self.deal.total_deal_value * short_strike_upper_multiplier):
+                    # Use PUT-specific short strike bounds (tighter, at deal price)
+                    if (short_put.strike >= self.deal.total_deal_value * put_short_lower_mult and
+                        short_put.strike <= self.deal.total_deal_value * put_short_upper_mult):
                         print(f"DEBUG PUT: Analyzing {expiry} {long_put.strike}/{short_put.strike} put spread")
                         opp = self.analyze_put_spread(long_put, short_put, current_price)
                         if opp:

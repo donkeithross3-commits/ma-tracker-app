@@ -12,8 +12,10 @@ interface ScanParameters {
   daysBeforeClose?: number;
   strikeLowerBound?: number;
   strikeUpperBound?: number;
-  shortStrikeLower?: number;
-  shortStrikeUpper?: number;
+  callShortStrikeLower?: number;
+  callShortStrikeUpper?: number;
+  putShortStrikeLower?: number;
+  putShortStrikeUpper?: number;
   topStrategiesPerExpiration?: number;
   dealConfidence?: number;
 }

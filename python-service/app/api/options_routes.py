@@ -273,15 +273,19 @@ async def generate_strategies(request: GenerateStrategiesRequest) -> GenerateStr
         analyzer = MergerArbAnalyzer(deal_input)
         current_price = request.chainData.get('spotPrice', request.dealPrice)
         
-        logger.info(f"Generating strategies with params: short_strike_lower={params.shortStrikeLower}%, "
-                   f"short_strike_upper={params.shortStrikeUpper}%, top_n={params.topStrategiesPerExpiration}")
+        logger.info(f"Generating strategies with params: "
+                   f"call_short={params.callShortStrikeLower}%-{params.callShortStrikeUpper}%, "
+                   f"put_short={params.putShortStrikeLower}%-{params.putShortStrikeUpper}%, "
+                   f"top_n={params.topStrategiesPerExpiration}")
         
         opportunities = analyzer.find_best_opportunities(
             options, 
             current_price, 
             top_n=params.topStrategiesPerExpiration,
-            short_strike_lower_pct=params.shortStrikeLower / 100.0,
-            short_strike_upper_pct=params.shortStrikeUpper / 100.0
+            call_short_strike_lower_pct=params.callShortStrikeLower / 100.0,
+            call_short_strike_upper_pct=params.callShortStrikeUpper / 100.0,
+            put_short_strike_lower_pct=params.putShortStrikeLower / 100.0,
+            put_short_strike_upper_pct=params.putShortStrikeUpper / 100.0
         )
         
         # Convert to response format

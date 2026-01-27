@@ -67,10 +67,12 @@ class AvailabilityCheckResponse(BaseModel):
 class ScanParameters(BaseModel):
     """Optional scan parameters"""
     daysBeforeClose: Optional[int] = 60
-    strikeLowerBound: Optional[float] = 20.0  # % below deal price
-    strikeUpperBound: Optional[float] = 10.0  # % above deal/spot price
-    shortStrikeLower: Optional[float] = 10.0  # % below deal price
-    shortStrikeUpper: Optional[float] = 20.0  # % above deal price
+    strikeLowerBound: Optional[float] = 25.0  # % below min(current, deal) for fetching chain
+    strikeUpperBound: Optional[float] = 15.0  # % above deal price for fetching chain
+    callShortStrikeLower: Optional[float] = 5.0   # Call spread: % below deal for short leg
+    callShortStrikeUpper: Optional[float] = 10.0  # Call spread: % above deal for short leg (higher offer buffer)
+    putShortStrikeLower: Optional[float] = 5.0    # Put spread: % below deal for short leg
+    putShortStrikeUpper: Optional[float] = 3.0    # Put spread: % above deal for short leg (tight to deal)
     topStrategiesPerExpiration: Optional[int] = 5
     dealConfidence: Optional[float] = 0.75
 
