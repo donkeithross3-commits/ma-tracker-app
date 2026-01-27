@@ -233,15 +233,16 @@ export default function WatchedSpreadsTable({
                   key={spread.id}
                   className={`
                     hover:bg-gray-800
-                    ${spread.isFirstInTicker ? 'border-t-2 border-t-blue-600' : ''}
-                    ${spread.isFirstInExpiration && !spread.isFirstInTicker ? 'border-t border-t-gray-600' : ''}
+                    ${spread.isFirstInTicker ? 'border-t border-t-gray-500' : ''}
+                    ${spread.isFirstInExpiration && !spread.isFirstInTicker ? 'border-t border-t-gray-700' : ''}
                     ${!spread.isFirstInExpiration ? 'border-t border-t-gray-800' : ''}
+                    ${spread.isLastInTicker ? 'border-b border-b-gray-500' : ''}
                   `}
                 >
                   {/* Ticker - only show on first row of ticker group */}
                   {spread.tickerRowSpan > 0 ? (
                     <td 
-                      className="py-1 px-2 text-gray-100 font-mono font-bold text-sm border-l-2 border-l-blue-600 bg-gray-850"
+                      className="py-1 px-2 text-gray-100 font-mono font-bold text-sm border-l border-l-gray-500 bg-gray-800/50"
                       rowSpan={spread.tickerRowSpan}
                     >
                       <div>{spread.dealTicker}</div>
@@ -254,7 +255,7 @@ export default function WatchedSpreadsTable({
                   {/* Expiration - only show on first row of expiration group */}
                   {spread.expirationRowSpan > 0 ? (
                     <td 
-                      className="py-1 px-2 text-gray-300 text-sm border-l border-l-gray-600"
+                      className="py-1 px-2 text-gray-300 text-sm border-l border-l-gray-700"
                       rowSpan={spread.expirationRowSpan}
                     >
                       {formatExpiration(expStr)}
@@ -270,7 +271,7 @@ export default function WatchedSpreadsTable({
                   <StrategyMetricsCells metrics={metrics} />
 
                   {/* Actions */}
-                  <td className="py-1 px-2 text-center">
+                  <td className="py-1 px-2 text-center border-r border-r-gray-500">
                     <div className="flex gap-1 justify-center items-center">
                       <div className="relative">
                         <button
