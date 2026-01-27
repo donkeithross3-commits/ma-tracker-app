@@ -379,6 +379,11 @@ class IBMergerArbScanner(EWrapper, EClient):
         - Lower: max(call_long_strike_lower_pct, put_long_strike_lower_pct) below deal
         - Upper: max(call_short_strike_upper_pct, put_short_strike_upper_pct) above deal
         """
+        # #region agent log
+        import json
+        with open('/tmp/ma_scanner_debug.log', 'a') as f:
+            f.write(json.dumps({"location": "scanner.py:382", "message": "fetch_option_chain ENTRY", "data": {"ticker": ticker, "current_price": current_price, "deal_price": deal_price, "code_version": "v2_with_interval_fix"}, "timestamp": int(__import__('time').time()*1000), "sessionId": "debug-session", "hypothesisId": "D"}) + '\n')
+        # #endregion
         print(f"Fetching option chain for {ticker} (LIMITED to avoid IB limits)...")
 
         # First, resolve contract to get contract ID
@@ -510,8 +515,8 @@ class IBMergerArbScanner(EWrapper, EClient):
                     
                     # #region agent log
                     import json
-                    with open('/Users/donaldross/Desktop/py_proj/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"location": "scanner.py:509", "message": "relevant_strikes before filtering", "data": {"ticker": ticker, "expiry": expiry, "relevant_strikes": relevant_strikes, "min_strike": min_strike, "max_strike": max_strike, "price_to_use": price_to_use}, "timestamp": int(__import__('time').time()*1000), "sessionId": "debug-session", "hypothesisId": "A"}) + '\n')
+                    with open('/tmp/ma_scanner_debug.log', 'a') as f:
+                        f.write(json.dumps({"location": "scanner.py:509", "message": "relevant_strikes before filtering", "data": {"ticker": ticker, "expiry": expiry, "relevant_strikes": relevant_strikes, "available_strikes_count": len(available_strikes), "available_strikes": available_strikes[:20] if len(available_strikes) > 20 else available_strikes, "min_strike": min_strike, "max_strike": max_strike, "price_to_use": price_to_use}, "timestamp": int(__import__('time').time()*1000), "sessionId": "debug-session", "hypothesisId": "A"}) + '\n')
                     # #endregion
                     
                     # OPTIMIZATION: Detect actual strike interval from available strikes
@@ -532,8 +537,8 @@ class IBMergerArbScanner(EWrapper, EClient):
                         strike_interval = 5.0 if price_to_use > 50 else 2.5
                     
                     # #region agent log
-                    with open('/Users/donaldross/Desktop/py_proj/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"location": "scanner.py:530", "message": "detected strike_interval", "data": {"ticker": ticker, "strike_interval": strike_interval, "price_to_use": price_to_use}, "timestamp": int(__import__('time').time()*1000), "sessionId": "debug-session", "hypothesisId": "B"}) + '\n')
+                    with open('/tmp/ma_scanner_debug.log', 'a') as f:
+                        f.write(json.dumps({"location": "scanner.py:530", "message": "detected strike_interval", "data": {"ticker": ticker, "strike_interval": strike_interval, "min_diff": min_diff if 'min_diff' in dir() else None, "price_to_use": price_to_use}, "timestamp": int(__import__('time').time()*1000), "sessionId": "debug-session", "hypothesisId": "B"}) + '\n')
                     # #endregion
                     
                     # Filter strikes to the detected interval
@@ -549,7 +554,7 @@ class IBMergerArbScanner(EWrapper, EClient):
                         filtered_strikes = relevant_strikes
                     
                     # #region agent log
-                    with open('/Users/donaldross/Desktop/py_proj/.cursor/debug.log', 'a') as f:
+                    with open('/tmp/ma_scanner_debug.log', 'a') as f:
                         f.write(json.dumps({"location": "scanner.py:545", "message": "filtered_strikes after interval filter", "data": {"ticker": ticker, "expiry": expiry, "filtered_strikes": filtered_strikes, "strike_interval": strike_interval}, "timestamp": int(__import__('time').time()*1000), "sessionId": "debug-session", "hypothesisId": "C"}) + '\n')
                     # #endregion
                     
