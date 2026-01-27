@@ -117,12 +117,22 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected, deal
           </div>
           <div className="flex items-center gap-1">
             <input
-              type="number"
-              step="0.01"
-              min="0"
+              type="text"
+              inputMode="decimal"
               value={dealPrice}
-              onChange={(e) => onDealPriceChange(parseFloat(e.target.value) || 0)}
-              className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 font-mono text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              onChange={(e) => {
+                const val = e.target.value;
+                // Allow empty or partial input while typing
+                if (val === '' || val === '.') {
+                  onDealPriceChange(0);
+                } else {
+                  const parsed = parseFloat(val);
+                  if (!isNaN(parsed)) {
+                    onDealPriceChange(parsed);
+                  }
+                }
+              }}
+              className="w-full px-2 py-1 bg-gray-800 border border-gray-600 rounded text-gray-100 font-mono text-sm"
             />
             {dealPriceModified && (
               <button
