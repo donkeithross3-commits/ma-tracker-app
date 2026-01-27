@@ -915,21 +915,27 @@ class MergerArbAnalyzer:
     def analyze_single_call(self, option: OptionData, current_price: float) -> Optional[TradeOpportunity]:
         """Analyze a single call option"""
 
-        # Skip if no valid price
-        if option.mid_price <= 0:
+        # Skip if no valid price (need both mid and ask for far-touch)
+        if option.mid_price <= 0 or option.ask <= 0:
             return None
 
-        # Calculate potential profit
+        # Calculate potential profit at deal close
         intrinsic_at_deal = max(0, self.deal.total_deal_value - option.strike)
-        cost = option.mid_price
-        max_profit = intrinsic_at_deal - cost
+        
+        # MIDPOINT cost and profit
+        cost_mid = option.mid_price
+        max_profit_mid = intrinsic_at_deal - cost_mid
 
-        # Skip if no profit potential
-        if max_profit <= 0:
+        # FAR-TOUCH cost and profit (pay the ask)
+        cost_ft = option.ask
+        max_profit_ft = intrinsic_at_deal - cost_ft
+
+        # Skip if no profit potential at midpoint
+        if max_profit_mid <= 0:
             return None
 
         # Calculate breakeven
-        breakeven = option.strike + cost
+        breakeven = option.strike + cost_mid
 
         # Estimate probability (simplified Black-Scholes approximation)
         prob_itm = self.calculate_probability_itm(
@@ -942,20 +948,24 @@ class MergerArbAnalyzer:
         # Adjust for deal probability
         prob_success = prob_itm * self.deal.confidence
 
-        # Calculate expected return
-        expected_return = (prob_success * max_profit) - ((1 - prob_success) * cost)
+        # Calculate expected return (probability-weighted)
+        expected_return_mid = (prob_success * max_profit_mid) - ((1 - prob_success) * cost_mid)
+        expected_return_ft = (prob_success * max_profit_ft) - ((1 - prob_success) * cost_ft)
 
         # Use the earlier of deal close or option expiration for IRR calculation
         option_expiry_date = datetime.strptime(option.expiry, "%Y%m%d")
         days_to_exit = min(self.deal.days_to_close, (option_expiry_date - datetime.now()).days)
         years_to_expiry = max(days_to_exit, 1) / 365  # At least 1 day to avoid division issues
-        annualized_return = (expected_return / cost) / years_to_expiry if years_to_expiry > 0 else 0
+        
+        # Annualized return (midpoint and far-touch)
+        annualized_return_mid = (expected_return_mid / cost_mid) / years_to_expiry if years_to_expiry > 0 and cost_mid > 0 else 0
+        annualized_return_ft = (expected_return_ft / cost_ft) / years_to_expiry if years_to_expiry > 0 and cost_ft > 0 else 0
 
         # Market implied probability
         market_prob = self.get_market_implied_probability(
             current_price,
             self.deal.total_deal_value,
-            cost,
+            cost_mid,
             option.strike
         )
 
@@ -965,15 +975,18 @@ class MergerArbAnalyzer:
         return TradeOpportunity(
             strategy='call',
             contracts=[option],
-            entry_cost=cost,
-            max_profit=max_profit,
+            entry_cost=cost_mid,
+            max_profit=max_profit_mid,
             breakeven=breakeven,
-            expected_return=expected_return,
-            annualized_return=annualized_return,
+            expected_return=expected_return_mid,
+            annualized_return=annualized_return_mid,
             probability_of_profit=prob_success,
             edge_vs_market=edge,
-            notes=f"Buy {option.symbol} {option.strike} Call @ ${cost:.2f}, "
-                  f"Max profit: ${max_profit:.2f} at deal close"
+            notes=f"Buy {option.symbol} {option.strike} Call @ ${cost_mid:.2f} mid (${cost_ft:.2f} FT), "
+                  f"Max profit: ${max_profit_mid:.2f} at deal close",
+            entry_cost_ft=cost_ft,
+            expected_return_ft=expected_return_ft,
+            annualized_return_ft=annualized_return_ft
         )
 
     def analyze_call_spread(self, long_call: OptionData, short_call: OptionData,
@@ -1237,13 +1250,26 @@ class MergerArbAnalyzer:
         put_short_lower_mult = 1.0 - put_short_strike_lower_pct   # e.g., 0.05 -> 0.95
         put_short_upper_mult = 1.0 + put_short_strike_upper_pct   # e.g., 0.03 -> 1.03
 
-        # Analyze single calls - ONLY analyze actual call options
+        # Analyze single calls - group by expiration and select top 3 per expiration
         calls_only = [opt for opt in options if opt.right == 'C']
-        for option in calls_only:
-            if option.strike < self.deal.total_deal_value:  # Only calls below deal price
-                opp = self.analyze_single_call(option, current_price)
-                if opp and opp.expected_return > 0:
-                    opportunities.append(opp)
+        eligible_calls = [opt for opt in calls_only if opt.strike < self.deal.total_deal_value]
+        print(f"DEBUG CALL: Analyzing {len(eligible_calls)} calls below deal price (${self.deal.total_deal_value:.2f})")
+        
+        single_calls_by_expiry = defaultdict(list)
+        
+        for option in eligible_calls:
+            opp = self.analyze_single_call(option, current_price)
+            if opp and opp.expected_return > 0:
+                single_calls_by_expiry[option.expiry].append(opp)
+                print(f"DEBUG CALL: {option.expiry} {option.strike}C - cost: ${opp.entry_cost:.2f}, profit: ${opp.max_profit:.2f}, IRR: {opp.annualized_return:.2%}")
+        
+        # Add top 3 single calls from each expiration (sorted by annualized return)
+        print(f"DEBUG CALL: Found single calls in {len(single_calls_by_expiry)} expirations")
+        for expiry, expiry_calls in single_calls_by_expiry.items():
+            sorted_calls = sorted(expiry_calls, key=lambda x: x.annualized_return, reverse=True)
+            top_3 = sorted_calls[:3]
+            print(f"DEBUG CALL: Adding top {len(top_3)} single calls from {expiry}")
+            opportunities.extend(top_3)
 
         # Group options by expiration - spreads MUST use same expiration
         options_by_expiry = defaultdict(list)
@@ -1350,9 +1376,10 @@ class MergerArbAnalyzer:
             print(f"DEBUG PUT: Adding top {len(top_5)} put spreads from {expiry}")
             opportunities.extend(top_5)
 
-        # Don't limit or globally sort - return all call spreads and put spreads
+        # Don't limit or globally sort - return all strategies
         # Frontend will display them in separate sections
         print(f"DEBUG: Returning {len(opportunities)} total opportunities")
+        print(f"DEBUG: Single calls: {len([o for o in opportunities if o.strategy == 'call'])}")
         print(f"DEBUG: Call spreads: {len([o for o in opportunities if o.strategy == 'spread'])}")
         print(f"DEBUG: Put spreads: {len([o for o in opportunities if o.strategy == 'put_spread'])}")
 
