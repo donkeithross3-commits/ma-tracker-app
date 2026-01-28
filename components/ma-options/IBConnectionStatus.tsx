@@ -14,21 +14,12 @@ interface FuturesQuote {
   error?: string;
 }
 
-interface AgentKey {
-  key: string;
-  createdAt: string;
-  lastUsed: string | null;
-}
-
 export default function IBConnectionStatus() {
   const { isConnected, isChecking, checkConnection } = useIBConnection();
   const [futuresQuote, setFuturesQuote] = useState<FuturesQuote | null>(null);
   const [isFetchingFutures, setIsFetchingFutures] = useState(false);
-  const [showAgentPanel, setShowAgentPanel] = useState(false);
-  const [agentKey, setAgentKey] = useState<AgentKey | null>(null);
-  const [isLoadingKey, setIsLoadingKey] = useState(false);
+  const [showAgentModal, setShowAgentModal] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [keyError, setKeyError] = useState<string | null>(null);
 
   const testFuturesQuote = async () => {
     setIsFetchingFutures(true);
@@ -44,39 +35,6 @@ export default function IBConnectionStatus() {
       });
     } finally {
       setIsFetchingFutures(false);
-    }
-  };
-
-  const fetchAgentKey = async () => {
-    setIsLoadingKey(true);
-    setKeyError(null);
-    try {
-      const response = await fetch("/api/ma-options/agent-key");
-      if (!response.ok) throw new Error("Failed to fetch key");
-      const data = await response.json();
-      setAgentKey(data);
-    } catch (error) {
-      setKeyError(error instanceof Error ? error.message : "Failed to load key");
-    } finally {
-      setIsLoadingKey(false);
-    }
-  };
-
-  const regenerateKey = async () => {
-    if (!confirm("Regenerate API key? This will disconnect any active agents.")) {
-      return;
-    }
-    setIsLoadingKey(true);
-    setKeyError(null);
-    try {
-      const response = await fetch("/api/ma-options/agent-key", { method: "POST" });
-      if (!response.ok) throw new Error("Failed to regenerate key");
-      const data = await response.json();
-      setAgentKey(data);
-    } catch (error) {
-      setKeyError(error instanceof Error ? error.message : "Failed to regenerate");
-    } finally {
-      setIsLoadingKey(false);
     }
   };
 
@@ -102,180 +60,152 @@ export default function IBConnectionStatus() {
     }
   };
 
-  const toggleAgentPanel = () => {
-    if (!showAgentPanel && !agentKey) {
-      fetchAgentKey();
-    }
-    setShowAgentPanel(!showAgentPanel);
-  };
-
-  const copyKey = () => {
-    if (agentKey?.key) {
-      navigator.clipboard.writeText(agentKey.key);
-      alert("API key copied to clipboard");
-    }
-  };
-
   // Show initial loading state only, not during background polling
   const showInitialLoading = isChecking && !futuresQuote;
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      {/* Top row: Connection status, quote data, test button */}
-      <div className="flex items-center gap-2 text-xs">
-        <div
-          className={`w-2 h-2 rounded-full ${
-            isChecking
-              ? "bg-gray-500 animate-pulse"
-              : isConnected
-              ? "bg-green-500"
-              : "bg-red-500"
-          }`}
-          title={isConnected ? "IB TWS connected" : "IB TWS not connected"}
-        ></div>
-        <span
-          className={
-            isChecking
-              ? "text-gray-400"
-              : isConnected
-              ? "text-green-400"
-              : "text-red-400"
-          }
-          title={isConnected ? "IB TWS connected" : "IB TWS not connected"}
-        >
-          {showInitialLoading
-            ? "Checking..."
-            : `IB TWS: ${isConnected ? "Connected" : "Disconnected"}`}
-        </span>
-        <button
-          onClick={() => checkConnection()}
-          className="text-gray-500 hover:text-gray-300"
-          title="Force reconnect to IB TWS"
-          disabled={isChecking}
-        >
-          {isChecking ? "..." : "↻"}
-        </button>
-        
-        {isConnected && (
-          <button
-            onClick={testFuturesQuote}
-            disabled={isFetchingFutures}
-            className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs disabled:opacity-50"
-            title="Test connection by fetching ES futures quote"
+    <>
+      <div className="flex flex-col items-end gap-1">
+        {/* Top row: Connection status, quote data, test button */}
+        <div className="flex items-center gap-2 text-xs">
+          <div
+            className={`w-2 h-2 rounded-full ${
+              isChecking
+                ? "bg-gray-500 animate-pulse"
+                : isConnected
+                ? "bg-green-500"
+                : "bg-red-500"
+            }`}
+            title={isConnected ? "IB TWS connected" : "IB TWS not connected"}
+          ></div>
+          <span
+            className={
+              isChecking
+                ? "text-gray-400"
+                : isConnected
+                ? "text-green-400"
+                : "text-red-400"
+            }
+            title={isConnected ? "IB TWS connected" : "IB TWS not connected"}
           >
-            {isFetchingFutures ? "..." : "Test ES Quote"}
-          </button>
-        )}
-
-        {/* ES Quote inline when available */}
-        {futuresQuote && futuresQuote.success && (
-          <div className="flex items-center gap-2 text-gray-300 bg-gray-800 rounded px-2 py-0.5 text-[11px]">
-            <span className="font-medium text-blue-400">{futuresQuote.contract}</span>
-            <span>Bid: <span className="text-green-400">{futuresQuote.bid?.toFixed(2)}</span></span>
-            <span>Ask: <span className="text-red-400">{futuresQuote.ask?.toFixed(2)}</span></span>
-            <span>Last: <span className="text-yellow-400">{futuresQuote.last?.toFixed(2)}</span></span>
-            <span className="text-gray-500 text-[10px]">
-              {futuresQuote.timestamp ? new Date(futuresQuote.timestamp).toLocaleTimeString() : ""}
-            </span>
-          </div>
-        )}
-        
-        {/* Error inline */}
-        {futuresQuote && !futuresQuote.success && (
-          <span className="text-red-400 text-[10px]">
-            {futuresQuote.error || "Quote failed"}
+            {showInitialLoading
+              ? "Checking..."
+              : `IB TWS: ${isConnected ? "Connected" : "Disconnected"}`}
           </span>
-        )}
-      </div>
+          <button
+            onClick={() => checkConnection()}
+            className="text-gray-500 hover:text-gray-300"
+            title="Force reconnect to IB TWS"
+            disabled={isChecking}
+          >
+            {isChecking ? "..." : "↻"}
+          </button>
+          
+          {isConnected && (
+            <button
+              onClick={testFuturesQuote}
+              disabled={isFetchingFutures}
+              className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs disabled:opacity-50"
+              title="Test connection by fetching ES futures quote"
+            >
+              {isFetchingFutures ? "..." : "Test ES Quote"}
+            </button>
+          )}
 
-      {/* Second row: Local Agent toggle */}
-      <div>
+          {/* ES Quote inline when available */}
+          {futuresQuote && futuresQuote.success && (
+            <div className="flex items-center gap-2 text-gray-300 bg-gray-800 rounded px-2 py-0.5 text-[11px]">
+              <span className="font-medium text-blue-400">{futuresQuote.contract}</span>
+              <span>Bid: <span className="text-green-400">{futuresQuote.bid?.toFixed(2)}</span></span>
+              <span>Ask: <span className="text-red-400">{futuresQuote.ask?.toFixed(2)}</span></span>
+              <span>Last: <span className="text-yellow-400">{futuresQuote.last?.toFixed(2)}</span></span>
+              <span className="text-gray-500 text-[10px]">
+                {futuresQuote.timestamp ? new Date(futuresQuote.timestamp).toLocaleTimeString() : ""}
+              </span>
+            </div>
+          )}
+          
+          {/* Error inline */}
+          {futuresQuote && !futuresQuote.success && (
+            <span className="text-red-400 text-[10px]">
+              {futuresQuote.error || "Quote failed"}
+            </span>
+          )}
+        </div>
+
+        {/* Second row: Local Agent button */}
         <button
-          onClick={toggleAgentPanel}
+          onClick={() => setShowAgentModal(true)}
           className="text-xs text-gray-400 hover:text-gray-200 flex items-center gap-1"
         >
-          <span>{showAgentPanel ? "▼" : "▶"}</span>
+          <span>▶</span>
           <span>Use Your Own IB Account</span>
           <span className="ml-1 px-1.5 py-0.5 bg-yellow-600/30 text-yellow-400 rounded text-[9px] font-medium">
             ALPHA
           </span>
         </button>
+      </div>
 
-        {showAgentPanel && (
-          <div className="mt-2 bg-gray-800 rounded p-3 text-xs">
-            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded px-2 py-1.5 mb-3 text-yellow-300 text-[10px]">
+      {/* Modal */}
+      {showAgentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div 
+            className="absolute inset-0 bg-black/60" 
+            onClick={() => setShowAgentModal(false)}
+          />
+          
+          {/* Modal content */}
+          <div className="relative bg-gray-900 border border-gray-700 rounded-lg p-5 max-w-md w-full mx-4 shadow-xl">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-100">
+                Use Your Own IB Account
+              </h3>
+              <button
+                onClick={() => setShowAgentModal(false)}
+                className="text-gray-400 hover:text-gray-200 text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Alpha warning */}
+            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded px-3 py-2 mb-4 text-yellow-300 text-sm">
               This feature is under development and in alpha testing (dev team only).
             </div>
-            <p className="text-gray-300 mb-3">
-              Run a local agent to get market data from your personal IB account.
+
+            {/* Description */}
+            <p className="text-gray-300 text-sm mb-4">
+              Run a local agent on your computer to get real-time market data from your personal Interactive Brokers account.
             </p>
 
             {/* Download Button */}
             <button
               onClick={downloadAgent}
               disabled={isDownloading}
-              className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded mb-3 disabled:opacity-50"
+              className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium mb-4 disabled:opacity-50"
             >
               {isDownloading ? "Downloading..." : "Download Local Agent"}
             </button>
 
-            {/* API Key Section */}
-            <div className="border-t border-gray-700 pt-2 mt-2">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-gray-400">Your API Key:</span>
-                <button
-                  onClick={regenerateKey}
-                  disabled={isLoadingKey}
-                  className="text-yellow-500 hover:text-yellow-400 text-[10px]"
-                >
-                  {isLoadingKey ? "..." : "Regenerate"}
-                </button>
-              </div>
-              
-              {keyError && (
-                <div className="text-red-400 text-[10px] mb-2">{keyError}</div>
-              )}
-              
-              {isLoadingKey ? (
-                <div className="text-gray-500">Loading...</div>
-              ) : agentKey ? (
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-gray-900 px-2 py-1 rounded font-mono text-[10px] text-gray-300 truncate">
-                    {agentKey.key.slice(0, 8)}...{agentKey.key.slice(-8)}
-                  </code>
-                  <button
-                    onClick={copyKey}
-                    className="text-gray-400 hover:text-white px-1"
-                    title="Copy full key"
-                  >
-                    📋
-                  </button>
-                </div>
-              ) : null}
-              
-              {agentKey?.lastUsed && (
-                <div className="text-gray-500 text-[10px] mt-1">
-                  Last used: {new Date(agentKey.lastUsed).toLocaleString()}
-                </div>
-              )}
-            </div>
-
             {/* Setup Instructions */}
-            <div className="border-t border-gray-700 pt-2 mt-3">
-              <div className="text-gray-400 mb-1">Quick Setup:</div>
-              <ol className="text-gray-500 text-[10px] list-decimal list-inside space-y-1">
+            <div className="border-t border-gray-700 pt-4">
+              <div className="text-gray-300 font-medium mb-2 text-sm">Quick Setup:</div>
+              <ol className="text-gray-400 text-sm list-decimal list-inside space-y-1.5">
                 <li>Download and extract the ZIP file</li>
                 <li>Start IB TWS/Gateway (enable API on port 7497)</li>
-                <li>Double-click <code className="bg-gray-900 px-1">start_windows.bat</code> (Win) or run <code className="bg-gray-900 px-1">./start_unix.sh</code> (Mac/Linux)</li>
+                <li>
+                  Run <code className="bg-gray-800 px-1.5 py-0.5 rounded text-xs">start_windows.bat</code> (Win) or <code className="bg-gray-800 px-1.5 py-0.5 rounded text-xs">./start_unix.sh</code> (Mac/Linux)
+                </li>
               </ol>
-              <div className="text-green-500/70 text-[10px] mt-2">
-                ✓ Your API key is already configured in the download
+              <div className="text-green-400 text-sm mt-3">
+                ✓ Your API key is pre-configured in the download
               </div>
             </div>
           </div>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </>
   );
 }
-
