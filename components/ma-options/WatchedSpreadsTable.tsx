@@ -196,7 +196,8 @@ export default function WatchedSpreadsTable({
   const formatDealCloseDate = (closeDate: string | null | undefined): string => {
     if (!closeDate) return "—";
     const date = new Date(closeDate + "T00:00:00");
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+    // Compact format: M/D/YY (e.g., "3/31/26")
+    return date.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" });
   };
 
   // Calculate metrics for a spread
