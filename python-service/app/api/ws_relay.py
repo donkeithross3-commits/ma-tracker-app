@@ -152,6 +152,11 @@ class ProviderRegistry:
             
             return None
     
+    async def get_provider_by_id(self, provider_id: str) -> Optional[DataProvider]:
+        """Get a provider by its ID"""
+        async with self._lock:
+            return self.providers.get(provider_id)
+    
     async def add_pending_request(self, request: PendingRequest):
         """Add a pending request"""
         async with self._lock:
@@ -172,6 +177,11 @@ class ProviderRegistry:
                 req = self.pending_requests.pop(request_id)
                 if not req.future.done():
                     req.future.set_exception(Exception(error))
+    
+    async def remove_pending_request(self, request_id: str):
+        """Remove a pending request (cleanup)"""
+        async with self._lock:
+            self.pending_requests.pop(request_id, None)
     
     def get_status(self) -> dict:
         """Get current status of providers and requests"""

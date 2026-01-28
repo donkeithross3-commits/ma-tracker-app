@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import List
 import logging
 import uuid
+import asyncio
 
 from ..options.ib_client import IBClient
 from ..options.models import (
@@ -24,7 +25,7 @@ from ..options.models import (
     ScanParameters,
 )
 from ..scanner import MergerArbAnalyzer, DealInput
-from .ws_relay import send_request_to_provider, get_registry
+from .ws_relay import send_request_to_provider, get_registry, PendingRequest
 
 logger = logging.getLogger(__name__)
 
@@ -579,6 +580,9 @@ async def relay_test_futures():
 async def relay_ib_status():
     """
     Check IB connection status through WebSocket relay.
+    
+    Queries ALL connected providers and returns connected=true if ANY
+    provider has IB TWS connected.
     """
     try:
         registry = get_registry()
@@ -591,27 +595,81 @@ async def relay_ib_status():
                 "message": "No IB data provider connected"
             }
         
-        # Ask the provider for IB status
-        try:
-            response_data = await send_request_to_provider(
-                request_type="ib_status",
-                payload={},
-                timeout=10.0
-            )
+        # Query ALL providers for their IB status
+        # Return connected=true if ANY provider has IB connected
+        connected_provider = None
+        all_responses = []
+        
+        for provider_info in status["providers"]:
+            provider_id = provider_info["id"]
+            user_id = provider_info.get("user_id")
             
-            return {
-                "connected": response_data.get("connected", False),
-                "source": "relay",
-                "providers": status["providers"],
-                "message": response_data.get("message", "")
-            }
-        except Exception as e:
-            return {
-                "connected": False,
-                "source": "relay",
-                "providers": status["providers"],
-                "message": f"Provider error: {str(e)}"
-            }
+            try:
+                # Get the actual provider object
+                provider = await registry.get_provider_by_id(provider_id)
+                if not provider:
+                    continue
+                    
+                # Send ib_status request to this specific provider
+                request_id = str(uuid.uuid4())
+                future = asyncio.get_event_loop().create_future()
+                
+                pending = PendingRequest(
+                    request_id=request_id,
+                    request_type="ib_status",
+                    payload={},
+                    future=future
+                )
+                await registry.add_pending_request(pending)
+                
+                await provider.websocket.send_json({
+                    "type": "request",
+                    "request_id": request_id,
+                    "request_type": "ib_status",
+                    "payload": {}
+                })
+                
+                # Wait for response with short timeout
+                try:
+                    response_data = await asyncio.wait_for(future, timeout=5.0)
+                    all_responses.append({
+                        "provider_id": provider_id,
+                        "user_id": user_id,
+                        "connected": response_data.get("connected", False)
+                    })
+                    
+                    if response_data.get("connected"):
+                        connected_provider = provider_id
+                except asyncio.TimeoutError:
+                    all_responses.append({
+                        "provider_id": provider_id,
+                        "user_id": user_id,
+                        "connected": False,
+                        "error": "timeout"
+                    })
+                finally:
+                    await registry.remove_pending_request(request_id)
+                    
+            except Exception as e:
+                logger.error(f"Error querying provider {provider_id}: {e}")
+                all_responses.append({
+                    "provider_id": provider_id,
+                    "user_id": user_id,
+                    "connected": False,
+                    "error": str(e)
+                })
+        
+        # Return connected if ANY provider has IB connected
+        is_connected = connected_provider is not None
+        
+        return {
+            "connected": is_connected,
+            "source": "relay",
+            "providers": status["providers"],
+            "provider_statuses": all_responses,
+            "connected_provider": connected_provider,
+            "message": "IB TWS connected" if is_connected else "IB TWS not connected"
+        }
             
     except Exception as e:
         logger.error(f"Relay IB status error: {e}")
