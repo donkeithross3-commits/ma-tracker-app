@@ -269,35 +269,38 @@ set "UPDATE_AVAILABLE=0"
 set "CURRENT_VERSION=unknown"
 set "SERVER_VERSION=unknown"
 
-REM Read current version
+REM Read current version and trim whitespace
 if exist "%SCRIPT_DIR%version.txt" (
-    set /p CURRENT_VERSION=<"%SCRIPT_DIR%version.txt"
+    for /f "usebackq tokens=* delims=" %%a in ("%SCRIPT_DIR%version.txt") do set "CURRENT_VERSION=%%a"
 ) else (
     set "CURRENT_VERSION=0.0.0"
 )
 
+REM Trim any trailing spaces/CR from version
+for /f "tokens=1" %%a in ("!CURRENT_VERSION!") do set "CURRENT_VERSION=%%a"
+
 echo Checking for updates... (current: !CURRENT_VERSION!)
 
-REM Try to fetch server version using PowerShell
-for /f "delims=" %%i in ('powershell -Command "(Invoke-WebRequest -Uri 'https://dr3-dashboard.com/api/ma-options/agent-version' -UseBasicParsing -TimeoutSec 5).Content" 2^>nul') do set "VERSION_RESPONSE=%%i"
+REM Fetch server version using PowerShell and parse JSON in one call
+for /f "usebackq tokens=*" %%i in (`powershell -Command "try { $r = Invoke-WebRequest -Uri 'https://dr3-dashboard.com/api/ma-options/agent-version' -UseBasicParsing -TimeoutSec 5; ($r.Content | ConvertFrom-Json).version } catch { '' }"`) do set "SERVER_VERSION=%%i"
 
-if "!VERSION_RESPONSE!"=="" (
+if "!SERVER_VERSION!"=="" (
     echo Could not check for updates ^(offline or server unavailable^)
     goto :eof
 )
 
-REM Parse version from JSON response using PowerShell
-for /f "delims=" %%i in ('powershell -Command "('!VERSION_RESPONSE!' | ConvertFrom-Json).version"') do set "SERVER_VERSION=%%i"
+REM Trim any trailing spaces from server version
+for /f "tokens=1" %%a in ("!SERVER_VERSION!") do set "SERVER_VERSION=%%a"
 
-if "!SERVER_VERSION!"=="" (
-    echo Could not parse server version
+echo Server version: !SERVER_VERSION!
+
+REM Compare versions
+if "!CURRENT_VERSION!"=="!SERVER_VERSION!" (
+    echo Already up to date.
     goto :eof
 )
 
-REM Compare versions
-if not "!CURRENT_VERSION!"=="!SERVER_VERSION!" (
-    set "UPDATE_AVAILABLE=1"
-)
+set "UPDATE_AVAILABLE=1"
 goto :eof
 
 :download_update
