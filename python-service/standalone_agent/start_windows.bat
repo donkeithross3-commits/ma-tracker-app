@@ -309,9 +309,10 @@ REM Create temp directory for download
 set "TEMP_DIR=%TEMP%\ib_agent_update_%RANDOM%"
 mkdir "%TEMP_DIR%" 2>nul
 
-REM Download the new agent zip
-set "ZIP_PATH=%TEMP_DIR%\ib-data-agent.zip"
-powershell -Command "Invoke-WebRequest -Uri 'https://dr3-dashboard.com/api/ma-options/download-agent' -OutFile '%ZIP_PATH%' -TimeoutSec 60"
+REM Download the new agent zip using API key for authentication
+set "ZIP_PATH=%TEMP_DIR%\ib-data-agent-update.zip"
+set "UPDATE_URL=https://dr3-dashboard.com/api/ma-options/download-agent-update?key=!IB_PROVIDER_KEY!"
+powershell -Command "try { Invoke-WebRequest -Uri '!UPDATE_URL!' -OutFile '%ZIP_PATH%' -TimeoutSec 60 } catch { Write-Host 'Download failed:' $_.Exception.Message }"
 
 if not exist "%ZIP_PATH%" (
     echo ERROR: Failed to download update
@@ -319,13 +320,24 @@ if not exist "%ZIP_PATH%" (
     goto :eof
 )
 
+REM Check if file is actually a ZIP (not an error page)
+for %%A in ("%ZIP_PATH%") do set "ZIP_SIZE=%%~zA"
+if !ZIP_SIZE! LSS 1000 (
+    echo ERROR: Download failed - received invalid response
+    type "%ZIP_PATH%" 2>nul
+    rmdir /s /q "%TEMP_DIR%" 2>nul
+    goto :eof
+)
+
 echo Download complete. Installing update...
 
-REM Backup current config.env (preserve user's API key)
-copy "%SCRIPT_DIR%config.env" "%TEMP_DIR%\config.env.backup" >nul 2>nul
-
 REM Extract new files (overwrite existing)
-powershell -Command "Expand-Archive -Path '%ZIP_PATH%' -DestinationPath '%TEMP_DIR%\extracted' -Force"
+powershell -Command "try { Expand-Archive -Path '%ZIP_PATH%' -DestinationPath '%TEMP_DIR%\extracted' -Force } catch { Write-Host 'Extract failed:' $_.Exception.Message; exit 1 }"
+if !errorlevel! neq 0 (
+    echo ERROR: Failed to extract update
+    rmdir /s /q "%TEMP_DIR%" 2>nul
+    goto :eof
+)
 
 REM Check if extraction created a subfolder
 if exist "%TEMP_DIR%\extracted\ib-data-agent" (
@@ -348,9 +360,6 @@ if exist "%EXTRACT_SRC%\python_bundle" (
 if exist "%EXTRACT_SRC%\ibapi" (
     xcopy /s /e /y /q "%EXTRACT_SRC%\ibapi" "%SCRIPT_DIR%ibapi\" >nul 2>nul
 )
-
-REM Restore config.env backup
-copy /y "%TEMP_DIR%\config.env.backup" "%SCRIPT_DIR%config.env" >nul 2>nul
 
 REM Cleanup
 rmdir /s /q "%TEMP_DIR%" 2>nul

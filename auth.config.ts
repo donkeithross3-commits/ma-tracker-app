@@ -34,7 +34,8 @@ export const authConfig: NextAuthConfig = {
       
       // Internal API endpoints (called by Python service or agent, not browser)
       const isInternalAPI = pathname === "/api/ma-options/validate-agent-key" ||
-                            pathname === "/api/ma-options/agent-version"
+                            pathname === "/api/ma-options/agent-version" ||
+                            pathname === "/api/ma-options/download-agent-update"
       
       // Allow public paths
       if (isLoginPage || isAuthAPI || isInternalAPI) {
