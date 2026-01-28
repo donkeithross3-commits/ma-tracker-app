@@ -54,10 +54,11 @@ def extract_zip(zip_path: Path, dest_dir: Path) -> None:
 
 def configure_pth_file(bundle_dir: Path, python_version: str) -> None:
     """
-    Configure the ._pth file to enable site-packages.
+    Configure the ._pth file to enable site-packages and script directory imports.
     
     The embeddable distribution has a restrictive ._pth file that prevents
-    importing from site-packages. We need to modify it.
+    importing from site-packages and doesn't include the current directory.
+    We need to modify it to allow both.
     """
     # Find the ._pth file (e.g., python311._pth)
     major_minor = python_version.rsplit('.', 1)[0].replace('.', '')  # "3.11.9" -> "311"
@@ -92,11 +93,16 @@ def configure_pth_file(bundle_dir: Path, python_version: str) -> None:
     if 'Lib/site-packages\n' not in new_lines and 'Lib\\site-packages\n' not in new_lines:
         new_lines.append('Lib/site-packages\n')
     
+    # Add parent directory (..) so scripts in the agent folder can import each other
+    # The bundle is in python_bundle/, scripts are in the parent directory
+    if '..\n' not in new_lines:
+        new_lines.append('..\n')
+    
     # Write back
     with open(pth_file, 'w') as f:
         f.writelines(new_lines)
     
-    print(f"  -> Enabled site-packages imports")
+    print(f"  -> Enabled site-packages and script directory imports")
 
 
 def install_websockets_from_wheel(bundle_dir: Path) -> None:
