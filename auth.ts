@@ -2,8 +2,14 @@ import NextAuth from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import * as bcrypt from "bcryptjs"
 import { prisma } from "@/lib/db"
+import { authConfig } from "@/auth.config"
 
+/**
+ * Full auth configuration with Prisma for server-side operations.
+ * Extends the base config from auth.config.ts
+ */
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
   providers: [
     Credentials({
       name: "credentials",
@@ -45,23 +51,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     })
   ],
   callbacks: {
-    async authorized({ auth, request }) {
-      // This callback is called by the middleware wrapper
-      const { pathname } = request.nextUrl
-      const isLoggedIn = !!auth?.user
-      
-      // Public paths that don't require authentication
-      const isLoginPage = pathname === "/login"
-      const isAuthAPI = pathname.startsWith("/api/auth")
-      
-      // Allow public paths
-      if (isLoginPage || isAuthAPI) {
-        return true
-      }
-      
-      // Require authentication for all other paths
-      return isLoggedIn
-    },
+    ...authConfig.callbacks,
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id
@@ -76,11 +66,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       return session
     }
-  },
-  pages: {
-    signIn: "/login",
-  },
-  session: {
-    strategy: "jwt",
   },
 })

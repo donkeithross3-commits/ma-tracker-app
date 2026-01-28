@@ -1,17 +1,15 @@
-import { auth } from "@/auth"
+import NextAuth from "next-auth"
+import { authConfig } from "@/auth.config"
 
 /**
  * Authentication Middleware for dr3-dashboard.com
  * 
- * Uses NextAuth v5 auth wrapper. The actual authorization logic is in
- * the `authorized` callback in auth.ts.
+ * Uses the edge-compatible auth config (no Prisma/Node.js dependencies).
+ * The actual credential verification happens in auth.ts on the server.
  * 
  * Protected routes: everything except /login and /api/auth/*
- * 
- * When not authenticated, NextAuth automatically redirects to the
- * signIn page configured in auth.ts (/login).
  */
-export default auth
+export default NextAuth(authConfig).auth
 
 // Apply middleware to all routes except static assets
 export const config = {
