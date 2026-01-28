@@ -71,6 +71,8 @@ export async function GET() {
     });
 
     // Add files from standalone_agent directory
+    // Files go directly into the ZIP root (no nested folder)
+    // When users extract "ib-data-agent.zip", Windows creates "ib-data-agent/" folder
     const filesToInclude = [
       "ib_data_agent.py",
       "ib_scanner.py",
@@ -86,27 +88,27 @@ export async function GET() {
     for (const fileName of filesToInclude) {
       const filePath = path.join(agentDir, fileName);
       if (fs.existsSync(filePath)) {
-        archive.file(filePath, { name: `ib-data-agent/${fileName}` });
+        archive.file(filePath, { name: fileName });
       }
     }
 
     // Add standalone executable if it exists (for Windows users without Python)
     const exePath = path.join(agentDir, "dist", "ib_data_agent.exe");
     if (fs.existsSync(exePath)) {
-      archive.file(exePath, { name: "ib-data-agent/ib_data_agent.exe" });
+      archive.file(exePath, { name: "ib_data_agent.exe" });
     }
 
     // Add bundled Python for Windows (if prepared on server)
     // This allows Windows users to run the agent without installing Python
     const pythonBundleDir = path.join(agentDir, "python_bundle");
     if (fs.existsSync(pythonBundleDir)) {
-      archive.directory(pythonBundleDir, "ib-data-agent/python_bundle");
+      archive.directory(pythonBundleDir, "python_bundle");
     }
 
     // Add ibapi directory
     const ibapiDir = path.join(agentDir, "ibapi");
     if (fs.existsSync(ibapiDir)) {
-      archive.directory(ibapiDir, "ib-data-agent/ibapi");
+      archive.directory(ibapiDir, "ibapi");
     }
 
     // Create config.env with user's API key
@@ -127,7 +129,7 @@ IB_PROVIDER_KEY=${agentKey.key}
 # RELAY_URL=wss://dr3-dashboard.com/ws/data-provider
 `;
 
-    archive.append(configContent, { name: "ib-data-agent/config.env" });
+    archive.append(configContent, { name: "config.env" });
 
     // Finalize the archive
     await archive.finalize();
