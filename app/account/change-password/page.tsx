@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useSession } from "next-auth/react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +12,11 @@ import Link from "next/link"
 
 export default function ChangePasswordPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const { data: session, update: updateSession } = useSession()
+  
+  const isRequired = searchParams.get("required") === "true"
+  
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -32,6 +38,12 @@ export default function ChangePasswordPage() {
     // Validate password strength
     if (newPassword.length < 8) {
       setError("New password must be at least 8 characters")
+      return
+    }
+
+    // Don't allow setting password to the default
+    if (newPassword === "limitless2025") {
+      setError("Please choose a different password")
       return
     }
 
@@ -61,10 +73,13 @@ export default function ChangePasswordPage() {
       setNewPassword("")
       setConfirmPassword("")
       
+      // Update the session to clear mustChangePassword flag
+      await updateSession()
+      
       // Redirect after a short delay
       setTimeout(() => {
         router.push("/")
-      }, 2000)
+      }, 1500)
     } catch (err) {
       setError("An error occurred. Please try again.")
     } finally {
@@ -77,17 +92,30 @@ export default function ChangePasswordPage() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <div className="flex items-center gap-2 mb-2">
-            <Link href="/" className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft className="h-5 w-5" />
-            </Link>
-            <CardTitle className="text-2xl">Change Password</CardTitle>
+            {!isRequired && (
+              <Link href="/" className="text-gray-500 hover:text-gray-700">
+                <ArrowLeft className="h-5 w-5" />
+              </Link>
+            )}
+            <CardTitle className="text-2xl">
+              {isRequired ? "Set Your Password" : "Change Password"}
+            </CardTitle>
           </div>
           <CardDescription>
-            Update your account password
+            {isRequired 
+              ? "Welcome! Please set a personal password to continue."
+              : "Update your account password"
+            }
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {isRequired && (
+              <div className="bg-blue-50 text-blue-700 p-3 rounded-md text-sm">
+                For security, please change from the default password to your own unique password.
+              </div>
+            )}
+
             {error && (
               <div className="bg-red-50 text-red-600 p-3 rounded-md text-sm">
                 {error}
@@ -101,15 +129,23 @@ export default function ChangePasswordPage() {
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="currentPassword">Current Password</Label>
+              <Label htmlFor="currentPassword">
+                {isRequired ? "Current Password (default)" : "Current Password"}
+              </Label>
               <Input
                 id="currentPassword"
                 type="password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder={isRequired ? "limitless2025" : ""}
                 required
                 autoComplete="current-password"
               />
+              {isRequired && (
+                <p className="text-xs text-gray-500">
+                  The default password is: <code className="bg-gray-100 px-1 rounded">limitless2025</code>
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -139,7 +175,7 @@ export default function ChangePasswordPage() {
             </div>
 
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Changing..." : "Change Password"}
+              {loading ? "Saving..." : (isRequired ? "Set Password & Continue" : "Change Password")}
             </Button>
           </form>
         </CardContent>

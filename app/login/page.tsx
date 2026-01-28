@@ -1,6 +1,5 @@
 import { signIn } from "@/auth"
 import { redirect } from "next/navigation"
-import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,7 +8,7 @@ import { Label } from "@/components/ui/label"
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string; registered?: string }>
+  searchParams: Promise<{ callbackUrl?: string; error?: string }>
 }) {
   const params = await searchParams
 
@@ -43,15 +42,9 @@ export default async function LoginPage({
         </CardHeader>
         <CardContent>
           <form action={handleLogin} className="space-y-4">
-            {params.registered && (
-              <div className="bg-green-50 text-green-600 p-3 rounded-md text-sm">
-                Account created successfully! Please sign in.
-              </div>
-            )}
-
             {params.error && (
               <div className="bg-red-50 text-red-600 p-3 rounded-md text-sm">
-                Invalid email or password. Please try again.
+                Invalid email or password. If you need access, please contact Don.
               </div>
             )}
 
@@ -82,11 +75,9 @@ export default async function LoginPage({
               Sign In
             </Button>
 
-            <div className="text-sm text-center text-gray-600 mt-4">
-              Don&apos;t have an account?{" "}
-              <Link href="/signup" className="text-blue-600 hover:underline">
-                Sign up
-              </Link>
+            <div className="text-sm text-gray-500 text-center mt-4 space-y-1">
+              <p>First time? Use your email with password: <code className="bg-gray-100 px-1.5 py-0.5 rounded">limitless2025</code></p>
+              <p className="text-xs">Need access? Contact Don.</p>
             </div>
           </form>
         </CardContent>

@@ -28,16 +28,26 @@ export const authConfig: NextAuthConfig = {
       
       // Public paths that don't require authentication
       const isLoginPage = pathname === "/login"
-      const isSignupPage = pathname === "/signup"
       const isAuthAPI = pathname.startsWith("/api/auth")
+      const isChangePasswordPage = pathname === "/account/change-password"
+      const isChangePasswordAPI = pathname === "/api/user/change-password"
       
       // Allow public paths
-      if (isLoginPage || isSignupPage || isAuthAPI) {
+      if (isLoginPage || isAuthAPI) {
         return true
       }
       
       // Require authentication for all other paths
-      return isLoggedIn
+      if (!isLoggedIn) {
+        return false
+      }
+      
+      // If user must change password, only allow password change page/API
+      if (auth?.user?.mustChangePassword && !isChangePasswordPage && !isChangePasswordAPI) {
+        return Response.redirect(new URL("/account/change-password?required=true", request.url))
+      }
+      
+      return true
     },
   },
   pages: {
