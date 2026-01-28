@@ -18,19 +18,30 @@
   - Should remain read-only (no mutations), just a report viewer for KRJ signals.
   - Do not change the CSV location or naming scheme without explicit instruction.
 - middleware.ts:
-  - Provides basic auth for /krj using KRJ_BASIC_USER and KRJ_BASIC_PASS from .env.local.
+  - Provides NextAuth v5 authentication. Protected routes redirect to /login.
   - Do not remove or relax this auth without explicit instruction.
 - Styling:
   - Use Tailwind utility classes consistent with existing patterns.
 
-- /app/krj/page.tsx is a trader-facing report. Follow docs/krj_ui_style.md:
-  - High information density.
-  - Right-aligned numeric columns.
-  - Limited decimals and compact units.
-  - Dark, high-contrast theme, no decorative fluff.
+## UI Design Principles - HIGH DENSITY TRADER DASHBOARDS
+- **Ruthlessly minimize vertical space**: Every pixel counts on trading dashboards.
+  - Page padding: `px-3 py-2` (not `p-4` or larger)
+  - Margins between sections: `mb-1` to `mb-3` (not `mb-4` or `mb-6`)
+  - Tab lists: `mb-3` after tabs, `py-1.5` for tab triggers
+  - Filter/control rows: inline layout with `py-1.5 px-3`, not stacked with `p-4`
+  - Section spacing: `space-y-3` (not `space-y-6`)
+- **Combine related elements on single rows**:
+  - Title + subtitle on same row block (subtitle below title, no extra margin)
+  - Status indicators + action buttons + user menu all on one header row
+  - Filter labels inline with filter controls, not stacked
+- **Keep font sizes readable but reduce surrounding whitespace**:
+  - Maintain text-2xl for page titles, text-sm for body text
+  - Reduce padding/margin around text, not the text size itself
+- **Dark, high-contrast theme**: bg-gray-950, text-gray-100, no decorative fluff
+- **Right-aligned numeric columns** with limited decimals and compact units
+- **Allow header labels to wrap** rather than adding horizontal scroll
+- **Place summary elements above/below tables**, not at the side
+
+- /app/krj/page.tsx is a trader-facing report. Follow docs/krj_ui_style.md.
 - Do not change CSV loading or data logic without explicit request.
 - Styling changes should be implemented via Tailwind classes and small formatting helpers only.
-
-- For trader tables, avoid horizontal scroll by:
-  - Allowing header labels to wrap.
-  - Placing summary elements above/below the table rather than at the side.

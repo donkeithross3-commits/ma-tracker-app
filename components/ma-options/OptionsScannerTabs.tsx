@@ -21,16 +21,16 @@ export default function OptionsScannerTabs({
 
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab}>
-      <Tabs.List className="flex gap-2 border-b border-gray-700 mb-6">
+      <Tabs.List className="flex gap-1 border-b border-gray-700 mb-3">
         <Tabs.Trigger
           value="curate"
-          className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
+          className="px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
         >
           Curate
         </Tabs.Trigger>
         <Tabs.Trigger
           value="monitor"
-          className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
+          className="px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
         >
           Monitor
         </Tabs.Trigger>

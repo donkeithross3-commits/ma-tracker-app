@@ -46,7 +46,7 @@ export default async function MAOptionsPage() {
   console.log(`MA Options Scanner: Loaded ${scannerDeals.length} scanner deals`);
 
   return (
-    <div className="min-h-screen bg-gray-950 p-4">
+    <div className="min-h-screen bg-gray-950 px-3 py-2">
       <div className="max-w-[1800px] mx-auto">
         <MAOptionsContent 
           initialDeals={scannerDeals} 

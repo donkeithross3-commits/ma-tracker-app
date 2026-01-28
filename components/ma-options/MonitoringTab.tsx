@@ -284,7 +284,7 @@ export default function MonitoringTab() {
   ).map((s) => JSON.parse(s));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       {/* Filter */}
       <DealFilter
         deals={deals}
@@ -294,7 +294,7 @@ export default function MonitoringTab() {
 
       {/* Spreads Table */}
       {loading ? (
-        <div className="text-gray-400 text-center py-8">Loading...</div>
+        <div className="text-gray-400 text-center py-4">Loading...</div>
       ) : (
         <WatchedSpreadsTable
           spreads={filteredSpreads}

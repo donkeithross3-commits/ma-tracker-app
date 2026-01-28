@@ -44,18 +44,20 @@ export default function MAOptionsContent({ initialDeals, initialUser }: MAOption
 
   return (
     <IBConnectionProvider>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-gray-100">
-          M&A Options Scanner
-        </h1>
+      <div className="flex items-center justify-between mb-1">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-100">
+            M&A Options Scanner
+          </h1>
+          <p className="text-sm text-gray-400">
+            Curate and monitor options strategies for merger arbitrage deals ({deals.length} deal{deals.length !== 1 ? "s" : ""})
+          </p>
+        </div>
         <div className="flex items-center gap-4">
           <IBConnectionStatus />
           <UserMenu variant="dark" initialUser={initialUser} />
         </div>
       </div>
-      <p className="text-sm text-gray-400 mb-6">
-        Curate and monitor options strategies for merger arbitrage deals ({deals.length} deal{deals.length !== 1 ? "s" : ""})
-      </p>
 
       <OptionsScannerTabs 
         deals={deals} 
