@@ -25,6 +25,7 @@ model User {
   dealsUpdated       Deal[]              @relation("DealsUpdated")
   portfolioPositions PortfolioPosition[]
   curatedSpreads     WatchedSpread[]
+  preferences        UserPreferences?
 
   @@map("users")
 }
@@ -289,4 +290,22 @@ model AgentApiKey {
 
   @@index([key])
   @@map("agent_api_keys")
+}
+
+model UserPreferences {
+  id             String   @id @default(uuid())
+  userId         String   @unique @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Dashboard preferences (JSON for flexibility)
+  maOptionsPrefs Json?    @map("ma_options_prefs")
+  dealListPrefs  Json?    @map("deal_list_prefs")
+  
+  // Ticker watchlists
+  customTickers  String[] @map("custom_tickers")
+  
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  
+  @@map("user_preferences")
 }

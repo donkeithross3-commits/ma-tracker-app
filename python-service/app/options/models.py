@@ -87,6 +87,7 @@ class FetchChainRequest(BaseModel):
     dealPrice: float
     expectedCloseDate: str
     scanParams: Optional[ScanParameters] = None
+    userId: Optional[str] = None  # For routing to user's own IB agent
 
 
 class FetchChainResponse(BaseModel):

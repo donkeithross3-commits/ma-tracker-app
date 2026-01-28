@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth-api";
 
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
@@ -23,11 +24,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get current user for agent routing (optional)
+    const user = await getCurrentUser();
+
     // Fetch stock quote through the Python service relay
+    // Include userId so requests are routed to the user's own agent when available
     const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/stock-quote`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker: ticker.toUpperCase() }),
+      body: JSON.stringify({ 
+        ticker: ticker.toUpperCase(),
+        userId: user?.id || undefined,
+      }),
     });
 
     if (!response.ok) {

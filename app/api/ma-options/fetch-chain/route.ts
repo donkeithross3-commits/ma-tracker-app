@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import type { OptionChainResponse, OptionContract } from "@/types/ma-options";
 import { spawn } from "child_process";
 import path from "path";
+import { getCurrentUser } from "@/lib/auth-api";
 
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
@@ -14,7 +15,8 @@ async function fetchViaWebSocketRelay(
   ticker: string,
   dealPrice: number,
   expectedCloseDate: string,
-  scanParams?: ScanParameters
+  scanParams?: ScanParameters,
+  userId?: string | null
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
     // Check provider status via the relay endpoint
@@ -37,6 +39,7 @@ async function fetchViaWebSocketRelay(
 
     // Send request through the relay
     // The Python service will route this to the connected provider via WebSocket
+    // Include userId so requests can be routed to the user's own agent when available
     const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/fetch-chain`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -45,6 +48,7 @@ async function fetchViaWebSocketRelay(
         dealPrice,
         expectedCloseDate,
         scanParams: scanParams || {},
+        userId: userId || undefined,  // Pass user context for agent routing
       }),
     });
 
@@ -170,17 +174,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get current user for agent routing (optional - works without auth too)
+    const user = await getCurrentUser();
+
     // Convert ISO date to YYYY-MM-DD format
     const closeDateObj = new Date(expectedCloseDate);
     const formattedCloseDate = closeDateObj.toISOString().split('T')[0];
 
     // PRIORITY 0: Try WebSocket relay (remote IB data provider)
     // This is the preferred method when IB TWS runs on a different machine
+    // Pass userId so requests are routed to the user's own agent when available
     const relayResult = await fetchViaWebSocketRelay(
       ticker,
       dealPrice,
       formattedCloseDate,
-      scanParams
+      scanParams,
+      user?.id
     );
 
     if (relayResult.success && relayResult.data) {

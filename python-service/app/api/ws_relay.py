@@ -309,7 +309,8 @@ async def data_provider_websocket(websocket: WebSocket):
 async def send_request_to_provider(
     request_type: str,
     payload: dict,
-    timeout: float = REQUEST_TIMEOUT_SECONDS
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
+    user_id: Optional[str] = None
 ) -> dict:
     """
     Send a request to a connected provider and wait for response.
@@ -318,6 +319,7 @@ async def send_request_to_provider(
         request_type: Type of request (e.g., 'fetch_chain', 'ib_status')
         payload: Request payload
         timeout: Timeout in seconds
+        user_id: Optional user ID for routing to user's own agent
         
     Returns:
         Response data from provider
@@ -325,7 +327,11 @@ async def send_request_to_provider(
     Raises:
         HTTPException if no provider is connected or request times out
     """
-    provider = await registry.get_active_provider()
+    # Try to get a provider for this specific user first, then fall back to any provider
+    provider = await registry.get_active_provider(user_id=user_id)
+    
+    if provider and user_id:
+        logger.info(f"Routing request to provider for user {user_id}: {provider.provider_id}")
     
     if not provider:
         raise HTTPException(

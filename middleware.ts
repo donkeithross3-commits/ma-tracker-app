@@ -1,42 +1,60 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { auth } from "@/auth"
+import { NextResponse } from "next/server"
 
 /**
- * Middleware for the KRJ application
+ * Authentication Middleware for dr3-dashboard.com
  * 
- * PHASE 2 UPDATE (Dec 2025):
- * - Removed Basic Auth (now handled by Cloudflare Access as outer gate)
- * - Cloudflare Access provides authentication before requests reach the app
- * - Future: Will add NextAuth session checks here for app-level user management
+ * Protects all routes except:
+ * - /login (auth page)
+ * - /api/auth/* (NextAuth endpoints)
+ * - Static assets (_next/static, _next/image, favicon.ico)
  * 
- * For now, this middleware is a pass-through. Cloudflare Access handles:
- * - Email-based authentication (One-Time PIN)
- * - Access control to krj-dev.dr3-dashboard.com
- * - Identity headers (CF-Access-Authenticated-User-Email)
+ * Uses NextAuth v5 JWT sessions for fast, reliable authentication.
  */
 
-export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+export default auth((req) => {
+  const { pathname } = req.nextUrl
+  const isLoggedIn = !!req.auth
 
-  // Only apply middleware to /krj routes
-  if (!pathname.startsWith("/krj")) {
-    return NextResponse.next();
-  }
-
-  // Optional: Log Cloudflare Access identity (for debugging)
-  if (process.env.NODE_ENV === "development") {
-    const cfEmail = req.headers.get("CF-Access-Authenticated-User-Email");
-    if (cfEmail) {
-      console.log(`[KRJ Access] User: ${cfEmail}`);
+  // Public paths that don't require authentication
+  const isLoginPage = pathname === "/login"
+  const isAuthAPI = pathname.startsWith("/api/auth")
+  
+  // Allow public paths
+  if (isLoginPage || isAuthAPI) {
+    // If logged in and trying to access login page, redirect to home
+    if (isLoggedIn && isLoginPage) {
+      return NextResponse.redirect(new URL("/", req.url))
     }
+    return NextResponse.next()
   }
 
-  // Pass through - Cloudflare Access handles outer authentication
-  // Future: Add NextAuth session check here for app-level user preferences
-  return NextResponse.next();
-}
+  // Redirect unauthenticated users to login
+  if (!isLoggedIn) {
+    const loginUrl = new URL("/login", req.url)
+    // Preserve the original URL to redirect back after login
+    loginUrl.searchParams.set("callbackUrl", pathname)
+    return NextResponse.redirect(loginUrl)
+  }
 
-// Tell Next which paths use this middleware
+  // Optional: Log user access for debugging
+  if (process.env.NODE_ENV === "development") {
+    console.log(`[Auth] User ${req.auth?.user?.email} accessing ${pathname}`)
+  }
+
+  return NextResponse.next()
+})
+
+// Apply middleware to all routes except static assets
 export const config = {
-  matcher: ["/krj/:path*", "/krj"],
-};
+  matcher: [
+    /*
+     * Match all request paths except:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder assets
+     */
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
+}

@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import crypto from "crypto";
-
-// Default user ID for single-user mode (since this app doesn't have multi-user auth)
-const DEFAULT_USER_ID = "default-user";
+import { requireAuth, isAuthError } from "@/lib/auth-api";
 
 /**
  * Generate a secure random API key
@@ -16,22 +14,23 @@ function generateApiKey(): string {
 
 /**
  * GET /api/ma-options/agent-key
- * Get the agent API key, creating one if it doesn't exist.
+ * Get the agent API key for the current user, creating one if it doesn't exist.
  */
 export async function GET() {
-  try {
-    const userId = DEFAULT_USER_ID;
+  const user = await requireAuth();
+  if (isAuthError(user)) return user;
 
-    // Try to find existing key
+  try {
+    // Try to find existing key for this user
     let agentKey = await prisma.agentApiKey.findUnique({
-      where: { userId },
+      where: { userId: user.id },
     });
 
     // Create new key if none exists
     if (!agentKey) {
       agentKey = await prisma.agentApiKey.create({
         data: {
-          userId,
+          userId: user.id,
           key: generateApiKey(),
         },
       });
@@ -53,23 +52,25 @@ export async function GET() {
 
 /**
  * POST /api/ma-options/agent-key
- * Regenerate the agent API key.
+ * Regenerate the agent API key for the current user.
  */
 export async function POST() {
+  const user = await requireAuth();
+  if (isAuthError(user)) return user;
+
   try {
-    const userId = DEFAULT_USER_ID;
     const newKey = generateApiKey();
 
     // Upsert: update existing or create new
     const agentKey = await prisma.agentApiKey.upsert({
-      where: { userId },
+      where: { userId: user.id },
       update: {
         key: newKey,
         createdAt: new Date(), // Reset creation date on regenerate
         lastUsed: null,
       },
       create: {
-        userId,
+        userId: user.id,
         key: newKey,
       },
     });
@@ -91,14 +92,15 @@ export async function POST() {
 
 /**
  * DELETE /api/ma-options/agent-key
- * Delete the agent API key (disconnects any active agents).
+ * Delete the agent API key for the current user (disconnects any active agents).
  */
 export async function DELETE() {
-  try {
-    const userId = DEFAULT_USER_ID;
+  const user = await requireAuth();
+  if (isAuthError(user)) return user;
 
+  try {
     await prisma.agentApiKey.deleteMany({
-      where: { userId },
+      where: { userId: user.id },
     });
 
     return NextResponse.json({

@@ -5,6 +5,7 @@ import type {
   UpdateSpreadPricesResponse,
   StrategyLeg,
 } from "@/types/ma-options";
+import { getCurrentUser } from "@/lib/auth-api";
 
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
@@ -13,7 +14,8 @@ const PYTHON_SERVICE_URL =
  * Fetch prices for specific contracts via WebSocket relay
  */
 async function fetchPricesViaRelay(
-  contracts: Array<{ticker: string, strike: number, expiry: string, right: string}>
+  contracts: Array<{ticker: string, strike: number, expiry: string, right: string}>,
+  userId?: string | null
 ): Promise<{success: boolean, contracts: any[]} | null> {
   try {
     console.log(`[PRICE FETCH] Fetching ${contracts.length} contracts via WebSocket relay...`);
@@ -21,7 +23,7 @@ async function fetchPricesViaRelay(
     const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/fetch-prices`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contracts }),
+      body: JSON.stringify({ contracts, userId: userId || undefined }),
     });
     
     if (!response.ok) {
@@ -44,12 +46,12 @@ async function fetchPricesViaRelay(
 /**
  * Fetch underlying stock quote via WebSocket relay
  */
-async function fetchStockQuote(ticker: string): Promise<{price: number} | null> {
+async function fetchStockQuote(ticker: string, userId?: string | null): Promise<{price: number} | null> {
   try {
     const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/stock-quote`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker }),
+      body: JSON.stringify({ ticker, userId: userId || undefined }),
     });
     
     if (!response.ok) {
@@ -77,6 +79,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Get current user for agent routing (optional)
+    const user = await getCurrentUser();
 
     // Fetch spreads with scanner deal info
     const spreads = await prisma.watchedSpread.findMany({
@@ -121,7 +126,7 @@ export async function POST(request: NextRequest) {
     
     // Fetch all prices in one call via relay
     const allContracts = Array.from(contractsNeeded.values());
-    const fetchResult = await fetchPricesViaRelay(allContracts);
+    const fetchResult = await fetchPricesViaRelay(allContracts, user?.id);
     
     // Build price lookup map
     const priceData = new Map<string, any>();
@@ -143,7 +148,7 @@ export async function POST(request: NextRequest) {
     const stockPrices = new Map<string, number>();
     
     for (const ticker of uniqueTickers) {
-      const quote = await fetchStockQuote(ticker);
+      const quote = await fetchStockQuote(ticker, user?.id);
       if (quote) {
         stockPrices.set(ticker, quote.price);
         console.log(`[REFRESH PRICES] Stock quote for ${ticker}: $${quote.price}`);

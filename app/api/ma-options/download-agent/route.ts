@@ -4,9 +4,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import archiver from "archiver";
-
-// Default user ID for single-user mode
-const DEFAULT_USER_ID = "default-user";
+import { requireAuth, isAuthError } from "@/lib/auth-api";
 
 /**
  * Generate a secure random API key
@@ -21,18 +19,19 @@ function generateApiKey(): string {
  * Download the IB Data Agent as a ZIP file with the API key pre-configured.
  */
 export async function GET() {
-  try {
-    const userId = DEFAULT_USER_ID;
+  const user = await requireAuth();
+  if (isAuthError(user)) return user;
 
-    // Get or create API key
+  try {
+    // Get or create API key for this user
     let agentKey = await prisma.agentApiKey.findUnique({
-      where: { userId },
+      where: { userId: user.id },
     });
 
     if (!agentKey) {
       agentKey = await prisma.agentApiKey.create({
         data: {
-          userId,
+          userId: user.id,
           key: generateApiKey(),
         },
       });

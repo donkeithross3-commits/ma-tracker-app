@@ -489,6 +489,7 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
             )
         
         # Send request through WebSocket relay
+        # Pass userId so requests are routed to the user's own agent when available
         response_data = await send_request_to_provider(
             request_type="fetch_chain",
             payload={
@@ -497,7 +498,8 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
                 "expectedCloseDate": request.expectedCloseDate,
                 "scanParams": request.scanParams.dict() if request.scanParams else {}
             },
-            timeout=120.0  # IB option chain fetches can take 60+ seconds
+            timeout=120.0,  # IB option chain fetches can take 60+ seconds
+            user_id=request.userId
         )
         
         # Check for errors in response
@@ -631,6 +633,7 @@ class ContractSpec(BaseModel):
 
 class FetchPricesRequest(BaseModel):
     contracts: List[ContractSpec]
+    userId: Optional[str] = None  # For routing to user's own IB agent
 
 class ContractPrice(BaseModel):
     ticker: str
@@ -666,12 +669,14 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
             )
         
         # Send request through WebSocket relay
+        # Pass userId so requests are routed to the user's own agent when available
         response_data = await send_request_to_provider(
             request_type="fetch_prices",
             payload={
                 "contracts": [c.dict() for c in request.contracts]
             },
-            timeout=60.0  # 60 seconds should be plenty for price fetches
+            timeout=60.0,  # 60 seconds should be plenty for price fetches
+            user_id=request.userId
         )
         
         # Check for errors in response
@@ -709,6 +714,7 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
 
 class StockQuoteRequest(BaseModel):
     ticker: str
+    userId: Optional[str] = None  # For routing to user's own IB agent
 
 class StockQuoteResponse(BaseModel):
     ticker: str
@@ -737,10 +743,12 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
             )
         
         # Send request through WebSocket relay
+        # Pass userId so requests are routed to the user's own agent when available
         response_data = await send_request_to_provider(
             request_type="fetch_underlying",
             payload={"ticker": request.ticker.upper()},
-            timeout=15.0  # Stock quote should be quick
+            timeout=15.0,  # Stock quote should be quick
+            user_id=request.userId
         )
         
         # Check for errors in response
