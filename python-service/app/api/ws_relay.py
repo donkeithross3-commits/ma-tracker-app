@@ -45,6 +45,10 @@ async def validate_api_key(api_key: str) -> Optional[str]:
     Returns the user_id if valid, None if invalid.
     Also supports legacy single-key mode for backwards compatibility.
     """
+    # Log key prefix for debugging (first 10 chars only)
+    key_prefix = api_key[:10] if len(api_key) > 10 else api_key
+    logger.info(f"Validating API key starting with: {key_prefix}...")
+    
     # Check legacy key first (for backwards compatibility)
     if LEGACY_PROVIDER_API_KEY and api_key == LEGACY_PROVIDER_API_KEY:
         logger.info("Using legacy API key authentication")
@@ -52,16 +56,21 @@ async def validate_api_key(api_key: str) -> Optional[str]:
     
     # Validate against database via internal API
     try:
+        logger.info(f"Checking key against database at {API_BASE_URL}")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{API_BASE_URL}/api/ma-options/validate-agent-key",
                 json={"key": api_key},
                 timeout=5.0
             )
+            logger.info(f"Validation response: status={response.status_code}, body={response.text[:100]}")
             if response.status_code == 200:
                 data = response.json()
                 if data.get("valid"):
+                    logger.info(f"Key validated for user: {data.get('userId')}")
                     return data.get("userId")
+                else:
+                    logger.warning(f"Key not valid in database")
     except Exception as e:
         logger.error(f"Error validating API key: {e}")
     
