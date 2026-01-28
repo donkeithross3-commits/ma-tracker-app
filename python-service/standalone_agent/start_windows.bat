@@ -79,23 +79,43 @@ REM ============================================
 REM Option 2: Check for Python
 REM ============================================
 where python >nul 2>nul
-if %errorlevel% equ 0 (
-    REM Python found, check version
-    python -c "import sys; exit(0 if sys.version_info >= (3, 9) else 1)" 2>nul
-    if !errorlevel! equ 0 (
-        echo Starting IB Data Agent (Python)...
-        echo Press Ctrl+C to stop
-        echo ============================================
-        echo.
-        python "%SCRIPT_DIR%ib_data_agent.py"
-        goto :end
-    ) else (
-        echo WARNING: Python found but version is too old (need 3.9+)
-        python --version
-        echo.
-    )
+if %errorlevel% neq 0 goto :nopython
+
+REM Python found, check version
+python -c "import sys; exit(0 if sys.version_info >= (3, 9) else 1)" 2>nul
+if !errorlevel! neq 0 (
+    echo WARNING: Python found but version is too old (need 3.9+)
+    python --version
+    echo.
+    goto :nopython
 )
 
+REM Python OK - check and install dependencies
+echo Checking dependencies...
+python -c "import websockets" 2>nul
+if !errorlevel! neq 0 (
+    echo Installing required packages...
+    python -m pip install --quiet --disable-pip-version-check websockets>=11.0
+    if !errorlevel! neq 0 (
+        echo ERROR: Failed to install dependencies
+        echo Try running: python -m pip install websockets
+        pause
+        exit /b 1
+    )
+    echo Dependencies installed.
+) else (
+    echo Dependencies OK.
+)
+echo.
+
+echo Starting IB Data Agent...
+echo Press Ctrl+C to stop
+echo ============================================
+echo.
+python "%SCRIPT_DIR%ib_data_agent.py"
+goto :end
+
+:nopython
 REM ============================================
 REM No Python found - show helpful error
 REM ============================================

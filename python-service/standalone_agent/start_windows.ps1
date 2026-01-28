@@ -48,16 +48,19 @@ if (Test-Path $configPath) {
         }
     }
     Write-Host ""
+} else {
+    Write-Host "ERROR: config.env not found" -ForegroundColor Red
+    Write-Host "Please re-download the agent from the MA Tracker web app."
+    Read-Host "Press Enter to exit"
+    exit 1
 }
 
 # Check if API key is set
-if (-not $env:IB_PROVIDER_KEY) {
-    Write-Host "ERROR: IB_PROVIDER_KEY is not set" -ForegroundColor Red
+if (-not $env:IB_PROVIDER_KEY -or $env:IB_PROVIDER_KEY -eq "your-api-key-here") {
+    Write-Host "ERROR: API key not configured" -ForegroundColor Red
     Write-Host ""
-    Write-Host "Please edit config.env and add your API key:"
-    Write-Host "IB_PROVIDER_KEY=your-api-key-here"
-    Write-Host ""
-    Write-Host "Get your API key from the MA Tracker web app."
+    Write-Host "Please re-download the agent from the MA Tracker web app"
+    Write-Host "to get a pre-configured version with your API key."
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -67,11 +70,33 @@ if (-not $env:IB_HOST) { $env:IB_HOST = "127.0.0.1" }
 if (-not $env:IB_PORT) { $env:IB_PORT = "7497" }
 if (-not $env:RELAY_URL) { $env:RELAY_URL = "wss://dr3-dashboard.com/ws/data-provider" }
 
-Write-Host "Starting IB Data Agent..." -ForegroundColor Green
-Write-Host ""
 Write-Host "IB TWS:    $($env:IB_HOST):$($env:IB_PORT)"
 Write-Host "Relay URL: $($env:RELAY_URL)"
 Write-Host ""
+
+# Install dependencies if needed
+Write-Host "Checking dependencies..." -ForegroundColor Yellow
+$reqPath = Join-Path $ScriptDir "requirements.txt"
+if (Test-Path $reqPath) {
+    # Check if websockets is installed
+    $wsCheck = python -c "import websockets" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Installing required packages..." -ForegroundColor Yellow
+        python -m pip install --quiet --disable-pip-version-check -r $reqPath
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: Failed to install dependencies" -ForegroundColor Red
+            Write-Host "Try running: python -m pip install websockets"
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+        Write-Host "Dependencies installed." -ForegroundColor Green
+    } else {
+        Write-Host "Dependencies OK." -ForegroundColor Green
+    }
+}
+Write-Host ""
+
+Write-Host "Starting IB Data Agent..." -ForegroundColor Green
 Write-Host "Press Ctrl+C to stop"
 Write-Host "============================================"
 Write-Host ""

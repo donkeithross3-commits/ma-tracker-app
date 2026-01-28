@@ -48,16 +48,18 @@ if [ -f "$CONFIG_FILE" ]; then
     source <(grep -v '^#' "$CONFIG_FILE" | grep -v '^$')
     set +a
     echo ""
+else
+    echo "ERROR: config.env not found"
+    echo "Please re-download the agent from the MA Tracker web app."
+    exit 1
 fi
 
 # Check if API key is set
-if [ -z "$IB_PROVIDER_KEY" ]; then
-    echo "ERROR: IB_PROVIDER_KEY is not set"
+if [ -z "$IB_PROVIDER_KEY" ] || [ "$IB_PROVIDER_KEY" = "your-api-key-here" ]; then
+    echo "ERROR: API key not configured"
     echo ""
-    echo "Please edit config.env and add your API key:"
-    echo "IB_PROVIDER_KEY=your-api-key-here"
-    echo ""
-    echo "Get your API key from the MA Tracker web app."
+    echo "Please re-download the agent from the MA Tracker web app"
+    echo "to get a pre-configured version with your API key."
     exit 1
 fi
 
@@ -68,11 +70,27 @@ fi
 
 export IB_HOST IB_PORT RELAY_URL IB_PROVIDER_KEY
 
-echo "Starting IB Data Agent..."
-echo ""
 echo "IB TWS:    $IB_HOST:$IB_PORT"
 echo "Relay URL: $RELAY_URL"
 echo ""
+
+# Check and install dependencies
+echo "Checking dependencies..."
+if ! python3 -c "import websockets" 2>/dev/null; then
+    echo "Installing required packages..."
+    python3 -m pip install --quiet websockets>=11.0
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to install dependencies"
+        echo "Try running: python3 -m pip install websockets"
+        exit 1
+    fi
+    echo "Dependencies installed."
+else
+    echo "Dependencies OK."
+fi
+echo ""
+
+echo "Starting IB Data Agent..."
 echo "Press Ctrl+C to stop"
 echo "============================================"
 echo ""
