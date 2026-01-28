@@ -23,7 +23,7 @@ export default async function LoginPage({
       await signIn("credentials", {
         email,
         password,
-        redirectTo: params.callbackUrl || "/deals",
+        redirectTo: params.callbackUrl || "/",
       })
     } catch (error) {
       // NextAuth throws a redirect error on successful login
