@@ -322,7 +322,7 @@ export default function WatchedSpreadsTable({
                       rowSpan={spread.tickerRowSpan}
                     >
                       <div>{spread.dealTicker}</div>
-                      <div className="text-xs text-gray-500 font-normal">
+                      <div className="text-xs text-gray-500 font-normal whitespace-nowrap">
                         ${spread.dealPrice?.toFixed(2)} | {formatDealCloseDate(spread.dealExpectedCloseDate)}
                       </div>
                     </td>
