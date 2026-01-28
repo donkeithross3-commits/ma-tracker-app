@@ -756,7 +756,7 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
             price=price,
             bid=response_data.get("bid"),
             ask=response_data.get("ask"),
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.utcnow().isoformat() + "Z"  # Explicit UTC timestamp
         )
         
     except HTTPException:

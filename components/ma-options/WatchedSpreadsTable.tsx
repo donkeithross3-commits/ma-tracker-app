@@ -5,6 +5,41 @@ import type { WatchedSpreadDTO, SpreadUpdateFailure } from "@/types/ma-options";
 import { StrategyMetricsCells, type StrategyMetrics } from "./StrategyColumns";
 import SpreadAnalysisModal from "./SpreadAnalysisModal";
 
+/**
+ * Format timestamp for display in Eastern Time
+ * Shows "X:XX PM ET" for today, or "Jan 11, X:XX PM ET" for other days
+ */
+function formatTimestampET(timestamp: string | null): string {
+  if (!timestamp) return "";
+  
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return "";
+  
+  const options: Intl.DateTimeFormatOptions = { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    timeZone: 'America/New_York'
+  };
+  
+  // Check if date is today in Eastern Time
+  const nowET = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const dateET = date.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const isToday = nowET === dateET;
+  
+  const timeStr = date.toLocaleTimeString('en-US', options);
+  
+  if (isToday) {
+    return `${timeStr} ET`;
+  } else {
+    const dateStr = date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      timeZone: 'America/New_York'
+    });
+    return `${dateStr}, ${timeStr} ET`;
+  }
+}
+
 interface WatchedSpreadsTableProps {
   spreads: WatchedSpreadDTO[];
   onDeactivate: (spreadId: string) => void;
@@ -106,6 +141,20 @@ export default function WatchedSpreadsTable({
     }
   };
 
+  // Get the most recent lastUpdated timestamp from all spreads
+  const latestUpdateTimestamp = useMemo(() => {
+    let latest: Date | null = null;
+    for (const spread of spreads) {
+      if (spread.lastUpdated) {
+        const date = new Date(spread.lastUpdated);
+        if (!isNaN(date.getTime()) && (!latest || date > latest)) {
+          latest = date;
+        }
+      }
+    }
+    return latest ? latest.toISOString() : null;
+  }, [spreads]);
+
   const formatStrategyType = (spread: WatchedSpreadDTO): string => {
     if (spread.strategyType === "spread") {
       return spread.legs[0]?.right === "C" ? "call sprd" : "put sprd";
@@ -174,9 +223,16 @@ export default function WatchedSpreadsTable({
   return (
     <div className="bg-gray-900 border border-gray-700 rounded p-4">
       <div className="flex justify-between items-center mb-3">
-        <h3 className="text-lg font-semibold text-gray-100">
-          Watched Spreads ({spreads.length})
-        </h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-lg font-semibold text-gray-100">
+            Watched Spreads ({spreads.length})
+          </h3>
+          {latestUpdateTimestamp && !isRefreshing && (
+            <span className="text-xs text-gray-500">
+              Prices as of {formatTimestampET(latestUpdateTimestamp)}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           {refreshStatus && (
             <div className="text-sm text-gray-400">
