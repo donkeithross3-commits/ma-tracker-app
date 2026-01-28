@@ -9,6 +9,29 @@ echo.
 REM Get script directory
 set "SCRIPT_DIR=%~dp0"
 
+REM ============================================
+REM Check if running from inside a ZIP file
+REM Windows temp extraction paths contain "Temp" and random chars
+REM ============================================
+echo !SCRIPT_DIR! | findstr /i "\\Temp\\" >nul
+if !errorlevel! equ 0 (
+    echo ============================================
+    echo PLEASE EXTRACT THE ZIP FILE FIRST
+    echo ============================================
+    echo.
+    echo It looks like you're running this from inside the ZIP file.
+    echo.
+    echo To install the IB Data Agent:
+    echo   1. Right-click on ib-data-agent.zip
+    echo   2. Select "Extract All..."
+    echo   3. Choose where to extract ^(Desktop is fine^)
+    echo   4. Open the extracted folder
+    echo   5. Double-click start_windows.bat
+    echo.
+    pause
+    exit /b 1
+)
+
 REM Load environment variables from config.env if it exists
 if exist "%SCRIPT_DIR%config.env" (
     echo Loading config.env...
@@ -23,10 +46,18 @@ if exist "%SCRIPT_DIR%config.env" (
     )
     echo.
 ) else (
+    echo ============================================
     echo ERROR: config.env not found
+    echo ============================================
     echo.
-    echo The config.env file should have been included in your download.
-    echo Please re-download the agent from the MA Tracker web app.
+    echo This usually means you need to extract the ZIP file first.
+    echo.
+    echo To install the IB Data Agent:
+    echo   1. Right-click on ib-data-agent.zip
+    echo   2. Select "Extract All..."
+    echo   3. Choose where to extract ^(Desktop is fine^)
+    echo   4. Open the extracted folder
+    echo   5. Double-click start_windows.bat
     echo.
     pause
     exit /b 1
