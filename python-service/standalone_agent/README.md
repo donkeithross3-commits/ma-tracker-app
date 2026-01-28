@@ -18,9 +18,23 @@ Local agent that connects your Interactive Brokers account to the MA Tracker web
 
 **Windows:**
 - Double-click `start_windows.bat`
+- No Python installation required - Python is bundled!
 
-**Mac/Linux:**
+**Mac:**
 ```bash
+# First time only - install Python if not already installed:
+brew install python@3.11
+
+# Then run the agent:
+./start_unix.sh
+```
+
+**Linux:**
+```bash
+# First time only - install Python if not already installed:
+sudo apt-get update && sudo apt-get install python3 python3-pip
+
+# Then run the agent:
 ./start_unix.sh
 ```
 
@@ -29,17 +43,38 @@ That's it! The agent will connect to your IB TWS and relay data to the web app.
 ## Requirements
 
 ### Windows
-- If `ib_data_agent.exe` is included: No additional requirements
-- Otherwise: Python 3.9 or newer ([download here](https://www.python.org/downloads/))
+No additional requirements! Python 3.11 is bundled in the download.
+
+If the bundled Python is missing, the script will fall back to system Python (3.8+).
 
 ### Mac
-- Python 3.9 or newer
-- Install via Homebrew: `brew install python@3.11`
-- Or download from: https://www.python.org/downloads/
+Python 3.8 or newer is required. Install options:
+
+**Option A: Homebrew (recommended)**
+```bash
+brew install python@3.11
+```
+
+**Option B: Official installer**
+Download from https://www.python.org/downloads/macos/
+
+After installation, the startup script will automatically install the required dependencies.
 
 ### Linux
-- Python 3.9 or newer
-- Install via apt: `sudo apt-get install python3 python3-pip`
+Python 3.8 or newer is required.
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get update
+sudo apt-get install python3 python3-pip
+```
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install python3 python3-pip
+```
+
+After installation, the startup script will automatically install the required dependencies.
 
 ## Configuration
 
@@ -75,23 +110,38 @@ Your API key may have been regenerated. Download a fresh copy of the agent from 
 
 ### "Python not found" (Windows)
 
+This shouldn't happen if you have the bundled Python. Try:
+1. Re-download the agent from the MA Tracker web app
+2. Make sure you extracted the ZIP file (don't run from inside the ZIP)
+
+If you prefer to install system Python:
 1. Download Python from https://www.python.org/downloads/
 2. **Important:** Check "Add Python to PATH" during installation
-3. Restart the start script
+3. Restart your computer
+4. Run the start script again
 
 ### "Python not found" (Mac)
 
+Install Python via Homebrew:
 ```bash
 brew install python@3.11
 ```
 
-Or download from https://www.python.org/downloads/
+Or download from https://www.python.org/downloads/macos/
 
 ### "Python not found" (Linux)
 
 ```bash
 sudo apt-get update
 sudo apt-get install python3 python3-pip
+```
+
+### "Permission denied" (Mac/Linux)
+
+Make the start script executable:
+```bash
+chmod +x start_unix.sh
+./start_unix.sh
 ```
 
 ## How It Works
@@ -106,14 +156,17 @@ sudo apt-get install python3 python3-pip
 
 ```
 ib-data-agent/
-├── ib_data_agent.exe    # Standalone executable (Windows, if included)
-├── ib_data_agent.py     # Main agent script
-├── ib_scanner.py        # IB connection logic
-├── ibapi/               # Bundled IB API
-├── config.env           # Your configuration (pre-configured!)
-├── start_windows.bat    # Windows starter
-├── start_unix.sh        # Mac/Linux starter
-└── README.md            # This file
+├── python_bundle/        # Bundled Python (Windows only)
+├── ib_data_agent.exe     # Standalone executable (if included)
+├── ib_data_agent.py      # Main agent script
+├── ib_scanner.py         # IB connection logic
+├── ibapi/                # Bundled IB API
+├── config.env            # Your configuration (pre-configured!)
+├── requirements.txt      # Python dependencies
+├── start_windows.bat     # Windows starter
+├── start_windows.ps1     # Windows starter (PowerShell)
+├── start_unix.sh         # Mac/Linux starter
+└── README.md             # This file
 ```
 
 ## Security

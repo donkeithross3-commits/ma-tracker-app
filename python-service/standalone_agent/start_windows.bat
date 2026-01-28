@@ -67,7 +67,7 @@ REM ============================================
 REM Option 1: Check for standalone executable (no Python needed)
 REM ============================================
 if exist "%SCRIPT_DIR%ib_data_agent.exe" (
-    echo Starting IB Data Agent (standalone)...
+    echo Starting IB Data Agent [standalone exe]...
     echo Press Ctrl+C to stop
     echo ============================================
     echo.
@@ -76,26 +76,45 @@ if exist "%SCRIPT_DIR%ib_data_agent.exe" (
 )
 
 REM ============================================
-REM Option 2: Check for Python
+REM Option 2: Check for bundled Python (no install needed)
+REM ============================================
+set "BUNDLED_PYTHON=%SCRIPT_DIR%python_bundle\python.exe"
+if exist "%BUNDLED_PYTHON%" (
+    echo Using bundled Python [no install required]
+    "%BUNDLED_PYTHON%" --version
+    echo.
+    echo Starting IB Data Agent...
+    echo Press Ctrl+C to stop
+    echo ============================================
+    echo.
+    "%BUNDLED_PYTHON%" "%SCRIPT_DIR%ib_data_agent.py"
+    goto :end
+)
+
+REM ============================================
+REM Option 3: Check for system Python
 REM ============================================
 where python >nul 2>nul
 if %errorlevel% neq 0 goto :nopython
 
-REM Python found, check version
-python -c "import sys; exit(0 if sys.version_info >= (3, 9) else 1)" 2>nul
+REM Python found, check version (need 3.8+)
+python -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>nul
 if !errorlevel! neq 0 (
-    echo WARNING: Python found but version is too old (need 3.9+)
+    echo WARNING: Python found but version is too old (need 3.8+)
     python --version
     echo.
     goto :nopython
 )
+
+echo Using system Python
+python --version
 
 REM Python OK - check and install dependencies
 echo Checking dependencies...
 python -c "import websockets" 2>nul
 if !errorlevel! neq 0 (
     echo Installing required packages...
-    python -m pip install --quiet --disable-pip-version-check websockets>=11.0
+    python -m pip install --quiet --disable-pip-version-check -r "%SCRIPT_DIR%requirements.txt"
     if !errorlevel! neq 0 (
         echo ERROR: Failed to install dependencies
         echo Try running: python -m pip install websockets
@@ -120,16 +139,19 @@ REM ============================================
 REM No Python found - show helpful error
 REM ============================================
 echo ============================================
-echo ERROR: Python 3.9+ is required
+echo ERROR: Python not found
 echo ============================================
 echo.
-echo The IB Data Agent requires Python to run.
+echo The IB Data Agent requires Python to run, but no bundled
+echo Python was found and no system Python is available.
 echo.
-echo To install Python:
-echo   1. Go to https://www.python.org/downloads/
-echo   2. Download Python 3.11 or newer
-echo   3. IMPORTANT: Check "Add Python to PATH" during installation
-echo   4. Restart this script after installation
+echo Options:
+echo   1. Re-download the agent (should include bundled Python)
+echo   2. Install Python manually:
+echo      - Go to https://www.python.org/downloads/
+echo      - Download Python 3.11 (recommended)
+echo      - IMPORTANT: Check "Add Python to PATH" during installation
+echo      - Restart this script after installation
 echo.
 echo.
 set /p "OPEN_URL=Would you like to open the Python download page? (Y/N): "

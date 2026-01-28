@@ -1,5 +1,8 @@
 # IB Data Agent - Required Dependencies
 # ======================================
 # Note: ibapi is bundled in the ibapi/ folder, no need to install it.
+#
+# Python version: 3.8+ recommended (3.10+ for latest websockets)
+# The bundled Python distribution uses 3.11 for best compatibility.
 
-websockets>=11.0
+websockets>=11.0,<17.0

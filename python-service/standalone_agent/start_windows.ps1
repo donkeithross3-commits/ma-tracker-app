@@ -9,31 +9,6 @@ Write-Host ""
 # Get script directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# Check if Python is available
-$python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $python) {
-    Write-Host "ERROR: Python not found in PATH" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Please install Python 3.9 or newer from:"
-    Write-Host "https://www.python.org/downloads/"
-    Write-Host ""
-    Write-Host "Make sure to check 'Add Python to PATH' during installation."
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-# Check Python version
-$version = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-$versionParts = $version -split '\.'
-if ([int]$versionParts[0] -lt 3 -or ([int]$versionParts[0] -eq 3 -and [int]$versionParts[1] -lt 9)) {
-    Write-Host "ERROR: Python 3.9 or newer is required" -ForegroundColor Red
-    Write-Host "Found: Python $version"
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-Write-Host "Python $version detected" -ForegroundColor Green
-
 # Load config.env if it exists
 $configPath = Join-Path $ScriptDir "config.env"
 if (Test-Path $configPath) {
@@ -73,6 +48,80 @@ if (-not $env:RELAY_URL) { $env:RELAY_URL = "wss://dr3-dashboard.com/ws/data-pro
 Write-Host "IB TWS:    $($env:IB_HOST):$($env:IB_PORT)"
 Write-Host "Relay URL: $($env:RELAY_URL)"
 Write-Host ""
+
+# ============================================
+# Option 1: Check for standalone executable
+# ============================================
+$exePath = Join-Path $ScriptDir "ib_data_agent.exe"
+if (Test-Path $exePath) {
+    Write-Host "Starting IB Data Agent [standalone exe]..." -ForegroundColor Green
+    Write-Host "Press Ctrl+C to stop"
+    Write-Host "============================================"
+    Write-Host ""
+    & $exePath
+    Write-Host ""
+    Write-Host "Agent stopped."
+    Read-Host "Press Enter to exit"
+    exit 0
+}
+
+# ============================================
+# Option 2: Check for bundled Python
+# ============================================
+$bundledPython = Join-Path $ScriptDir "python_bundle\python.exe"
+if (Test-Path $bundledPython) {
+    Write-Host "Using bundled Python [no install required]" -ForegroundColor Green
+    & $bundledPython --version
+    Write-Host ""
+    Write-Host "Starting IB Data Agent..." -ForegroundColor Green
+    Write-Host "Press Ctrl+C to stop"
+    Write-Host "============================================"
+    Write-Host ""
+    
+    $agentPath = Join-Path $ScriptDir "ib_data_agent.py"
+    & $bundledPython $agentPath
+    
+    Write-Host ""
+    Write-Host "Agent stopped."
+    Read-Host "Press Enter to exit"
+    exit 0
+}
+
+# ============================================
+# Option 3: Check for system Python
+# ============================================
+$python = Get-Command python -ErrorAction SilentlyContinue
+if (-not $python) {
+    Write-Host "============================================" -ForegroundColor Red
+    Write-Host "ERROR: Python not found" -ForegroundColor Red
+    Write-Host "============================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "The IB Data Agent requires Python to run, but no bundled"
+    Write-Host "Python was found and no system Python is available."
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  1. Re-download the agent (should include bundled Python)"
+    Write-Host "  2. Install Python manually:"
+    Write-Host "     - Go to https://www.python.org/downloads/"
+    Write-Host "     - Download Python 3.11 (recommended)"
+    Write-Host "     - IMPORTANT: Check 'Add Python to PATH' during installation"
+    Write-Host "     - Restart this script after installation"
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+# Check Python version (need 3.8+)
+$version = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+$versionParts = $version -split '\.'
+if ([int]$versionParts[0] -lt 3 -or ([int]$versionParts[0] -eq 3 -and [int]$versionParts[1] -lt 8)) {
+    Write-Host "ERROR: Python 3.8 or newer is required" -ForegroundColor Red
+    Write-Host "Found: Python $version"
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+Write-Host "Using system Python" -ForegroundColor Green
+Write-Host "Python $version"
 
 # Install dependencies if needed
 Write-Host "Checking dependencies..." -ForegroundColor Yellow

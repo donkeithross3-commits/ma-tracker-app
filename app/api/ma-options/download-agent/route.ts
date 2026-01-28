@@ -96,6 +96,13 @@ export async function GET() {
       archive.file(exePath, { name: "ib-data-agent/ib_data_agent.exe" });
     }
 
+    // Add bundled Python for Windows (if prepared on server)
+    // This allows Windows users to run the agent without installing Python
+    const pythonBundleDir = path.join(agentDir, "python_bundle");
+    if (fs.existsSync(pythonBundleDir)) {
+      archive.directory(pythonBundleDir, "ib-data-agent/python_bundle");
+    }
+
     // Add ibapi directory
     const ibapiDir = path.join(agentDir, "ibapi");
     if (fs.existsSync(ibapiDir)) {
