@@ -15,6 +15,7 @@ model User {
   fullName           String?             @map("full_name")
   role               String              @default("analyst")
   isActive           Boolean             @default(true) @map("is_active")
+  lastLoginAt        DateTime?           @map("last_login_at")
   createdAt          DateTime            @default(now()) @map("created_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
   apiPriceFetches    ApiPriceFetch[]
