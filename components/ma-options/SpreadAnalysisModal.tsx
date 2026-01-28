@@ -155,14 +155,33 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
     // For debit spreads (call spreads), capital = entry cost
     // For credit spreads (put spreads), capital = max loss (collateral)
     const spreadCapital = spread.maxLoss * 100; // maxLoss is per share, multiply by 100
-    const spreadProfitIfClose = spread.maxProfit * 100;
     
-    // Calculate spread value at break price (accounts for residual intrinsic value)
     // Get strikes from legs
     const buyLeg = spread.legs.find(l => l.side === "BUY");
     const sellLeg = spread.legs.find(l => l.side === "SELL");
     const isCallSpread = spread.legs[0]?.right === "C";
     
+    // Calculate spread value at deal price (what we get if deal closes)
+    // This needs to be dynamic based on editableDealPrice, not fixed
+    let spreadValueAtDealPrice = 0;
+    if (buyLeg && sellLeg) {
+      if (isCallSpread) {
+        // Call spread at expiration: value = max(0, price - buyStrike) - max(0, price - sellStrike)
+        const longCallValue = Math.max(0, dealPrice - buyLeg.strike);
+        const shortCallValue = Math.max(0, dealPrice - sellLeg.strike);
+        spreadValueAtDealPrice = (longCallValue - shortCallValue) * 100;
+      } else {
+        // Put spread at expiration: value = max(0, buyStrike - price) - max(0, sellStrike - price)
+        const longPutValue = Math.max(0, buyLeg.strike - dealPrice);
+        const shortPutValue = Math.max(0, sellLeg.strike - dealPrice);
+        spreadValueAtDealPrice = (longPutValue - shortPutValue) * 100;
+      }
+    }
+    
+    // Profit = value at expiration - cost to enter
+    const spreadProfitIfClose = spreadValueAtDealPrice - spreadCapital;
+    
+    // Calculate spread value at break price (accounts for residual intrinsic value)
     let spreadValueAtBreak = 0;
     if (buyLeg && sellLeg) {
       if (isCallSpread) {
