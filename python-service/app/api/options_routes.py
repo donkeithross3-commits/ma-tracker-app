@@ -546,6 +546,8 @@ async def relay_test_futures():
     """
     Test ES futures quote through WebSocket relay.
     Useful for verifying IB connectivity when options markets are closed.
+    
+    Finds a provider that has IB connected and sends the request there.
     """
     try:
         registry = get_registry()
@@ -557,11 +559,59 @@ async def relay_test_futures():
                 detail="No IB data provider connected. Please start the local agent."
             )
         
-        # Send request through WebSocket relay
+        # Find a provider with IB connected by checking ib_status on each
+        connected_user_id = None
+        for provider_info in status["providers"]:
+            provider_id = provider_info["id"]
+            user_id = provider_info.get("user_id")
+            
+            try:
+                provider = await registry.get_provider_by_id(provider_id)
+                if not provider:
+                    continue
+                
+                # Quick ib_status check
+                request_id = str(uuid.uuid4())
+                future = asyncio.get_event_loop().create_future()
+                pending = PendingRequest(
+                    request_id=request_id,
+                    request_type="ib_status",
+                    payload={},
+                    future=future
+                )
+                await registry.add_pending_request(pending)
+                
+                await provider.websocket.send_json({
+                    "type": "request",
+                    "request_id": request_id,
+                    "request_type": "ib_status",
+                    "payload": {}
+                })
+                
+                try:
+                    response = await asyncio.wait_for(future, timeout=3.0)
+                    if response.get("connected"):
+                        connected_user_id = user_id
+                        break
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    await registry.remove_pending_request(request_id)
+            except Exception:
+                continue
+        
+        if not connected_user_id:
+            raise HTTPException(
+                status_code=503,
+                detail="No provider has IB TWS connected. Please ensure TWS is running."
+            )
+        
+        # Send request through WebSocket relay to the connected provider
         response_data = await send_request_to_provider(
             request_type="test_futures",
             payload={},
-            timeout=15.0
+            timeout=15.0,
+            user_id=connected_user_id
         )
         
         if "error" in response_data:
