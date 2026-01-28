@@ -2,7 +2,6 @@ import { prisma } from "@/lib/db";
 import { auth } from "@/auth";
 import MAOptionsContent from "@/components/ma-options/MAOptionsContent";
 import type { ScannerDeal } from "@/types/ma-options";
-import { UserMenu } from "@/components/UserMenu";
 
 // Force dynamic rendering - this page requires database access
 export const dynamic = 'force-dynamic';
@@ -48,16 +47,11 @@ export default async function MAOptionsPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 p-4">
-      {/* User Menu in top right */}
-      <div className="absolute top-4 right-4 z-50">
-        <UserMenu 
-          variant="dark" 
+      <div className="max-w-[1800px] mx-auto">
+        <MAOptionsContent 
+          initialDeals={scannerDeals} 
           initialUser={session?.user ? { name: session.user.name, email: session.user.email } : undefined}
         />
-      </div>
-      
-      <div className="max-w-[1800px] mx-auto">
-        <MAOptionsContent initialDeals={scannerDeals} />
       </div>
     </div>
   );
