@@ -6,12 +6,12 @@ This script prepares a Python embeddable distribution for Windows users
 who don't have Python installed. It:
 
 1. Downloads the official Python embeddable package from python.org
-2. Configures it to allow pip and site-packages
-3. Installs the websockets dependency
+2. Configures it to allow importing from site-packages
+3. Downloads and extracts the websockets wheel directly
 4. Creates a ready-to-use bundle in python_bundle/
 
-Run this script on the server to prepare the bundle, which will then
-be included in the downloadable ZIP for Windows users.
+This script can run on Linux (server) to prepare a Windows bundle.
+It doesn't execute the Windows Python - just downloads and configures files.
 
 Usage:
     python bundle_python.py [--python-version 3.11.9]
@@ -32,8 +32,9 @@ DEFAULT_PYTHON_VERSION = "3.11.9"
 # Python embeddable download URL template
 PYTHON_DOWNLOAD_URL = "https://www.python.org/ftp/python/{version}/python-{version}-embed-amd64.zip"
 
-# get-pip.py download URL
-GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+# Direct wheel download URLs (pre-built, no compilation needed)
+# We use the wheel format which is just a zip file we can extract
+WEBSOCKETS_WHEEL_URL = "https://files.pythonhosted.org/packages/py3/w/websockets/websockets-14.1-py3-none-any.whl"
 
 
 def download_file(url: str, dest: Path) -> None:
@@ -53,7 +54,7 @@ def extract_zip(zip_path: Path, dest_dir: Path) -> None:
 
 def configure_pth_file(bundle_dir: Path, python_version: str) -> None:
     """
-    Configure the ._pth file to enable site-packages and pip.
+    Configure the ._pth file to enable site-packages.
     
     The embeddable distribution has a restrictive ._pth file that prevents
     importing from site-packages. We need to modify it.
@@ -98,55 +99,30 @@ def configure_pth_file(bundle_dir: Path, python_version: str) -> None:
     print(f"  -> Enabled site-packages imports")
 
 
-def install_pip(bundle_dir: Path) -> None:
-    """Install pip into the bundled Python."""
-    python_exe = bundle_dir / "python.exe"
-    get_pip = bundle_dir / "get-pip.py"
+def install_websockets_from_wheel(bundle_dir: Path) -> None:
+    """
+    Install websockets by downloading and extracting the wheel directly.
     
-    # Download get-pip.py
-    download_file(GET_PIP_URL, get_pip)
+    A wheel file is just a ZIP file, so we can extract it without
+    running pip or the Windows Python.
+    """
+    site_packages = bundle_dir / "Lib" / "site-packages"
+    site_packages.mkdir(parents=True, exist_ok=True)
     
-    # Run get-pip.py
-    print("Installing pip...")
-    result = subprocess.run(
-        [str(python_exe), str(get_pip), "--no-warn-script-location"],
-        cwd=bundle_dir,
-        capture_output=True,
-        text=True
-    )
+    wheel_path = bundle_dir / "websockets.whl"
     
-    if result.returncode != 0:
-        print(f"ERROR installing pip: {result.stderr}")
-        raise RuntimeError("Failed to install pip")
+    # Download the wheel
+    download_file(WEBSOCKETS_WHEEL_URL, wheel_path)
     
-    print("  -> pip installed")
+    # Extract the wheel (it's a ZIP file)
+    print("Installing websockets from wheel...")
+    with zipfile.ZipFile(wheel_path, 'r') as zf:
+        zf.extractall(site_packages)
     
-    # Clean up get-pip.py
-    get_pip.unlink()
-
-
-def install_dependencies(bundle_dir: Path, requirements_file: Path) -> None:
-    """Install dependencies from requirements.txt."""
-    python_exe = bundle_dir / "python.exe"
+    # Clean up wheel file
+    wheel_path.unlink()
     
-    print(f"Installing dependencies from {requirements_file.name}...")
-    result = subprocess.run(
-        [
-            str(python_exe), "-m", "pip", "install",
-            "--no-warn-script-location",
-            "--disable-pip-version-check",
-            "-r", str(requirements_file)
-        ],
-        cwd=bundle_dir,
-        capture_output=True,
-        text=True
-    )
-    
-    if result.returncode != 0:
-        print(f"ERROR installing dependencies: {result.stderr}")
-        raise RuntimeError("Failed to install dependencies")
-    
-    print("  -> Dependencies installed")
+    print("  -> websockets installed")
 
 
 def cleanup_bundle(bundle_dir: Path) -> None:
@@ -158,10 +134,6 @@ def cleanup_bundle(bundle_dir: Path) -> None:
         "**/__pycache__",
         "**/*.pyc",
         "**/*.pyo",
-        "**/pip*",  # Remove pip itself after installing deps
-        "**/setuptools*",
-        "**/pkg_resources*",
-        "**/distutils*",
         "**/*.dist-info",
         "**/*.egg-info",
     ]
@@ -202,13 +174,12 @@ def main():
     parser.add_argument(
         "--skip-cleanup",
         action="store_true",
-        help="Skip cleanup step (keep pip, etc.)"
+        help="Skip cleanup step"
     )
     args = parser.parse_args()
     
     script_dir = Path(__file__).parent
     bundle_dir = script_dir / args.output_dir
-    requirements_file = script_dir / "requirements.txt"
     
     print("=" * 60)
     print("Python Bundle Creator for IB Data Agent")
@@ -217,11 +188,9 @@ def main():
     print(f"Output directory: {bundle_dir}")
     print()
     
-    # Check if we're on Windows (required for the embeddable to work)
-    if sys.platform != "win32":
-        print("NOTE: This script creates a Windows bundle.")
-        print("      The bundle will only work on Windows.")
-        print()
+    print("NOTE: This creates a Windows bundle by downloading and")
+    print("      configuring files (no Windows Python execution needed).")
+    print()
     
     # Clean existing bundle
     if bundle_dir.exists():
@@ -249,18 +218,8 @@ def main():
     # Configure ._pth file
     configure_pth_file(bundle_dir, args.python_version)
     
-    # Create Lib/site-packages directory
-    site_packages = bundle_dir / "Lib" / "site-packages"
-    site_packages.mkdir(parents=True, exist_ok=True)
-    
-    # Install pip
-    install_pip(bundle_dir)
-    
-    # Install dependencies
-    if requirements_file.exists():
-        install_dependencies(bundle_dir, requirements_file)
-    else:
-        print(f"WARNING: {requirements_file} not found, skipping dependency installation")
+    # Install websockets directly from wheel (no pip needed)
+    install_websockets_from_wheel(bundle_dir)
     
     # Cleanup
     if not args.skip_cleanup:
@@ -276,6 +235,10 @@ def main():
     print("=" * 60)
     print(f"Location: {bundle_dir}")
     print(f"Size: {size_mb:.1f} MB")
+    print()
+    print("Contents:")
+    print("  - Python 3.11 embeddable runtime")
+    print("  - websockets library (pre-installed)")
     print()
     print("Next steps:")
     print("1. The bundle will be included in Windows agent downloads")
