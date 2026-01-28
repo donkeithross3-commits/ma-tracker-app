@@ -40,6 +40,39 @@ function formatTimestampET(timestamp: string | null): string {
   }
 }
 
+/**
+ * Format timestamp for compact display in table rows
+ * Shows just time for today, or "M/D H:MM" for other days
+ */
+function formatTimestampCompact(timestamp: string | null): string {
+  if (!timestamp) return "—";
+  
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return "—";
+  
+  // Check if date is today in Eastern Time
+  const nowET = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const dateET = date.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+  const isToday = nowET === dateET;
+  
+  const timeStr = date.toLocaleTimeString('en-US', { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    timeZone: 'America/New_York'
+  });
+  
+  if (isToday) {
+    return timeStr;
+  } else {
+    const dateStr = date.toLocaleDateString('en-US', { 
+      month: 'numeric', 
+      day: 'numeric',
+      timeZone: 'America/New_York'
+    });
+    return `${dateStr} ${timeStr}`;
+  }
+}
+
 interface WatchedSpreadsTableProps {
   spreads: WatchedSpreadDTO[];
   onDeactivate: (spreadId: string) => void;
@@ -141,20 +174,6 @@ export default function WatchedSpreadsTable({
     }
   };
 
-  // Get the most recent lastUpdated timestamp from all spreads
-  const latestUpdateTimestamp = useMemo(() => {
-    let latest: Date | null = null;
-    for (const spread of spreads) {
-      if (spread.lastUpdated) {
-        const date = new Date(spread.lastUpdated);
-        if (!isNaN(date.getTime()) && (!latest || date > latest)) {
-          latest = date;
-        }
-      }
-    }
-    return latest ? latest.toISOString() : null;
-  }, [spreads]);
-
   const formatStrategyType = (spread: WatchedSpreadDTO): string => {
     if (spread.strategyType === "spread") {
       return spread.legs[0]?.right === "C" ? "call sprd" : "put sprd";
@@ -223,16 +242,9 @@ export default function WatchedSpreadsTable({
   return (
     <div className="bg-gray-900 border border-gray-700 rounded p-4">
       <div className="flex justify-between items-center mb-3">
-        <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold text-gray-100">
-            Watched Spreads ({spreads.length})
-          </h3>
-          {latestUpdateTimestamp && !isRefreshing && (
-            <span className="text-xs text-gray-500">
-              Prices as of {formatTimestampET(latestUpdateTimestamp)}
-            </span>
-          )}
-        </div>
+        <h3 className="text-lg font-semibold text-gray-100">
+          Watched Spreads ({spreads.length})
+        </h3>
         <div className="flex items-center gap-3">
           {refreshStatus && (
             <div className="text-sm text-gray-400">
@@ -269,6 +281,7 @@ export default function WatchedSpreadsTable({
               <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>
                 Far Touch Entry
               </th>
+              <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>Quote</th>
               <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>Action</th>
             </tr>
             <tr className="border-b border-gray-700">
@@ -331,6 +344,11 @@ export default function WatchedSpreadsTable({
 
                   {/* Strategy metrics columns */}
                   <StrategyMetricsCells metrics={metrics} />
+
+                  {/* Quote Timestamp */}
+                  <td className="py-1 px-2 text-center text-[10px] text-gray-500 whitespace-nowrap">
+                    {formatTimestampCompact(spread.lastUpdated)}
+                  </td>
 
                   {/* Actions */}
                   <td className="py-1 px-2 text-center border-r border-r-gray-500">
