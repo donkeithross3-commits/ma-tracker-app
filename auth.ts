@@ -45,6 +45,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     })
   ],
   callbacks: {
+    async authorized({ auth, request }) {
+      // This callback is called by the middleware wrapper
+      const { pathname } = request.nextUrl
+      const isLoggedIn = !!auth?.user
+      
+      // Public paths that don't require authentication
+      const isLoginPage = pathname === "/login"
+      const isAuthAPI = pathname.startsWith("/api/auth")
+      
+      // Allow public paths
+      if (isLoginPage || isAuthAPI) {
+        return true
+      }
+      
+      // Require authentication for all other paths
+      return isLoggedIn
+    },
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id
