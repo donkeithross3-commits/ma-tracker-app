@@ -17,21 +17,85 @@ For Python service changes only (no Docker rebuild needed):
 ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && kill $(lsof -t -i :8000) 2>/dev/null; sleep 2 && cd python-service && source .venv/bin/activate && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &'
 ```
 
-## IB Data Agent Versioning
-The IB Data Agent auto-updates from version.txt. When making changes to the agent:
-1. Edit files in `python-service/standalone_agent/`
-2. **BUMP THE VERSION** in `python-service/standalone_agent/version.txt` (e.g., 1.0.0 → 1.0.1)
-3. Deploy as normal - users' agents will auto-download the update on next startup
+## IB Data Agent Architecture
+
+### Overview
+The IB Data Agent runs on users' local machines and connects to their IB TWS/Gateway.
+It communicates with the server via WebSocket relay, allowing the dashboard to fetch
+real-time options data through users' own IB accounts.
+
+### Data Flow
+```
+User's Browser <---> Next.js API <---> Python Service <--WebSocket--> Local IB Agent <---> IB TWS
+```
+
+### Key Components
+
+**Server-side (python-service/app/api/):**
+- `ws_relay.py` - WebSocket relay that manages agent connections
+  - `DataProviderRegistry` - Tracks all connected agents by provider_id and user_id
+  - `validate_api_key()` - Checks API key against database or legacy key
+  - Agents authenticate with their API key on WebSocket connect
+- `options_routes.py` - HTTP endpoints that forward requests to agents
+  - `/relay/ib-status` - Queries ALL connected agents, returns connected=true if ANY has IB
+  - `/relay/test-futures` - Finds agent with IB connected, sends request there
+  - `/relay/fetch-chain` - Fetches option chain via agent (passes user_id for routing)
+
+**Client-side (python-service/standalone_agent/):**
+- `ib_data_agent.py` - Main agent that connects to WebSocket relay and IB TWS
+- `ib_scanner.py` - IB API wrapper for fetching quotes and option chains
+- `start_windows.bat` - Windows launcher with auto-update, shortcut creation
+- `start_unix.sh` - Mac/Linux launcher with same features
+- `config.env` - User's API key and IB connection settings (generated per-user)
+- `version.txt` - Current version (NO trailing newline - use `printf "x.y.z" > version.txt`)
+
+**Download endpoints (app/api/ma-options/):**
+- `download-agent/route.ts` - Initial download (requires auth, includes config.env with API key)
+- `download-agent-update/route.ts` - Update download (uses API key auth, excludes config.env)
+- `agent-version/route.ts` - Returns current version (public endpoint for update checks)
+
+### Multi-Agent Support
+- Multiple agents can connect simultaneously (each user has their own)
+- Each agent is identified by provider_id (random UUID) and user_id (from API key)
+- When fetching data, requests are routed to the user's own agent if available
+- Status checks query ALL agents and return connected=true if ANY has IB connected
+
+### Auto-Update System
+1. Agent starts, reads local `version.txt`
+2. Calls `/api/ma-options/agent-version` to get server version
+3. If different, prompts user to update
+4. Downloads from `/api/ma-options/download-agent-update?key=xxx`
+5. Extracts new files (preserves config.env with user's API key)
+6. User restarts to use new version
+
+### Versioning Rules
+When making changes to agent files in `python-service/standalone_agent/`:
+1. Edit the files
+2. **BUMP THE VERSION** in `version.txt` using: `printf "x.y.z" > version.txt`
+3. Deploy as normal - users' agents auto-update on next startup
 
 Version format: MAJOR.MINOR.PATCH
-- PATCH: Bug fixes, minor improvements
-- MINOR: New features, non-breaking changes  
-- MAJOR: Breaking changes
+- PATCH: Bug fixes, minor improvements (1.0.2 → 1.0.3)
+- MINOR: New features, non-breaking changes (1.0.3 → 1.1.0)
+- MAJOR: Breaking changes requiring manual intervention (1.1.0 → 2.0.0)
 
-Files included in agent download (see `app/api/ma-options/download-agent/route.ts`):
-- ib_data_agent.py, ib_scanner.py, install.py, requirements.txt, README.md
-- start_windows.bat, start_windows.ps1, start_unix.sh, config.env.template, version.txt
-- python_bundle/ (bundled Python for Windows), ibapi/ (IB API library)
+### Files Included in Agent Download
+See `app/api/ma-options/download-agent/route.ts`:
+- Python files: ib_data_agent.py, ib_scanner.py, install.py
+- Scripts: start_windows.bat, start_windows.ps1, start_unix.sh
+- Config: requirements.txt, README.md, config.env.template, version.txt
+- Directories: python_bundle/ (Windows Python), ibapi/ (IB API library)
+
+### Public Endpoints (no auth required)
+Defined in `auth.config.ts` under `isInternalAPI`:
+- `/api/ma-options/validate-agent-key` - Called by Python service to validate keys
+- `/api/ma-options/agent-version` - Called by agent for update checks
+- `/api/ma-options/download-agent-update` - Called by agent for updates (uses API key param)
+
+### Troubleshooting
+- **Agent shows connected but dashboard says disconnected**: Check `/relay/ib-status` is querying all providers
+- **Update downloads but extraction fails**: Check ZIP is valid (not HTML error page), file size > 1KB
+- **Version always shows update available**: Check for whitespace in version.txt (use printf, not echo)
 
 ## Framework
 - This is a Next.js 16 app using the App Router.
