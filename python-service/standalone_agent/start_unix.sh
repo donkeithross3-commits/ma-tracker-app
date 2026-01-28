@@ -74,6 +74,134 @@ echo "IB TWS:    $IB_HOST:$IB_PORT"
 echo "Relay URL: $RELAY_URL"
 echo ""
 
+# ============================================
+# Check for desktop shortcut (first run) - Mac only
+# ============================================
+FIRST_RUN_FLAG="$SCRIPT_DIR/.first_run_complete"
+
+if [[ "$OSTYPE" == "darwin"* ]] && [ ! -f "$FIRST_RUN_FLAG" ]; then
+    DESKTOP_ALIAS="$HOME/Desktop/IB Data Agent"
+    if [ ! -e "$DESKTOP_ALIAS" ] && [ ! -L "$DESKTOP_ALIAS" ]; then
+        echo "============================================"
+        echo "First Run Setup"
+        echo "============================================"
+        echo ""
+        read -p "Would you like to create a desktop shortcut? (y/n): " CREATE_SHORTCUT
+        if [[ "$CREATE_SHORTCUT" =~ ^[Yy]$ ]]; then
+            # Create an alias (symbolic link) on Desktop
+            ln -s "$SCRIPT_DIR/start_unix.sh" "$DESKTOP_ALIAS"
+            if [ -L "$DESKTOP_ALIAS" ]; then
+                echo "✅ Desktop shortcut created!"
+            else
+                echo "Note: Could not create shortcut automatically."
+                echo "You can manually drag start_unix.sh to your dock or desktop."
+            fi
+        fi
+        echo ""
+    fi
+    # Mark first run as complete
+    date > "$FIRST_RUN_FLAG"
+fi
+
+# ============================================
+# Check for updates
+# ============================================
+check_for_updates() {
+    CURRENT_VERSION="0.0.0"
+    if [ -f "$SCRIPT_DIR/version.txt" ]; then
+        CURRENT_VERSION=$(cat "$SCRIPT_DIR/version.txt" | tr -d '[:space:]')
+    fi
+    
+    echo "Checking for updates... (current: $CURRENT_VERSION)"
+    
+    # Fetch server version
+    SERVER_RESPONSE=$(curl -s --connect-timeout 5 "https://dr3-dashboard.com/api/ma-options/agent-version" 2>/dev/null)
+    
+    if [ -z "$SERVER_RESPONSE" ]; then
+        echo "Could not check for updates (offline or server unavailable)"
+        return 1
+    fi
+    
+    # Parse version from JSON using python (available since we checked earlier)
+    SERVER_VERSION=$(echo "$SERVER_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null)
+    
+    if [ -z "$SERVER_VERSION" ]; then
+        echo "Could not parse server version"
+        return 1
+    fi
+    
+    if [ "$CURRENT_VERSION" != "$SERVER_VERSION" ]; then
+        echo ""
+        echo "============================================"
+        echo "UPDATE AVAILABLE"
+        echo "============================================"
+        echo "Current version: $CURRENT_VERSION"
+        echo "New version:     $SERVER_VERSION"
+        echo ""
+        read -p "Would you like to update now? (y/n): " DO_UPDATE
+        if [[ "$DO_UPDATE" =~ ^[Yy]$ ]]; then
+            download_update
+        fi
+        echo ""
+    fi
+}
+
+download_update() {
+    echo ""
+    echo "Downloading update..."
+    
+    # Create temp directory
+    TEMP_DIR=$(mktemp -d)
+    ZIP_PATH="$TEMP_DIR/ib-data-agent.zip"
+    
+    # Download
+    curl -s -o "$ZIP_PATH" "https://dr3-dashboard.com/api/ma-options/download-agent"
+    
+    if [ ! -f "$ZIP_PATH" ]; then
+        echo "ERROR: Failed to download update"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    
+    echo "Download complete. Installing update..."
+    
+    # Backup config.env
+    cp "$SCRIPT_DIR/config.env" "$TEMP_DIR/config.env.backup" 2>/dev/null
+    
+    # Extract
+    unzip -q -o "$ZIP_PATH" -d "$TEMP_DIR/extracted"
+    
+    # Find extracted contents (handle nested folder if present)
+    EXTRACT_SRC="$TEMP_DIR/extracted"
+    if [ -d "$TEMP_DIR/extracted/ib-data-agent" ]; then
+        EXTRACT_SRC="$TEMP_DIR/extracted/ib-data-agent"
+    fi
+    
+    # Copy files (but not config.env)
+    for file in "$EXTRACT_SRC"/*; do
+        filename=$(basename "$file")
+        if [ "$filename" != "config.env" ]; then
+            cp -r "$file" "$SCRIPT_DIR/"
+        fi
+    done
+    
+    # Restore config.env
+    cp "$TEMP_DIR/config.env.backup" "$SCRIPT_DIR/config.env" 2>/dev/null
+    
+    # Make scripts executable
+    chmod +x "$SCRIPT_DIR/start_unix.sh" 2>/dev/null
+    
+    # Cleanup
+    rm -rf "$TEMP_DIR"
+    
+    echo "✅ Update installed successfully!"
+    echo ""
+    echo "Please restart the agent to use the new version."
+    exit 0
+}
+
+check_for_updates
+
 # Check and install dependencies
 echo "Checking dependencies..."
 if ! python3 -c "import websockets" 2>/dev/null; then

@@ -83,6 +83,7 @@ export async function GET() {
       "start_windows.ps1",
       "start_unix.sh",
       "config.env.template",
+      "version.txt",
     ];
 
     for (const fileName of filesToInclude) {

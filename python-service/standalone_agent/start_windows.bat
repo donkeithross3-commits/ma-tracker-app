@@ -64,6 +64,54 @@ echo Relay URL: %RELAY_URL%
 echo.
 
 REM ============================================
+REM Check for desktop shortcut (first run)
+REM ============================================
+set "SHORTCUT_PATH=%USERPROFILE%\Desktop\IB Data Agent.lnk"
+set "FIRST_RUN_FLAG=%SCRIPT_DIR%.first_run_complete"
+
+if not exist "%FIRST_RUN_FLAG%" (
+    if not exist "%SHORTCUT_PATH%" (
+        echo ============================================
+        echo First Run Setup
+        echo ============================================
+        echo.
+        set /p "CREATE_SHORTCUT=Would you like to create a desktop shortcut? (Y/N): "
+        if /i "!CREATE_SHORTCUT!"=="Y" (
+            call :create_shortcut
+        )
+        echo.
+    )
+    REM Mark first run as complete
+    echo %date% %time% > "%FIRST_RUN_FLAG%"
+)
+
+REM ============================================
+REM Check for updates
+REM ============================================
+call :check_for_updates
+if !UPDATE_AVAILABLE!==1 (
+    echo.
+    echo ============================================
+    echo UPDATE AVAILABLE
+    echo ============================================
+    echo Current version: !CURRENT_VERSION!
+    echo New version:     !SERVER_VERSION!
+    echo.
+    set /p "DO_UPDATE=Would you like to update now? (Y/N): "
+    if /i "!DO_UPDATE!"=="Y" (
+        call :download_update
+        if !UPDATE_SUCCESS!==1 (
+            echo.
+            echo Update complete! Please restart the agent.
+            echo.
+            pause
+            exit /b 0
+        )
+    )
+    echo.
+)
+
+REM ============================================
 REM Option 1: Check for standalone executable (no Python needed)
 REM ============================================
 if exist "%SCRIPT_DIR%ib_data_agent.exe" (
@@ -166,3 +214,116 @@ exit /b 1
 echo.
 echo Agent stopped.
 pause
+exit /b 0
+
+REM ============================================
+REM SUBROUTINES
+REM ============================================
+
+:create_shortcut
+echo Creating desktop shortcut...
+REM Use PowerShell to create the shortcut
+powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); $s.TargetPath = '%SCRIPT_DIR%start_windows.bat'; $s.WorkingDirectory = '%SCRIPT_DIR%'; $s.Description = 'IB Data Agent for MA Tracker'; $s.Save()"
+if exist "%SHORTCUT_PATH%" (
+    echo Desktop shortcut created successfully!
+) else (
+    echo Note: Could not create shortcut automatically.
+    echo You can manually create one by right-clicking start_windows.bat
+    echo and selecting "Create shortcut", then move it to your desktop.
+)
+goto :eof
+
+:check_for_updates
+set "UPDATE_AVAILABLE=0"
+set "CURRENT_VERSION=unknown"
+set "SERVER_VERSION=unknown"
+
+REM Read current version
+if exist "%SCRIPT_DIR%version.txt" (
+    set /p CURRENT_VERSION=<"%SCRIPT_DIR%version.txt"
+) else (
+    set "CURRENT_VERSION=0.0.0"
+)
+
+echo Checking for updates... (current: !CURRENT_VERSION!)
+
+REM Try to fetch server version using PowerShell
+for /f "delims=" %%i in ('powershell -Command "(Invoke-WebRequest -Uri 'https://dr3-dashboard.com/api/ma-options/agent-version' -UseBasicParsing -TimeoutSec 5).Content" 2^>nul') do set "VERSION_RESPONSE=%%i"
+
+if "!VERSION_RESPONSE!"=="" (
+    echo Could not check for updates ^(offline or server unavailable^)
+    goto :eof
+)
+
+REM Parse version from JSON response using PowerShell
+for /f "delims=" %%i in ('powershell -Command "('!VERSION_RESPONSE!' | ConvertFrom-Json).version"') do set "SERVER_VERSION=%%i"
+
+if "!SERVER_VERSION!"=="" (
+    echo Could not parse server version
+    goto :eof
+)
+
+REM Compare versions
+if not "!CURRENT_VERSION!"=="!SERVER_VERSION!" (
+    set "UPDATE_AVAILABLE=1"
+)
+goto :eof
+
+:download_update
+set "UPDATE_SUCCESS=0"
+echo.
+echo Downloading update...
+
+REM Create temp directory for download
+set "TEMP_DIR=%TEMP%\ib_agent_update_%RANDOM%"
+mkdir "%TEMP_DIR%" 2>nul
+
+REM Download the new agent zip
+set "ZIP_PATH=%TEMP_DIR%\ib-data-agent.zip"
+powershell -Command "Invoke-WebRequest -Uri 'https://dr3-dashboard.com/api/ma-options/download-agent' -OutFile '%ZIP_PATH%' -TimeoutSec 60"
+
+if not exist "%ZIP_PATH%" (
+    echo ERROR: Failed to download update
+    rmdir /s /q "%TEMP_DIR%" 2>nul
+    goto :eof
+)
+
+echo Download complete. Installing update...
+
+REM Backup current config.env (preserve user's API key)
+copy "%SCRIPT_DIR%config.env" "%TEMP_DIR%\config.env.backup" >nul 2>nul
+
+REM Extract new files (overwrite existing)
+powershell -Command "Expand-Archive -Path '%ZIP_PATH%' -DestinationPath '%TEMP_DIR%\extracted' -Force"
+
+REM Check if extraction created a subfolder
+if exist "%TEMP_DIR%\extracted\ib-data-agent" (
+    set "EXTRACT_SRC=%TEMP_DIR%\extracted\ib-data-agent"
+) else (
+    set "EXTRACT_SRC=%TEMP_DIR%\extracted"
+)
+
+REM Copy new files to agent directory (but NOT config.env)
+for %%f in ("%EXTRACT_SRC%\*") do (
+    if /i not "%%~nxf"=="config.env" (
+        copy /y "%%f" "%SCRIPT_DIR%" >nul 2>nul
+    )
+)
+
+REM Copy directories (python_bundle, ibapi, etc.)
+if exist "%EXTRACT_SRC%\python_bundle" (
+    xcopy /s /e /y /q "%EXTRACT_SRC%\python_bundle" "%SCRIPT_DIR%python_bundle\" >nul 2>nul
+)
+if exist "%EXTRACT_SRC%\ibapi" (
+    xcopy /s /e /y /q "%EXTRACT_SRC%\ibapi" "%SCRIPT_DIR%ibapi\" >nul 2>nul
+)
+
+REM Restore config.env backup
+copy /y "%TEMP_DIR%\config.env.backup" "%SCRIPT_DIR%config.env" >nul 2>nul
+
+REM Cleanup
+rmdir /s /q "%TEMP_DIR%" 2>nul
+
+echo Update installed successfully!
+set "UPDATE_SUCCESS=1"
+goto :eof
