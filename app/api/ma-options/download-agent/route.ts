@@ -91,6 +91,12 @@ export async function GET() {
       }
     }
 
+    // Add standalone executable if it exists (for Windows users without Python)
+    const exePath = path.join(agentDir, "dist", "ib_data_agent.exe");
+    if (fs.existsSync(exePath)) {
+      archive.file(exePath, { name: "ib-data-agent/ib_data_agent.exe" });
+    }
+
     // Add ibapi directory
     const ibapiDir = path.join(agentDir, "ibapi");
     if (fs.existsSync(ibapiDir)) {

@@ -281,11 +281,13 @@ export default function IBConnectionStatus() {
             <div className="border-t border-gray-700 pt-2 mt-3">
               <div className="text-gray-400 mb-1">Quick Setup:</div>
               <ol className="text-gray-500 text-[10px] list-decimal list-inside space-y-1">
-                <li>Download and extract the agent ZIP</li>
-                <li>Run <code className="bg-gray-900 px-1">python install.py</code></li>
-                <li>Start IB TWS (port 7497)</li>
-                <li>Run <code className="bg-gray-900 px-1">start_windows.bat</code> or <code className="bg-gray-900 px-1">./start_unix.sh</code></li>
+                <li>Download and extract the ZIP file</li>
+                <li>Start IB TWS/Gateway (enable API on port 7497)</li>
+                <li>Double-click <code className="bg-gray-900 px-1">start_windows.bat</code> (Win) or run <code className="bg-gray-900 px-1">./start_unix.sh</code> (Mac/Linux)</li>
               </ol>
+              <div className="text-green-500/70 text-[10px] mt-2">
+                ✓ Your API key is already configured in the download
+              </div>
             </div>
           </div>
         )}
