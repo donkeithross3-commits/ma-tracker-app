@@ -32,8 +32,11 @@ export const authConfig: NextAuthConfig = {
       const isChangePasswordPage = pathname === "/account/change-password"
       const isChangePasswordAPI = pathname === "/api/user/change-password"
       
+      // Internal API endpoints (called by Python service, not browser)
+      const isInternalAPI = pathname === "/api/ma-options/validate-agent-key"
+      
       // Allow public paths
-      if (isLoginPage || isAuthAPI) {
+      if (isLoginPage || isAuthAPI || isInternalAPI) {
         return true
       }
       
