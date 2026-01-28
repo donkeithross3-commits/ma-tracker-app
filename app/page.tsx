@@ -1,9 +1,15 @@
 import Link from "next/link";
+import { UserMenu } from "@/components/UserMenu";
 
 export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white">
       <div className="container mx-auto px-4 py-16">
+        {/* User Menu in top right */}
+        <div className="absolute top-4 right-4">
+          <UserMenu variant="dark" />
+        </div>
+        
         <header className="text-center mb-16">
           <h1 className="text-5xl font-bold mb-4">DR3 Dashboard</h1>
           <p className="text-xl text-slate-300">Trading Analytics &amp; Tools</p>

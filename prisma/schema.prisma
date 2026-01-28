@@ -310,3 +310,14 @@ model UserPreferences {
   
   @@map("user_preferences")
 }
+
+// Email whitelist for signup - only whitelisted emails can create accounts
+model EmailWhitelist {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  addedBy   String?  @map("added_by")
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  @@map("email_whitelist")
+}

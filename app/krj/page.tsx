@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import Papa from "papaparse";
 import KrjTabsClient from "@/components/KrjTabsClient";
+import { UserMenu } from "@/components/UserMenu";
 
 // Force dynamic rendering to ensure metadata.json is read at request time
 export const dynamic = 'force-dynamic';
@@ -194,6 +195,7 @@ export default function KrjPage() {
             </span>
           </h1>
         </div>
+        <UserMenu variant="dark" />
       </div>
 
       <KrjTabsClient groups={groupsData} columns={columns} />

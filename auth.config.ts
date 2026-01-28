@@ -28,10 +28,11 @@ export const authConfig: NextAuthConfig = {
       
       // Public paths that don't require authentication
       const isLoginPage = pathname === "/login"
+      const isSignupPage = pathname === "/signup"
       const isAuthAPI = pathname.startsWith("/api/auth")
       
       // Allow public paths
-      if (isLoginPage || isAuthAPI) {
+      if (isLoginPage || isSignupPage || isAuthAPI) {
         return true
       }
       

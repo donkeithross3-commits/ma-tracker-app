@@ -1,0 +1,92 @@
+"use client"
+
+import { useState } from "react"
+import { signOut, useSession } from "next-auth/react"
+import { Button } from "@/components/ui/button"
+import { LogOut, Key, User, ChevronDown } from "lucide-react"
+
+interface UserMenuProps {
+  variant?: "light" | "dark"
+}
+
+export function UserMenu({ variant = "light" }: UserMenuProps) {
+  const { data: session } = useSession()
+  const [isOpen, setIsOpen] = useState(false)
+
+  if (!session?.user) {
+    return null
+  }
+
+  const handleSignOut = () => {
+    signOut({ callbackUrl: "/login" })
+  }
+
+  const bgColor = variant === "dark" 
+    ? "bg-slate-800 border-slate-600" 
+    : "bg-white border-gray-200"
+  const textColor = variant === "dark" 
+    ? "text-white" 
+    : "text-gray-900"
+  const hoverColor = variant === "dark" 
+    ? "hover:bg-slate-700" 
+    : "hover:bg-gray-100"
+  const mutedColor = variant === "dark" 
+    ? "text-slate-400" 
+    : "text-gray-500"
+
+  return (
+    <div className="relative">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex items-center gap-2 ${variant === "dark" ? "text-white hover:bg-slate-700" : ""}`}
+      >
+        <User className="h-4 w-4" />
+        <span className="hidden sm:inline">{session.user.name || session.user.email}</span>
+        <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+      </Button>
+
+      {isOpen && (
+        <>
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 z-40" 
+            onClick={() => setIsOpen(false)} 
+          />
+          
+          {/* Dropdown */}
+          <div className={`absolute right-0 mt-2 w-56 rounded-md shadow-lg border z-50 ${bgColor}`}>
+            <div className={`px-4 py-3 border-b ${variant === "dark" ? "border-slate-600" : "border-gray-200"}`}>
+              <p className={`text-sm font-medium ${textColor}`}>
+                {session.user.name || "User"}
+              </p>
+              <p className={`text-xs ${mutedColor} truncate`}>
+                {session.user.email}
+              </p>
+            </div>
+            
+            <div className="py-1">
+              <a
+                href="/account/change-password"
+                className={`flex items-center gap-2 px-4 py-2 text-sm ${textColor} ${hoverColor}`}
+                onClick={() => setIsOpen(false)}
+              >
+                <Key className="h-4 w-4" />
+                Change Password
+              </a>
+              
+              <button
+                onClick={handleSignOut}
+                className={`flex items-center gap-2 px-4 py-2 text-sm w-full text-left text-red-500 ${hoverColor}`}
+              >
+                <LogOut className="h-4 w-4" />
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
