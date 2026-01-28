@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import Papa from "papaparse";
 import KrjTabsClient from "@/components/KrjTabsClient";
+import { auth } from "@/auth";
 import { UserMenu } from "@/components/UserMenu";
 
 // Force dynamic rendering to ensure metadata.json is read at request time
@@ -139,7 +140,9 @@ function sortWithCurrencyPairsFirst(rows: RawRow[]): RawRow[] {
 }
 
 // Server component
-export default function KrjPage() {
+export default async function KrjPage() {
+  const session = await auth();
+  
   const dataByGroup: Record<GroupKey, RawRow[]> = {
     equities: loadCsv("latest_equities.csv"),
     etfs_fx: sortWithCurrencyPairsFirst(loadCsv("latest_etfs_fx.csv")),
@@ -195,7 +198,10 @@ export default function KrjPage() {
             </span>
           </h1>
         </div>
-        <UserMenu variant="dark" />
+        <UserMenu 
+          variant="dark" 
+          initialUser={session?.user ? { name: session.user.name, email: session.user.email } : undefined}
+        />
       </div>
 
       <KrjTabsClient groups={groupsData} columns={columns} />

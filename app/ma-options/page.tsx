@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { auth } from "@/auth";
 import MAOptionsContent from "@/components/ma-options/MAOptionsContent";
 import type { ScannerDeal } from "@/types/ma-options";
 import { UserMenu } from "@/components/UserMenu";
@@ -7,6 +8,8 @@ import { UserMenu } from "@/components/UserMenu";
 export const dynamic = 'force-dynamic';
 
 export default async function MAOptionsPage() {
+  const session = await auth();
+  
   // Fetch active scanner deals
   const deals = await prisma.scannerDeal.findMany({
     where: {
@@ -47,7 +50,10 @@ export default async function MAOptionsPage() {
     <div className="min-h-screen bg-gray-950 p-4">
       {/* User Menu in top right */}
       <div className="absolute top-4 right-4 z-50">
-        <UserMenu variant="dark" />
+        <UserMenu 
+          variant="dark" 
+          initialUser={session?.user ? { name: session.user.name, email: session.user.email } : undefined}
+        />
       </div>
       
       <div className="max-w-[1800px] mx-auto">

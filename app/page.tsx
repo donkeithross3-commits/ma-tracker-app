@@ -1,13 +1,19 @@
 import Link from "next/link";
+import { auth } from "@/auth";
 import { UserMenu } from "@/components/UserMenu";
 
-export default function Home() {
+export default async function Home() {
+  const session = await auth();
+  
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white">
       <div className="container mx-auto px-4 py-16">
         {/* User Menu in top right */}
         <div className="absolute top-4 right-4">
-          <UserMenu variant="dark" />
+          <UserMenu 
+            variant="dark" 
+            initialUser={session?.user ? { name: session.user.name, email: session.user.email } : undefined}
+          />
         </div>
         
         <header className="text-center mb-16">

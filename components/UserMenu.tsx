@@ -7,13 +7,32 @@ import { LogOut, Key, User, ChevronDown } from "lucide-react"
 
 interface UserMenuProps {
   variant?: "light" | "dark"
+  // Optional server-side session data for immediate render
+  initialUser?: {
+    name?: string | null
+    email?: string | null
+  }
 }
 
-export function UserMenu({ variant = "light" }: UserMenuProps) {
-  const { data: session } = useSession()
+export function UserMenu({ variant = "light", initialUser }: UserMenuProps) {
+  const { data: session, status } = useSession()
   const [isOpen, setIsOpen] = useState(false)
 
-  if (!session?.user) {
+  // Use session from client if available, otherwise use initial server data
+  const user = session?.user || initialUser
+  
+  // Show nothing only if we're done loading and there's no user
+  if (status === "loading" && !initialUser) {
+    // Show a placeholder during loading to prevent layout shift
+    return (
+      <div className={`flex items-center gap-2 px-3 py-1.5 rounded ${variant === "dark" ? "text-slate-400" : "text-gray-400"}`}>
+        <User className="h-4 w-4" />
+        <span className="hidden sm:inline">...</span>
+      </div>
+    )
+  }
+  
+  if (!user) {
     return null
   }
 
@@ -43,7 +62,7 @@ export function UserMenu({ variant = "light" }: UserMenuProps) {
         className={`flex items-center gap-2 ${variant === "dark" ? "text-white hover:bg-slate-700" : ""}`}
       >
         <User className="h-4 w-4" />
-        <span className="hidden sm:inline">{session.user.name || session.user.email}</span>
+        <span className="hidden sm:inline">{user.name || user.email}</span>
         <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </Button>
 
@@ -59,10 +78,10 @@ export function UserMenu({ variant = "light" }: UserMenuProps) {
           <div className={`absolute right-0 mt-2 w-56 rounded-md shadow-lg border z-50 ${bgColor}`}>
             <div className={`px-4 py-3 border-b ${variant === "dark" ? "border-slate-600" : "border-gray-200"}`}>
               <p className={`text-sm font-medium ${textColor}`}>
-                {session.user.name || "User"}
+                {user.name || "User"}
               </p>
               <p className={`text-xs ${mutedColor} truncate`}>
-                {session.user.email}
+                {user.email}
               </p>
             </div>
             
