@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,10 +10,10 @@ import { Label } from "@/components/ui/label"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 
-export default function ChangePasswordPage() {
+function ChangePasswordForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { data: session, update: updateSession } = useSession()
+  const { update: updateSession } = useSession()
   
   const isRequired = searchParams.get("required") === "true"
   
@@ -181,5 +181,17 @@ export default function ChangePasswordPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function ChangePasswordPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    }>
+      <ChangePasswordForm />
+    </Suspense>
   )
 }
