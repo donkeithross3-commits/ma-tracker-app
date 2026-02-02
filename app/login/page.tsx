@@ -1,5 +1,6 @@
 import { signIn } from "@/auth"
 import { redirect } from "next/navigation"
+import { AuthError } from "next-auth"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -25,8 +26,11 @@ export default async function LoginPage({
         redirectTo: params.callbackUrl || "/",
       })
     } catch (error) {
-      // NextAuth throws a redirect error on successful login
-      // This is expected behavior, so we just rethrow it
+      // Handle credential errors by redirecting with error param
+      if (error instanceof AuthError) {
+        redirect(`/login?error=CredentialsSignin${params.callbackUrl ? `&callbackUrl=${encodeURIComponent(params.callbackUrl)}` : ""}`)
+      }
+      // For other errors (like NEXT_REDIRECT), rethrow
       throw error
     }
   }
