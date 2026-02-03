@@ -5,10 +5,13 @@ import type { WatchedSpreadDTO, SpreadUpdateFailure } from "@/types/ma-options";
 import WatchedSpreadsTable from "./WatchedSpreadsTable";
 import DealFilter from "./DealFilter";
 
+type SpreadFilter = "all" | "mine";
+
 export default function MonitoringTab() {
   const [spreads, setSpreads] = useState<WatchedSpreadDTO[]>([]);
   const [filteredSpreads, setFilteredSpreads] = useState<WatchedSpreadDTO[]>([]);
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+  const [spreadFilter, setSpreadFilter] = useState<SpreadFilter>("all");
   const [loading, setLoading] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -29,7 +32,8 @@ export default function MonitoringTab() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spreadFilter]);
 
   useEffect(() => {
     // Filter spreads when selection changes
@@ -43,7 +47,10 @@ export default function MonitoringTab() {
   const loadSpreads = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/ma-options/watched-spreads");
+      const url = spreadFilter === "mine" 
+        ? "/api/ma-options/watched-spreads?filter=mine"
+        : "/api/ma-options/watched-spreads";
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
         // Filter to only show active spreads
@@ -285,12 +292,39 @@ export default function MonitoringTab() {
 
   return (
     <div className="space-y-3">
-      {/* Filter */}
-      <DealFilter
-        deals={deals}
-        selectedDealId={selectedDealId}
-        onSelectDeal={setSelectedDealId}
-      />
+      {/* Filters row */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <DealFilter
+          deals={deals}
+          selectedDealId={selectedDealId}
+          onSelectDeal={setSelectedDealId}
+        />
+        
+        {/* Spread ownership filter */}
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-gray-400">Show:</span>
+          <button
+            onClick={() => setSpreadFilter("all")}
+            className={`px-2 py-1 rounded ${
+              spreadFilter === "all"
+                ? "bg-blue-600 text-white"
+                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+            }`}
+          >
+            All Spreads
+          </button>
+          <button
+            onClick={() => setSpreadFilter("mine")}
+            className={`px-2 py-1 rounded ${
+              spreadFilter === "mine"
+                ? "bg-blue-600 text-white"
+                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+            }`}
+          >
+            My Spreads
+          </button>
+        </div>
+      </div>
 
       {/* Spreads Table */}
       {loading ? (

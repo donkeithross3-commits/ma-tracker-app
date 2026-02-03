@@ -1,0 +1,217 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Plus, Trash2, Edit3, X, Loader2 } from "lucide-react";
+
+interface TickerEditorModalProps {
+  listId: string;
+  listName: string;
+  trigger: React.ReactNode;
+}
+
+export function TickerEditorModal({
+  listId,
+  listName,
+  trigger,
+}: TickerEditorModalProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [localTickers, setLocalTickers] = useState<string[]>([]);
+  const [newTicker, setNewTicker] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isRemoving, setIsRemoving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load tickers from API when modal opens
+  const loadTickers = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/krj/lists/${listId}/tickers`);
+      if (!response.ok) throw new Error("Failed to load tickers");
+      const data = await response.json();
+      setLocalTickers(data.tickers.map((t: { ticker: string }) => t.ticker).sort());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load tickers");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    if (open) {
+      loadTickers();
+      setNewTicker("");
+    }
+    setIsOpen(open);
+  };
+
+  const handleAddTicker = async () => {
+    const ticker = newTicker.trim().toUpperCase();
+    if (!ticker) return;
+
+    if (localTickers.includes(ticker)) {
+      setError(`${ticker} is already in the list`);
+      return;
+    }
+
+    setIsAdding(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/krj/lists/${listId}/tickers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickers: [ticker] }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to add ticker");
+      }
+
+      setLocalTickers((prev) => [...prev, ticker].sort());
+      setNewTicker("");
+      // Don't call onTickersChanged here - just update local state
+      // The table won't show the new ticker until the next batch run anyway
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add ticker");
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const handleRemoveTicker = async (ticker: string) => {
+    setIsRemoving(ticker);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/krj/lists/${listId}/tickers`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickers: [ticker] }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to remove ticker");
+      }
+
+      setLocalTickers((prev) => prev.filter((t) => t !== ticker));
+      // Don't call onTickersChanged here - just update local state
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove ticker");
+    } finally {
+      setIsRemoving(null);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleAddTicker();
+    }
+  };
+
+  return (
+    <>
+      <span onClick={() => setIsOpen(true)}>{trigger}</span>
+
+      <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+        <DialogContent className="bg-gray-900 text-gray-100 border-gray-700 max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit3 className="h-5 w-5" />
+              Edit {listName} Tickers
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-hidden flex flex-col gap-4">
+            {/* Add new ticker */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newTicker}
+                onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
+                onKeyDown={handleKeyDown}
+                placeholder="Enter ticker symbol..."
+                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                disabled={isAdding}
+              />
+              <Button
+                onClick={handleAddTicker}
+                disabled={isAdding || !newTicker.trim()}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                {isAdding ? "Adding..." : "Add"}
+              </Button>
+            </div>
+
+            {error && (
+              <div className="text-red-400 text-sm bg-red-900/20 border border-red-800 rounded px-3 py-2">
+                {error}
+              </div>
+            )}
+
+            {/* Ticker list */}
+            <div className="flex-1 overflow-y-auto border border-gray-700 rounded">
+              <div className="p-2 text-xs text-gray-500 border-b border-gray-700 sticky top-0 bg-gray-900">
+                {isLoading ? "Loading..." : `${localTickers.length} ticker${localTickers.length !== 1 ? "s" : ""}`}
+              </div>
+              {isLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-800">
+                  {localTickers.map((ticker) => (
+                    <div
+                      key={ticker}
+                      className="flex items-center justify-between px-3 py-2 hover:bg-gray-800"
+                    >
+                      <span className="font-mono text-sm">{ticker}</span>
+                      <button
+                        onClick={() => handleRemoveTicker(ticker)}
+                        disabled={isRemoving === ticker}
+                        className="text-gray-500 hover:text-red-400 disabled:opacity-50"
+                        title="Remove ticker"
+                      >
+                        {isRemoving === ticker ? (
+                          <span className="text-xs">...</span>
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                  {localTickers.length === 0 && (
+                    <div className="px-3 py-8 text-center text-gray-500 text-sm">
+                      No tickers in this list
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Note: Newly added tickers will appear in the list but won&apos;t have signal data until the next weekly batch runs.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsOpen(false)}
+              className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

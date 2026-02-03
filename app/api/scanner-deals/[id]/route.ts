@@ -52,6 +52,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
           lastOptionsCheck: lastOptionsCheck ? new Date(lastOptionsCheck) : null 
         }),
       },
+      include: {
+        addedBy: { select: { alias: true } },
+      },
     });
 
     const expectedDate = new Date(deal.expectedCloseDate);
@@ -71,6 +74,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       isActive: deal.isActive,
       noOptionsAvailable: deal.noOptionsAvailable,
       lastOptionsCheck: deal.lastOptionsCheck?.toISOString() || null,
+      addedById: deal.addedById,
+      addedByAlias: deal.addedBy?.alias || null,
       createdAt: deal.createdAt.toISOString(),
       updatedAt: deal.updatedAt.toISOString(),
     };

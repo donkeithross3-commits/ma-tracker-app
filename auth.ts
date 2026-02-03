@@ -48,15 +48,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             return null // Email not whitelisted
           }
 
+          // Extract alias from whitelist notes if present (format: "Alias: XYZ")
+          let alias: string | null = null
+          if (whitelistEntry.notes?.startsWith("Alias: ")) {
+            alias = whitelistEntry.notes.substring(7).trim()
+          }
+
           // Auto-provision the user
           const hashedPassword = await bcrypt.hash(DEFAULT_PASSWORD, 10)
           user = await prisma.user.create({
             data: {
               email,
               password: hashedPassword,
+              alias,
               role: "analyst",
               isActive: true,
               mustChangePassword: true, // Force password change on first login
+            }
+          })
+          
+          // Create default "Favorites" deal list for new user
+          await prisma.userDealList.create({
+            data: {
+              userId: user.id,
+              name: "Favorites",
+              isDefault: true,
             }
           })
         }
@@ -80,7 +96,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return {
           id: user.id,
           email: user.email,
-          name: user.fullName || user.email.split("@")[0],
+          name: user.fullName || user.alias || user.email.split("@")[0],
+          alias: user.alias || undefined,
           role: user.role,
           mustChangePassword: user.mustChangePassword,
         }
@@ -92,6 +109,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id
+        token.alias = user.alias
         token.role = user.role
         token.mustChangePassword = user.mustChangePassword
       }
@@ -111,6 +129,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, token }) {
       if (token && session.user) {
         session.user.id = token.id as string
+        session.user.alias = token.alias as string | undefined
         session.user.role = token.role as string
         session.user.mustChangePassword = token.mustChangePassword as boolean
       }

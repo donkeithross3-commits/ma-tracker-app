@@ -283,6 +283,7 @@ export default function WatchedSpreadsTable({
                 Far Touch Entry
               </th>
               <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>Quote</th>
+              <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>By</th>
               <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>Action</th>
             </tr>
             <tr className="border-b border-gray-700">
@@ -350,6 +351,11 @@ export default function WatchedSpreadsTable({
                   {/* Quote Timestamp */}
                   <td className="py-1 px-2 text-center text-[10px] text-gray-500 whitespace-nowrap">
                     {formatTimestampCompact(spread.lastUpdated)}
+                  </td>
+
+                  {/* Curator */}
+                  <td className="py-1 px-2 text-center text-[10px] text-gray-400 whitespace-nowrap">
+                    {spread.curatedByAlias || "—"}
                   </td>
 
                   {/* Actions */}

@@ -13,6 +13,7 @@ model User {
   email              String              @unique
   password           String
   fullName           String?             @map("full_name")
+  alias              String?             @unique  // Display name like "DR3", "KRJ", etc.
   role               String              @default("analyst")
   isActive           Boolean             @default(true) @map("is_active")
   mustChangePassword Boolean             @default(false) @map("must_change_password")
@@ -28,6 +29,16 @@ model User {
   portfolioPositions PortfolioPosition[]
   curatedSpreads     WatchedSpread[]
   preferences        UserPreferences?
+  
+  // KRJ ticker list relationships
+  ownedKrjLists      KrjTickerList[]     @relation("OwnedLists")
+  addedKrjTickers    KrjTicker[]
+  krjListForks       KrjTickerListFork[]
+  krjPreferences     UserKrjPreferences?
+  
+  // Deal list relationships
+  userDealLists      UserDealList[]
+  addedScannerDeals  ScannerDeal[]
 
   @@map("users")
 }
@@ -252,6 +263,7 @@ model WatchedSpread {
   avgVolume       Int?        @map("avg_volume")
   avgOpenInterest Int?        @map("avg_open_interest")
   status          String      @default("active")
+  isPublic        Boolean     @default(true) @map("is_public") // Visible in community view
   notes           String?
   createdAt       DateTime    @default(now()) @map("created_at")
   updatedAt       DateTime    @updatedAt @map("updated_at")
@@ -261,6 +273,7 @@ model WatchedSpread {
   @@index([scannerDealId])
   @@index([status])
   @@index([expiration])
+  @@index([curatedBy])
   @@map("watched_spreads")
 }
 
@@ -274,12 +287,16 @@ model ScannerDeal {
   isActive           Boolean         @default(true) @map("is_active")
   noOptionsAvailable Boolean         @default(false) @map("no_options_available")
   lastOptionsCheck   DateTime?       @map("last_options_check")
+  addedById          String?         @map("added_by")
+  addedBy            User?           @relation(fields: [addedById], references: [id])
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
   watchedSpreads     WatchedSpread[]
+  userDealListItems  UserDealListItem[]
 
   @@index([isActive])
   @@index([ticker])
+  @@index([addedById])
   @@map("scanner_deals")
 }
 
@@ -321,4 +338,104 @@ model EmailWhitelist {
   createdAt DateTime @default(now()) @map("created_at")
   
   @@map("email_whitelist")
+}
+
+// ============================================
+// KRJ Ticker List Models
+// ============================================
+
+model KrjTickerList {
+  id          String              @id @default(uuid())
+  name        String              // "Top Equities", "SP500", "DRC", etc.
+  slug        String              @unique // "equities", "sp500", "drc"
+  description String?
+  ownerId     String?             @map("owner_id")
+  owner       User?               @relation("OwnedLists", fields: [ownerId], references: [id])
+  isSystem    Boolean             @default(false) @map("is_system") // true for SP500/SP100 (auto-updated from index)
+  isEditable  Boolean             @default(true) @map("is_editable") // false for system lists
+  displayOrder Int                @default(0) @map("display_order")
+  tickers     KrjTicker[]
+  forks       KrjTickerListFork[]
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@index([ownerId])
+  @@index([slug])
+  @@map("krj_ticker_lists")
+}
+
+model KrjTicker {
+  id        String        @id @default(uuid())
+  listId    String        @map("list_id")
+  list      KrjTickerList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  ticker    String
+  addedById String?       @map("added_by")
+  addedBy   User?         @relation(fields: [addedById], references: [id])
+  addedAt   DateTime      @default(now()) @map("added_at")
+  
+  @@unique([listId, ticker])
+  @@index([listId])
+  @@index([ticker])
+  @@map("krj_tickers")
+}
+
+model KrjTickerListFork {
+  id             String        @id @default(uuid())
+  sourceListId   String        @map("source_list_id")
+  sourceList     KrjTickerList @relation(fields: [sourceListId], references: [id], onDelete: Cascade)
+  userId         String        @map("user_id")
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addedTickers   String[]      @map("added_tickers")   // Tickers user added to their fork
+  removedTickers String[]      @map("removed_tickers") // Tickers user hid from their view
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  
+  @@unique([sourceListId, userId])
+  @@index([userId])
+  @@map("krj_ticker_list_forks")
+}
+
+model UserKrjPreferences {
+  id            String   @id @default(uuid())
+  userId        String   @unique @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hiddenListIds String[] @map("hidden_list_ids") // List IDs the user doesn't want to see
+  tabOrder      String[] @map("tab_order")       // Custom tab ordering (list IDs)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  @@map("user_krj_preferences")
+}
+
+// ============================================
+// User Deal List Models
+// ============================================
+
+model UserDealList {
+  id        String             @id @default(uuid())
+  userId    String             @map("user_id")
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String             // "My Focus List", "High Conviction", etc.
+  isDefault Boolean            @default(false) @map("is_default") // One default list per user
+  items     UserDealListItem[]
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("user_deal_lists")
+}
+
+model UserDealListItem {
+  id        String       @id @default(uuid())
+  listId    String       @map("list_id")
+  list      UserDealList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  dealId    String       @map("deal_id")
+  deal      ScannerDeal  @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  addedAt   DateTime     @default(now()) @map("added_at")
+  notes     String?
+
+  @@unique([listId, dealId])
+  @@index([listId])
+  @@index([dealId])
+  @@map("user_deal_list_items")
 }

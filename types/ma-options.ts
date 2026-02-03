@@ -72,6 +72,10 @@ export interface WatchedSpreadDTO {
   lastUpdated: string | null;
   status: string;
   notes: string | null;
+  // User attribution
+  curatedById: string | null;
+  curatedByAlias: string | null;
+  isPublic: boolean;
 }
 
 export interface DealForScanner {
@@ -182,6 +186,8 @@ export interface ScannerDeal {
   isActive: boolean;
   noOptionsAvailable: boolean;
   lastOptionsCheck: string | null;
+  addedById: string | null;
+  addedByAlias: string | null; // User alias who added this deal
   createdAt: string;
   updatedAt: string;
 }

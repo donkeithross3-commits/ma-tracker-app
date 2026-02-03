@@ -11,6 +11,7 @@ interface UserMenuProps {
   initialUser?: {
     name?: string | null
     email?: string | null
+    alias?: string | null
   }
 }
 
@@ -62,7 +63,7 @@ export function UserMenu({ variant = "light", initialUser }: UserMenuProps) {
         className={`flex items-center gap-2 ${variant === "dark" ? "text-white hover:bg-slate-700" : ""}`}
       >
         <User className="h-4 w-4" />
-        <span className="hidden sm:inline">{user.name || user.email}</span>
+        <span className="hidden sm:inline">{(user as { alias?: string }).alias || user.name || user.email}</span>
         <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </Button>
 

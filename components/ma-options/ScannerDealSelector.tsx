@@ -176,6 +176,9 @@ export default function ScannerDealSelector({
                 Days
               </th>
               <th className="text-center py-2 px-2 text-gray-400 font-medium">
+                Added By
+              </th>
+              <th className="text-center py-2 px-2 text-gray-400 font-medium">
                 Actions
               </th>
             </tr>
@@ -233,6 +236,9 @@ export default function ScannerDealSelector({
                       />
                     </td>
                     <td className="py-2 px-2 text-right text-gray-500">—</td>
+                    <td className="py-2 px-2 text-center text-xs text-gray-400">
+                      {deal.addedByAlias || "—"}
+                    </td>
                     <td className="py-2 px-2 text-center">
                       <div className="flex justify-center gap-1">
                         <button
@@ -293,6 +299,9 @@ export default function ScannerDealSelector({
                       }`}
                     >
                       {deal.daysToClose}
+                    </td>
+                    <td className="py-2 px-2 text-center text-xs text-gray-400">
+                      {deal.addedByAlias || "—"}
                     </td>
                     <td className="py-2 px-2 text-center">
                       <div className="flex justify-center gap-1">

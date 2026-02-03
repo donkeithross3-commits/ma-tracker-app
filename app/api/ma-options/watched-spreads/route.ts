@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { auth } from "@/auth";
 import type { WatchedSpreadDTO } from "@/types/ma-options";
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  const userId = session?.user?.id;
+
   try {
     const searchParams = request.nextUrl.searchParams;
     const scannerDealId = searchParams.get("dealId");
+    const filter = searchParams.get("filter"); // "mine" | "all" | null
 
     // Build where clause
     const where: any = {};
@@ -13,11 +18,17 @@ export async function GET(request: NextRequest) {
       where.scannerDealId = scannerDealId;
     }
 
-    // Fetch watched spreads with scanner deal info
+    // Filter by curator if requested
+    if (filter === "mine" && userId) {
+      where.curatedBy = userId;
+    }
+
+    // Fetch watched spreads with scanner deal info and curator
     const spreads = await prisma.watchedSpread.findMany({
       where,
       include: {
         scannerDeal: true,
+        curator: { select: { alias: true } },
       },
       orderBy: {
         createdAt: "desc",
@@ -79,6 +90,9 @@ export async function GET(request: NextRequest) {
         lastUpdated: spread.lastUpdated?.toISOString() || null,
         status: spread.status,
         notes: spread.notes,
+        curatedById: spread.curatedBy,
+        curatedByAlias: spread.curator?.alias || null,
+        isPublic: spread.isPublic,
       };
     });
 

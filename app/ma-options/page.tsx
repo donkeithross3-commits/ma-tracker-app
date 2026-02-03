@@ -9,10 +9,13 @@ export const dynamic = 'force-dynamic';
 export default async function MAOptionsPage() {
   const session = await auth();
   
-  // Fetch active scanner deals
+  // Fetch active scanner deals with user attribution
   const deals = await prisma.scannerDeal.findMany({
     where: {
       isActive: true,
+    },
+    include: {
+      addedBy: { select: { alias: true } },
     },
     orderBy: {
       ticker: "asc",
@@ -38,6 +41,8 @@ export default async function MAOptionsPage() {
       isActive: deal.isActive,
       noOptionsAvailable: deal.noOptionsAvailable,
       lastOptionsCheck: deal.lastOptionsCheck?.toISOString() || null,
+      addedById: deal.addedById,
+      addedByAlias: deal.addedBy?.alias || null,
       createdAt: deal.createdAt.toISOString(),
       updatedAt: deal.updatedAt.toISOString(),
     };

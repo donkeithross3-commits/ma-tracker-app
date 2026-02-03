@@ -1,94 +1,12 @@
-import fs from "fs";
-import path from "path";
-import Papa from "papaparse";
+import { getKrjListsForUser } from "@/lib/krj-data";
 import KrjTabsClient from "@/components/KrjTabsClient";
 import { auth } from "@/auth";
 import { UserMenu } from "@/components/UserMenu";
 
-// Force dynamic rendering to ensure metadata.json is read at request time
+// Force dynamic rendering to ensure data is read at request time
 export const dynamic = 'force-dynamic';
 
 type RawRow = Record<string, string>;
-
-type GroupKey = "equities" | "etfs_fx" | "sp500" | "sp100" | "drc";
-
-const GROUPS: { key: GroupKey; label: string; file: string }[] = [
-  { key: "equities", label: "Top Equities", file: "latest_equities.csv" },
-  { key: "etfs_fx", label: "ETFs / FX", file: "latest_etfs_fx.csv" },
-  { key: "sp500", label: "SP500", file: "latest_sp500.csv" },
-  { key: "sp100", label: "SP100", file: "latest_sp100.csv" },
-  { key: "drc", label: "DRC", file: "latest_drc.csv" },
-];
-
-function loadCsv(fileName: string): RawRow[] {
-  const filePath = path.join(process.cwd(), "data", "krj", fileName);
-  const csv = fs.readFileSync(filePath, "utf8");
-  const parsed = Papa.parse<RawRow>(csv, {
-    header: true,
-    dynamicTyping: false,
-    skipEmptyLines: true,
-  });
-  if (parsed.errors.length) {
-    console.error("CSV parse errors", fileName, parsed.errors);
-  }
-  return parsed.data;
-}
-
-function getSignalDate(): string {
-  /**
-   * SIGNAL DATE RESOLUTION (FIXED v2):
-   * 
-   * PROBLEM:
-   * - KRJ signals are generated every Friday (e.g., 2025-12-19)
-   * - Source CSV filenames contain the signal date: KRJ_signals_latest_week_Equities_2025-12-19.csv
-   * - Batch script copies these to latest_*.csv, stripping the date from filename
-   * - Previous fix used file modification timestamp (e.g., 2025-12-24) which was wrong
-   * 
-   * CORRECT SOLUTION:
-   * - Batch script (run_krj_batch.py) now extracts the signal date from source filenames
-   * - Writes metadata.json with the actual signal date: { "signal_date": "2025-12-19" }
-   * - UI reads from metadata.json to display the correct Friday signal date
-   * 
-   * FALLBACK:
-   * - If metadata.json doesn't exist (old batch script), fall back to file timestamp
-   * - This ensures backwards compatibility during deployment
-   */
-  try {
-    // Try to read metadata.json first (preferred method)
-    const metadataPath = path.join(process.cwd(), "data", "krj", "metadata.json");
-    
-    if (fs.existsSync(metadataPath)) {
-      const metadataContent = fs.readFileSync(metadataPath, "utf8");
-      const metadata = JSON.parse(metadataContent);
-      
-      if (metadata.signal_date) {
-        // Parse YYYY-MM-DD format and format as "Mon DD, YYYY"
-        const [year, month, day] = metadata.signal_date.split('-');
-        const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-        
-        return date.toLocaleDateString('en-US', { 
-          year: 'numeric', 
-          month: 'short', 
-          day: 'numeric' 
-        });
-      }
-    }
-    
-    // Fallback: Use file modification timestamp (backwards compatibility)
-    const filePath = path.join(process.cwd(), "data", "krj", "latest_equities.csv");
-    const stats = fs.statSync(filePath);
-    const fileDate = stats.mtime;
-    
-    return fileDate.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric' 
-    });
-  } catch (error) {
-    console.error(`Error reading signal date:`, error);
-    return "—"; // Defensive fallback only if file is inaccessible
-  }
-}
 
 function computeSummary(rows: RawRow[]) {
   const currentCounts: Record<string, number> = { Long: 0, Neutral: 0, Short: 0 };
@@ -118,55 +36,18 @@ function computeSummary(rows: RawRow[]) {
   return { rowsSummary, totals };
 }
 
-function isCurrencyPair(ticker: string): boolean {
-  return ticker.startsWith("c:");
-}
-
-function sortWithCurrencyPairsFirst(rows: RawRow[]): RawRow[] {
-  return [...rows].sort((a, b) => {
-    const tickerA = (a["ticker"] || "").trim();
-    const tickerB = (b["ticker"] || "").trim();
-    
-    const isACurrency = isCurrencyPair(tickerA);
-    const isBCurrency = isCurrencyPair(tickerB);
-    
-    // Currency pairs come first
-    if (isACurrency && !isBCurrency) return -1;
-    if (!isACurrency && isBCurrency) return 1;
-    
-    // Within same type, sort alphabetically
-    return tickerA.localeCompare(tickerB);
-  });
-}
-
 // Server component
 export default async function KrjPage() {
   const session = await auth();
+  const userId = session?.user?.id || null;
   
-  const dataByGroup: Record<GroupKey, RawRow[]> = {
-    equities: loadCsv("latest_equities.csv"),
-    etfs_fx: sortWithCurrencyPairsFirst(loadCsv("latest_etfs_fx.csv")),
-    sp500: loadCsv("latest_sp500.csv"),
-    sp100: loadCsv("latest_sp100.csv"),
-  drc: loadCsv("latest_drc.csv"),
-  };
-
-  // Get the signal date from metadata.json (source of truth)
-  // This reflects the actual Friday signal date from the batch pipeline
-  const dataDate = getSignalDate();
-
-  const summaries: Record<GroupKey, ReturnType<typeof computeSummary>> = {
-    equities: computeSummary(dataByGroup.equities),
-    etfs_fx: computeSummary(dataByGroup.etfs_fx),
-    sp500: computeSummary(dataByGroup.sp500),
-    sp100: computeSummary(dataByGroup.sp100),
-  drc: computeSummary(dataByGroup.drc),
-  };
+  // Fetch lists from database with user customizations applied
+  const { lists, signalDate } = await getKrjListsForUser(userId);
 
   const columns: { key: string; label: string; description: string }[] = [
     { key: "ticker", label: "Ticker", description: "Stock or ETF symbol" },
-    { key: "c", label: "Friday Close", description: `Closing price on last trading day of the week ending ${dataDate}` },
-    { key: "weekly_low", label: "Last Week Low", description: `Lowest trade price during the week ending ${dataDate}` },
+    { key: "c", label: "Friday Close", description: `Closing price on last trading day of the week ending ${signalDate}` },
+    { key: "weekly_low", label: "Last Week Low", description: `Lowest trade price during the week ending ${signalDate}` },
     { key: "25DMA", label: "25 DMA", description: "25-day simple moving average of closing prices" },
     { key: "25DMA_shifted", label: "25 DMA (shifted 3 weeks)", description: "25-day moving average as it was 15 trading days ago; used for stop-loss levels" },
     { key: "long_signal_value", label: "Long Signal Value", description: "(Weekly Low - 25DMA) / 25DMA; positive values indicate strength above the moving average" },
@@ -180,11 +61,22 @@ export default async function KrjPage() {
     { key: "avg_trade_size", label: "Average Trade Size", description: "Average number of shares per trade (volume / number of trades)" },
   ];
 
-  const groupsData = GROUPS.map(group => ({
-    key: group.key,
-    label: group.label,
-    rows: dataByGroup[group.key],
-    summary: summaries[group.key],
+  // Transform lists to the format expected by KrjTabsClient
+  const groupsData = lists.map(list => ({
+    key: list.key,
+    label: list.name,
+    rows: list.rows,
+    summary: computeSummary(list.rows),
+    // Extended metadata for UI features
+    listId: list.id,
+    ownerId: list.ownerId,
+    ownerAlias: list.ownerAlias,
+    isSystem: list.isSystem,
+    isEditable: list.isEditable,
+    canEdit: list.canEdit,
+    isFork: list.isFork,
+    forkDelta: list.forkDelta,
+    tickerCount: list.tickers.length,
   }));
 
   return (
@@ -194,17 +86,26 @@ export default async function KrjPage() {
           <h1 className="text-3xl font-semibold text-gray-100">
             KRJ Weekly Signals
             <span className="text-xl text-gray-400 ml-3 font-normal">
-              {dataDate}
+              {signalDate}
             </span>
           </h1>
         </div>
         <UserMenu 
           variant="dark" 
-          initialUser={session?.user ? { name: session.user.name, email: session.user.email } : undefined}
+          initialUser={session?.user ? { 
+            name: session.user.name, 
+            email: session.user.email,
+            alias: session.user.alias 
+          } : undefined}
         />
       </div>
 
-      <KrjTabsClient groups={groupsData} columns={columns} />
+      <KrjTabsClient 
+        groups={groupsData} 
+        columns={columns}
+        userId={userId}
+        userAlias={session?.user?.alias}
+      />
     </div>
   );
 }

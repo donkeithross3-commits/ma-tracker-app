@@ -5,8 +5,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Printer, Filter, X } from "lucide-react"
+import { Printer, Filter, X, User, GitFork, Edit3 } from "lucide-react"
 import KrjPrintLayout from "@/components/KrjPrintLayout"
+import { ListSettingsModal } from "@/components/krj/ListSettingsModal"
+import { TickerEditorModal } from "@/components/krj/TickerEditorModal"
 
 type RawRow = Record<string, string>;
 
@@ -26,11 +28,23 @@ type GroupData = {
       last: number;
     };
   };
+  // Extended metadata for customization features
+  listId?: string;
+  ownerId?: string | null;
+  ownerAlias?: string | null;
+  isSystem?: boolean;
+  isEditable?: boolean;
+  canEdit?: boolean;
+  isFork?: boolean;
+  forkDelta?: { added: string[]; removed: string[] };
+  tickerCount?: number;
 };
 
 interface KrjTabsClientProps {
   groups: GroupData[];
   columns: Array<{ key: string; label: string; description: string }>;
+  userId?: string | null;
+  userAlias?: string | null;
 }
 
 // Signal filter types
@@ -123,12 +137,18 @@ function computeSummaryFromRows(rows: RawRow[]) {
   return { rowsSummary, totals };
 }
 
-export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
+export default function KrjTabsClient({ groups, columns, userId, userAlias }: KrjTabsClientProps) {
   // Print state management
   const [printMode, setPrintMode] = useState(false)
   const [selectedGroups, setSelectedGroups] = useState<string[]>([])
   const [showPrintDialog, setShowPrintDialog] = useState(false)
-  const [currentTab, setCurrentTab] = useState("equities")
+  const [currentTab, setCurrentTab] = useState(groups[0]?.key || "equities")
+  
+  // List visibility state (for hiding tabs)
+  const [hiddenListIds, setHiddenListIds] = useState<string[]>([])
+  
+  // Filter visible groups based on hidden list IDs
+  const visibleGroups = groups.filter((g) => !g.listId || !hiddenListIds.includes(g.listId))
   
   // Filter state management
   const [filterColumn, setFilterColumn] = useState<FilterColumn>(null)
@@ -364,28 +384,67 @@ export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
         >
           <div className="flex justify-between items-center mb-1">
             <TabsList className="bg-gray-800 border border-gray-600 h-auto p-1">
-              {groups.map((group) => (
+              {visibleGroups.map((group) => (
                 <TabsTrigger
                   key={group.key}
                   value={group.key}
                   className="data-[state=active]:bg-gray-700 data-[state=active]:text-gray-100 text-gray-400 text-lg px-3 py-1"
+                  title={group.ownerAlias ? `Owner: ${group.ownerAlias}` : undefined}
                 >
-                  {group.label}
+                  <span className="flex items-center gap-1.5">
+                    {group.label}
+                    {group.isFork && (
+                      <GitFork className="h-3 w-3 text-blue-400" />
+                    )}
+                    {group.ownerAlias && (
+                      <span className="text-xs text-gray-500 font-normal">
+                        ({group.ownerAlias})
+                      </span>
+                    )}
+                  </span>
                 </TabsTrigger>
               ))}
             </TabsList>
-            <Button
-              onClick={handleOpenPrintDialog}
-              variant="outline"
-              size="sm"
-              className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700 hover:text-gray-100 no-print"
-            >
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
+            <div className="flex items-center gap-2">
+              <ListSettingsModal
+                lists={groups.map((g) => ({
+                  listId: g.listId || g.key,
+                  key: g.key,
+                  label: g.label,
+                  ownerAlias: g.ownerAlias || null,
+                  isSystem: g.isSystem || false,
+                  isEditable: g.isEditable || false,
+                  canEdit: g.canEdit || false,
+                  isFork: g.isFork || false,
+                  forkDelta: g.forkDelta,
+                  tickerCount: g.tickerCount || g.rows.length,
+                }))}
+                hiddenListIds={hiddenListIds}
+                onHiddenListsChange={setHiddenListIds}
+                onForkList={(listId) => console.log("Fork list:", listId)}
+                onResetFork={async (listId) => {
+                  try {
+                    await fetch(`/api/krj/lists/${listId}/fork`, { method: "DELETE" });
+                    window.location.reload();
+                  } catch (error) {
+                    console.error("Failed to reset fork:", error);
+                  }
+                }}
+                userId={userId || null}
+              />
+              <Button
+                onClick={handleOpenPrintDialog}
+                variant="outline"
+                size="sm"
+                className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700 hover:text-gray-100 no-print"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                Print
+              </Button>
+            </div>
           </div>
 
-      {groups.map((group) => {
+      {visibleGroups.map((group) => {
         const filteredRows = getFilteredRows(group.rows);
         const displaySummary = isFilterActive ? computeSummaryFromRows(filteredRows) : group.summary;
         
@@ -415,6 +474,24 @@ export default function KrjTabsClient({ groups, columns }: KrjTabsClientProps) {
               })}
               {" | Tot:"}{displaySummary.totals.current}
             </div>
+
+            {/* Edit button for list owners */}
+            {group.canEdit && group.listId && (
+              <TickerEditorModal
+                listId={group.listId}
+                listName={group.label}
+                trigger={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700"
+                  >
+                    <Edit3 className="h-4 w-4 mr-1" />
+                    Edit Tickers
+                  </Button>
+                }
+              />
+            )}
 
             {/* Filter controls */}
             <div className="flex items-center gap-2">

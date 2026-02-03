@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { auth } from "@/auth";
 
 export interface ScannerDealDTO {
   id: string;
@@ -12,6 +13,8 @@ export interface ScannerDealDTO {
   isActive: boolean;
   noOptionsAvailable: boolean;
   lastOptionsCheck: string | null;
+  addedById: string | null;
+  addedByAlias: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -22,6 +25,9 @@ export async function GET() {
     const deals = await prisma.scannerDeal.findMany({
       where: {
         isActive: true,
+      },
+      include: {
+        addedBy: { select: { alias: true } },
       },
       orderBy: {
         ticker: "asc",
@@ -46,6 +52,8 @@ export async function GET() {
         isActive: deal.isActive,
         noOptionsAvailable: deal.noOptionsAvailable,
         lastOptionsCheck: deal.lastOptionsCheck?.toISOString() || null,
+        addedById: deal.addedById,
+        addedByAlias: deal.addedBy?.alias || null,
         createdAt: deal.createdAt.toISOString(),
         updatedAt: deal.updatedAt.toISOString(),
       };
@@ -63,6 +71,8 @@ export async function GET() {
 
 // POST - Create a new scanner deal
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  
   try {
     const body = await request.json();
     const { ticker, targetName, expectedClosePrice, expectedCloseDate, notes } =
@@ -95,6 +105,10 @@ export async function POST(request: NextRequest) {
         expectedClosePrice,
         expectedCloseDate: new Date(expectedCloseDate),
         notes: notes || null,
+        addedById: session?.user?.id || null,
+      },
+      include: {
+        addedBy: { select: { alias: true } },
       },
     });
 
@@ -115,6 +129,8 @@ export async function POST(request: NextRequest) {
       isActive: deal.isActive,
       noOptionsAvailable: deal.noOptionsAvailable,
       lastOptionsCheck: deal.lastOptionsCheck?.toISOString() || null,
+      addedById: deal.addedById,
+      addedByAlias: deal.addedBy?.alias || null,
       createdAt: deal.createdAt.toISOString(),
       updatedAt: deal.updatedAt.toISOString(),
     };
