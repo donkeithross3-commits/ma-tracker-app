@@ -355,6 +355,13 @@ class IBMergerArbScanner(EWrapper, EClient):
             third_friday = c[3][4]
         return datetime(year, month, third_friday)
 
+    def _strike_on_grid(self, strike: float, increment: float) -> bool:
+        """True if strike lies on the standard option chain grid (avoids half-dollar strikes not listed on SMART)."""
+        if increment <= 0:
+            return True
+        nearest = round(strike / increment) * increment
+        return abs(nearest - strike) < 1e-6
+
     def get_strikes_near_price(self, price: float, min_strike: float,
                               max_strike: float, increment: float = 2.5) -> List[float]:
         """Return strike prices at increment between min and max (fallback when IB returns no strikes)."""
@@ -428,12 +435,14 @@ class IBMergerArbScanner(EWrapper, EClient):
             lower_bound = deal_price_to_use * 0.75
             upper_bound = deal_price_to_use * 1.10
 
-            # Use only IB strikes when available (exact chain). Fallback only if IB returned no data.
+            # Use only IB strikes when available, filtered to standard grid to avoid "No security definition" for half-dollar strikes.
+            increment = 5.0 if deal_price_to_use > 50 else 2.5
             for expiry in selected_expiries:
                 if expiry in self.available_strikes and self.available_strikes[expiry]:
                     all_strikes = self.available_strikes[expiry]
-                    strikes = [s for s in all_strikes if lower_bound <= s <= upper_bound]
-                    print(f"[{ticker}]   {expiry}: {len(strikes)} strikes (exact from IB)", flush=True)
+                    strikes = [s for s in all_strikes
+                               if lower_bound <= s <= upper_bound and self._strike_on_grid(s, increment)]
+                    print(f"[{ticker}]   {expiry}: {len(strikes)} strikes (from IB, grid {increment})", flush=True)
                 else:
                     # Only when IB returned no option params after wait+retry
                     strikes = self.get_strikes_near_price(
