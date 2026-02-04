@@ -5,7 +5,6 @@ import * as Tabs from "@radix-ui/react-tabs";
 import type { ScannerDeal } from "@/types/ma-options";
 import CuratorTab from "./CuratorTab";
 import MonitoringTab from "./MonitoringTab";
-import MyListsTab from "./MyListsTab";
 
 interface OptionsScannerTabsProps {
   deals: ScannerDeal[];
@@ -35,12 +34,6 @@ export default function OptionsScannerTabs({
         >
           Monitor
         </Tabs.Trigger>
-        <Tabs.Trigger
-          value="my-lists"
-          className="px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
-        >
-          My Lists
-        </Tabs.Trigger>
       </Tabs.List>
 
       <Tabs.Content value="curate">
@@ -49,10 +42,6 @@ export default function OptionsScannerTabs({
 
       <Tabs.Content value="monitor">
         <MonitoringTab />
-      </Tabs.Content>
-
-      <Tabs.Content value="my-lists">
-        <MyListsTab />
       </Tabs.Content>
     </Tabs.Root>
   );

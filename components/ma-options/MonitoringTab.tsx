@@ -1,11 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ChevronDown, Plus, Star, Folder, Trash2 } from "lucide-react";
 import type { WatchedSpreadDTO, SpreadUpdateFailure } from "@/types/ma-options";
 import WatchedSpreadsTable from "./WatchedSpreadsTable";
 import DealFilter from "./DealFilter";
 
-type SpreadFilter = "all" | "mine";
+interface UserList {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  itemCount: number;
+}
+
+// Filter can be "all", "mine", or a list ID
+type SpreadFilter = "all" | "mine" | string;
 
 export default function MonitoringTab() {
   const [spreads, setSpreads] = useState<WatchedSpreadDTO[]>([]);
@@ -19,6 +28,18 @@ export default function MonitoringTab() {
   const [refreshStatus, setRefreshStatus] = useState<string>("");
   // Track failures by spreadId for per-row indicators
   const [failedSpreads, setFailedSpreads] = useState<Map<string, SpreadUpdateFailure>>(new Map());
+  
+  // User lists state
+  const [userLists, setUserLists] = useState<UserList[]>([]);
+  const [listSpreadIds, setListSpreadIds] = useState<Set<string>>(new Set());
+  const [showListDropdown, setShowListDropdown] = useState(false);
+  const [isCreatingList, setIsCreatingList] = useState(false);
+  const [newListName, setNewListName] = useState("");
+
+  // Load user lists on mount
+  useEffect(() => {
+    loadUserLists();
+  }, []);
 
   useEffect(() => {
     loadSpreads();
@@ -37,16 +58,52 @@ export default function MonitoringTab() {
 
   useEffect(() => {
     // Filter spreads when selection changes
-    if (selectedDealId) {
-      setFilteredSpreads(spreads.filter((s) => s.dealId === selectedDealId));
-    } else {
-      setFilteredSpreads(spreads);
+    let filtered = spreads;
+    
+    // Apply list filter (for custom lists, filter by spreadIds in that list)
+    if (spreadFilter !== "all" && spreadFilter !== "mine" && listSpreadIds.size > 0) {
+      filtered = filtered.filter((s) => listSpreadIds.has(s.id));
     }
-  }, [selectedDealId, spreads]);
+    
+    // Apply deal filter
+    if (selectedDealId) {
+      filtered = filtered.filter((s) => s.dealId === selectedDealId);
+    }
+    
+    setFilteredSpreads(filtered);
+  }, [selectedDealId, spreads, spreadFilter, listSpreadIds]);
+
+  const loadUserLists = async () => {
+    try {
+      const response = await fetch("/api/user/deal-lists");
+      if (response.ok) {
+        const data = await response.json();
+        setUserLists(data.lists || []);
+      }
+    } catch (error) {
+      console.error("Error loading user lists:", error);
+    }
+  };
+
+  const loadListSpreads = async (listId: string) => {
+    try {
+      const response = await fetch(`/api/user/deal-lists/${listId}`);
+      if (response.ok) {
+        const data = await response.json();
+        const spreadIds = new Set<string>((data.items || []).map((item: { spreadId: string }) => item.spreadId));
+        setListSpreadIds(spreadIds);
+      }
+    } catch (error) {
+      console.error("Error loading list spreads:", error);
+      setListSpreadIds(new Set());
+    }
+  };
 
   const loadSpreads = async () => {
     setLoading(true);
     try {
+      // For custom lists, we still load all spreads but filter client-side
+      // For "mine", use the server filter
       const url = spreadFilter === "mine" 
         ? "/api/ma-options/watched-spreads?filter=mine"
         : "/api/ma-options/watched-spreads";
@@ -59,11 +116,64 @@ export default function MonitoringTab() {
         );
         setSpreads(activeSpreads);
       }
+      
+      // If a custom list is selected, load its spread IDs
+      if (spreadFilter !== "all" && spreadFilter !== "mine") {
+        await loadListSpreads(spreadFilter);
+      } else {
+        setListSpreadIds(new Set());
+      }
     } catch (error) {
       console.error("Error loading spreads:", error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCreateList = async () => {
+    if (!newListName.trim()) return;
+    try {
+      const response = await fetch("/api/user/deal-lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newListName.trim() }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUserLists((prev) => [...prev, data.list]);
+        setNewListName("");
+        setIsCreatingList(false);
+        // Switch to the new list
+        setSpreadFilter(data.list.id);
+      }
+    } catch (error) {
+      console.error("Error creating list:", error);
+    }
+  };
+
+  const handleDeleteList = async (listId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Delete this list?")) return;
+    try {
+      const response = await fetch(`/api/user/deal-lists/${listId}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        setUserLists((prev) => prev.filter((l) => l.id !== listId));
+        if (spreadFilter === listId) {
+          setSpreadFilter("all");
+        }
+      }
+    } catch (error) {
+      console.error("Error deleting list:", error);
+    }
+  };
+
+  const getFilterLabel = () => {
+    if (spreadFilter === "all") return "All Spreads";
+    if (spreadFilter === "mine") return "My Spreads";
+    const list = userLists.find((l) => l.id === spreadFilter);
+    return list?.name || "Select...";
   };
 
   const refreshPrices = async () => {
@@ -300,30 +410,118 @@ export default function MonitoringTab() {
           onSelectDeal={setSelectedDealId}
         />
         
-        {/* Spread ownership filter */}
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-gray-400">Show:</span>
+        {/* Spread list filter dropdown */}
+        <div className="relative">
           <button
-            onClick={() => setSpreadFilter("all")}
-            className={`px-2 py-1 rounded ${
-              spreadFilter === "all"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-            }`}
+            onClick={() => setShowListDropdown(!showListDropdown)}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-gray-700 text-gray-100 rounded hover:bg-gray-600 border border-gray-600"
           >
-            All Spreads
+            {spreadFilter !== "all" && spreadFilter !== "mine" && (
+              <Folder className="h-3.5 w-3.5 text-gray-400" />
+            )}
+            {getFilterLabel()}
+            <ChevronDown className="h-4 w-4 text-gray-400" />
           </button>
-          <button
-            onClick={() => setSpreadFilter("mine")}
-            className={`px-2 py-1 rounded ${
-              spreadFilter === "mine"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-            }`}
-          >
-            My Spreads
-          </button>
+          
+          {showListDropdown && (
+            <div className="absolute top-full left-0 mt-1 w-56 bg-gray-800 border border-gray-700 rounded-md shadow-lg z-50">
+              {/* Built-in filters */}
+              <div className="p-1 border-b border-gray-700">
+                <button
+                  onClick={() => { setSpreadFilter("all"); setShowListDropdown(false); }}
+                  className={`w-full text-left px-3 py-1.5 text-sm rounded ${
+                    spreadFilter === "all" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"
+                  }`}
+                >
+                  All Spreads
+                </button>
+                <button
+                  onClick={() => { setSpreadFilter("mine"); setShowListDropdown(false); }}
+                  className={`w-full text-left px-3 py-1.5 text-sm rounded ${
+                    spreadFilter === "mine" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"
+                  }`}
+                >
+                  My Spreads
+                </button>
+              </div>
+              
+              {/* User lists */}
+              {userLists.length > 0 && (
+                <div className="p-1 border-b border-gray-700">
+                  <div className="px-3 py-1 text-xs text-gray-500 uppercase">My Lists</div>
+                  {userLists.map((list) => (
+                    <button
+                      key={list.id}
+                      onClick={() => { setSpreadFilter(list.id); setShowListDropdown(false); }}
+                      className={`w-full text-left px-3 py-1.5 text-sm rounded flex items-center justify-between group ${
+                        spreadFilter === list.id ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        {list.isDefault ? (
+                          <Star className="h-3.5 w-3.5 text-yellow-500" />
+                        ) : (
+                          <Folder className="h-3.5 w-3.5 text-gray-400" />
+                        )}
+                        {list.name}
+                        <span className="text-xs text-gray-500">({list.itemCount})</span>
+                      </span>
+                      {!list.isDefault && (
+                        <button
+                          onClick={(e) => handleDeleteList(list.id, e)}
+                          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 p-0.5"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              
+              {/* Create new list */}
+              <div className="p-1">
+                {isCreatingList ? (
+                  <div className="flex gap-1 px-2 py-1">
+                    <input
+                      type="text"
+                      value={newListName}
+                      onChange={(e) => setNewListName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleCreateList();
+                        if (e.key === "Escape") { setIsCreatingList(false); setNewListName(""); }
+                      }}
+                      placeholder="List name..."
+                      className="flex-1 px-2 py-1 text-sm bg-gray-900 border border-gray-600 rounded text-gray-100"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleCreateList}
+                      className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500"
+                    >
+                      Add
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsCreatingList(true)}
+                    className="w-full text-left px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded flex items-center gap-2"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    New List...
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
+        
+        {/* Show count when filtering by list */}
+        {spreadFilter !== "all" && spreadFilter !== "mine" && (
+          <span className="text-xs text-gray-500">
+            {listSpreadIds.size} spread{listSpreadIds.size !== 1 ? "s" : ""} in list
+          </span>
+        )}
       </div>
 
       {/* Spreads Table */}
