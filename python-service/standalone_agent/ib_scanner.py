@@ -116,6 +116,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.connection_lost = False
         self.last_heartbeat = time.time()
         self.connection_start_time = None
+        # Last market data error (req_id, errorCode, errorString) for ES test_futures
+        self.last_mkt_data_error = None
 
     def connect_to_ib(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1):
         """Connect to IB Gateway or TWS"""
@@ -176,6 +178,9 @@ class IBMergerArbScanner(EWrapper, EClient):
             pass
         else:
             self.logger.error(f"IB Error {reqId}/{errorCode}: {errorString}")
+            # 354 = market data not subscribed; surface for test_futures
+            if errorCode == 354 or "not subscribed" in (errorString or "").lower():
+                self.last_mkt_data_error = (reqId, errorCode, errorString)
     
     def get_next_req_id(self) -> int:
         req_id = self.next_req_id

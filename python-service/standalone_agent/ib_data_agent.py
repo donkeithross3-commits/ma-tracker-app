@@ -238,6 +238,7 @@ class IBDataAgent:
             contract.lastTradeDateOrContractMonth = contract_month
             
             req_id = self.scanner.get_next_req_id()
+            self.scanner.last_mkt_data_error = None  # clear so we only see errors for this request
             futures_data = {"bid": None, "ask": None, "last": None}
             data_received = False
             
@@ -256,27 +257,66 @@ class IBDataAgent:
             
             self.scanner.tickPrice = handle_tick
             self.scanner.reqMktData(req_id, contract, "", True, False, [])
-            
-            # Wait up to 10s for data; accept if we have last or (bid and ask)
-            for _ in range(100):
-                time.sleep(0.1)
-                if data_received:
-                    if futures_data["bid"] and futures_data["ask"]:
-                        break
-                    if futures_data["last"] is not None:
-                        break
-                if futures_data["bid"] or futures_data["ask"] or futures_data["last"]:
-                    break
-            
+
+            def wait_for_ticks(timeout_sec=10):
+                nonlocal data_received, futures_data
+                for _ in range(int(timeout_sec * 10)):
+                    time.sleep(0.1)
+                    if data_received or futures_data["bid"] or futures_data["ask"] or futures_data["last"]:
+                        return True
+                return False
+
+            wait_for_ticks(10)
             self.scanner.cancelMktData(req_id)
-            self.scanner.tickPrice = original_tickPrice
-            
+
             has_any = (
                 futures_data["bid"] is not None
                 or futures_data["ask"] is not None
                 or futures_data["last"] is not None
             )
-            if not data_received and not has_any:
+            use_delayed = False
+            if not has_any:
+                err = getattr(self.scanner, "last_mkt_data_error", None)
+                # 354 = real-time not subscribed; IB says delayed is available
+                if err and len(err) >= 3 and err[0] == req_id and (err[1] == 354 or "delayed" in (err[2] or "").lower()):
+                    logger.info("Real-time ES not subscribed, retrying with delayed market data (reqMarketDataType=3)")
+                    self.scanner.reqMarketDataType(3)  # 3 = DELAYED
+                    time.sleep(0.5)
+                    # Reset and retry with a new req_id so we don't mix with old callbacks
+                    req_id2 = self.scanner.get_next_req_id()
+                    self.scanner.last_mkt_data_error = None
+                    futures_data = {"bid": None, "ask": None, "last": None}
+                    data_received = False
+
+                    def handle_tick2(reqId, tickType, price, attrib):
+                        nonlocal futures_data, data_received
+                        if reqId == req_id2:
+                            if tickType == 1:
+                                futures_data["bid"] = price
+                            elif tickType == 2:
+                                futures_data["ask"] = price
+                            elif tickType == 4:
+                                futures_data["last"] = price
+                                data_received = True
+
+                    self.scanner.tickPrice = handle_tick2
+                    self.scanner.reqMktData(req_id2, contract, "", True, False, [])
+                    wait_for_ticks(10)
+                    self.scanner.cancelMktData(req_id2)
+                    self.scanner.reqMarketDataType(1)  # restore real-time (1 = REALTIME)
+                    use_delayed = True
+                    has_any = (
+                        futures_data["bid"] is not None
+                        or futures_data["ask"] is not None
+                        or futures_data["last"] is not None
+                    )
+
+            self.scanner.tickPrice = original_tickPrice
+
+            if not has_any:
+                err = getattr(self.scanner, "last_mkt_data_error", None)
+                if err and len(err) >= 3 and (err[0] == req_id or err[1] == 354):
+                    return {"error": "ES futures market data is not subscribed in TWS. In TWS: Account → Management → Market Data Subscriptions; add CME if needed. Delayed data may be available."}
                 return {"error": "No futures data received - market may be closed or check TWS market data permissions for CME"}
             
             month_codes = {3: 'H', 6: 'M', 9: 'U', 12: 'Z'}
@@ -297,6 +337,7 @@ class IBDataAgent:
                 "ask": ask,
                 "last": last,
                 "mid": mid,
+                "delayed": use_delayed,
                 "timestamp": datetime.now().isoformat()
             }
         except Exception as e:

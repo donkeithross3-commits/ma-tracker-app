@@ -10,6 +10,7 @@ interface FuturesQuote {
   ask?: number;
   last?: number;
   mid?: number;
+  delayed?: boolean;
   timestamp?: string;
   error?: string;
 }
@@ -118,6 +119,9 @@ export default function IBConnectionStatus() {
           {futuresQuote && futuresQuote.success && (
             <div className="flex items-center gap-2 text-gray-300 bg-gray-800 rounded px-2 py-0.5 text-[11px]">
               <span className="font-medium text-blue-400">{futuresQuote.contract}</span>
+              {futuresQuote.delayed && (
+                <span className="text-amber-400/90 text-[10px]" title="Account has delayed, not real-time, CME data">(Delayed)</span>
+              )}
               <span>Bid: <span className="text-green-400">{futuresQuote.bid?.toFixed(2)}</span></span>
               <span>Ask: <span className="text-red-400">{futuresQuote.ask?.toFixed(2)}</span></span>
               <span>Last: <span className="text-yellow-400">{futuresQuote.last?.toFixed(2)}</span></span>

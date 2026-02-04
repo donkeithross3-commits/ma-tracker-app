@@ -596,8 +596,10 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
                             )
                             if "error" in response_data:
                                 err = response_data["error"]
-                                if "market may be closed" in (err or "").lower() or "no futures data" in (err or "").lower():
-                                    err = "Your agent did not receive ES futures data from IB. Check: (1) TWS market data subscriptions include CME, (2) Market is open (ES trades Sun 6pm–Fri 5pm ET), (3) Restart the agent after updating from the dashboard."
+                                # Keep agent's specific message if already about subscription; else rewrite generic ones
+                                if "not subscribed" not in (err or "").lower() and "market data subscription" not in (err or "").lower():
+                                    if "market may be closed" in (err or "").lower() or "no futures data" in (err or "").lower():
+                                        err = "Your agent did not receive ES futures data from IB. Often this is because CME is not subscribed in TWS: Account → Management → Market Data Subscriptions — add CME. Also: (2) Market is open (ES Sun 6pm–Fri 5pm ET), (3) Restart the agent after updating."
                                 raise HTTPException(status_code=500, detail=err)
                             return response_data
                     except asyncio.TimeoutError:
@@ -664,8 +666,10 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
         
         if "error" in response_data:
             err = response_data["error"]
-            if "market may be closed" in (err or "").lower() or "no futures data" in (err or "").lower():
-                err = "Your agent did not receive ES futures data from IB. Check: (1) TWS market data subscriptions include CME, (2) Market is open (ES trades Sun 6pm–Fri 5pm ET), (3) Restart the agent after updating from the dashboard."
+            # Keep agent's specific message if already about subscription; else rewrite generic ones
+            if "not subscribed" not in (err or "").lower() and "market data subscription" not in (err or "").lower():
+                if "market may be closed" in (err or "").lower() or "no futures data" in (err or "").lower():
+                    err = "Your agent did not receive ES futures data from IB. Often this is because CME is not subscribed in TWS: Account → Management → Market Data Subscriptions — add CME. Also: (2) Market is open (ES Sun 6pm–Fri 5pm ET), (3) Restart the agent after updating."
             raise HTTPException(status_code=500, detail=err)
         
         return response_data
