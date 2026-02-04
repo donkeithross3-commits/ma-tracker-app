@@ -2,9 +2,9 @@
 Options Scanner API Routes
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 import logging
 import uuid
 import asyncio
@@ -542,12 +542,13 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
 
 
 @router.get("/relay/test-futures")
-async def relay_test_futures():
+async def relay_test_futures(user_id: Optional[str] = Query(None)):
     """
     Test ES futures quote through WebSocket relay.
     Useful for verifying IB connectivity when options markets are closed.
     
-    Finds a provider that has IB connected and sends the request there.
+    If user_id query param is provided, routes to that user's agent. Otherwise
+    uses the first provider that has IB connected (for backwards compatibility).
     """
     try:
         registry = get_registry()
@@ -559,20 +560,65 @@ async def relay_test_futures():
                 detail="No IB data provider connected. Please start the local agent."
             )
         
-        # Find a provider with IB connected by checking ib_status on each
+        # If user_id provided, try to route to that user's agent first
+        target_user_id = user_id
+        if target_user_id:
+            provider = await registry.get_active_provider(user_id=target_user_id)
+            if provider:
+                try:
+                    # Quick ib_status check for this provider
+                    request_id = str(uuid.uuid4())
+                    loop = asyncio.get_running_loop()
+                    future = loop.create_future()
+                    pending = PendingRequest(
+                        request_id=request_id,
+                        request_type="ib_status",
+                        payload={},
+                        future=future
+                    )
+                    await registry.add_pending_request(pending)
+                    await provider.websocket.send_json({
+                        "type": "request",
+                        "request_id": request_id,
+                        "request_type": "ib_status",
+                        "payload": {}
+                    })
+                    try:
+                        response = await asyncio.wait_for(future, timeout=3.0)
+                        if response.get("connected"):
+                            response_data = await send_request_to_provider(
+                                request_type="test_futures",
+                                payload={},
+                                timeout=15.0,
+                                user_id=target_user_id
+                            )
+                            if "error" in response_data:
+                                raise HTTPException(status_code=500, detail=response_data["error"])
+                            return response_data
+                    except asyncio.TimeoutError:
+                        pass
+                    finally:
+                        await registry.remove_pending_request(request_id)
+                except HTTPException:
+                    raise
+            raise HTTPException(
+                status_code=503,
+                detail="Your agent is not connected or IB is not connected. Start the local agent and ensure TWS is running."
+            )
+        
+        # No user_id: find first provider with IB connected (legacy behaviour)
         connected_user_id = None
         for provider_info in status["providers"]:
             provider_id = provider_info["id"]
-            user_id = provider_info.get("user_id")
+            uid = provider_info.get("user_id")
             
             try:
                 provider = await registry.get_provider_by_id(provider_id)
                 if not provider:
                     continue
-                
-                # Quick ib_status check
                 request_id = str(uuid.uuid4())
-                future = asyncio.get_event_loop().create_future()
+                loop = asyncio.get_running_loop()
+                future = loop.create_future()
                 pending = PendingRequest(
                     request_id=request_id,
                     request_type="ib_status",
@@ -580,18 +626,16 @@ async def relay_test_futures():
                     future=future
                 )
                 await registry.add_pending_request(pending)
-                
                 await provider.websocket.send_json({
                     "type": "request",
                     "request_id": request_id,
                     "request_type": "ib_status",
                     "payload": {}
                 })
-                
                 try:
                     response = await asyncio.wait_for(future, timeout=3.0)
                     if response.get("connected"):
-                        connected_user_id = user_id
+                        connected_user_id = uid
                         break
                 except asyncio.TimeoutError:
                     pass
@@ -606,7 +650,6 @@ async def relay_test_futures():
                 detail="No provider has IB TWS connected. Please ensure TWS is running."
             )
         
-        # Send request through WebSocket relay to the connected provider
         response_data = await send_request_to_provider(
             request_type="test_futures",
             payload={},

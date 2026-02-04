@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth-api";
 
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
 export async function GET(request: NextRequest) {
   try {
-    const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/test-futures`, {
+    const user = await getCurrentUser();
+    const userId = user?.id;
+    const url = new URL(`${PYTHON_SERVICE_URL}/options/relay/test-futures`);
+    if (userId) url.searchParams.set("user_id", userId);
+
+    const response = await fetch(url.toString(), {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
