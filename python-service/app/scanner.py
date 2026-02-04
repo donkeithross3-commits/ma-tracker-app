@@ -129,6 +129,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.req_id_map = {}
         self.next_req_id = 1000
         self.data_ready = Event()
+        # Wait for all option-parameter callbacks (IB sends multiple + End)
+        self.sec_def_opt_params_done = Event()
+        self._sec_def_wait_req_id = None
 
         # Queue for handling callbacks
         self.data_queue = queue.Queue()
@@ -596,29 +599,42 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         print(f"Getting available expirations for {ticker} (contract ID: {contract_id})...")
 
-        # Request security definition option parameters
-        req_id = self.get_next_req_id()
-        self.req_id_map[req_id] = f"expirations_{ticker}"
+        for attempt in range(2):  # initial try + one retry for flaky symbols (e.g. EA)
+            if attempt > 0:
+                print(f"Retrying option parameters for {ticker} (attempt 2/2)...")
+                time.sleep(1)
 
-        logger.info(f"REQUESTING expirations with reqId={req_id}, stored as '{self.req_id_map[req_id]}'")
+            # Request security definition option parameters
+            req_id = self.get_next_req_id()
+            self.req_id_map[req_id] = f"expirations_{ticker}"
 
-        # Reset storage for new request
-        self.available_expirations = []
-        self.available_strikes = {}
+            logger.info(f"REQUESTING expirations with reqId={req_id}, stored as '{self.req_id_map[req_id]}'")
 
-        # Use proper IB API call - reqSecDefOptParams expects:
-        # reqId, underlyingSymbol, futFopExchange, underlyingSecType, underlyingConId
-        self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
+            # Reset storage for new request
+            self.available_expirations = []
+            self.available_strikes = {}
 
-        # Wait for response - 4s for slower symbols (e.g. EA)
-        time.sleep(4)
+            # Use proper IB API call - reqSecDefOptParams expects:
+            # reqId, underlyingSymbol, futFopExchange, underlyingSecType, underlyingConId
+            self._sec_def_wait_req_id = req_id
+            self.sec_def_opt_params_done.clear()
+            self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
+
+            # Wait for securityDefinitionOptionParameterEnd (all callbacks complete).
+            # IB sends multiple securityDefinitionOptionParameter callbacks then End.
+            if not self.sec_def_opt_params_done.wait(timeout=15):
+                print(f"Warning: Timeout (15s) waiting for option parameters for {ticker}")
+            self._sec_def_wait_req_id = None
+
+            if self.available_expirations:
+                print(f"Got {len(self.available_expirations)} expirations from IB")
+                print(f"Got strikes for {len(self.available_strikes)} expirations from IB")
+                break
+            if attempt == 0:
+                print(f"Warning: No option parameters for {ticker} on first try (contract ID: {contract_id})")
 
         if not self.available_expirations:
-            print(f"Warning: IB expiration lookup failed for {ticker} (contract ID: {contract_id})")
-        else:
-            print(f"Got {len(self.available_expirations)} expirations from IB")
-            print(f"Got strikes for {len(self.available_strikes)} expirations from IB")
-
+            print(f"Warning: IB expiration lookup failed for {ticker} (contract ID: {contract_id}) after 2 attempts")
         return self.available_expirations
 
     def securityDefinitionOptionParameter(self, reqId: int, exchange: str,
@@ -655,6 +671,13 @@ class IBMergerArbScanner(EWrapper, EClient):
         else:
             logger.warning(f"Skipping exchange {exchange} - reqId {reqId} not in map")
             print(f"Skipping exchange {exchange} - reqId not in map")
+
+    def securityDefinitionOptionParameterEnd(self, reqId: int):
+        """Called when all securityDefinitionOptionParameter callbacks are complete."""
+        if getattr(self, "_sec_def_wait_req_id", None) == reqId:
+            self.sec_def_opt_params_done.set()
+            logger = logging.getLogger(__name__)
+            logger.info(f"secDefOptParams complete for reqId={reqId}")
 
     def get_expiries(self, ticker: str, end_date: datetime) -> List[str]:
         """Get available expiries (simplified - in practice would get from IB)"""

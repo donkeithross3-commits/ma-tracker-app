@@ -103,6 +103,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.req_id_map = {}
         self.next_req_id = 1000
         self.data_ready = Event()
+        # Wait for all option-parameter callbacks (IB sends multiple + End)
+        self.sec_def_opt_params_done = Event()
+        self._sec_def_wait_req_id = None
         self.data_queue = queue.Queue()
         self.executor = ThreadPoolExecutor(max_workers=10)
         
@@ -279,22 +282,36 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self.option_chain[reqId]['delta'] = delta
 
     def get_available_expirations(self, ticker: str, contract_id: int = 0) -> List[str]:
-        """Get available option expirations from IB"""
+        """Get available option expirations and strikes from IB. Waits for End callback (all exchanges)."""
         print(f"Getting available expirations for {ticker}...")
 
-        req_id = self.get_next_req_id()
-        self.req_id_map[req_id] = f"expirations_{ticker}"
-        self.available_expirations = []
-        self.available_strikes = {}
+        for attempt in range(2):  # initial try + one retry for flaky symbols (e.g. EA)
+            if attempt > 0:
+                print(f"Retrying option parameters for {ticker} (attempt 2/2)...")
+                time.sleep(1)
 
-        self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
-        time.sleep(4)  # 4s for slower symbols (e.g. EA)
+            req_id = self.get_next_req_id()
+            self.req_id_map[req_id] = f"expirations_{ticker}"
+            self.available_expirations = []
+            self.available_strikes = {}
+
+            self._sec_def_wait_req_id = req_id
+            self.sec_def_opt_params_done.clear()
+            self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
+
+            # Wait for securityDefinitionOptionParameterEnd (all callbacks complete).
+            if not self.sec_def_opt_params_done.wait(timeout=15):
+                print(f"Warning: Timeout (15s) waiting for option parameters for {ticker}")
+            self._sec_def_wait_req_id = None
+
+            if self.available_expirations:
+                print(f"Got {len(self.available_expirations)} expirations from IB")
+                break
+            if attempt == 0:
+                print(f"Warning: No option parameters for {ticker} on first try")
 
         if not self.available_expirations:
-            print(f"Warning: IB expiration lookup failed for {ticker}")
-        else:
-            print(f"Got {len(self.available_expirations)} expirations from IB")
-
+            print(f"Warning: IB expiration lookup failed for {ticker} after 2 attempts")
         return self.available_expirations
 
     def securityDefinitionOptionParameter(self, reqId: int, exchange: str,
@@ -311,7 +328,9 @@ class IBMergerArbScanner(EWrapper, EClient):
                     self.available_strikes[exp] = strike_list
 
     def securityDefinitionOptionParameterEnd(self, reqId: int):
-        pass
+        """Called when all securityDefinitionOptionParameter callbacks are complete."""
+        if getattr(self, "_sec_def_wait_req_id", None) == reqId:
+            self.sec_def_opt_params_done.set()
 
     def get_third_friday(self, year: int, month: int) -> datetime:
         """Calculate third Friday of the month"""
@@ -322,6 +341,18 @@ class IBMergerArbScanner(EWrapper, EClient):
         else:
             third_friday = c[3][4]
         return datetime(year, month, third_friday)
+
+    def get_strikes_near_price(self, price: float, min_strike: float,
+                              max_strike: float, increment: float = 2.5) -> List[float]:
+        """Return strike prices at increment between min and max (fallback when IB returns no strikes)."""
+        strikes = []
+        start = int(min_strike / increment) * increment
+        end = int(max_strike / increment) * increment + increment
+        current = start
+        while current <= end:
+            strikes.append(current)
+            current += increment
+        return strikes
 
     def get_expiries(self, ticker: str, end_date: datetime) -> List[str]:
         """Get monthly expiries as fallback"""
@@ -383,18 +414,25 @@ class IBMergerArbScanner(EWrapper, EClient):
             lower_bound = deal_price_to_use * 0.75
             upper_bound = deal_price_to_use * 1.10
 
-            # Get strikes for each expiration
+            # Use only IB strikes when available (exact chain). Fallback only if IB returned no data.
             for expiry in selected_expiries:
-                if expiry in self.available_strikes:
+                if expiry in self.available_strikes and self.available_strikes[expiry]:
                     all_strikes = self.available_strikes[expiry]
                     strikes = [s for s in all_strikes if lower_bound <= s <= upper_bound]
-                    print(f"  {expiry}: {len(strikes)} strikes in range")
-                    
-                    for strike in strikes:
-                        for right in ['C', 'P']:
-                            opt = self.get_option_data(ticker, expiry, strike, right)
-                            if opt:
-                                options.append(opt)
+                    print(f"  {expiry}: {len(strikes)} strikes (exact from IB)")
+                else:
+                    # Only when IB returned no option params after wait+retry
+                    strikes = self.get_strikes_near_price(
+                        deal_price_to_use, lower_bound, upper_bound,
+                        increment=5.0 if deal_price_to_use > 50 else 2.5
+                    )
+                    print(f"  {expiry}: {len(strikes)} strikes (estimated - IB returned no strikes)")
+
+                for strike in strikes:
+                    for right in ['C', 'P']:
+                        opt = self.get_option_data(ticker, expiry, strike, right)
+                        if opt:
+                            options.append(opt)
 
         print(f"Fetched {len(options)} options total")
         return options
