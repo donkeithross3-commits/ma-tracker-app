@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { auth } from "@/auth";
 import type {
   WatchSpreadRequest,
   WatchSpreadResponse,
@@ -22,8 +23,11 @@ function generateLegSignature(legs: StrategyLeg[] | unknown): string {
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    const userId = session?.user?.id;
+    
     const body: WatchSpreadRequest = await request.json();
-    const { dealId: scannerDealId, strategy, underlyingPrice, notes } = body;
+    const { dealId: scannerDealId, strategy, underlyingPrice, notes, listIds, newListName } = body;
 
     if (!scannerDealId || !strategy) {
       return NextResponse.json(
@@ -111,8 +115,53 @@ export async function POST(request: NextRequest) {
           strategy.legs.length,
         status: "active",
         notes: notes || null,
+        curatedBy: userId || null,
+        isPublic: true, // All spreads are public by default
       },
     });
+
+    // Handle list assignments if user is logged in
+    if (userId) {
+      const listsToAdd: string[] = [...(listIds || [])];
+      
+      // Create new list if requested
+      if (newListName) {
+        const newList = await prisma.userDealList.create({
+          data: {
+            userId,
+            name: newListName,
+            isDefault: false,
+          },
+        });
+        listsToAdd.push(newList.id);
+      }
+      
+      // Add spread's deal to each selected list
+      for (const listId of listsToAdd) {
+        // Verify user owns this list
+        const list = await prisma.userDealList.findFirst({
+          where: { id: listId, userId },
+        });
+        
+        if (list) {
+          // Add the deal to the list (not the spread - lists contain deals)
+          await prisma.userDealListItem.upsert({
+            where: {
+              listId_dealId: {
+                listId,
+                dealId: scannerDealId,
+              },
+            },
+            create: {
+              listId,
+              dealId: scannerDealId,
+              notes: `Added via spread: ${strategy.strategyType}`,
+            },
+            update: {}, // Don't update if already exists
+          });
+        }
+      }
+    }
 
     const result: WatchSpreadResponse = {
       spreadId: spread.id,

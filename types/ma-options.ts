@@ -137,6 +137,8 @@ export interface WatchSpreadRequest {
   strategy: CandidateStrategy;
   underlyingPrice?: number;
   notes?: string;
+  listIds?: string[]; // User's deal lists to add this spread's deal to
+  newListName?: string; // Create a new list with this name
 }
 
 export interface WatchSpreadResponse {

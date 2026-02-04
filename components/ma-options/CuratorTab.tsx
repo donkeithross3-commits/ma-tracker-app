@@ -12,6 +12,7 @@ import ScannerDealSelector from "./ScannerDealSelector";
 import DealInfo, { type ScanParameters } from "./DealInfo";
 import OptionChainViewer from "./OptionChainViewer";
 import CandidateStrategiesTable from "./CandidateStrategiesTable";
+import { WatchSpreadModal } from "./WatchSpreadModal";
 import { useIBConnection } from "./IBConnectionContext";
 
 interface CuratorTabProps {
@@ -30,6 +31,10 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
   
   // Editable deal price for real-time metric recalculation
   const [editableDealPrice, setEditableDealPrice] = useState<number | null>(null);
+  
+  // Watch spread modal state
+  const [watchModalOpen, setWatchModalOpen] = useState(false);
+  const [pendingStrategy, setPendingStrategy] = useState<CandidateStrategy | null>(null);
   
   // Reset editable deal price when deal changes
   useEffect(() => {
@@ -170,34 +175,58 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
 
   const handleWatchSpread = async (strategy: CandidateStrategy) => {
     if (!selectedDeal) return;
+    
+    // Open modal to let user choose lists
+    setPendingStrategy(strategy);
+    setWatchModalOpen(true);
+  };
+  
+  const handleConfirmWatch = async (listIds: string[], newListName?: string) => {
+    if (!selectedDeal || !pendingStrategy) return;
 
-    try {
-      const response = await fetch("/api/ma-options/watch-spread", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dealId: selectedDeal.id,
-          strategy,
-          underlyingPrice: chainData?.spotPrice,
-        }),
-      });
+    const response = await fetch("/api/ma-options/watch-spread", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dealId: selectedDeal.id,
+        strategy: pendingStrategy,
+        underlyingPrice: chainData?.spotPrice,
+        listIds,
+        newListName,
+      }),
+    });
 
-      const data = await response.json();
+    const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to add to watchlist");
-      }
-
-      // Check for duplicate response
-      if (data.duplicate) {
-        alert(data.message || "This spread is already in your watchlist");
-        return;
-      }
-
-      alert("Added to watchlist!");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to add to watchlist");
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to add to watchlist");
     }
+
+    // Check for duplicate response
+    if (data.duplicate) {
+      throw new Error(data.message || "This spread is already in your watchlist");
+    }
+    
+    // Success - modal will close automatically
+    setPendingStrategy(null);
+  };
+  
+  // Generate spread description for modal
+  const getSpreadDescription = (strategy: CandidateStrategy): string => {
+    if (!selectedDeal) return "";
+    const legs = strategy.legs;
+    const expDate = new Date(strategy.expiration);
+    const expStr = expDate.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+    
+    if (legs.length === 1) {
+      const leg = legs[0];
+      return `${selectedDeal.ticker} ${leg.strike}${leg.right} ${expStr}`;
+    } else if (legs.length === 2) {
+      const strikes = legs.map(l => l.strike).sort((a, b) => a - b);
+      const type = legs[0].right === "C" ? "Call" : "Put";
+      return `${selectedDeal.ticker} ${strikes[0]}/${strikes[1]} ${type} Spread ${expStr}`;
+    }
+    return `${selectedDeal.ticker} ${strategy.strategyType} ${expStr}`;
   };
 
   const handleWatchSingleLeg = async (contract: OptionContract) => {
@@ -270,33 +299,9 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       notes: `Long ${contract.strike}${contract.right} @ $${cost.toFixed(2)} mid ($${costFarTouch.toFixed(2)} ask)`,
     };
 
-    try {
-      const response = await fetch("/api/ma-options/watch-spread", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dealId: selectedDeal.id,
-          strategy,
-          underlyingPrice: chainData.spotPrice,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to add to watchlist");
-      }
-
-      // Check for duplicate response
-      if (data.duplicate) {
-        alert(data.message || `${contract.strike}${contract.right} is already in your watchlist`);
-        return;
-      }
-
-      alert(`Added ${contract.strike}${contract.right} to watchlist!`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to add to watchlist");
-    }
+    // Open modal to let user choose lists
+    setPendingStrategy(strategy);
+    setWatchModalOpen(true);
   };
 
   // Helper to calculate liquidity score for a single contract
@@ -378,6 +383,17 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
         onSelectDeal={handleSelectDeal}
         onDealUpdated={handleDealUpdated}
         onDealDeleted={handleDealDeleted}
+      />
+      
+      {/* Watch Spread Modal */}
+      <WatchSpreadModal
+        isOpen={watchModalOpen}
+        onClose={() => {
+          setWatchModalOpen(false);
+          setPendingStrategy(null);
+        }}
+        onConfirm={handleConfirmWatch}
+        spreadDescription={pendingStrategy ? getSpreadDescription(pendingStrategy) : ""}
       />
     </div>
   );
