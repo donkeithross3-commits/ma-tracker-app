@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
         listsToAdd.push(newList.id);
       }
       
-      // Add spread's deal to each selected list
+      // Add the spread to each selected list
       for (const listId of listsToAdd) {
         // Verify user owns this list
         const list = await prisma.userDealList.findFirst({
@@ -144,18 +144,17 @@ export async function POST(request: NextRequest) {
         });
         
         if (list) {
-          // Add the deal to the list (not the spread - lists contain deals)
+          // Add the spread to the list
           await prisma.userDealListItem.upsert({
             where: {
-              listId_dealId: {
+              listId_spreadId: {
                 listId,
-                dealId: scannerDealId,
+                spreadId: spread.id,
               },
             },
             create: {
               listId,
-              dealId: scannerDealId,
-              notes: `Added via spread: ${strategy.strategyType}`,
+              spreadId: spread.id,
             },
             update: {}, // Don't update if already exists
           });

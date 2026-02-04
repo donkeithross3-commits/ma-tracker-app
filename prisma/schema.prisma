@@ -269,6 +269,7 @@ model WatchedSpread {
   updatedAt       DateTime    @updatedAt @map("updated_at")
   curator         User?       @relation(fields: [curatedBy], references: [id])
   scannerDeal     ScannerDeal @relation(fields: [scannerDealId], references: [id], onDelete: Cascade)
+  userListItems   UserDealListItem[]
 
   @@index([scannerDealId])
   @@index([status])
@@ -292,7 +293,6 @@ model ScannerDeal {
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
   watchedSpreads     WatchedSpread[]
-  userDealListItems  UserDealListItem[]
 
   @@index([isActive])
   @@index([ticker])
@@ -426,16 +426,16 @@ model UserDealList {
 }
 
 model UserDealListItem {
-  id        String       @id @default(uuid())
-  listId    String       @map("list_id")
-  list      UserDealList @relation(fields: [listId], references: [id], onDelete: Cascade)
-  dealId    String       @map("deal_id")
-  deal      ScannerDeal  @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  addedAt   DateTime     @default(now()) @map("added_at")
+  id        String        @id @default(uuid())
+  listId    String        @map("list_id")
+  list      UserDealList  @relation(fields: [listId], references: [id], onDelete: Cascade)
+  spreadId  String        @map("spread_id")
+  spread    WatchedSpread @relation(fields: [spreadId], references: [id], onDelete: Cascade)
+  addedAt   DateTime      @default(now()) @map("added_at")
   notes     String?
 
-  @@unique([listId, dealId])
+  @@unique([listId, spreadId])
   @@index([listId])
-  @@index([dealId])
+  @@index([spreadId])
   @@map("user_deal_list_items")
 }

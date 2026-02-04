@@ -3,35 +3,33 @@
 import { useState, useEffect } from "react";
 import { Plus, Folder, Trash2, Edit2, Check, X, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ScannerDeal } from "@/types/ma-options";
 
-interface DealList {
+interface SpreadList {
   id: string;
   name: string;
   isDefault: boolean;
   itemCount: number;
 }
 
-interface DealListItem {
+interface SpreadListItem {
   id: string;
-  dealId: string;
+  spreadId: string;
   ticker: string;
-  targetName: string | null;
-  expectedClosePrice: number;
-  expectedCloseDate: string;
-  addedByAlias: string | null;
+  strategyType: string;
+  expiration: string;
+  entryPremium: number;
+  maxProfit: number;
+  returnOnRisk: number;
+  status: string;
+  curatorAlias: string | null;
   notes: string | null;
   addedAt: string;
 }
 
-interface MyListsTabProps {
-  allDeals: ScannerDeal[];
-}
-
-export default function MyListsTab({ allDeals }: MyListsTabProps) {
-  const [lists, setLists] = useState<DealList[]>([]);
+export default function MyListsTab() {
+  const [lists, setLists] = useState<SpreadList[]>([]);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
-  const [listItems, setListItems] = useState<DealListItem[]>([]);
+  const [listItems, setListItems] = useState<SpreadListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,9 +41,6 @@ export default function MyListsTab({ allDeals }: MyListsTabProps) {
   // Rename list state
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
-
-  // Add deal state
-  const [showAddDeal, setShowAddDeal] = useState(false);
 
   // Fetch lists on mount
   useEffect(() => {
@@ -68,7 +63,7 @@ export default function MyListsTab({ allDeals }: MyListsTabProps) {
       const data = await response.json();
       setLists(data.lists);
       // Auto-select default list
-      const defaultList = data.lists.find((l: DealList) => l.isDefault);
+      const defaultList = data.lists.find((l: SpreadList) => l.isDefault);
       if (defaultList && !selectedListId) {
         setSelectedListId(defaultList.id);
       }
@@ -157,56 +152,32 @@ export default function MyListsTab({ allDeals }: MyListsTabProps) {
     }
   };
 
-  const handleAddDeal = async (dealId: string) => {
-    if (!selectedListId) return;
-
-    try {
-      const response = await fetch(`/api/user/deal-lists/${selectedListId}/items`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealId }),
-      });
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to add deal");
-      }
-      const data = await response.json();
-      setListItems((prev) => [data.item, ...prev]);
-      setLists((prev) =>
-        prev.map((l) =>
-          l.id === selectedListId ? { ...l, itemCount: l.itemCount + 1 } : l
-        )
-      );
-      setShowAddDeal(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add deal");
-    }
-  };
-
-  const handleRemoveDeal = async (dealId: string) => {
+  const handleRemoveSpread = async (spreadId: string) => {
     if (!selectedListId) return;
 
     try {
       await fetch(`/api/user/deal-lists/${selectedListId}/items`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealId }),
+        body: JSON.stringify({ spreadId }),
       });
-      setListItems((prev) => prev.filter((item) => item.dealId !== dealId));
+      setListItems((prev) => prev.filter((item) => item.spreadId !== spreadId));
       setLists((prev) =>
         prev.map((l) =>
           l.id === selectedListId ? { ...l, itemCount: Math.max(0, l.itemCount - 1) } : l
         )
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove deal");
+      setError(err instanceof Error ? err.message : "Failed to remove spread");
     }
   };
 
-  // Get deals not already in the selected list
-  const availableDeals = allDeals.filter(
-    (deal) => !listItems.some((item) => item.dealId === deal.id)
-  );
+  // Format strategy type for display
+  const formatStrategyType = (type: string): string => {
+    return type
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  };
 
   if (isLoading) {
     return (
@@ -347,43 +318,10 @@ export default function MyListsTab({ allDeals }: MyListsTabProps) {
               <h3 className="text-lg font-medium text-gray-100">
                 {lists.find((l) => l.id === selectedListId)?.name}
               </h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowAddDeal(!showAddDeal)}
-                className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700"
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                Add Deal
-              </Button>
+              <p className="text-sm text-gray-400">
+                Add spreads to this list when watching them in the Curate tab
+              </p>
             </div>
-
-            {showAddDeal && (
-              <div className="mb-3 p-3 bg-gray-800 border border-gray-700 rounded">
-                <div className="text-sm text-gray-400 mb-2">
-                  Select a deal to add to this list:
-                </div>
-                <div className="max-h-48 overflow-y-auto space-y-1">
-                  {availableDeals.map((deal) => (
-                    <button
-                      key={deal.id}
-                      onClick={() => handleAddDeal(deal.id)}
-                      className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-gray-700 flex items-center justify-between"
-                    >
-                      <span className="font-mono">{deal.ticker}</span>
-                      <span className="text-gray-500 text-xs">
-                        ${deal.expectedClosePrice.toFixed(2)} • {deal.expectedCloseDate}
-                      </span>
-                    </button>
-                  ))}
-                  {availableDeals.length === 0 && (
-                    <div className="text-center py-2 text-gray-500 text-sm">
-                      All deals are already in this list
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
 
             {error && (
               <div className="mb-3 text-red-400 text-sm bg-red-900/20 border border-red-800 rounded px-3 py-2">
@@ -408,16 +346,25 @@ export default function MyListsTab({ allDeals }: MyListsTabProps) {
                         Ticker
                       </th>
                       <th className="text-left py-2 px-2 text-gray-400 font-medium">
-                        Target
+                        Strategy
                       </th>
                       <th className="text-right py-2 px-2 text-gray-400 font-medium">
-                        Deal Price
+                        Expiration
                       </th>
                       <th className="text-right py-2 px-2 text-gray-400 font-medium">
-                        Close Date
+                        Entry
+                      </th>
+                      <th className="text-right py-2 px-2 text-gray-400 font-medium">
+                        Max Profit
+                      </th>
+                      <th className="text-right py-2 px-2 text-gray-400 font-medium">
+                        RoR
                       </th>
                       <th className="text-center py-2 px-2 text-gray-400 font-medium">
-                        Added By
+                        Status
+                      </th>
+                      <th className="text-center py-2 px-2 text-gray-400 font-medium">
+                        By
                       </th>
                       <th className="text-center py-2 px-2 text-gray-400 font-medium">
                         Actions
@@ -433,21 +380,40 @@ export default function MyListsTab({ allDeals }: MyListsTabProps) {
                         <td className="py-2 px-2 text-gray-100 font-mono">
                           {item.ticker}
                         </td>
-                        <td className="py-2 px-2 text-gray-300">
-                          {item.targetName || "—"}
-                        </td>
-                        <td className="py-2 px-2 text-right text-gray-100 font-mono">
-                          ${item.expectedClosePrice.toFixed(2)}
+                        <td className="py-2 px-2 text-gray-300 text-xs">
+                          {formatStrategyType(item.strategyType)}
                         </td>
                         <td className="py-2 px-2 text-right text-gray-300 font-mono text-xs">
-                          {item.expectedCloseDate}
+                          {item.expiration}
+                        </td>
+                        <td className="py-2 px-2 text-right text-gray-100 font-mono">
+                          ${item.entryPremium.toFixed(2)}
+                        </td>
+                        <td className="py-2 px-2 text-right text-green-400 font-mono">
+                          ${item.maxProfit.toFixed(2)}
+                        </td>
+                        <td className="py-2 px-2 text-right text-blue-400 font-mono">
+                          {(item.returnOnRisk * 100).toFixed(0)}%
+                        </td>
+                        <td className="py-2 px-2 text-center">
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs ${
+                              item.status === "active"
+                                ? "bg-green-900/30 text-green-400"
+                                : item.status === "closed"
+                                ? "bg-gray-700 text-gray-400"
+                                : "bg-yellow-900/30 text-yellow-400"
+                            }`}
+                          >
+                            {item.status}
+                          </span>
                         </td>
                         <td className="py-2 px-2 text-center text-xs text-gray-400">
-                          {item.addedByAlias || "—"}
+                          {item.curatorAlias || "—"}
                         </td>
                         <td className="py-2 px-2 text-center">
                           <button
-                            onClick={() => handleRemoveDeal(item.dealId)}
+                            onClick={() => handleRemoveSpread(item.spreadId)}
                             className="text-gray-500 hover:text-red-400"
                             title="Remove from list"
                           >
@@ -461,7 +427,11 @@ export default function MyListsTab({ allDeals }: MyListsTabProps) {
 
                 {listItems.length === 0 && (
                   <div className="text-center py-8 text-gray-500 text-sm">
-                    No deals in this list yet. Click &quot;Add Deal&quot; to get started.
+                    No spreads in this list yet.
+                    <br />
+                    <span className="text-gray-600">
+                      When you watch a spread in the Curate tab, you can add it to this list.
+                    </span>
                   </div>
                 )}
               </div>

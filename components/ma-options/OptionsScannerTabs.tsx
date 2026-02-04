@@ -52,7 +52,7 @@ export default function OptionsScannerTabs({
       </Tabs.Content>
 
       <Tabs.Content value="my-lists">
-        <MyListsTab allDeals={deals} />
+        <MyListsTab />
       </Tabs.Content>
     </Tabs.Root>
   );

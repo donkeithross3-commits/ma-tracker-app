@@ -28,9 +28,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       include: {
         items: {
           include: {
-            deal: {
+            spread: {
               include: {
-                addedBy: { select: { alias: true } },
+                scannerDeal: true,
+                curator: { select: { alias: true } },
               },
             },
           },
@@ -53,12 +54,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
       items: list.items.map((item) => ({
         id: item.id,
-        dealId: item.dealId,
-        ticker: item.deal.ticker,
-        targetName: item.deal.targetName,
-        expectedClosePrice: item.deal.expectedClosePrice.toNumber(),
-        expectedCloseDate: item.deal.expectedCloseDate.toISOString().split("T")[0],
-        addedByAlias: item.deal.addedBy?.alias || null,
+        spreadId: item.spreadId,
+        ticker: item.spread.scannerDeal.ticker,
+        strategyType: item.spread.strategyType,
+        expiration: item.spread.expiration.toISOString().split("T")[0],
+        entryPremium: item.spread.entryPremium.toNumber(),
+        maxProfit: item.spread.maxProfit.toNumber(),
+        returnOnRisk: item.spread.returnOnRisk.toNumber(),
+        status: item.spread.status,
+        curatorAlias: item.spread.curator?.alias || null,
         notes: item.notes,
         addedAt: item.addedAt.toISOString(),
       })),
