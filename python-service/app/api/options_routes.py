@@ -553,6 +553,7 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
     try:
         registry = get_registry()
         status = registry.get_status()
+        logger.info(f"relay_test_futures: user_id param={user_id!r}, providers={status['providers_connected']}")
         
         if status["providers_connected"] == 0:
             raise HTTPException(
@@ -561,9 +562,10 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
             )
         
         # If user_id provided, try to route to that user's agent first
-        target_user_id = user_id
+        target_user_id = user_id.strip() if user_id else None
         if target_user_id:
             provider = await registry.get_active_provider(user_id=target_user_id)
+            logger.info(f"relay_test_futures: get_active_provider(user_id={target_user_id!r}) -> provider_id={getattr(provider, 'provider_id', None) if provider else None}")
             if provider:
                 try:
                     # Quick ib_status check for this provider

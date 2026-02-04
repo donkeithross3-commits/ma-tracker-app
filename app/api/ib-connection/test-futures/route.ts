@@ -7,9 +7,10 @@ const PYTHON_SERVICE_URL =
 export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser();
-    const userId = user?.id;
+    const userId = user?.id ?? null;
     const url = new URL(`${PYTHON_SERVICE_URL}/options/relay/test-futures`);
-    if (userId) url.searchParams.set("user_id", userId);
+    if (userId) url.searchParams.set("user_id", String(userId));
+    console.log("[test-futures] user_id for routing:", userId ?? "(none)");
 
     const response = await fetch(url.toString(), {
       method: "GET",

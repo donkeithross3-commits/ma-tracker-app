@@ -25,7 +25,9 @@ export default function IBConnectionStatus() {
     setIsFetchingFutures(true);
     setFuturesQuote(null);
     try {
-      const response = await fetch("/api/ib-connection/test-futures");
+      const response = await fetch("/api/ib-connection/test-futures", {
+        credentials: "include",
+      });
       const data = await response.json();
       setFuturesQuote(data);
     } catch (error) {

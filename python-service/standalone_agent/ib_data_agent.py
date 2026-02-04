@@ -257,16 +257,27 @@ class IBDataAgent:
             self.scanner.tickPrice = handle_tick
             self.scanner.reqMktData(req_id, contract, "", True, False, [])
             
-            for _ in range(50):
+            # Wait up to 10s for data; accept if we have last or (bid and ask)
+            for _ in range(100):
                 time.sleep(0.1)
-                if data_received and futures_data["bid"] and futures_data["ask"]:
+                if data_received:
+                    if futures_data["bid"] and futures_data["ask"]:
+                        break
+                    if futures_data["last"] is not None:
+                        break
+                if futures_data["bid"] or futures_data["ask"] or futures_data["last"]:
                     break
             
             self.scanner.cancelMktData(req_id)
             self.scanner.tickPrice = original_tickPrice
             
-            if not data_received and not futures_data["bid"]:
-                return {"error": "No futures data received - market may be closed"}
+            has_any = (
+                futures_data["bid"] is not None
+                or futures_data["ask"] is not None
+                or futures_data["last"] is not None
+            )
+            if not data_received and not has_any:
+                return {"error": "No futures data received - market may be closed or check TWS market data permissions for CME"}
             
             month_codes = {3: 'H', 6: 'M', 9: 'U', 12: 'Z'}
             year_digit = contract_month[3]
@@ -274,14 +285,18 @@ class IBDataAgent:
             month_code = month_codes.get(month_num, '?')
             contract_name = f"ES{month_code}{year_digit}"
             
+            bid = futures_data["bid"]
+            ask = futures_data["ask"]
+            last = futures_data["last"]
+            mid = (bid + ask) / 2 if bid is not None and ask is not None else (last if last is not None else None)
             return {
                 "success": True,
                 "contract": contract_name,
                 "contract_month": contract_month,
-                "bid": futures_data["bid"],
-                "ask": futures_data["ask"],
-                "last": futures_data["last"],
-                "mid": (futures_data["bid"] + futures_data["ask"]) / 2 if futures_data["bid"] and futures_data["ask"] else None,
+                "bid": bid,
+                "ask": ask,
+                "last": last,
+                "mid": mid,
                 "timestamp": datetime.now().isoformat()
             }
         except Exception as e:
