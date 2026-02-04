@@ -76,49 +76,51 @@ export async function POST(request: NextRequest) {
     });
 
     // Check if any existing spread has the same leg signature
+    let spread: { id: string } | null = null;
+    let isExisting = false;
+    
     for (const existing of existingSpreads) {
       const existingLegSig = generateLegSignature(existing.legs);
       if (existingLegSig === newLegSignature) {
-        console.log("DEBUG: Found duplicate spread:", existing.id);
-        return NextResponse.json({
-          spreadId: existing.id,
-          success: false,
-          duplicate: true,
-          message: "This spread is already in your watchlist",
-        });
+        console.log("DEBUG: Found existing spread:", existing.id);
+        spread = existing;
+        isExisting = true;
+        break;
       }
     }
 
-    // No duplicate found, create the spread
-    const spread = await prisma.watchedSpread.create({
-      data: {
-        scannerDealId,
-        strategyType: strategy.strategyType,
-        expiration: expirationDate,
-        legs: strategy.legs as any,
-        entryPremium: strategy.netPremium,
-        maxProfit: strategy.maxProfit,
-        maxLoss: strategy.maxLoss,
-        returnOnRisk: strategy.returnOnRisk,
-        annualizedYield: strategy.annualizedYield,
-        underlyingPrice: underlyingPrice || null,
-        avgBidAskSpread:
-          strategy.legs.reduce(
-            (sum, leg) => sum + (leg.ask - leg.bid) / leg.mid,
-            0
-          ) / strategy.legs.length,
-        avgVolume:
-          strategy.legs.reduce((sum, leg) => sum + leg.volume, 0) /
-          strategy.legs.length,
-        avgOpenInterest:
-          strategy.legs.reduce((sum, leg) => sum + leg.openInterest, 0) /
-          strategy.legs.length,
-        status: "active",
-        notes: notes || null,
-        curatedBy: userId || null,
-        isPublic: true, // All spreads are public by default
-      },
-    });
+    // If no existing spread found, create a new one
+    if (!spread) {
+      spread = await prisma.watchedSpread.create({
+        data: {
+          scannerDealId,
+          strategyType: strategy.strategyType,
+          expiration: expirationDate,
+          legs: strategy.legs as any,
+          entryPremium: strategy.netPremium,
+          maxProfit: strategy.maxProfit,
+          maxLoss: strategy.maxLoss,
+          returnOnRisk: strategy.returnOnRisk,
+          annualizedYield: strategy.annualizedYield,
+          underlyingPrice: underlyingPrice || null,
+          avgBidAskSpread:
+            strategy.legs.reduce(
+              (sum, leg) => sum + (leg.ask - leg.bid) / leg.mid,
+              0
+            ) / strategy.legs.length,
+          avgVolume:
+            strategy.legs.reduce((sum, leg) => sum + leg.volume, 0) /
+            strategy.legs.length,
+          avgOpenInterest:
+            strategy.legs.reduce((sum, leg) => sum + leg.openInterest, 0) /
+            strategy.legs.length,
+          status: "active",
+          notes: notes || null,
+          curatedBy: userId || null,
+          isPublic: true, // All spreads are public by default
+        },
+      });
+    }
 
     // Handle list assignments if user is logged in
     if (userId) {
@@ -165,6 +167,8 @@ export async function POST(request: NextRequest) {
     const result: WatchSpreadResponse = {
       spreadId: spread.id,
       success: true,
+      // Let the client know if this was an existing spread (already in All Spreads)
+      ...(isExisting && { existing: true, message: "Spread already in All Spreads, added to your list(s)" }),
     };
 
     return NextResponse.json(result);
