@@ -387,21 +387,9 @@ class IBMergerArbScanner(EWrapper, EClient):
             print(f"Warning: Could not resolve contract ID for {ticker}, trying with ID=0")
             contract_id = 0
 
-        # Create underlying contract for option chain request
-        underlying = Contract()
-        underlying.symbol = ticker
-        underlying.secType = "STK"
-        underlying.exchange = "SMART"
-        underlying.currency = "USD"
-
-        # Request security definition option parameters
-        req_id = self.get_next_req_id()
-        self.req_id_map[req_id] = f"option_chain_{ticker}"
-
-        self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
-
-        # Wait for response - increased from 1s to 2s for better reliability
-        time.sleep(2)
+        # Expirations/strikes are requested once inside get_available_expirations() below.
+        # Do NOT call reqSecDefOptParams here: a second request would clear the first
+        # response and some symbols (e.g. EA) may only get one callback from IB.
 
         # Now request specific option contracts - LIMITED
         options = []
@@ -622,8 +610,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         # reqId, underlyingSymbol, futFopExchange, underlyingSecType, underlyingConId
         self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
 
-        # Wait for response - increased from 2s to 3s for better reliability
-        time.sleep(3)
+        # Wait for response - 4s for slower symbols (e.g. EA)
+        time.sleep(4)
 
         if not self.available_expirations:
             print(f"Warning: IB expiration lookup failed for {ticker} (contract ID: {contract_id})")

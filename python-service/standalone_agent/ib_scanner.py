@@ -288,7 +288,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.available_strikes = {}
 
         self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
-        time.sleep(3)
+        time.sleep(4)  # 4s for slower symbols (e.g. EA)
 
         if not self.available_expirations:
             print(f"Warning: IB expiration lookup failed for {ticker}")
@@ -347,10 +347,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         if not contract_id:
             contract_id = 0
 
-        req_id = self.get_next_req_id()
-        self.req_id_map[req_id] = f"option_chain_{ticker}"
-        self.reqSecDefOptParams(req_id, ticker, "", "STK", contract_id)
-        time.sleep(2)
+        # Expirations/strikes are requested once in get_available_expirations().
+        # Do not call reqSecDefOptParams here or the second request can clear the first response.
 
         options = []
         price_to_use = current_price or self.underlying_price
