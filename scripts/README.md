@@ -2,6 +2,23 @@
 
 This directory contains utility scripts for the KRJ dashboard deployment.
 
+## check-relay-status.sh
+
+**Purpose:** Debug WebSocket relay and IB status when the local agent is connected but the dashboard shows "Disconnected".
+
+**Usage (on the droplet, with the user's agent running):**
+```bash
+ssh droplet
+cd ~/apps/ma-tracker-app
+PYTHON_URL=http://localhost:8000 ./scripts/check-relay-status.sh
+```
+
+**Output:** Registry (who is connected), IB status (does any provider report IB connected). See `docs/RELAY_STATUS_DEBUG.md` for how to interpret results.
+
+**See Also:** `docs/RELAY_STATUS_DEBUG.md`
+
+---
+
 ## run_krj_batch.py
 
 **Purpose:** Copy latest KRJ signal files from input directory to output directory and generate metadata.

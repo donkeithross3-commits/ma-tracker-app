@@ -6,6 +6,8 @@ import path from "path";
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
+const RELAY_STATUS_TIMEOUT_MS = 15000; // 15s (relay may query multiple providers, 5s each)
+
 /**
  * Check WebSocket relay provider status
  */
@@ -13,25 +15,49 @@ async function checkRelayProviderStatus(): Promise<{
   connected: boolean;
   providers?: any[];
   message?: string;
+  relayError?: string; // Set when relay returned an error or fetch failed (for debugging)
 }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RELAY_STATUS_TIMEOUT_MS);
   try {
-    const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/ib-status`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    });
+    const response = await fetch(
+      `${PYTHON_SERVICE_URL}/options/relay/ib-status`,
+      {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+      }
+    );
+    clearTimeout(timeoutId);
 
+    const text = await response.text();
     if (!response.ok) {
-      return { connected: false };
+      return {
+        connected: false,
+        relayError: `relay ${response.status}: ${text.slice(0, 200)}`,
+      };
     }
 
-    const data = await response.json();
+    let data: { connected?: boolean; providers?: any[]; message?: string };
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return { connected: false, relayError: "relay invalid JSON" };
+    }
+
     return {
-      connected: data.connected,
+      connected: Boolean(data.connected),
       providers: data.providers,
       message: data.message,
     };
   } catch (error) {
-    return { connected: false };
+    clearTimeout(timeoutId);
+    const message =
+      error instanceof Error ? error.message : String(error);
+    return {
+      connected: false,
+      relayError: message.includes("abort") ? "relay timeout" : message,
+    };
   }
 }
 
@@ -94,6 +120,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // If relay check failed with a specific error, surface it for debugging
+    const relayError = relayStatus.relayError;
+
     // 2. Test local IB TWS connection
     const ibConnected = await testIBConnection();
     
@@ -121,7 +150,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       connected: false,
       source: "none",
-      message: "No IB connection available. Start the local agent or ensure TWS is running.",
+      message:
+        relayError ||
+        "No IB connection available. Start the local agent or ensure TWS is running.",
+      relayError: relayError || undefined,
     });
   } catch (error) {
     return NextResponse.json({

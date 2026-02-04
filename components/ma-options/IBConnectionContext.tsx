@@ -6,6 +6,7 @@ interface IBConnectionContextType {
   isConnected: boolean;
   isChecking: boolean;
   lastChecked: Date | null;
+  lastMessage?: string; // From status API (e.g. relay error when disconnected)
   checkConnection: () => Promise<void>;
 }
 
@@ -15,6 +16,7 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [lastMessage, setLastMessage] = useState<string | undefined>(undefined);
   const hasInitialized = useRef(false);
 
   const checkConnection = async (forceReconnect: boolean = false) => {
@@ -35,6 +37,7 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
         if (reconnectResponse.ok) {
           const data = await reconnectResponse.json();
           setIsConnected(data.connected);
+          setLastMessage(data.message);
           setLastChecked(new Date());
           hasInitialized.current = true;
           setIsChecking(false);
@@ -47,12 +50,15 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
       if (response.ok) {
         const data = await response.json();
         setIsConnected(data.connected);
+        setLastMessage(data.message ?? data.relayError);
         setLastChecked(new Date());
       } else {
         setIsConnected(false);
+        setLastMessage(undefined);
       }
     } catch (error) {
       setIsConnected(false);
+      setLastMessage(undefined);
     } finally {
       hasInitialized.current = true;
       setIsChecking(false);
@@ -67,7 +73,7 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <IBConnectionContext.Provider value={{ isConnected, isChecking, lastChecked, checkConnection }}>
+    <IBConnectionContext.Provider value={{ isConnected, isChecking, lastChecked, lastMessage, checkConnection }}>
       {children}
     </IBConnectionContext.Provider>
   );

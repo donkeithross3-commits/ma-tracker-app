@@ -626,6 +626,25 @@ async def relay_test_futures():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/relay/registry")
+async def relay_registry():
+    """
+    Return current relay registry state (connected providers) without querying IB.
+    Use this to verify that an agent is registered (e.g. for debugging dashboard not seeing a new user).
+    """
+    try:
+        registry = get_registry()
+        status = registry.get_status()
+        return {
+            "providers_connected": status["providers_connected"],
+            "providers": status["providers"],
+            "pending_requests": status["pending_requests"],
+        }
+    except Exception as e:
+        logger.error(f"Relay registry error: {e}")
+        return {"providers_connected": 0, "providers": [], "error": str(e)}
+
+
 @router.get("/relay/ib-status")
 async def relay_ib_status():
     """
@@ -639,16 +658,20 @@ async def relay_ib_status():
         status = registry.get_status()
         
         if status["providers_connected"] == 0:
+            logger.info("relay_ib_status: no providers connected")
             return {
                 "connected": False,
                 "source": "relay",
                 "message": "No IB data provider connected"
             }
         
+        logger.info(f"relay_ib_status: querying {status['providers_connected']} provider(s)")
+        
         # Query ALL providers for their IB status
         # Return connected=true if ANY provider has IB connected
         connected_provider = None
         all_responses = []
+        loop = asyncio.get_running_loop()
         
         for provider_info in status["providers"]:
             provider_id = provider_info["id"]
@@ -658,11 +681,12 @@ async def relay_ib_status():
                 # Get the actual provider object
                 provider = await registry.get_provider_by_id(provider_id)
                 if not provider:
+                    logger.warning(f"relay_ib_status: provider {provider_id} no longer in registry, skipping")
                     continue
                     
                 # Send ib_status request to this specific provider
                 request_id = str(uuid.uuid4())
-                future = asyncio.get_event_loop().create_future()
+                future = loop.create_future()
                 
                 pending = PendingRequest(
                     request_id=request_id,
@@ -682,14 +706,18 @@ async def relay_ib_status():
                 # Wait for response with short timeout
                 try:
                     response_data = await asyncio.wait_for(future, timeout=5.0)
+                    # Defensive: agent may send success=True but data=None in edge cases
+                    if response_data is None:
+                        response_data = {}
+                    is_connected = response_data.get("connected", False)
                     all_responses.append({
                         "provider_id": provider_id,
                         "user_id": user_id,
-                        "connected": response_data.get("connected", False)
+                        "connected": is_connected
                     })
-                    
-                    if response_data.get("connected"):
+                    if is_connected:
                         connected_provider = provider_id
+                    logger.info(f"relay_ib_status: provider {provider_id} (user={user_id}) -> connected={is_connected}")
                 except asyncio.TimeoutError:
                     all_responses.append({
                         "provider_id": provider_id,
@@ -697,6 +725,7 @@ async def relay_ib_status():
                         "connected": False,
                         "error": "timeout"
                     })
+                    logger.warning(f"relay_ib_status: provider {provider_id} (user={user_id}) -> timeout")
                 finally:
                     await registry.remove_pending_request(request_id)
                     
@@ -711,6 +740,7 @@ async def relay_ib_status():
         
         # Return connected if ANY provider has IB connected
         is_connected = connected_provider is not None
+        logger.info(f"relay_ib_status: result connected={is_connected} (connected_provider={connected_provider})")
         
         return {
             "connected": is_connected,

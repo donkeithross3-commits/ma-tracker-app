@@ -15,7 +15,7 @@ interface FuturesQuote {
 }
 
 export default function IBConnectionStatus() {
-  const { isConnected, isChecking, checkConnection } = useIBConnection();
+  const { isConnected, isChecking, lastMessage, checkConnection } = useIBConnection();
   const [futuresQuote, setFuturesQuote] = useState<FuturesQuote | null>(null);
   const [isFetchingFutures, setIsFetchingFutures] = useState(false);
   const [showAgentModal, setShowAgentModal] = useState(false);
@@ -76,7 +76,7 @@ export default function IBConnectionStatus() {
                 ? "bg-green-500"
                 : "bg-red-500"
             }`}
-            title={isConnected ? "IB TWS connected" : "IB TWS not connected"}
+            title={isConnected ? "IB TWS connected" : lastMessage || "IB TWS not connected"}
           ></div>
           <span
             className={
@@ -86,7 +86,7 @@ export default function IBConnectionStatus() {
                 ? "text-green-400"
                 : "text-red-400"
             }
-            title={isConnected ? "IB TWS connected" : "IB TWS not connected"}
+            title={isConnected ? "IB TWS connected" : lastMessage || "IB TWS not connected"}
           >
             {showInitialLoading
               ? "Checking..."

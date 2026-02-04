@@ -93,7 +93,7 @@ Defined in `auth.config.ts` under `isInternalAPI`:
 - `/api/ma-options/download-agent-update` - Called by agent for updates (uses API key param)
 
 ### Troubleshooting
-- **Agent shows connected but dashboard says disconnected**: Check `/relay/ib-status` is querying all providers
+- **Agent shows connected but dashboard says disconnected**: (1) Call `GET /api/ib-connection/relay-registry` (or `GET /options/relay/registry` on Python). If `providers_connected` is 0, the agent is not registered (wrong RELAY_URL or auth failed). If > 0, call `GET /options/relay/ib-status` and check `provider_statuses` for timeout/error. (2) Python relay must run with a single uvicorn worker (in-memory registry is per-process). (3) Hover the red status dot for the last error (e.g. relay timeout).
 - **Update downloads but extraction fails**: Check ZIP is valid (not HTML error page), file size > 1KB
 - **Version always shows update available**: Check for whitespace in version.txt (use printf, not echo)
 
