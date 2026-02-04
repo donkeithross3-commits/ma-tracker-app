@@ -13,8 +13,13 @@ services:
       # KRJ data directory - read-only for safety
       # CRITICAL: This path must not change - KRJ data flow depends on it
       - ./data/krj:/app/data/krj:ro
+    # So the container can reach the host (where Python runs on port 8000)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - NODE_ENV=production
+      # Dashboard must reach Python service on host (relay, IB status, options, etc.)
+      - PYTHON_SERVICE_URL=http://host.docker.internal:8000
     # Load environment variables from .env.local
     # Must contain: KRJ_BASIC_USER, KRJ_BASIC_PASS, DATABASE_URL
     env_file:
