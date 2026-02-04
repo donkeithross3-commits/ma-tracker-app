@@ -107,9 +107,11 @@ except Exception as e:
 }
 
 export async function GET(request: NextRequest) {
+  const pyUrl = process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
   try {
     // 1. Check WebSocket relay provider first (preferred for remote setups)
     const relayStatus = await checkRelayProviderStatus();
+    console.log("[ib-connection/status] PYTHON_SERVICE_URL=", pyUrl, "relayConnected=", relayStatus.connected, "relayError=", relayStatus.relayError ?? "none");
     
     if (relayStatus.connected) {
       return NextResponse.json({
