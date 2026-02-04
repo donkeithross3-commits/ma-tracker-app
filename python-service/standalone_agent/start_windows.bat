@@ -133,9 +133,9 @@ if !UPDATE_AVAILABLE!==1 (
         call :download_update
         if !UPDATE_SUCCESS!==1 (
             echo.
-            echo Update complete! Please restart the agent.
+            echo Restarting with new version...
             echo.
-            pause
+            "%~f0"
             exit /b 0
         )
     )
@@ -166,7 +166,7 @@ if exist "%BUNDLED_PYTHON%" (
     echo Press Ctrl+C to stop
     echo ============================================
     echo.
-    "%BUNDLED_PYTHON%" "%SCRIPT_DIR%ib_data_agent.py"
+    "%BUNDLED_PYTHON%" "%SCRIPT_DIR%run_agent.py"
     goto :end
 )
 
@@ -210,7 +210,7 @@ echo Starting IB Data Agent...
 echo Press Ctrl+C to stop
 echo ============================================
 echo.
-python "%SCRIPT_DIR%ib_data_agent.py"
+python "%SCRIPT_DIR%run_agent.py"
 goto :end
 
 :nopython

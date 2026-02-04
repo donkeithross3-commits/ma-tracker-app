@@ -59,9 +59,6 @@ if (Test-Path $exePath) {
     Write-Host "============================================"
     Write-Host ""
     & $exePath
-    Write-Host ""
-    Write-Host "Agent stopped."
-    Read-Host "Press Enter to exit"
     exit 0
 }
 
@@ -78,12 +75,8 @@ if (Test-Path $bundledPython) {
     Write-Host "============================================"
     Write-Host ""
     
-    $agentPath = Join-Path $ScriptDir "ib_data_agent.py"
-    & $bundledPython $agentPath
-    
-    Write-Host ""
-    Write-Host "Agent stopped."
-    Read-Host "Press Enter to exit"
+    $runAgentPath = Join-Path $ScriptDir "run_agent.py"
+    & $bundledPython $runAgentPath
     exit 0
 }
 
@@ -150,10 +143,6 @@ Write-Host "Press Ctrl+C to stop"
 Write-Host "============================================"
 Write-Host ""
 
-# Run the agent
-$agentPath = Join-Path $ScriptDir "ib_data_agent.py"
-python $agentPath
-
-Write-Host ""
-Write-Host "Agent stopped."
-Read-Host "Press Enter to exit"
+# Run the agent (run_agent.py exec's into agent for clean Ctrl+C exit)
+$runAgentPath = Join-Path $ScriptDir "run_agent.py"
+python $runAgentPath

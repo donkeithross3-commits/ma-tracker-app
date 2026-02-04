@@ -67,6 +67,7 @@ export async function GET(request: NextRequest) {
     // Add files (NOT including config.env - user keeps their existing one)
     const filesToInclude = [
       "ib_data_agent.py",
+      "run_agent.py",
       "ib_scanner.py",
       "install.py",
       "requirements.txt",

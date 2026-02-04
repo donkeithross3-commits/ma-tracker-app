@@ -152,10 +152,11 @@ download_update() {
     
     # Create temp directory
     TEMP_DIR=$(mktemp -d)
-    ZIP_PATH="$TEMP_DIR/ib-data-agent.zip"
+    ZIP_PATH="$TEMP_DIR/ib-data-agent-update.zip"
     
-    # Download
-    curl -s -o "$ZIP_PATH" "https://dr3-dashboard.com/api/ma-options/download-agent"
+    # Download (update endpoint uses API key; preserves config.env on extract)
+    UPDATE_URL="https://dr3-dashboard.com/api/ma-options/download-agent-update?key=${IB_PROVIDER_KEY}"
+    curl -s -o "$ZIP_PATH" "$UPDATE_URL"
     
     if [ ! -f "$ZIP_PATH" ]; then
         echo "ERROR: Failed to download update"
@@ -196,8 +197,9 @@ download_update() {
     
     echo "✅ Update installed successfully!"
     echo ""
-    echo "Please restart the agent to use the new version."
-    exit 0
+    echo "Restarting with new version..."
+    echo ""
+    exec "$0"
 }
 
 check_for_updates
@@ -223,8 +225,5 @@ echo "Press Ctrl+C to stop"
 echo "============================================"
 echo ""
 
-# Run the agent
-python3 "$SCRIPT_DIR/ib_data_agent.py"
-
-echo ""
-echo "Agent stopped."
+# Run the agent (exec so Ctrl+C goes to agent only, no shell prompt)
+exec python3 "$SCRIPT_DIR/ib_data_agent.py"

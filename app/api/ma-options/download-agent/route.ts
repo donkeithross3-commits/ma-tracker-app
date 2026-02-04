@@ -75,6 +75,7 @@ export async function GET() {
     // When users extract "ib-data-agent.zip", Windows creates "ib-data-agent/" folder
     const filesToInclude = [
       "ib_data_agent.py",
+      "run_agent.py",
       "ib_scanner.py",
       "install.py",
       "requirements.txt",
