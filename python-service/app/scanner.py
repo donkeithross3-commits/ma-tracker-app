@@ -132,6 +132,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Wait for all option-parameter callbacks (IB sends multiple + End)
         self.sec_def_opt_params_done = Event()
         self._sec_def_wait_req_id = None
+        # Wait for contract details end
+        self.contract_details_done = Event()
+        self._contract_details_wait_req_id = None
 
         # Queue for handling callbacks
         self.data_queue = queue.Queue()
@@ -247,8 +250,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         return req_id
 
     def resolve_contract(self, ticker: str) -> Optional[int]:
-        """Resolve stock contract to get contract ID"""
-        print(f"Resolving contract for {ticker}...")
+        """Resolve stock contract to get contract ID. Waits for contractDetailsEnd."""
+        print(f"[{ticker}] Step 1: Resolving contract...", flush=True)
 
         # Create stock contract
         contract = Contract()
@@ -261,18 +264,21 @@ class IBMergerArbScanner(EWrapper, EClient):
         req_id = self.get_next_req_id()
         self.req_id_map[req_id] = f"contract_details_{ticker}"
         self.contract_details = None
+        self._contract_details_wait_req_id = req_id
+        self.contract_details_done.clear()
 
         self.reqContractDetails(req_id, contract)
 
-        # Wait for response - increased from 0.5s to 2.0s for better reliability
-        time.sleep(2.0)
+        if not self.contract_details_done.wait(timeout=10):
+            print(f"[{ticker}] Step 1: Timeout (10s) waiting for contract details", flush=True)
+        self._contract_details_wait_req_id = None
 
         if self.contract_details:
             con_id = self.contract_details.contract.conId
-            print(f"Resolved {ticker} to contract ID: {con_id}")
+            print(f"[{ticker}] Step 1: Resolved to contract ID {con_id}", flush=True)
             return con_id
         else:
-            print(f"Warning: Could not resolve contract ID for {ticker}")
+            print(f"[{ticker}] Step 1: Could not resolve contract ID (no details from IB)", flush=True)
             return None
 
     def contractDetails(self, reqId: int, contractDetails):
@@ -283,12 +289,13 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def contractDetailsEnd(self, reqId: int):
         """Handle end of contract details"""
-        pass
+        if getattr(self, "_contract_details_wait_req_id", None) == reqId:
+            self.contract_details_done.set()
 
     def fetch_underlying_data(self, ticker: str) -> Dict:
         """Fetch current underlying stock data"""
-        print(f"Fetching underlying data for {ticker}...")
-        
+        print(f"[{ticker}] Step 2: Fetching underlying price...", flush=True)
+
         # Reset current data to avoid using stale values
         self.underlying_price = None
         self.underlying_bid = None
@@ -308,11 +315,16 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         self.reqMktData(req_id, contract, "", False, False, [])
 
-        # Wait for data - increased from 0.5s to 2.0s for better reliability
-        time.sleep(2.0)
+        # Wait for data - 3s for slow symbols (e.g. EA)
+        time.sleep(3.0)
 
         # Cancel market data
         self.cancelMktData(req_id)
+
+        if self.underlying_price is not None:
+            print(f"[{ticker}] Step 2: Got price {self.underlying_price}", flush=True)
+        else:
+            print(f"[{ticker}] Step 2: No price from IB (timeout or no data)", flush=True)
 
         return {
             'price': self.underlying_price,

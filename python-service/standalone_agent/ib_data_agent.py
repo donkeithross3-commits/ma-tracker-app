@@ -308,65 +308,74 @@ class IBDataAgent:
             logger.info(f"Returning cached chain for {ticker}")
             return cached_data
         
-        # Fetch underlying
-        underlying_data = self.scanner.fetch_underlying_data(ticker)
-        if not underlying_data.get("price"):
-            return {"error": f"Could not fetch price for {ticker}"}
-        
-        spot_price = underlying_data["price"]
-        
-        # Parse date
         try:
-            close_date = datetime.strptime(expected_close_date, "%Y-%m-%d")
-        except ValueError:
-            return {"error": "Invalid date format. Use YYYY-MM-DD"}
-        
-        logger.info(f"Fetching chain for {ticker}, spot={spot_price}, deal={deal_price}")
-        
-        # Fetch options
-        options = self.scanner.fetch_option_chain(
-            ticker,
-            expiry_months=6,
-            current_price=spot_price,
-            deal_close_date=close_date,
-            days_before_close=days_before_close,
-            deal_price=deal_price
-        )
-        
-        # Convert to serializable format
-        contracts = []
-        expirations = set()
-        
-        for opt in options:
-            expirations.add(opt.expiry)
-            contracts.append({
-                "symbol": opt.symbol,
-                "strike": opt.strike,
-                "expiry": opt.expiry,
-                "right": opt.right,
-                "bid": opt.bid,
-                "ask": opt.ask,
-                "mid": opt.mid_price,
-                "last": opt.last,
-                "volume": opt.volume,
-                "open_interest": opt.open_interest,
-                "implied_vol": opt.implied_vol,
-                "delta": opt.delta,
-                "bid_size": opt.bid_size,
-                "ask_size": opt.ask_size
-            })
-        
-        result = {
-            "ticker": ticker,
-            "spotPrice": spot_price,
-            "expirations": sorted(list(expirations)),
-            "contracts": contracts
-        }
-        
-        # Cache result
-        self.option_chain_cache.set(ticker, deal_price, expected_close_date, days_before_close, result)
-        
-        return result
+            # Fetch underlying
+            underlying_data = self.scanner.fetch_underlying_data(ticker)
+            if not underlying_data.get("price"):
+                return {"error": f"Could not fetch price for {ticker}. Check agent console for [{ticker}] Step 2."}
+
+            spot_price = underlying_data["price"]
+
+            # Parse date
+            try:
+                close_date = datetime.strptime(expected_close_date, "%Y-%m-%d")
+            except ValueError:
+                return {"error": "Invalid date format. Use YYYY-MM-DD"}
+
+            logger.info(f"Fetching chain for {ticker}, spot={spot_price}, deal={deal_price}")
+
+            # Fetch options
+            options = self.scanner.fetch_option_chain(
+                ticker,
+                expiry_months=6,
+                current_price=spot_price,
+                deal_close_date=close_date,
+                days_before_close=days_before_close,
+                deal_price=deal_price
+            )
+
+            # Convert to serializable format
+            contracts = []
+            expirations = set()
+
+            for opt in options:
+                expirations.add(opt.expiry)
+                contracts.append({
+                    "symbol": opt.symbol,
+                    "strike": opt.strike,
+                    "expiry": opt.expiry,
+                    "right": opt.right,
+                    "bid": opt.bid,
+                    "ask": opt.ask,
+                    "mid": opt.mid_price,
+                    "last": opt.last,
+                    "volume": opt.volume,
+                    "open_interest": opt.open_interest,
+                    "implied_vol": opt.implied_vol,
+                    "delta": opt.delta,
+                    "bid_size": opt.bid_size,
+                    "ask_size": opt.ask_size
+                })
+
+            if not contracts:
+                return {
+                    "error": f"No options returned for {ticker}. Check agent console for [{ticker}] Step 1-5 to see where it failed (e.g. no expirations from IB, or no quotes)."
+                }
+
+            result = {
+                "ticker": ticker,
+                "spotPrice": spot_price,
+                "expirations": sorted(list(expirations)),
+                "contracts": contracts
+            }
+
+            # Cache result
+            self.option_chain_cache.set(ticker, deal_price, expected_close_date, days_before_close, result)
+
+            return result
+        except Exception as e:
+            logger.exception(f"Chain fetch failed for {ticker}")
+            return {"error": f"Chain fetch failed for {ticker}: {e}. Check agent console for [{ticker}] step messages."}
     
     def _handle_fetch_prices_sync(self, payload: dict) -> dict:
         """Fetch prices for specific contracts"""

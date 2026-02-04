@@ -106,6 +106,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Wait for all option-parameter callbacks (IB sends multiple + End)
         self.sec_def_opt_params_done = Event()
         self._sec_def_wait_req_id = None
+        # Wait for contract details end (so we have final conId)
+        self.contract_details_done = Event()
+        self._contract_details_wait_req_id = None
         self.data_queue = queue.Queue()
         self.executor = ThreadPoolExecutor(max_workers=10)
         
@@ -180,8 +183,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         return req_id
 
     def resolve_contract(self, ticker: str) -> Optional[int]:
-        """Resolve stock contract to get contract ID"""
-        print(f"Resolving contract for {ticker}...")
+        """Resolve stock contract to get contract ID. Waits for contractDetailsEnd."""
+        print(f"[{ticker}] Step 1: Resolving contract...", flush=True)
 
         contract = Contract()
         contract.symbol = ticker
@@ -192,16 +195,20 @@ class IBMergerArbScanner(EWrapper, EClient):
         req_id = self.get_next_req_id()
         self.req_id_map[req_id] = f"contract_details_{ticker}"
         self.contract_details = None
+        self._contract_details_wait_req_id = req_id
+        self.contract_details_done.clear()
 
         self.reqContractDetails(req_id, contract)
-        time.sleep(2.0)
+        if not self.contract_details_done.wait(timeout=10):
+            print(f"[{ticker}] Step 1: Timeout (10s) waiting for contract details", flush=True)
+        self._contract_details_wait_req_id = None
 
         if self.contract_details:
             con_id = self.contract_details.contract.conId
-            print(f"Resolved {ticker} to contract ID: {con_id}")
+            print(f"[{ticker}] Step 1: Resolved to contract ID {con_id}", flush=True)
             return con_id
         else:
-            print(f"Warning: Could not resolve contract ID for {ticker}")
+            print(f"[{ticker}] Step 1: Could not resolve contract ID (no details from IB)", flush=True)
             return None
 
     def contractDetails(self, reqId: int, contractDetails):
@@ -209,12 +216,13 @@ class IBMergerArbScanner(EWrapper, EClient):
             self.contract_details = contractDetails
 
     def contractDetailsEnd(self, reqId: int):
-        pass
+        if getattr(self, "_contract_details_wait_req_id", None) == reqId:
+            self.contract_details_done.set()
 
     def fetch_underlying_data(self, ticker: str) -> Dict:
         """Fetch current underlying stock data"""
-        print(f"Fetching underlying data for {ticker}...")
-        
+        print(f"[{ticker}] Step 2: Fetching underlying price...", flush=True)
+
         self.underlying_price = None
         self.underlying_bid = None
         self.underlying_ask = None
@@ -230,8 +238,13 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.req_id_map[req_id] = f"underlying_{ticker}"
 
         self.reqMktData(req_id, contract, "", False, False, [])
-        time.sleep(2.0)
+        time.sleep(3.0)  # 3s for slow symbols (e.g. EA)
         self.cancelMktData(req_id)
+
+        if self.underlying_price is not None:
+            print(f"[{ticker}] Step 2: Got price {self.underlying_price}", flush=True)
+        else:
+            print(f"[{ticker}] Step 2: No price from IB (timeout or no data)", flush=True)
 
         return {
             'price': self.underlying_price,
@@ -283,11 +296,11 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def get_available_expirations(self, ticker: str, contract_id: int = 0) -> List[str]:
         """Get available option expirations and strikes from IB. Waits for End callback (all exchanges)."""
-        print(f"Getting available expirations for {ticker}...")
+        print(f"[{ticker}] Step 3: Getting option expirations and strikes from IB...", flush=True)
 
         for attempt in range(2):  # initial try + one retry for flaky symbols (e.g. EA)
             if attempt > 0:
-                print(f"Retrying option parameters for {ticker} (attempt 2/2)...")
+                print(f"[{ticker}] Step 3: Retry (attempt 2/2)...", flush=True)
                 time.sleep(1)
 
             req_id = self.get_next_req_id()
@@ -301,17 +314,17 @@ class IBMergerArbScanner(EWrapper, EClient):
 
             # Wait for securityDefinitionOptionParameterEnd (all callbacks complete).
             if not self.sec_def_opt_params_done.wait(timeout=15):
-                print(f"Warning: Timeout (15s) waiting for option parameters for {ticker}")
+                print(f"[{ticker}] Step 3: Timeout (15s) waiting for option parameters", flush=True)
             self._sec_def_wait_req_id = None
 
             if self.available_expirations:
-                print(f"Got {len(self.available_expirations)} expirations from IB")
+                print(f"[{ticker}] Step 3: Got {len(self.available_expirations)} expirations, {len(self.available_strikes)} strike lists", flush=True)
                 break
             if attempt == 0:
-                print(f"Warning: No option parameters for {ticker} on first try")
+                print(f"[{ticker}] Step 3: No option parameters on first try", flush=True)
 
         if not self.available_expirations:
-            print(f"Warning: IB expiration lookup failed for {ticker} after 2 attempts")
+            print(f"[{ticker}] Step 3: IB returned no expirations after 2 attempts", flush=True)
         return self.available_expirations
 
     def securityDefinitionOptionParameter(self, reqId: int, exchange: str,
@@ -372,11 +385,12 @@ class IBMergerArbScanner(EWrapper, EClient):
                            deal_close_date: datetime = None, days_before_close: int = 0, 
                            deal_price: float = None) -> List[OptionData]:
         """Fetch option chain from IB"""
-        print(f"Fetching option chain for {ticker}...")
+        print(f"[{ticker}] Fetching option chain (price={current_price or self.underlying_price}, deal_close={deal_close_date})", flush=True)
 
         contract_id = self.resolve_contract(ticker)
         if not contract_id:
             contract_id = 0
+            print(f"[{ticker}] Using contract_id=0 for option params request", flush=True)
 
         # Expirations/strikes are requested once in get_available_expirations().
         # Do not call reqSecDefOptParams here or the second request can clear the first response.
@@ -407,7 +421,7 @@ class IBMergerArbScanner(EWrapper, EClient):
             else:
                 selected_expiries = self.available_expirations[:3]
 
-            print(f"Selected expirations: {selected_expiries}")
+            print(f"[{ticker}] Step 4: Selected expirations: {selected_expiries}", flush=True)
 
             # Determine strike range
             deal_price_to_use = deal_price or price_to_use
@@ -419,14 +433,14 @@ class IBMergerArbScanner(EWrapper, EClient):
                 if expiry in self.available_strikes and self.available_strikes[expiry]:
                     all_strikes = self.available_strikes[expiry]
                     strikes = [s for s in all_strikes if lower_bound <= s <= upper_bound]
-                    print(f"  {expiry}: {len(strikes)} strikes (exact from IB)")
+                    print(f"[{ticker}]   {expiry}: {len(strikes)} strikes (exact from IB)", flush=True)
                 else:
                     # Only when IB returned no option params after wait+retry
                     strikes = self.get_strikes_near_price(
                         deal_price_to_use, lower_bound, upper_bound,
                         increment=5.0 if deal_price_to_use > 50 else 2.5
                     )
-                    print(f"  {expiry}: {len(strikes)} strikes (estimated - IB returned no strikes)")
+                    print(f"[{ticker}]   {expiry}: {len(strikes)} strikes (estimated - IB returned no strikes)", flush=True)
 
                 for strike in strikes:
                     for right in ['C', 'P']:
@@ -434,7 +448,7 @@ class IBMergerArbScanner(EWrapper, EClient):
                         if opt:
                             options.append(opt)
 
-        print(f"Fetched {len(options)} options total")
+        print(f"[{ticker}] Step 5: Fetched {len(options)} options total", flush=True)
         return options
 
     def get_option_data(self, ticker: str, expiry: str, strike: float, right: str) -> Optional[OptionData]:
