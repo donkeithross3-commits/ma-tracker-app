@@ -595,7 +595,10 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
                                 user_id=target_user_id
                             )
                             if "error" in response_data:
-                                raise HTTPException(status_code=500, detail=response_data["error"])
+                                err = response_data["error"]
+                                if "market may be closed" in (err or "").lower() or "no futures data" in (err or "").lower():
+                                    err = "Your agent did not receive ES futures data from IB. Check: (1) TWS market data subscriptions include CME, (2) Market is open (ES trades Sun 6pm–Fri 5pm ET), (3) Restart the agent after updating from the dashboard."
+                                raise HTTPException(status_code=500, detail=err)
                             return response_data
                     except asyncio.TimeoutError:
                         pass
@@ -660,7 +663,10 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
         )
         
         if "error" in response_data:
-            raise HTTPException(status_code=500, detail=response_data["error"])
+            err = response_data["error"]
+            if "market may be closed" in (err or "").lower() or "no futures data" in (err or "").lower():
+                err = "Your agent did not receive ES futures data from IB. Check: (1) TWS market data subscriptions include CME, (2) Market is open (ES trades Sun 6pm–Fri 5pm ET), (3) Restart the agent after updating from the dashboard."
+            raise HTTPException(status_code=500, detail=err)
         
         return response_data
         
