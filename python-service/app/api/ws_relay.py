@@ -305,7 +305,8 @@ async def data_provider_websocket(websocket: WebSocket):
                     if msg.get("success"):
                         await registry.resolve_request(request_id, msg.get("data", {}))
                     else:
-                        await registry.fail_request(request_id, msg.get("error", "Unknown error"))
+                        # Return error as data so callers can show the agent's message (e.g. relay_test_futures rewrite)
+                        await registry.resolve_request(request_id, {"error": msg.get("error", "Unknown error")})
                 
                 else:
                     logger.warning(f"Unknown message type from provider: {msg_type}")
