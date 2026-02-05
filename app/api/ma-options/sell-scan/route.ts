@@ -64,14 +64,12 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      return NextResponse.json(
-        {
-          error:
-            errorData.detail ||
-            `Sell scan failed: ${response.status}`,
-        },
-        { status: response.status }
-      );
+      const detail = errorData.detail ?? errorData.error;
+      const message =
+        response.status === 404
+          ? "Sell-scan endpoint not available (404). Restart the Python service on the server to load the latest code."
+          : detail || `Sell scan failed: ${response.status}`;
+      return NextResponse.json({ error: message }, { status: response.status });
     }
 
     const data: SellScanResponse = await response.json();
