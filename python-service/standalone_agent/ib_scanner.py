@@ -32,6 +32,17 @@ from threading import Thread, Event, Lock
 import queue
 from concurrent.futures import ThreadPoolExecutor
 
+# #region agent log
+DEBUG_LOG = "/Users/donross/dev/ma-tracker-app/.cursor/debug.log"
+def _debug_log(location: str, message: str, data: dict, hypothesis_id: str = ""):
+    try:
+        import json
+        with open(DEBUG_LOG, "a") as f:
+            f.write(json.dumps({"timestamp": int(time.time() * 1000), "location": location, "message": message, "data": data, "hypothesisId": hypothesis_id, "sessionId": "debug-session"}) + "\n")
+    except Exception:
+        pass
+# #endregion
+
 
 @dataclass
 class DealInput:
@@ -633,10 +644,18 @@ class IBMergerArbScanner(EWrapper, EClient):
         if reqId in self.req_id_map:
             exp_list = list(expirations) if isinstance(expirations, set) else expirations
             strike_list = sorted(list(strikes)) if isinstance(strikes, set) else strikes
+            # #region agent log
+            _debug_log("ib_scanner:securityDefinitionOptionParameter", "sec_def_callback", {"exchange": exchange, "n_expirations": len(exp_list), "n_strikes": len(strike_list), "reqId": reqId}, "H2")
+            # #endregion
             self.available_expirations.extend(exp_list)
             for exp in exp_list:
                 if exp not in self.available_strikes:
                     self.available_strikes[exp] = strike_list
+                else:
+                    # Merge strike lists so we get all available strikes from every exchange (fix EA intermittent missing strikes)
+                    existing = self.available_strikes[exp]
+                    merged = sorted(set(existing) | set(strike_list))
+                    self.available_strikes[exp] = merged
 
     def securityDefinitionOptionParameterEnd(self, reqId: int):
         """Called when all securityDefinitionOptionParameter callbacks are complete."""
@@ -702,6 +721,10 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         options = []
         price_to_use = current_price or self.underlying_price
+        total_planned = 0
+        # #region agent log
+        _chain_start = time.time()
+        # #endregion
 
         if price_to_use:
             # Get expirations
@@ -748,6 +771,7 @@ class IBMergerArbScanner(EWrapper, EClient):
                         increment=5.0 if deal_price_to_use > 50 else 2.5
                     )
                     print(f"[{ticker}]   {expiry}: {len(strikes)} strikes (estimated - IB returned no strikes)", flush=True)
+                total_planned += len(strikes) * 2
 
                 for strike in strikes:
                     for right in ['C', 'P']:
@@ -755,6 +779,9 @@ class IBMergerArbScanner(EWrapper, EClient):
                         if opt:
                             options.append(opt)
 
+        # #region agent log
+        _debug_log("ib_scanner:fetch_option_chain", "chain_done", {"ticker": ticker, "options_count": len(options), "total_planned": total_planned, "duration_sec": round(time.time() - _chain_start, 2)}, "H1")
+        # #endregion
         print(f"[{ticker}] Step 5: Fetched {len(options)} options total", flush=True)
         return options
 
@@ -793,10 +820,16 @@ class IBMergerArbScanner(EWrapper, EClient):
         }
 
         self.reqMktData(req_id, contract, "100,101,104,106", False, False, [])
-        time.sleep(1.5)
+        time.sleep(1.0)
         self.cancelMktData(req_id)
 
         data = self.option_chain.get(req_id)
-        if data and (data['bid'] > 0 or data['last'] > 0):
+        if data:
+            if data['bid'] > 0 or data['last'] > 0:
+                return OptionData(**data)
+            # Return option with zero quotes so we always include every available strike (goal: fetch available strikes every time)
+            # #region agent log
+            _debug_log("ib_scanner:get_option_data", "no_quote_returned_anyway", {"ticker": ticker, "expiry": expiry, "strike": strike, "right": right}, "H3")
+            # #endregion
             return OptionData(**data)
         return None

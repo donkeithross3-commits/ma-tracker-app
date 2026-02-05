@@ -500,7 +500,7 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
                 "expectedCloseDate": request.expectedCloseDate,
                 "scanParams": request.scanParams.dict() if request.scanParams else {}
             },
-            timeout=120.0,  # IB option chain fetches can take 60+ seconds
+            timeout=180.0,  # EA and similar can have 90+ options (90*1s); need headroom
             user_id=request.userId
         )
         
