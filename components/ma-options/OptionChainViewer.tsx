@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { OptionChainResponse, OptionContract } from "@/types/ma-options";
+import { formatCompactVolOi } from "@/lib/utils";
 
 interface OptionChainViewerProps {
   chainData: OptionChainResponse;
@@ -96,8 +97,8 @@ export default function OptionChainViewer({ chainData, onWatchSingleLeg }: Optio
                     <td className="py-1 px-1 text-right text-gray-100">{contract.bid.toFixed(2)}</td>
                     <td className="py-1 px-1 text-right text-gray-100">{contract.ask.toFixed(2)}</td>
                     <td className="py-1 px-1 text-right text-gray-100">{contract.mid.toFixed(2)}</td>
-                    <td className="py-1 px-1 text-right text-gray-300">{contract.volume}</td>
-                    <td className="py-1 px-1 text-right text-gray-300">{contract.open_interest}</td>
+                    <td className="py-1 px-1 text-right text-gray-300">{formatCompactVolOi(contract.volume)}</td>
+                    <td className="py-1 px-1 text-right text-gray-300">{formatCompactVolOi(contract.open_interest)}</td>
                     {onWatchSingleLeg && (
                       <td className="py-1 px-1 text-center">
                         <button

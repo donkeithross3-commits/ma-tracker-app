@@ -1,5 +1,7 @@
 "use client";
 
+import { formatCompactVolOi } from "@/lib/utils";
+
 /**
  * Shared column definitions and rendering for strategy tables
  * Used by both CandidateStrategiesTable (Curator) and WatchedSpreadsTable (Monitor)
@@ -195,6 +197,10 @@ export function BidAskGrids({ legs }: { legs: StrategyLeg[] }) {
               {/* Bid price */}
               <div className="bg-blue-900/20 px-2 py-0.5 text-center text-blue-400">
                 ${leg.bid.toFixed(2)}
+              </div>
+              {/* Volume / Open interest */}
+              <div className="px-1 py-0.5 text-[10px] text-gray-500 text-right border-t border-gray-700">
+                V {formatCompactVolOi(leg.volume)}  OI {formatCompactVolOi(leg.openInterest)}
               </div>
             </div>
           </div>

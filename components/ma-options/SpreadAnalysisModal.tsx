@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { WatchedSpreadDTO } from "@/types/ma-options";
+import { formatCompactVolOi } from "@/lib/utils";
 
 /**
  * Get color class for profit/return values
@@ -476,6 +477,35 @@ export default function SpreadAnalysisModal({ spread, onClose }: SpreadAnalysisM
                 </span>
               </div>
             )}
+          </div>
+
+          {/* Option legs - per-leg market data */}
+          <div className="bg-gray-800/50 rounded p-3">
+            <div className="text-xs text-gray-500 mb-1.5">Option legs</div>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-700">
+                  <th className="text-left py-1 px-2 text-gray-400">Strike</th>
+                  <th className="text-center py-1 px-2 text-gray-400">Type</th>
+                  <th className="text-right py-1 px-2 text-gray-400">Bid</th>
+                  <th className="text-right py-1 px-2 text-gray-400">Ask</th>
+                  <th className="text-right py-1 px-2 text-gray-400">Vol</th>
+                  <th className="text-right py-1 px-2 text-gray-400">OI</th>
+                </tr>
+              </thead>
+              <tbody className="text-gray-100">
+                {spread.legs.map((leg, idx) => (
+                  <tr key={idx} className="border-b border-gray-700/50 last:border-0">
+                    <td className="py-1 px-2 font-mono">{leg.strike}</td>
+                    <td className="py-1 px-2 text-center">{leg.right}</td>
+                    <td className="py-1 px-2 text-right font-mono">${leg.bid.toFixed(2)}</td>
+                    <td className="py-1 px-2 text-right font-mono">${leg.ask.toFixed(2)}</td>
+                    <td className="py-1 px-2 text-right text-gray-300">{formatCompactVolOi(leg.volume)}</td>
+                    <td className="py-1 px-2 text-right text-gray-300">{formatCompactVolOi(leg.openInterest)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
           
           {/* Comparison Table */}
