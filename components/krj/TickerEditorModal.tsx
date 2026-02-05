@@ -23,6 +23,7 @@ export function TickerEditorModal({
   const [isAdding, setIsAdding] = useState(false);
   const [isRemoving, setIsRemoving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [addSuccess, setAddSuccess] = useState<string | null>(null);
 
   // Load tickers from API when modal opens
   const loadTickers = async () => {
@@ -44,6 +45,7 @@ export function TickerEditorModal({
     if (open) {
       loadTickers();
       setNewTicker("");
+      setAddSuccess(null);
     }
     setIsOpen(open);
   };
@@ -59,6 +61,7 @@ export function TickerEditorModal({
 
     setIsAdding(true);
     setError(null);
+    setAddSuccess(null);
 
     try {
       const response = await fetch(`/api/krj/lists/${listId}/tickers`, {
@@ -74,8 +77,10 @@ export function TickerEditorModal({
 
       setLocalTickers((prev) => [...prev, ticker].sort());
       setNewTicker("");
-      // Don't call onTickersChanged here - just update local state
-      // The table won't show the new ticker until the next batch run anyway
+      setAddSuccess(`${ticker} added to list. Close and use "Request signal" in the table for data, or refresh the page.`);
+      // #region agent log
+      fetch("http://127.0.0.1:7242/ingest/5eb096b0-06f6-4f03-a0db-0e4112629bad", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "TickerEditorModal.tsx:handleAddTicker", message: "add ticker success", data: { ticker, listId }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H4" }) }).catch(() => {});
+      // #endregion
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add ticker");
     } finally {
@@ -156,6 +161,12 @@ export function TickerEditorModal({
               </div>
             )}
 
+            {addSuccess && (
+              <div className="text-green-400 text-sm bg-green-900/20 border border-green-800 rounded px-3 py-2">
+                {addSuccess}
+              </div>
+            )}
+
             {/* Ticker list */}
             <div className="flex-1 overflow-y-auto border border-gray-700 rounded">
               <div className="p-2 text-xs text-gray-500 border-b border-gray-700 sticky top-0 bg-gray-900">
@@ -197,7 +208,7 @@ export function TickerEditorModal({
             </div>
 
             <p className="text-xs text-gray-500">
-              Note: Newly added tickers will appear in the list but won&apos;t have signal data until the next weekly batch runs.
+              Newly added tickers appear in the table right away. Use &quot;Request signal&quot; on a row to fetch signal data on demand, or wait for the next weekly batch.
             </p>
           </div>
 

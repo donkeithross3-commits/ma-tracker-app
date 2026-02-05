@@ -307,9 +307,21 @@ export async function getKrjListsForUser(userId: string | null): Promise<{
         if (masterTickerData[upperTicker]) {
           rowsFromMaster.push(masterTickerData[upperTicker]);
         } else {
+          // Do not show placeholder rows for currency pairs (c: prefix); they would clutter ETFs/FX with "No signal yet" for tickers not in the weekly CSV.
+          if (upperTicker.startsWith("C:")) continue;
+          // #region agent log
+          if (dbList.slug === "etfs_fx" && upperTicker.startsWith("C:")) {
+            fetch("http://127.0.0.1:7242/ingest/5eb096b0-06f6-4f03-a0db-0e4112629bad", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "krj-data.ts:placeholder", message: "etfs_fx placeholder for c: ticker", data: { listSlug: dbList.slug, ticker: upperTicker }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H1" }) }).catch(() => {});
+          }
+          // #endregion
           placeholderRows.push(makePlaceholderRow(ticker));
         }
       }
+      // #region agent log
+      if (placeholderRows.length > 0) {
+        fetch("http://127.0.0.1:7242/ingest/5eb096b0-06f6-4f03-a0db-0e4112629bad", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "krj-data.ts:placeholders", message: "placeholder rows added", data: { listSlug: dbList.slug, placeholderTickers: placeholderRows.map((r) => r.ticker), count: placeholderRows.length }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H1" }) }).catch(() => {});
+      }
+      // #endregion
       // Placeholders at end so "No signal yet" rows are grouped
       rows = [...rowsFromOwnCsv, ...rowsFromMaster, ...placeholderRows];
     }
