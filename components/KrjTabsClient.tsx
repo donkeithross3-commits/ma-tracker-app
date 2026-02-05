@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Printer, Filter, X, User, GitFork, Edit3 } from "lucide-react"
@@ -140,8 +139,6 @@ function computeSummaryFromRows(rows: RawRow[]) {
 export default function KrjTabsClient({ groups, columns, userId, userAlias }: KrjTabsClientProps) {
   // Print state management
   const [printMode, setPrintMode] = useState(false)
-  const [selectedGroups, setSelectedGroups] = useState<string[]>([])
-  const [showPrintDialog, setShowPrintDialog] = useState(false)
   const [currentTab, setCurrentTab] = useState(groups[0]?.key || "equities")
   
   // List visibility state (for hiding tabs)
@@ -153,9 +150,6 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
   // Filter state management
   const [filterColumn, setFilterColumn] = useState<FilterColumn>(null)
   const [filterValues, setFilterValues] = useState<string[]>([])
-  
-  // Print filter option
-  const [printFilteredOnly, setPrintFilteredOnly] = useState(true)
 
   // Filter rows based on current filter state
   const getFilteredRows = (rows: RawRow[]): RawRow[] => {
@@ -202,50 +196,28 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
     return () => window.removeEventListener('afterprint', handleAfterPrint)
   }, [])
 
-  // Print dialog handlers
-  const handleOpenPrintDialog = () => {
-    setShowPrintDialog(true)
-  }
-
-  // Prepare groups for printing (with optional filtering)
-  const getGroupsForPrint = useMemo(() => {
-    const groupKeys = selectedGroups.length > 0 ? selectedGroups : [currentTab];
-    return groups
-      .filter(g => groupKeys.includes(g.key))
-      .map(g => {
-        const rows = (isFilterActive && printFilteredOnly) ? getFilteredRows(g.rows) : g.rows;
-        const summary = (isFilterActive && printFilteredOnly) ? computeSummaryFromRows(rows) : g.summary;
-        return { ...g, rows, summary };
+  // One-click print: all groups, current week Long/Short only, sorted Long then Short, each group on its own page(s)
+  const getGroupsForQuickPrint = useMemo(() => {
+    return groups.map((g) => {
+      const rows = g.rows.filter((row) => {
+        const s = (row["signal"] || "").trim();
+        return s === "Long" || s === "Short";
       });
-  }, [groups, selectedGroups, currentTab, isFilterActive, printFilteredOnly, filterColumn, filterValues]);
+      // Sort so all Longs together, then all Shorts
+      rows.sort((a, b) => {
+        const sa = (a["signal"] || "").trim();
+        const sb = (b["signal"] || "").trim();
+        if (sa === sb) return 0;
+        return sa === "Long" ? -1 : 1;
+      });
+      const summary = computeSummaryFromRows(rows);
+      return { ...g, rows, summary };
+    });
+  }, [groups]);
 
-  const handlePrint = () => {
-    // If no groups selected, default to current tab
-    const groupsToPrint = selectedGroups.length > 0 ? selectedGroups : [currentTab]
-    setSelectedGroups(groupsToPrint)
-    setShowPrintDialog(false)
-    
-    // Wait for dialog to close before triggering print
-    setTimeout(() => {
-      setPrintMode(true)
-    }, 150)
-  }
-
-  const handleSelectCurrentTab = () => {
-    setSelectedGroups([currentTab])
-  }
-
-  const handleSelectAll = () => {
-    setSelectedGroups(groups.map(g => g.key))
-  }
-
-  const handleToggleGroup = (groupKey: string) => {
-    setSelectedGroups(prev => 
-      prev.includes(groupKey)
-        ? prev.filter(k => k !== groupKey)
-        : [...prev, groupKey]
-    )
-  }
+  const handleQuickPrint = () => {
+    setPrintMode(true);
+  };
 
   // Filter handlers
   const handleFilterColumnChange = (value: string) => {
@@ -276,102 +248,12 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
 
   return (
     <>
-      {/* Print dialog */}
-      <Dialog open={showPrintDialog} onOpenChange={setShowPrintDialog}>
-        <DialogContent className="bg-gray-900 text-gray-100 border-gray-700">
-          <DialogHeader>
-            <DialogTitle>Print KRJ Signals</DialogTitle>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm text-gray-400 mb-3">Select groups to print:</p>
-              <div className="space-y-2">
-                {groups.map((group) => (
-                  <div key={group.key} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={`print-${group.key}`}
-                      checked={selectedGroups.includes(group.key)}
-                      onCheckedChange={() => handleToggleGroup(group.key)}
-                    />
-                    <label
-                      htmlFor={`print-${group.key}`}
-                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                    >
-                      {group.label}
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="text-sm text-gray-400 mb-2">Quick actions:</p>
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleSelectCurrentTab}
-                  variant="outline"
-                  size="sm"
-                  className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700"
-                >
-                  Current Tab
-                </Button>
-                <Button
-                  onClick={handleSelectAll}
-                  variant="outline"
-                  size="sm"
-                  className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700"
-                >
-                  All Groups
-                </Button>
-              </div>
-            </div>
-
-            {/* Filter option for print */}
-            {isFilterActive && (
-              <div className="border-t border-gray-700 pt-4">
-                <p className="text-sm text-gray-400 mb-2">Filter active: {getFilterDescription()}</p>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="print-filtered-only"
-                    checked={printFilteredOnly}
-                    onCheckedChange={(checked) => setPrintFilteredOnly(checked === true)}
-                  />
-                  <label
-                    htmlFor="print-filtered-only"
-                    className="text-sm font-medium leading-none cursor-pointer"
-                  >
-                    Print filtered rows only
-                  </label>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button
-              onClick={() => setShowPrintDialog(false)}
-              variant="outline"
-              className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handlePrint}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              Print
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Print layout (hidden on screen, visible in print) */}
       {printMode && (
         <KrjPrintLayout 
-          groups={getGroupsForPrint}
+          groups={getGroupsForQuickPrint}
           columns={columns}
-          filterDescription={isFilterActive && printFilteredOnly ? getFilterDescription() : undefined}
+          filterDescription="Current Week: Long, Short"
         />
       )}
 
@@ -433,7 +315,7 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
                 userId={userId || null}
               />
               <Button
-                onClick={handleOpenPrintDialog}
+                onClick={handleQuickPrint}
                 variant="outline"
                 size="sm"
                 className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700 hover:text-gray-100 no-print"
