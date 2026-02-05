@@ -201,6 +201,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [sellScanLoading, setSellScanLoading] = useState(false);
   const [sellScanResult, setSellScanResult] = useState<SellScanResponse | null>(null);
   const [sellScanError, setSellScanError] = useState<string | null>(null);
+  const [krjSignals, setKrjSignals] = useState<Record<string, "Long" | "Short" | "Neutral" | null>>({});
 
   const fetchPositions = useCallback(async () => {
     setLoading(true);
@@ -321,6 +322,33 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     });
   };
   const selectedGroups = groups.filter((g) => selectedTickers.has(g.key));
+  const selectedGroupKeysSig = useMemo(
+    () => [...selectedTickers].sort().join(","),
+    [selectedTickers]
+  );
+
+  // Fetch KRJ signal for selected tickers (underlying symbol: first token of group.key)
+  useEffect(() => {
+    if (selectedGroups.length === 0) {
+      setKrjSignals({});
+      return;
+    }
+    const underlyingTickers = [...new Set(selectedGroups.map((g) => g.key.split(" ")[0]).filter(Boolean))];
+    const q = new URLSearchParams({ tickers: underlyingTickers.join(",") });
+    fetch(`/api/krj/signals?${q}`, { credentials: "include" })
+      .then((res) => res.json())
+      .then((data: { signals?: Record<string, "Long" | "Short" | "Neutral"> }) => {
+        const signals = data.signals ?? {};
+        const byGroupKey: Record<string, "Long" | "Short" | "Neutral" | null> = {};
+        for (const g of selectedGroups) {
+          const underlying = g.key.split(" ")[0]?.toUpperCase() ?? "";
+          byGroupKey[g.key] = underlying && signals[underlying] ? signals[underlying] : null;
+        }
+        setKrjSignals(byGroupKey);
+      })
+      .catch(() => setKrjSignals({}));
+  }, [selectedGroupKeysSig]);
+
   const byType = filteredPositions.reduce<Record<string, number>>((acc, row) => {
     const t = row.contract?.secType || "?";
     acc[t] = (acc[t] || 0) + 1;
@@ -493,9 +521,25 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                         <div
                           className={`flex flex-col gap-1.5 px-4 py-3 border-b border-gray-600 ${headerAccent}`}
                         >
-                          <span className="text-xl font-bold text-white tracking-tight">
-                            {group.key}
-                          </span>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span className="text-xl font-bold text-white tracking-tight">
+                              {group.key}
+                            </span>
+                            <span
+                              className={`text-sm font-medium px-2 py-0.5 rounded ${
+                                krjSignals[group.key] === "Long"
+                                  ? "bg-blue-900/60 text-blue-200"
+                                  : krjSignals[group.key] === "Short"
+                                    ? "bg-red-900/60 text-red-200"
+                                    : krjSignals[group.key] === "Neutral"
+                                      ? "bg-gray-600/60 text-gray-200"
+                                      : "bg-gray-700/40 text-gray-500"
+                              }`}
+                              title="KRJ weekly signal"
+                            >
+                              KRJ: {krjSignals[group.key] ?? "Not available"}
+                            </span>
+                          </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-200">
                             <span>
                               {Object.entries(group.typeCounts)

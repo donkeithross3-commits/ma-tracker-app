@@ -93,6 +93,38 @@ export function getSignalDate(): string {
   }
 }
 
+export type KrjSignal = "Long" | "Short" | "Neutral";
+
+const KRJ_SIGNAL_VALUES: KrjSignal[] = ["Long", "Neutral", "Short"];
+
+/**
+ * Get KRJ weekly signal for a set of tickers.
+ * Returns a map of ticker (uppercase) -> "Long" | "Short" | "Neutral".
+ * Tickers not in any KRJ CSV are omitted (caller treats as "not available").
+ */
+export function getKrjSignalsForTickers(tickers: string[]): Record<string, KrjSignal> {
+  if (tickers.length === 0) return {};
+  const wantSet = new Set(tickers.map((t) => t.trim().toUpperCase()).filter(Boolean));
+  if (wantSet.size === 0) return {};
+
+  const allCsvData: Record<string, RawRow[]> = {};
+  for (const [slug, csvFile] of Object.entries(SLUG_TO_CSV)) {
+    allCsvData[slug] = loadCsv(csvFile);
+  }
+  const result: Record<string, KrjSignal> = {};
+  for (const rows of Object.values(allCsvData)) {
+    for (const row of rows) {
+      const ticker = (row.ticker || "").toUpperCase();
+      if (!ticker || !wantSet.has(ticker) || result[ticker]) continue;
+      const raw = (row.signal || "").trim();
+      if (KRJ_SIGNAL_VALUES.includes(raw as KrjSignal)) {
+        result[ticker] = raw as KrjSignal;
+      }
+    }
+  }
+  return result;
+}
+
 /**
  * Map list slugs to CSV filenames
  */
