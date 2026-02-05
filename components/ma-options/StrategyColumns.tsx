@@ -185,7 +185,7 @@ export function BidAskGrids({ legs }: { legs: StrategyLeg[] }) {
         return (
           <div key={idx} className="border border-gray-700 rounded w-[72px]">
             {/* Leg label */}
-            <div className="bg-gray-800 px-1 py-0.5 text-center text-[10px] text-gray-400 border-b border-gray-700 truncate">
+            <div className="bg-gray-800 px-1 py-0.5 text-center text-[10px] text-gray-300 border-b border-gray-700 truncate">
               {legLabel}
             </div>
             {/* Bid/Ask prices only (no quantities) */}
