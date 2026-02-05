@@ -132,24 +132,30 @@ class ProviderRegistry:
                             Exception("Provider disconnected")
                         )
     
-    async def get_active_provider(self, user_id: Optional[str] = None) -> Optional[DataProvider]:
+    async def get_active_provider(
+        self,
+        user_id: Optional[str] = None,
+        allow_fallback_to_any: bool = True,
+    ) -> Optional[DataProvider]:
         """Get an active provider to handle a request.
-        
-        If user_id is specified, tries to find a provider for that user first.
-        Falls back to any active provider (for shared/legacy mode).
+
+        - If user_id is specified, tries to find a provider for that user first.
+        - If allow_fallback_to_any is True (default), and no user-specific provider
+          is found, returns any active provider (for read-only quotes from any connection).
+        - If allow_fallback_to_any is False, returns only a provider that matches user_id;
+          never returns another user's provider. Use this for positions and orders so
+          users only see their own account data and only send orders to their own account.
         """
         async with self._lock:
-            # First try to find a provider for the specific user
             if user_id:
                 for provider in self.providers.values():
                     if provider.is_active and provider.user_id == user_id:
                         return provider
-            
-            # Fall back to any active provider (legacy/shared mode)
+                if not allow_fallback_to_any:
+                    return None
             for provider in self.providers.values():
                 if provider.is_active:
                     return provider
-            
             return None
     
     async def get_provider_by_id(self, provider_id: str) -> Optional[DataProvider]:
@@ -330,25 +336,31 @@ async def send_request_to_provider(
     request_type: str,
     payload: dict,
     timeout: float = REQUEST_TIMEOUT_SECONDS,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    allow_fallback_to_any_provider: bool = True,
 ) -> dict:
     """
     Send a request to a connected provider and wait for response.
-    
+
     Args:
         request_type: Type of request (e.g., 'fetch_chain', 'ib_status')
         payload: Request payload
         timeout: Timeout in seconds
         user_id: Optional user ID for routing to user's own agent
-        
+        allow_fallback_to_any_provider: If True, when user_id has no provider, use any
+            connected provider (for read-only quotes). If False, only use the provider
+            that matches user_id; never use another user's provider (use for positions/orders).
+
     Returns:
         Response data from provider
-        
+
     Raises:
         HTTPException if no provider is connected or request times out
     """
-    # Try to get a provider for this specific user first, then fall back to any provider
-    provider = await registry.get_active_provider(user_id=user_id)
+    provider = await registry.get_active_provider(
+        user_id=user_id,
+        allow_fallback_to_any=allow_fallback_to_any_provider,
+    )
     
     if provider and user_id:
         logger.info(f"Routing request to provider for user {user_id}: {provider.provider_id}")

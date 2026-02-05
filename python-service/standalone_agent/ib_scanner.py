@@ -26,8 +26,9 @@ import calendar
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
+from ibapi.order import Order
 from ibapi.common import TickerId, TickAttrib, SetOfString, SetOfFloat
-from threading import Thread, Event
+from threading import Thread, Event, Lock
 import queue
 from concurrent.futures import ThreadPoolExecutor
 
@@ -99,9 +100,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.available_expirations = []
         self.available_strikes = {}
 
-        # Request tracking
+        # Request tracking (data requests only; order ids are separate)
         self.req_id_map = {}
         self.next_req_id = 1000
+        self.next_order_id = 1000  # Synced from nextValidId; used only for placeOrder
         self.data_ready = Event()
         # Wait for all option-parameter callbacks (IB sends multiple + End)
         self.sec_def_opt_params_done = Event()
@@ -118,6 +120,169 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.connection_start_time = None
         # Last market data error (req_id, errorCode, errorString) for ES test_futures
         self.last_mkt_data_error = None
+        # Error 200 on underlying request (no security definition) - trigger delayed retry
+        self._underlying_200_req_id = None
+
+        # Positions: for get_positions request (lock prevents concurrent snapshot corruption)
+        self._positions_list: List[dict] = []
+        self._positions_done = Event()
+        self._managed_accounts: List[str] = []
+        self._positions_lock = Lock()
+
+        # Orders: for place_order / cancel_order (order_id -> Event, order_id -> result dict)
+        self._order_events: Dict[int, Event] = {}
+        self._order_results: Dict[int, dict] = {}
+
+    def managedAccounts(self, accountsList: str):
+        """Store comma-separated account ids from TWS on connect."""
+        self._managed_accounts = [a.strip() for a in (accountsList or "").split(",") if a.strip()]
+        self.logger.info("Managed accounts: %s", self._managed_accounts)
+
+    def position(self, account: str, contract: Contract, position: float, avgCost: float):
+        """Called for each position in response to reqPositions()."""
+        self._positions_list.append({
+            "account": account,
+            "contract": self._contract_to_dict(contract),
+            "position": float(position) if position is not None else 0,
+            "avgCost": float(avgCost) if avgCost is not None else 0,
+        })
+
+    def positionEnd(self):
+        """Called once after initial position dump; signals snapshot complete."""
+        self._positions_done.set()
+
+    def _contract_to_dict(self, contract: Contract) -> dict:
+        """Serialize Contract for JSON response."""
+        return {
+            "conId": getattr(contract, "conId", 0),
+            "symbol": getattr(contract, "symbol", "") or "",
+            "secType": getattr(contract, "secType", "") or "",
+            "exchange": getattr(contract, "exchange", "") or "",
+            "currency": getattr(contract, "currency", "") or "",
+            "lastTradeDateOrContractMonth": getattr(contract, "lastTradeDateOrContractMonth", "") or "",
+            "strike": float(getattr(contract, "strike", 0) or 0),
+            "right": getattr(contract, "right", "") or "",
+            "multiplier": getattr(contract, "multiplier", "") or "",
+            "localSymbol": getattr(contract, "localSymbol", "") or "",
+            "tradingClass": getattr(contract, "tradingClass", "") or "",
+        }
+
+    def get_positions_snapshot(self, timeout_sec: float = 15.0) -> List[dict]:
+        """Request positions, wait for positionEnd(), return list and cancel subscription.
+        Thread-safe: only one snapshot at a time (concurrent callers block)."""
+        with self._positions_lock:
+            self._positions_list = []
+            self._positions_done.clear()
+            self.reqPositions()
+            if not self._positions_done.wait(timeout=timeout_sec):
+                self.logger.warning("get_positions_snapshot: timeout waiting for positionEnd")
+            self.cancelPositions()
+            return list(self._positions_list)
+
+    def _contract_from_dict(self, d: dict) -> Contract:
+        """Build Contract from payload dict (symbol, secType, exchange, currency, etc.)."""
+        c = Contract()
+        if not d:
+            return c
+        c.conId = int(d.get("conId") or 0)
+        c.symbol = (d.get("symbol") or "").strip()
+        c.secType = (d.get("secType") or "STK").strip()
+        c.exchange = (d.get("exchange") or "").strip()
+        c.currency = (d.get("currency") or "USD").strip()
+        c.lastTradeDateOrContractMonth = (d.get("lastTradeDateOrContractMonth") or "").strip()
+        c.strike = float(d.get("strike") or 0)
+        c.right = (d.get("right") or "").strip()
+        c.multiplier = (d.get("multiplier") or "").strip()
+        c.localSymbol = (d.get("localSymbol") or "").strip()
+        c.tradingClass = (d.get("tradingClass") or "").strip()
+        c.primaryExchange = (d.get("primaryExchange") or "").strip()
+        return c
+
+    def _order_from_dict(self, d: dict) -> Order:
+        """Build Order from payload dict (action, totalQuantity, orderType, lmtPrice, etc.)."""
+        o = Order()
+        if not d:
+            return o
+        o.action = (d.get("action") or "BUY").strip().upper()
+        o.totalQuantity = float(d.get("totalQuantity") or 0)
+        o.orderType = (d.get("orderType") or "MKT").strip().upper()
+        if d.get("lmtPrice") is not None:
+            o.lmtPrice = float(d["lmtPrice"])
+        if d.get("auxPrice") is not None:
+            o.auxPrice = float(d["auxPrice"])
+        o.tif = (d.get("tif") or "DAY").strip().upper()
+        o.transmit = bool(d.get("transmit", True))
+        o.whatIf = bool(d.get("whatIf", False))
+        if d.get("account"):
+            o.account = str(d["account"]).strip()
+        if d.get("openClose"):
+            o.openClose = str(d["openClose"]).strip()
+        return o
+
+    @staticmethod
+    def _order_error_message(code: int, text: str) -> str:
+        """Human-readable message for known IB order error codes."""
+        known = {
+            103: "Duplicate order ID. Use a new order id or restart the agent.",
+            201: "Order size too large (LGSZ). Submit a smaller size or use an algorithmic order.",
+            202: "Limit price too far from market. Use a limit price closer to the current market price.",
+            399: "Order rejected by exchange.",
+            404: "Order not found (may already be filled or cancelled).",
+            10167: "Order rejected: trading permission or market hours.",
+        }
+        if code in known:
+            return f"{known[code]} (IB {code}: {text})"
+        return f"IB error {code}: {text}"
+
+    def place_order_sync(self, contract_d: dict, order_d: dict, timeout_sec: float = 30.0) -> dict:
+        """Place order, wait for orderStatus/error, return result dict. Validates contract and order first."""
+        ok, err = self.validate_contract_for_order(contract_d)
+        if not ok:
+            return {"error": err}
+        ok, err = self.validate_order_params(order_d)
+        if not ok:
+            return {"error": err}
+        order_id = self.get_next_order_id()
+        self._order_events[order_id] = Event()
+        self._order_results[order_id] = {}
+        try:
+            contract = self._contract_from_dict(contract_d)
+            order = self._order_from_dict(order_d)
+            order.orderId = order_id
+            self.placeOrder(order_id, contract, order)
+            if not self._order_events[order_id].wait(timeout=timeout_sec):
+                return {"error": "Order response timeout. Check TWS and try again.", "orderId": order_id}
+            res = self._order_results.get(order_id) or {}
+            if res.get("errorCode") is not None:
+                code = res.get("errorCode")
+                text = res.get("errorString") or ""
+                return {
+                    "error": self._order_error_message(code, text),
+                    "orderId": order_id,
+                    "errorCode": code,
+                    "errorString": text,
+                }
+            return {
+                "orderId": order_id,
+                "status": res.get("status"),
+                "filled": res.get("filled"),
+                "remaining": res.get("remaining"),
+                "avgFillPrice": res.get("avgFillPrice"),
+                "permId": res.get("permId"),
+                "warningText": res.get("warningText"),
+            }
+        finally:
+            self._order_events.pop(order_id, None)
+            self._order_results.pop(order_id, None)
+
+    def cancel_order_sync(self, order_id: int) -> dict:
+        """Cancel order by id."""
+        try:
+            self.cancelOrder(order_id)
+            return {"ok": True, "orderId": order_id}
+        except Exception as e:
+            self.logger.error("cancel_order_sync: %s", e)
+            return {"error": str(e), "orderId": order_id}
 
     def connect_to_ib(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1):
         """Connect to IB Gateway or TWS"""
@@ -147,9 +312,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         return False
 
     def nextValidId(self, orderId: int):
-        """Callback when connected"""
+        """Callback when connected; sync both data req id and order id from TWS."""
         super().nextValidId(orderId)
         self.next_req_id = orderId
+        self.next_order_id = orderId  # Order ids must come from TWS sequence
         self.connection_lost = False
         self.last_heartbeat = time.time()
         if self.connection_start_time is None:
@@ -181,11 +347,116 @@ class IBMergerArbScanner(EWrapper, EClient):
             # 354 = market data not subscribed; surface for test_futures
             if errorCode == 354 or "not subscribed" in (errorString or "").lower():
                 self.last_mkt_data_error = (reqId, errorCode, errorString)
-    
+            # 200 = no security definition; for underlying requests we may retry with delayed
+            if errorCode == 200 and reqId in self.req_id_map and "underlying" in self.req_id_map.get(reqId, ""):
+                self._underlying_200_req_id = reqId
+            # Order rejections (201 LGSZ, 202 price, etc.): signal pending place_order wait
+            if reqId in self._order_events:
+                self._order_results[reqId] = self._order_results.get(reqId) or {}
+                self._order_results[reqId]["errorCode"] = errorCode
+                self._order_results[reqId]["errorString"] = errorString or ""
+                self._order_events[reqId].set()
+
+    def orderStatus(self, orderId: int, status: str, filled: float, remaining: float,
+                   avgFillPrice: float, permId: int, parentId: int, lastFillPrice: float,
+                   clientId: int, whyHeld: str, mktCapPrice: float):
+        """Order status update; signal pending place_order wait."""
+        self.logger.info(f"orderStatus orderId={orderId} status={status} filled={filled} remaining={remaining}")
+        if orderId in self._order_events:
+            self._order_results[orderId] = self._order_results.get(orderId) or {}
+            self._order_results[orderId].update({
+                "status": status,
+                "filled": filled,
+                "remaining": remaining,
+                "avgFillPrice": avgFillPrice,
+                "permId": permId,
+                "parentId": parentId,
+                "lastFillPrice": lastFillPrice,
+                "clientId": clientId,
+                "whyHeld": whyHeld or "",
+                "mktCapPrice": mktCapPrice,
+            })
+            self._order_events[orderId].set()
+
+    def openOrder(self, orderId: int, contract: Contract, order: Order, orderState):
+        """Open order / what-if; may include warningText (e.g. price capping)."""
+        if orderId in self._order_events:
+            self._order_results[orderId] = self._order_results.get(orderId) or {}
+            if getattr(orderState, "warningText", None):
+                self._order_results[orderId]["warningText"] = orderState.warningText
+            # Don't set event here alone; orderStatus will set it. If whatIf, only openOrder may come.
+            if order and getattr(order, "whatIf", False):
+                self._order_events[orderId].set()
+
+    def openOrderEnd(self):
+        """End of open orders list."""
+        pass
+
+    def execDetails(self, reqId: int, contract: Contract, execution):
+        """Fill notification; optional for place_order (orderStatus is primary)."""
+        self.logger.info("execDetails reqId=%s execId=%s", reqId, getattr(execution, "execId", ""))
+
+    def execDetailsEnd(self, reqId: int):
+        """End of executions for request."""
+        pass
+
     def get_next_req_id(self) -> int:
+        """For data requests only (market data, contract details, etc.). Do not use for placeOrder."""
         req_id = self.next_req_id
         self.next_req_id += 1
         return req_id
+
+    def get_next_order_id(self) -> int:
+        """For placeOrder only. Keeps order id sequence separate from request ids."""
+        oid = self.next_order_id
+        self.next_order_id += 1
+        return oid
+
+    @staticmethod
+    def validate_contract_for_order(contract_d: dict) -> tuple:
+        """Validate contract dict before order. Returns (ok: bool, error_message: str)."""
+        if not contract_d or not isinstance(contract_d, dict):
+            return False, "Contract is required and must be an object"
+        symbol = (contract_d.get("symbol") or "").strip()
+        if not symbol:
+            return False, "Contract symbol is required"
+        sec_type = (contract_d.get("secType") or "STK").strip().upper()
+        if sec_type not in ("STK", "OPT", "FOP", "FUT", "CASH", "BOND", "WAR", "BAG"):
+            return False, f"Unsupported secType: {sec_type}"
+        if sec_type == "OPT":
+            if not contract_d.get("lastTradeDateOrContractMonth") and not contract_d.get("localSymbol"):
+                return False, "Option contract requires lastTradeDateOrContractMonth or localSymbol"
+            if not contract_d.get("strike") and contract_d.get("strike") != 0:
+                return False, "Option contract requires strike"
+            if (contract_d.get("right") or "").strip().upper() not in ("C", "P"):
+                return False, "Option contract requires right (C or P)"
+        return True, ""
+
+    @staticmethod
+    def validate_order_params(order_d: dict) -> tuple:
+        """Validate order dict before sending. Returns (ok: bool, error_message: str)."""
+        if not order_d or not isinstance(order_d, dict):
+            return False, "Order is required and must be an object"
+        action = (order_d.get("action") or "BUY").strip().upper()
+        if action not in ("BUY", "SELL", "SSHORT"):
+            return False, f"Order action must be BUY, SELL, or SSHORT; got {action}"
+        try:
+            qty = float(order_d.get("totalQuantity") or 0)
+        except (TypeError, ValueError):
+            return False, "Order totalQuantity must be a number"
+        if qty <= 0:
+            return False, "Order totalQuantity must be positive"
+        order_type = (order_d.get("orderType") or "MKT").strip().upper()
+        if order_type not in ("MKT", "LMT", "STP", "STP LMT", "MOC", "LOC", "TRAIL", "TRAIL LIMIT", "MKT PRT", "LMT PRT"):
+            return False, f"Unsupported orderType: {order_type}"
+        if order_type == "LMT" or order_type == "STP LMT":
+            try:
+                lmt = order_d.get("lmtPrice")
+                if lmt is None or (isinstance(lmt, (int, float)) and float(lmt) < 0):
+                    return False, "Limit order requires non-negative lmtPrice"
+            except (TypeError, ValueError):
+                return False, "Order lmtPrice must be a number for limit orders"
+        return True, ""
 
     def resolve_contract(self, ticker: str) -> Optional[int]:
         """Resolve stock contract to get contract ID. Waits for contractDetailsEnd."""
@@ -224,20 +495,28 @@ class IBMergerArbScanner(EWrapper, EClient):
         if getattr(self, "_contract_details_wait_req_id", None) == reqId:
             self.contract_details_done.set()
 
-    def fetch_underlying_data(self, ticker: str) -> Dict:
-        """Fetch current underlying stock data"""
+    def fetch_underlying_data(self, ticker: str, resolved_contract: Optional[Contract] = None) -> Dict:
+        """Fetch current underlying stock data. Use resolved_contract (conId/primaryExchange) when
+        provided to avoid IB error 200 (no security definition) on some accounts."""
         print(f"[{ticker}] Step 2: Fetching underlying price...", flush=True)
 
         self.underlying_price = None
         self.underlying_bid = None
         self.underlying_ask = None
         self.historical_vol = None
+        self._underlying_200_req_id = None
 
-        contract = Contract()
-        contract.symbol = ticker
-        contract.secType = "STK"
-        contract.exchange = "SMART"
-        contract.currency = "USD"
+        contract = resolved_contract
+        if contract is None:
+            contract = Contract()
+            contract.symbol = ticker
+            contract.secType = "STK"
+            contract.exchange = "SMART"
+            contract.currency = "USD"
+        else:
+            # Ensure symbol set for req_id_map logging
+            if not getattr(contract, "symbol", ""):
+                contract.symbol = ticker
 
         req_id = self.get_next_req_id()
         self.req_id_map[req_id] = f"underlying_{ticker}"
@@ -245,6 +524,20 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.reqMktData(req_id, contract, "", False, False, [])
         time.sleep(3.0)  # 3s for slow symbols (e.g. EA)
         self.cancelMktData(req_id)
+
+        # If IB returned 200 (no security definition) and we have no price, retry with delayed data
+        if self.underlying_price is None and getattr(self, "_underlying_200_req_id", None) == req_id:
+            self._underlying_200_req_id = None
+            print(f"[{ticker}] Step 2: Retrying with delayed market data (account may not have real-time)...", flush=True)
+            self.reqMarketDataType(3)  # DELAYED
+            req_id2 = self.get_next_req_id()
+            self.req_id_map[req_id2] = f"underlying_{ticker}"
+            self.reqMktData(req_id2, contract, "", False, False, [])
+            time.sleep(3.0)
+            self.cancelMktData(req_id2)
+            self.reqMarketDataType(1)  # restore REALTIME
+            if self.underlying_price is not None:
+                print(f"[{ticker}] Step 2: Got delayed price {self.underlying_price}", flush=True)
 
         if self.underlying_price is not None:
             print(f"[{ticker}] Step 2: Got price {self.underlying_price}", flush=True)

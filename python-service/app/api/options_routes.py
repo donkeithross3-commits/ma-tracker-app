@@ -3,6 +3,7 @@ Options Scanner API Routes
 """
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
 import logging
@@ -681,6 +682,149 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/relay/positions")
+async def relay_positions(user_id: Optional[str] = Query(None)):
+    """
+    Request positions from the user's agent only (reqPositions).
+    Requires user_id. Never routes to another user's agent (permission: own account only).
+    """
+    try:
+        if not user_id or not user_id.strip():
+            raise HTTPException(status_code=400, detail="user_id query param required for positions")
+        target_user_id = user_id.strip()
+        registry = get_registry()
+        status = registry.get_status()
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        provider = await registry.get_active_provider(user_id=target_user_id)
+        if not provider:
+            raise HTTPException(
+                status_code=503,
+                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
+            )
+        response_data = await send_request_to_provider(
+            request_type="get_positions",
+            payload={"timeout_sec": 15.0},
+            timeout=20.0,
+            user_id=target_user_id,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay positions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class PlaceOrderBody(BaseModel):
+    contract: dict = {}
+    order: dict = {}
+    timeout_sec: Optional[float] = 30.0
+
+
+@router.post("/relay/place-order")
+async def relay_place_order(
+    user_id: Optional[str] = Query(None),
+    body: Optional[PlaceOrderBody] = None,
+):
+    """
+    Place an order via the user's agent only. Requires user_id.
+    Never routes to another user's agent (permission: own account only).
+    """
+    try:
+        if not user_id or not user_id.strip():
+            raise HTTPException(status_code=400, detail="user_id query param required")
+        target_user_id = user_id.strip()
+        registry = get_registry()
+        status = registry.get_status()
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        provider = await registry.get_active_provider(user_id=target_user_id)
+        if not provider:
+            raise HTTPException(
+                status_code=503,
+                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
+            )
+        payload = {
+            "contract": (body or PlaceOrderBody()).contract,
+            "order": (body or PlaceOrderBody()).order,
+            "timeout_sec": (body or PlaceOrderBody()).timeout_sec or 30.0,
+        }
+        response_data = await send_request_to_provider(
+            request_type="place_order",
+            payload=payload,
+            timeout=payload["timeout_sec"] + 10,
+            user_id=target_user_id,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay place order error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CancelOrderBody(BaseModel):
+    orderId: int
+
+
+@router.post("/relay/cancel-order")
+async def relay_cancel_order(
+    user_id: Optional[str] = Query(None),
+    body: Optional[CancelOrderBody] = None,
+):
+    """
+    Cancel an order via the user's agent only. Requires user_id and body.orderId.
+    Never routes to another user's agent (permission: own account only).
+    """
+    try:
+        if not user_id or not user_id.strip():
+            raise HTTPException(status_code=400, detail="user_id query param required")
+        if not body or body.orderId is None:
+            raise HTTPException(status_code=400, detail="orderId required in body")
+        target_user_id = user_id.strip()
+        registry = get_registry()
+        status = registry.get_status()
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        provider = await registry.get_active_provider(user_id=target_user_id)
+        if not provider:
+            raise HTTPException(
+                status_code=503,
+                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
+            )
+        response_data = await send_request_to_provider(
+            request_type="cancel_order",
+            payload={"orderId": body.orderId},
+            timeout=10.0,
+            user_id=target_user_id,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay cancel order error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/relay/registry")
 async def relay_registry():
     """
@@ -814,9 +958,6 @@ async def relay_ib_status():
             "message": str(e)
         }
 
-
-from pydantic import BaseModel
-from typing import Optional
 
 class ContractSpec(BaseModel):
     ticker: str

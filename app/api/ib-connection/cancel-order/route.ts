@@ -4,19 +4,28 @@ import { getCurrentUser } from "@/lib/auth-api";
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser();
     const userId = user?.id ?? null;
-    const url = new URL(`${PYTHON_SERVICE_URL}/options/relay/test-futures`);
-    if (userId) url.searchParams.set("user_id", String(userId));
-    console.log("[test-futures] user_id for routing:", userId ?? "(none)");
+    if (!userId) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+    const body = await request.json();
+    const orderId = body?.orderId;
+    if (orderId === undefined || orderId === null) {
+      return NextResponse.json(
+        { error: "orderId required in body" },
+        { status: 400 }
+      );
+    }
+    const url = new URL(`${PYTHON_SERVICE_URL}/options/relay/cancel-order`);
+    url.searchParams.set("user_id", String(userId));
 
     const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId: Number(orderId) }),
     });
 
     const contentType = response.headers.get("content-type") ?? "";
@@ -41,16 +50,14 @@ export async function GET(request: NextRequest) {
         errorDetail = `Backend returned non-JSON (${response.status}). Check Python service is running on port 8000.`;
       }
       return NextResponse.json(
-        { success: false, error: errorDetail },
+        { error: errorDetail },
         { status: response.status }
       );
     }
 
     if (!isJson) {
-      console.error("[test-futures] Non-JSON response:", text.slice(0, 200));
       return NextResponse.json(
         {
-          success: false,
           error:
             "Backend returned HTML instead of JSON. Is the Python service running on port 8000?",
         },
@@ -61,11 +68,10 @@ export async function GET(request: NextRequest) {
     const data = JSON.parse(text);
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error testing futures:", error);
+    console.error("Error canceling order:", error);
     return NextResponse.json(
       {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to test futures",
+        error: error instanceof Error ? error.message : "Failed to cancel order",
       },
       { status: 500 }
     );

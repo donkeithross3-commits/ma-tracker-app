@@ -142,6 +142,12 @@ class IBDataAgent:
                 return await self._handle_fetch_underlying(payload)
             elif request_type == "test_futures":
                 return await self._handle_test_futures(payload)
+            elif request_type == "get_positions":
+                return await self._run_in_thread(self._handle_get_positions_sync, payload)
+            elif request_type == "place_order":
+                return await self._run_in_thread(self._handle_place_order_sync, payload)
+            elif request_type == "cancel_order":
+                return await self._handle_cancel_order(payload)
             elif request_type == "fetch_prices":
                 return await self._run_in_thread(self._handle_fetch_prices_sync, payload)
             else:
@@ -198,6 +204,47 @@ class IBDataAgent:
             "ask": data.get("ask")
         }
     
+    def _handle_get_positions_sync(self, payload: dict) -> dict:
+        """Fetch all positions from IB (reqPositions -> position/positionEnd)."""
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": "IB not connected"}
+        timeout = float(payload.get("timeout_sec", 15.0))
+        try:
+            positions = self.scanner.get_positions_snapshot(timeout_sec=timeout)
+            accounts = getattr(self.scanner, "_managed_accounts", [])
+            return {"positions": positions, "accounts": accounts}
+        except Exception as e:
+            logger.error(f"Error fetching positions: {e}")
+            return {"error": str(e)}
+
+    def _handle_place_order_sync(self, payload: dict) -> dict:
+        """Place order via IB (placeOrder -> orderStatus/error)."""
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": "IB not connected"}
+        contract_d = payload.get("contract") or {}
+        order_d = payload.get("order") or {}
+        timeout_sec = float(payload.get("timeout_sec", 30.0))
+        try:
+            return self.scanner.place_order_sync(contract_d, order_d, timeout_sec=timeout_sec)
+        except Exception as e:
+            logger.error(f"Error placing order: {e}")
+            return {"error": str(e)}
+
+    async def _handle_cancel_order(self, payload: dict) -> dict:
+        """Cancel order by orderId (sync in thread)."""
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": "IB not connected"}
+        order_id = payload.get("orderId")
+        if order_id is None:
+            return {"error": "orderId required"}
+        try:
+            return await self._run_in_thread(
+                lambda: self.scanner.cancel_order_sync(int(order_id))
+            )
+        except Exception as e:
+            logger.error(f"Error canceling order: {e}")
+            return {"error": str(e)}
+
     async def _handle_test_futures(self, payload: dict) -> dict:
         """Fetch ES futures quote as a connectivity test"""
         if not self.scanner or not self.scanner.isConnected():
@@ -365,8 +412,11 @@ class IBDataAgent:
             return cached_data
         
         try:
-            # Fetch underlying
-            underlying_data = self.scanner.fetch_underlying_data(ticker)
+            # Resolve stock contract first (conId + primaryExchange) to avoid IB error 200
+            # on accounts where symbol+SMART is ambiguous or sec-def is slow.
+            _ = self.scanner.resolve_contract(ticker)
+            resolved = self.scanner.contract_details.contract if self.scanner.contract_details else None
+            underlying_data = self.scanner.fetch_underlying_data(ticker, resolved_contract=resolved)
             if not underlying_data.get("price"):
                 return {"error": f"Could not fetch price for {ticker}. Check agent console for [{ticker}] Step 2."}
 
