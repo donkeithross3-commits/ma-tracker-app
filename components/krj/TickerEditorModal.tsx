@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2, Edit3, X, Loader2 } from "lucide-react";
@@ -18,6 +19,7 @@ export function TickerEditorModal({
   listSlug,
   trigger,
 }: TickerEditorModalProps) {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [localTickers, setLocalTickers] = useState<string[]>([]);
   const [newTicker, setNewTicker] = useState("");
@@ -28,6 +30,8 @@ export function TickerEditorModal({
   const [error, setError] = useState<string | null>(null);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
   const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
+  // Track if list was modified this session (to refresh on close)
+  const listModifiedRef = useRef(false);
 
   // Load tickers from API when modal opens
   const loadTickers = async () => {
@@ -51,6 +55,12 @@ export function TickerEditorModal({
       setNewTicker("");
       setAddSuccess(null);
       setRestoreSuccess(null);
+      listModifiedRef.current = false;
+    } else {
+      // Modal is closing - refresh page if list was modified
+      if (listModifiedRef.current) {
+        router.refresh();
+      }
     }
     setIsOpen(open);
   };
@@ -68,6 +78,7 @@ export function TickerEditorModal({
       }
       const data = await response.json();
       setRestoreSuccess(data.message ?? "List restored.");
+      listModifiedRef.current = true;
       await loadTickers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Restore failed");
@@ -104,6 +115,7 @@ export function TickerEditorModal({
       setLocalTickers((prev) => [...prev, ticker].sort());
       setNewTicker("");
       setAddSuccess(`${ticker} added to list. Close and use "Request signal" in the table for data, or refresh the page.`);
+      listModifiedRef.current = true;
       // #region agent log
       fetch("http://127.0.0.1:7242/ingest/5eb096b0-06f6-4f03-a0db-0e4112629bad", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "TickerEditorModal.tsx:handleAddTicker", message: "add ticker success", data: { ticker, listId }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H4" }) }).catch(() => {});
       // #endregion
@@ -131,7 +143,7 @@ export function TickerEditorModal({
       }
 
       setLocalTickers((prev) => prev.filter((t) => t !== ticker));
-      // Don't call onTickersChanged here - just update local state
+      listModifiedRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove ticker");
     } finally {
