@@ -123,21 +123,18 @@ call :check_for_updates
 if !UPDATE_AVAILABLE!==1 (
     echo.
     echo ============================================
-    echo UPDATE AVAILABLE
+    echo UPDATE AVAILABLE - Installing automatically
     echo ============================================
     echo Current version: !CURRENT_VERSION!
     echo New version:     !SERVER_VERSION!
     echo.
-    set /p "DO_UPDATE=Would you like to update now? (Y/N): "
-    if /i "!DO_UPDATE!"=="Y" (
-        call :download_update
-        if !UPDATE_SUCCESS!==1 (
-            echo.
-            echo Restarting with new version...
-            echo.
-            "%~f0"
-            exit /b 0
-        )
+    call :download_update
+    if !UPDATE_SUCCESS!==1 (
+        echo.
+        echo Restarting with new version...
+        echo.
+        "%~f0"
+        exit /b 0
     )
     echo.
 )

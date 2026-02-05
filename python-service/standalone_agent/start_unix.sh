@@ -133,15 +133,13 @@ check_for_updates() {
     if [ "$CURRENT_VERSION" != "$SERVER_VERSION" ]; then
         echo ""
         echo "============================================"
-        echo "UPDATE AVAILABLE"
+        echo "UPDATE AVAILABLE - Installing automatically"
         echo "============================================"
         echo "Current version: $CURRENT_VERSION"
         echo "New version:     $SERVER_VERSION"
         echo ""
-        read -p "Would you like to update now? (y/n): " DO_UPDATE
-        if [[ "$DO_UPDATE" =~ ^[Yy]$ ]]; then
-            download_update
-        fi
+        download_update
+        # download_update does exec "$0" to restart; only reach here if it failed
         echo ""
     fi
 }
