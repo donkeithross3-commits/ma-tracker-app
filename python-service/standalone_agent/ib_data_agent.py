@@ -486,46 +486,41 @@ class IBDataAgent:
             return {"error": f"Chain fetch failed for {ticker}: {e}. Check agent console for [{ticker}] step messages."}
     
     def _handle_fetch_prices_sync(self, payload: dict) -> dict:
-        """Fetch prices for specific contracts"""
+        """Fetch prices for specific contracts using the same batch path as sell_scan and fetch_chain."""
         contracts = payload.get("contracts", [])
-        
         if not contracts:
             return {"error": "No contracts specified"}
-        
         if not self.scanner or not self.scanner.isConnected():
             return {"error": "IB not connected"}
-        
-        logger.info(f"Fetching prices for {len(contracts)} contracts")
-        
-        results = []
-        for contract_spec in contracts:
-            ticker = contract_spec.get("ticker", "").upper()
-            strike = float(contract_spec.get("strike", 0))
-            expiry = contract_spec.get("expiry", "")
-            right = contract_spec.get("right", "C").upper()
-            
-            expiry_normalized = expiry.replace("-", "")
-            
-            try:
-                option_data = self.scanner.get_option_data(ticker, expiry_normalized, strike, right)
-                
-                if option_data and (option_data.bid > 0 or option_data.ask > 0):
-                    results.append({
+        logger.info(f"Fetching prices for {len(contracts)} contracts (batch)")
+        # Normalize and group by ticker to call get_option_data_batch once per ticker (preserves order).
+        by_ticker = {}
+        for i, c in enumerate(contracts):
+            ticker = (c.get("ticker") or "").upper()
+            strike = float(c.get("strike", 0))
+            expiry = (c.get("expiry") or "").replace("-", "")
+            right = (c.get("right") or "C").upper()
+            if ticker not in by_ticker:
+                by_ticker[ticker] = []
+            by_ticker[ticker].append((i, expiry, strike, right))
+        results = [None] * len(contracts)
+        for ticker, items in by_ticker.items():
+            batch = [(expiry, strike, right) for (_, expiry, strike, right) in items]
+            batch_results = self.scanner.get_option_data_batch(ticker, batch)
+            for (idx, expiry_norm, strike, right), opt in zip(items, batch_results):
+                if opt and (opt.bid > 0 or opt.ask > 0):
+                    results[idx] = {
                         "ticker": ticker,
                         "strike": strike,
-                        "expiry": expiry_normalized,
+                        "expiry": expiry_norm,
                         "right": right,
-                        "bid": option_data.bid,
-                        "ask": option_data.ask,
-                        "mid": option_data.mid_price,
-                        "last": option_data.last,
-                    })
+                        "bid": opt.bid,
+                        "ask": opt.ask,
+                        "mid": opt.mid_price,
+                        "last": opt.last,
+                    }
                 else:
-                    results.append(None)
-            except Exception as e:
-                logger.error(f"Error fetching price for {ticker} {strike}: {e}")
-                results.append(None)
-        
+                    results[idx] = None
         return {"success": True, "contracts": results}
 
     def _handle_sell_scan_sync(self, payload: dict) -> dict:

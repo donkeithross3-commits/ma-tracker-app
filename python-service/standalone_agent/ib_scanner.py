@@ -604,7 +604,9 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self.option_chain[reqId]['delta'] = delta
 
     def get_available_expirations(self, ticker: str, contract_id: int = 0) -> List[str]:
-        """Get available option expirations and strikes from IB. Waits for End callback (all exchanges)."""
+        """Get available option expirations and strikes from IB. Waits for End callback (all exchanges).
+        The scanner is used by one request at a time; available_expirations and available_strikes
+        are valid only until the next call to this method."""
         print(f"[{ticker}] Step 3: Getting option expirations and strikes from IB...", flush=True)
 
         for attempt in range(2):  # initial try + one retry for flaky symbols (e.g. EA)
@@ -747,7 +749,9 @@ class IBMergerArbScanner(EWrapper, EClient):
                 if expiries_on_close:
                     selected_expiries = expiries_on_close[:1] + selected_expiries
             else:
-                selected_expiries = self.available_expirations[:3]
+                # Always get fresh expirations/strikes from IB for this ticker (avoid stale data from a previous call).
+                self.get_available_expirations(ticker, contract_id)
+                selected_expiries = sorted(set(self.available_expirations))[:3]
 
             print(f"[{ticker}] Step 4: Selected expirations: {selected_expiries}", flush=True)
 
@@ -886,12 +890,12 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self.cancelMktData(req_id)
             for req_id, (expiry, strike, right) in zip(req_ids, chunk):
                 data = self.option_chain.get(req_id)
-                try:
-                    if data:
-                        results.append(OptionData(**data))
-                    else:
-                        results.append(None)
-                finally:
-                    self.option_chain.pop(req_id, None)
-                    self.req_id_map.pop(req_id, None)
+                if data:
+                    results.append(OptionData(**data))
+                else:
+                    results.append(None)
+            # Clean up all req_ids so late-arriving ticks do not leave orphan entries.
+            for req_id in req_ids:
+                self.option_chain.pop(req_id, None)
+                self.req_id_map.pop(req_id, None)
         return results

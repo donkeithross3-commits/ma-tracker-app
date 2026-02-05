@@ -152,6 +152,18 @@ chmod +x start_unix.sh
 4. The agent fetches data from IB and sends it back
 5. Your IB credentials never leave your computer
 
+### Options market data (unified batch path)
+
+Options market data is requested from three places in the UI; all use the same backend path and `ib_scanner.get_option_data_batch` for robustness and lower latency:
+
+| UI | Action | Relay message | Scanner usage |
+|----|--------|---------------|---------------|
+| **Curate** | Load chain | `fetch-chain` | `fetch_option_chain` → `get_available_expirations` + `get_option_data_batch` |
+| **Monitor** | Refresh spread prices | `fetch-prices` | `get_option_data_batch` (grouped by ticker) |
+| **Account** | Sell calls / Sell puts | `sell-scan` | `get_available_expirations` + `get_option_data_batch` |
+
+Single-contract `get_option_data` remains available for one-off use; all bulk flows use the batch API and chunking (e.g. 50 contracts per chunk, 2.5s wait) to stay within IB limits.
+
 ## Files
 
 ```
