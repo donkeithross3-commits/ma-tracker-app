@@ -14,6 +14,8 @@ interface MAOptionsPrefs {
   defaultDealFilter?: string
   showExpiredSpreads?: boolean
   defaultExpiration?: string
+  /** Ticker keys selected in Account positions view (persisted per user) */
+  positionsSelectedTickers?: string[]
   [key: string]: unknown
 }
 

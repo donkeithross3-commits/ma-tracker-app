@@ -196,11 +196,27 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set());
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const hasSetDefaultAccountRef = useRef(false);
+  const [savedPositionsTickers, setSavedPositionsTickers] = useState<string[] | null>(null);
+  const appliedSavedPositionsRef = useRef(false);
   const [sellScanTicker, setSellScanTicker] = useState<string | null>(null);
   const [sellScanRight, setSellScanRight] = useState<"C" | "P" | null>(null);
   const [sellScanLoading, setSellScanLoading] = useState(false);
   const [sellScanResult, setSellScanResult] = useState<SellScanResponse | null>(null);
   const [sellScanError, setSellScanError] = useState<string | null>(null);
+  const [orderContract, setOrderContract] = useState<SellScanContract | null>(null);
+  const [orderQuantity, setOrderQuantity] = useState(1);
+  const [orderOrderType, setOrderOrderType] = useState<"MKT" | "LMT">("MKT");
+  const [orderLmtPrice, setOrderLmtPrice] = useState("");
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
+
+  const openOrderForContract = useCallback((c: SellScanContract) => {
+    setOrderContract(c);
+    setOrderQuantity(1);
+    setOrderOrderType("MKT");
+    setOrderLmtPrice(c.mid != null ? c.mid.toFixed(2) : "");
+    setOrderError(null);
+  }, []);
   const [krjSignals, setKrjSignals] = useState<Record<string, "Long" | "Short" | "Neutral" | null>>({});
 
   const fetchPositions = useCallback(async () => {
@@ -256,7 +272,55 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setSellScanRight(null);
     setSellScanResult(null);
     setSellScanError(null);
+    setOrderContract(null);
+    setOrderError(null);
   }, []);
+
+  const placeOrderFromScan = useCallback(
+    async (contract: SellScanContract, quantity: number, orderType: "MKT" | "LMT", lmtPrice?: number) => {
+      setOrderSubmitting(true);
+      setOrderError(null);
+      try {
+        const payload = {
+          contract: {
+            symbol: contract.symbol,
+            secType: "OPT",
+            exchange: "SMART",
+            currency: "USD",
+            lastTradeDateOrContractMonth: contract.expiry,
+            strike: contract.strike,
+            right: contract.right,
+            multiplier: "100",
+          },
+          order: {
+            action: "SELL",
+            totalQuantity: quantity,
+            orderType,
+            ...(orderType === "LMT" && lmtPrice != null && { lmtPrice }),
+          },
+          timeout_sec: 30,
+        };
+        const res = await fetch("/api/ib-connection/place-order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          credentials: "include",
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setOrderError(data?.error ?? `Order failed: ${res.status}`);
+          return;
+        }
+        setOrderContract(null);
+        setOrderError(null);
+      } catch (e) {
+        setOrderError(e instanceof Error ? e.message : "Order failed");
+      } finally {
+        setOrderSubmitting(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     fetchPositions();
@@ -267,6 +331,21 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     const interval = setInterval(fetchPositions, 60000);
     return () => clearInterval(interval);
   }, [autoRefresh, isConnected, fetchPositions]);
+
+  // Load saved position ticker selection from user preferences
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/user/preferences", { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((prefs) => {
+        if (cancelled || !prefs?.maOptionsPrefs) return;
+        const tickers = prefs.maOptionsPrefs.positionsSelectedTickers;
+        if (Array.isArray(tickers)) setSavedPositionsTickers(tickers);
+        else setSavedPositionsTickers(null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const positions = data?.positions ?? [];
   useEffect(() => {
@@ -303,6 +382,15 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
   }, [accounts, userAlias]);
 
+  // Apply saved ticker selection once when we have groups and preferences (e.g. after hard refresh)
+  useEffect(() => {
+    if (groups.length === 0 || savedPositionsTickers === null || appliedSavedPositionsRef.current) return;
+    const validKeys = new Set(groups.map((g) => g.key));
+    const toSelect = savedPositionsTickers.filter((k) => validKeys.has(k));
+    if (toSelect.length > 0) setSelectedTickers(new Set(toSelect));
+    appliedSavedPositionsRef.current = true;
+  }, [groups, savedPositionsTickers]);
+
   // When groups load or change: default no selection; keep only tickers that still exist
   useEffect(() => {
     if (groups.length === 0) return;
@@ -321,6 +409,29 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       return next;
     });
   };
+
+  // Persist selected tickers to user preferences (debounced)
+  useEffect(() => {
+    if (!appliedSavedPositionsRef.current) return;
+    const tickers = [...selectedTickers];
+    const timeoutId = setTimeout(() => {
+      fetch("/api/user/preferences", { credentials: "include" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((prefs) => {
+          if (!prefs) return;
+          const maOptionsPrefs = { ...(prefs.maOptionsPrefs || {}), positionsSelectedTickers: tickers };
+          return fetch("/api/user/preferences", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ maOptionsPrefs }),
+          });
+        })
+        .catch(() => {});
+    }, 600);
+    return () => clearTimeout(timeoutId);
+  }, [selectedTickers]);
+
   const selectedGroups = groups.filter((g) => selectedTickers.has(g.key));
   const selectedGroupKeysSig = useMemo(
     () => [...selectedTickers].sort().join(","),
@@ -714,6 +825,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             <th className="text-right py-3 px-3 font-bold">Vol</th>
                             <th className="text-right py-3 px-3 font-bold">OI</th>
                             <th className="text-right py-3 px-3 font-bold">Delta</th>
+                            <th className="text-center py-3 px-2 font-bold w-20">Trade</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -724,7 +836,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             return (
                               <Fragment key={expiry}>
                                 <tr className={`${groupBorder} ${bg}`} aria-label={`Expiration ${expDisplay}`}>
-                                  <td colSpan={8} className="py-1.5 px-3 text-sm font-bold text-amber-200/95 tracking-wide">
+                                  <td colSpan={9} className="py-1.5 px-3 text-sm font-bold text-amber-200/95 tracking-wide">
                                     {expDisplay}
                                   </td>
                                 </tr>
@@ -747,6 +859,15 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">
                                         {c.delta != null ? c.delta.toFixed(2) : "—"}
                                       </td>
+                                      <td className="py-2 px-2 text-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => openOrderForContract(c)}
+                                          className="min-h-[40px] px-3 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white"
+                                        >
+                                          Trade
+                                        </button>
+                                      </td>
                                     </tr>
                                   );
                                 })}
@@ -759,6 +880,106 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   </div>
                 );
               })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order entry modal (from sell-scan Trade button) */}
+      {orderContract != null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="order-modal-title"
+        >
+          <div className="bg-gray-900 border border-gray-600 rounded-xl shadow-xl max-w-md w-full">
+            <div className="px-4 py-3 border-b border-gray-600">
+              <h2 id="order-modal-title" className="text-xl font-bold text-white">
+                Place order
+              </h2>
+            </div>
+            <div className="px-4 py-4 space-y-4">
+              <div className="bg-gray-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Contract</div>
+                <div className="font-mono text-base text-white">
+                  {orderContract.symbol} {orderContract.expiry.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3")} {orderContract.strike} {orderContract.right === "C" ? "Call" : "Put"}
+                </div>
+                <div className="text-sm text-gray-400 mt-1">
+                  Bid {orderContract.bid?.toFixed(2) ?? "—"} / Ask {orderContract.ask?.toFixed(2) ?? "—"} / Mid {orderContract.mid?.toFixed(2) ?? "—"}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Action</label>
+                  <div className="py-2 px-3 rounded-lg bg-gray-800 text-white font-medium">SELL</div>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Quantity</label>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={orderQuantity}
+                    onChange={(e) => setOrderQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-full py-2 px-3 rounded-lg bg-gray-800 border border-gray-600 text-white focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Order type</label>
+                <select
+                  value={orderOrderType}
+                  onChange={(e) => setOrderOrderType(e.target.value as "MKT" | "LMT")}
+                  className="w-full py-2 px-3 rounded-lg bg-gray-800 border border-gray-600 text-white focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="MKT">Market</option>
+                  <option value="LMT">Limit</option>
+                </select>
+              </div>
+              {orderOrderType === "LMT" && (
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Limit price</label>
+                  <input
+                    type="number"
+                    step={0.01}
+                    min={0}
+                    value={orderLmtPrice}
+                    onChange={(e) => setOrderLmtPrice(e.target.value)}
+                    placeholder={orderContract.mid?.toFixed(2)}
+                    className="w-full py-2 px-3 rounded-lg bg-gray-800 border border-gray-600 text-white focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+              )}
+              {orderError && (
+                <p className="text-sm text-red-300 font-medium">{orderError}</p>
+              )}
+            </div>
+            <div className="px-4 py-3 border-t border-gray-600 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setOrderContract(null); setOrderError(null); }}
+                disabled={orderSubmitting}
+                className="min-h-[44px] px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const qty = Math.max(1, orderQuantity);
+                  const lmt = orderOrderType === "LMT" ? parseFloat(orderLmtPrice) : undefined;
+                  if (orderOrderType === "LMT" && (lmt == null || isNaN(lmt) || lmt < 0)) {
+                    setOrderError("Enter a valid limit price");
+                    return;
+                  }
+                  placeOrderFromScan(orderContract, qty, orderOrderType, lmt);
+                }}
+                disabled={orderSubmitting}
+                className="min-h-[44px] px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50"
+              >
+                {orderSubmitting ? "Sending…" : "Place order"}
+              </button>
             </div>
           </div>
         </div>
