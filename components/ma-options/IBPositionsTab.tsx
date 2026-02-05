@@ -1,7 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import { useIBConnection } from "./IBConnectionContext";
+
+/** Hardcoded account aliases for KRJ (display only; filtering still uses raw account id). */
+const KRJ_ACCOUNT_ALIASES: Record<string, string> = {
+  U127613: "Personal",
+  U22621569: "Event Driven",
+};
+
+function getAccountLabel(accountId: string, userAlias?: string | null): string {
+  if (userAlias === "KRJ" && KRJ_ACCOUNT_ALIASES[accountId]) {
+    return KRJ_ACCOUNT_ALIASES[accountId];
+  }
+  return accountId;
+}
 
 export interface IBPositionContract {
   conId?: number;
@@ -149,12 +163,15 @@ interface IBPositionsTabProps {
 }
 
 export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabProps) {
+  const { data: session } = useSession();
+  const userAlias = session?.user?.alias ?? null;
   const { isConnected } = useIBConnection();
   const [data, setData] = useState<IBPositionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set());
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  const hasSetDefaultAccountRef = useRef(false);
 
   const fetchPositions = useCallback(async () => {
     setLoading(true);
@@ -189,6 +206,10 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   }, [autoRefresh, isConnected, fetchPositions]);
 
   const positions = data?.positions ?? [];
+  useEffect(() => {
+    hasSetDefaultAccountRef.current = false;
+  }, [data]);
+
   const accounts = useMemo(
     () => [...new Set(positions.map((p) => p.account))].sort(),
     [positions]
@@ -205,6 +226,19 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     () => groups.map((g) => g.key).sort().join(","),
     [filteredPositions.length, filteredPositions.map((p) => groupKey(p)).join(",")]
   );
+
+  // For KRJ: default to Personal (U127613) on first load when that account exists
+  useEffect(() => {
+    if (
+      !hasSetDefaultAccountRef.current &&
+      accounts.length > 0 &&
+      userAlias === "KRJ" &&
+      accounts.includes("U127613")
+    ) {
+      setSelectedAccount("U127613");
+      hasSetDefaultAccountRef.current = true;
+    }
+  }, [accounts, userAlias]);
 
   // When groups load or change: default no selection; keep only tickers that still exist
   useEffect(() => {
@@ -311,7 +345,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   : "bg-gray-700 text-gray-200 hover:bg-gray-600"
               }`}
             >
-              {acct} ({positions.filter((p) => p.account === acct).length})
+              {getAccountLabel(acct, userAlias)} ({positions.filter((p) => p.account === acct).length})
             </button>
           ))}
         </div>
@@ -321,7 +355,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-base text-gray-200">
         <span className="font-medium">
           Positions: {filteredPositions.length} total
-          {selectedAccount !== null && ` (${selectedAccount})`}
+          {selectedAccount !== null &&
+            ` (${getAccountLabel(selectedAccount, userAlias)})`}
         </span>
         {Object.keys(byType).length > 0 && (
           <span>By type: {Object.entries(byType).map(([t, n]) => `${t} ${n}`).join(", ")}</span>
@@ -334,7 +369,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       {filteredPositions.length === 0 ? (
         <div className="rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-6 text-base text-gray-300">
           {selectedAccount !== null
-            ? `No positions in account ${selectedAccount}.`
+            ? `No positions in account ${getAccountLabel(selectedAccount, userAlias)}.`
             : "No positions."}
         </div>
       ) : (
@@ -435,7 +470,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                   key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
                                   className="border-b border-gray-700/50 hover:bg-gray-700/30"
                                 >
-                                  <td className="py-2 px-3 text-gray-300 text-sm">{row.account}</td>
+                                  <td className="py-2 px-3 text-gray-300 text-sm">
+                                    {getAccountLabel(row.account, userAlias)}
+                                  </td>
                                   <td className="py-2 px-3 text-gray-100 whitespace-nowrap text-sm font-medium">
                                     {displaySymbol(row)}
                                   </td>
