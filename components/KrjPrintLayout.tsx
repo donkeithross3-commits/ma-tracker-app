@@ -199,6 +199,8 @@ export default function KrjPrintLayout({ groups, columns, filterDescription }: K
                     }
                     
                     const isNumeric = numericCols.includes(col.key);
+                    const isPlaceholder = !!(row.ticker || "").trim() && !(row.c ?? "").toString().trim() && !(row.signal ?? "").toString().trim();
+                    if (isPlaceholder && col.key === "signal") value = "No signal yet";
                     return (
                       <td
                         key={col.key}

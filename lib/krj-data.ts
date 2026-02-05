@@ -100,18 +100,18 @@ const KRJ_SIGNAL_VALUES: KrjSignal[] = ["Long", "Neutral", "Short"];
 /**
  * Get KRJ weekly signal for a set of tickers.
  * Returns a map of ticker (uppercase) -> "Long" | "Short" | "Neutral".
- * Tickers not in any KRJ CSV are omitted (caller treats as "not available").
+ * Uses CSV data plus on-demand signals. Tickers not found are omitted (caller treats as "not available").
  */
 export function getKrjSignalsForTickers(tickers: string[]): Record<string, KrjSignal> {
   if (tickers.length === 0) return {};
   const wantSet = new Set(tickers.map((t) => t.trim().toUpperCase()).filter(Boolean));
   if (wantSet.size === 0) return {};
 
+  const result: Record<string, KrjSignal> = {};
   const allCsvData: Record<string, RawRow[]> = {};
   for (const [slug, csvFile] of Object.entries(SLUG_TO_CSV)) {
     allCsvData[slug] = loadCsv(csvFile);
   }
-  const result: Record<string, KrjSignal> = {};
   for (const rows of Object.values(allCsvData)) {
     for (const row of rows) {
       const ticker = (row.ticker || "").toUpperCase();
@@ -121,6 +121,14 @@ export function getKrjSignalsForTickers(tickers: string[]): Record<string, KrjSi
         result[ticker] = raw as KrjSignal;
       }
     }
+  }
+  const onDemand = loadOnDemandSignals();
+  for (const ticker of wantSet) {
+    if (result[ticker]) continue;
+    const row = onDemand[ticker];
+    if (!row) continue;
+    const raw = (row.signal || "").trim();
+    if (KRJ_SIGNAL_VALUES.includes(raw as KrjSignal)) result[ticker] = raw as KrjSignal;
   }
   return result;
 }
@@ -135,6 +143,49 @@ const SLUG_TO_CSV: Record<string, string> = {
   sp100: "latest_sp100.csv",
   drc: "latest_drc.csv",
 };
+
+const KRJ_CSV_COLUMNS = [
+  "ticker", "c", "weekly_low", "25DMA", "25DMA_shifted",
+  "long_signal_value", "short_signal_value", "signal", "signal_status_prior_week",
+  "vol_ratio", "25DMA_range_bps", "25D_ADV_Shares_MM", "25D_ADV_nortional_B", "avg_trade_size",
+] as const;
+
+/** Path to on-demand (single-ticker) signals merged into list data */
+const ON_DEMAND_SIGNALS_PATH = path.join(process.cwd(), "data", "krj", "on_demand_signals.json");
+
+/**
+ * Row is a placeholder when it has a ticker but no Friday close or signal (no CSV data yet).
+ */
+export function isPlaceholderRow(row: RawRow): boolean {
+  const ticker = (row?.ticker || "").trim();
+  const c = (row?.c ?? "").toString().trim();
+  const signal = (row?.signal ?? "").toString().trim();
+  return !!ticker && !c && !signal;
+}
+
+function loadOnDemandSignals(): Record<string, RawRow> {
+  try {
+    if (!fs.existsSync(ON_DEMAND_SIGNALS_PATH)) return {};
+    const raw = fs.readFileSync(ON_DEMAND_SIGNALS_PATH, "utf8");
+    const data = JSON.parse(raw) as Record<string, RawRow>;
+    const out: Record<string, RawRow> = {};
+    for (const [ticker, row] of Object.entries(data)) {
+      const upper = (ticker || "").toUpperCase();
+      if (upper && row && typeof row === "object") out[upper] = row;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function makePlaceholderRow(ticker: string): RawRow {
+  const row: RawRow = {};
+  for (const col of KRJ_CSV_COLUMNS) {
+    row[col] = col === "ticker" ? ticker.toUpperCase() : "";
+  }
+  return row;
+}
 
 /**
  * Get all KRJ lists with data for a specific user
@@ -195,6 +246,12 @@ export async function getKrjListsForUser(userId: string | null): Promise<{
       }
     }
   }
+  // Merge on-demand (single-ticker) signals so they appear in lists
+  const onDemandSignals = loadOnDemandSignals();
+  for (const [ticker, row] of Object.entries(onDemandSignals)) {
+    const upper = ticker.toUpperCase();
+    if (upper && !masterTickerData[upper]) masterTickerData[upper] = row;
+  }
 
   // Build the list data with user customizations applied
   const lists: KrjListData[] = [];
@@ -241,16 +298,20 @@ export async function getKrjListsForUser(userId: string | null): Promise<{
       // Track which tickers we found
       const foundTickers = new Set(rowsFromOwnCsv.map((r) => (r.ticker || "").toUpperCase()));
       
-      // For tickers not in own CSV, look up from master data
+      // For tickers not in own CSV, look up from master data or add placeholder
       const rowsFromMaster: RawRow[] = [];
+      const placeholderRows: RawRow[] = [];
       for (const ticker of tickers) {
         const upperTicker = ticker.toUpperCase();
-        if (!foundTickers.has(upperTicker) && masterTickerData[upperTicker]) {
+        if (foundTickers.has(upperTicker)) continue;
+        if (masterTickerData[upperTicker]) {
           rowsFromMaster.push(masterTickerData[upperTicker]);
+        } else {
+          placeholderRows.push(makePlaceholderRow(ticker));
         }
       }
-      
-      rows = [...rowsFromOwnCsv, ...rowsFromMaster];
+      // Placeholders at end so "No signal yet" rows are grouped
+      rows = [...rowsFromOwnCsv, ...rowsFromMaster, ...placeholderRows];
     }
 
     // Sort currency pairs first for ETFs/FX

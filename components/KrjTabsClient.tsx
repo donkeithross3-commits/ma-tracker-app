@@ -1,16 +1,25 @@
 'use client'
 
 import { useState, useEffect, useMemo } from "react"
+import { useRouter } from "next/navigation"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Printer, Filter, X, User, GitFork, Edit3 } from "lucide-react"
+import { Printer, Filter, X, User, GitFork, Edit3, Loader2 } from "lucide-react"
 import KrjPrintLayout from "@/components/KrjPrintLayout"
 import { ListSettingsModal } from "@/components/krj/ListSettingsModal"
 import { TickerEditorModal } from "@/components/krj/TickerEditorModal"
 
 type RawRow = Record<string, string>;
+
+/** Row has ticker but no CSV data yet (placeholder for "Request signal"). */
+function isPlaceholderRow(row: RawRow): boolean {
+  const t = (row?.ticker ?? "").toString().trim()
+  const c = (row?.c ?? "").toString().trim()
+  const s = (row?.signal ?? "").toString().trim()
+  return !!t && !c && !s
+}
 
 type GroupData = {
   key: string;
@@ -138,6 +147,7 @@ function computeSummaryFromRows(rows: RawRow[]) {
 }
 
 export default function KrjTabsClient({ groups, columns, userId, userAlias }: KrjTabsClientProps) {
+  const router = useRouter()
   // Print state management
   const [printMode, setPrintMode] = useState(false)
   const [showPrintDialog, setShowPrintDialog] = useState(false)
@@ -147,6 +157,9 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
   // Payload for current print run (set when user clicks Print or Print all Long/Short)
   const [selectedGroupsForPrint, setSelectedGroupsForPrint] = useState<string[]>([])
   const [longShortOnlyForPrint, setLongShortOnlyForPrint] = useState(false)
+  // Request signal for one ticker (placeholder row)
+  const [requestingTicker, setRequestingTicker] = useState<string | null>(null)
+  const [requestError, setRequestError] = useState<string | null>(null)
   
   // List visibility state (for hiding tabs)
   const [hiddenListIds, setHiddenListIds] = useState<string[]>([])
@@ -175,6 +188,27 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
 
   // Check if filter is active
   const isFilterActive = filterColumn !== null && filterValues.length > 0;
+
+  async function handleRequestSignal(ticker: string) {
+    if (!ticker?.trim()) return
+    setRequestError(null)
+    setRequestingTicker(ticker.toUpperCase())
+    try {
+      const res = await fetch("/api/krj/signals/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ticker: ticker.trim().toUpperCase() }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || "Request failed")
+      router.refresh()
+    } catch (e) {
+      setRequestError(e instanceof Error ? e.message : "Request failed")
+    } finally {
+      setRequestingTicker(null)
+    }
+  }
 
   // Get filter description for display
   const getFilterDescription = (): string => {
@@ -558,6 +592,12 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
             </span>
           </div>
 
+          {requestError && (
+            <div className="mb-2 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-2 py-1">
+              {requestError}
+            </div>
+          )}
+
           {/* Main table */}
           <div className="border border-gray-600 rounded overflow-auto max-h-[80vh]">
             <table className="min-w-full text-[16px]">
@@ -621,13 +661,36 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
                           }
                           // Neutral stays default gray-100
                         }
-                        
+
+                        const isPlaceholder = isPlaceholderRow(row);
+                        const tickerForRequest = (row.ticker || "").trim().toUpperCase();
+                        const isRequesting = requestingTicker === tickerForRequest;
+
                         return (
                           <td
                             key={col.key}
                             className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap ${isNumeric ? 'text-right' : 'text-left'} ${cellColorClass}`}
                           >
-                            {value}
+                            {isPlaceholder && col.key === "signal" ? (
+                              <span className="flex flex-col gap-1">
+                                <span className="text-gray-500 text-xs">No signal yet</span>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 text-xs bg-gray-800 border-gray-600 text-gray-200 hover:bg-gray-700"
+                                  disabled={!!requestingTicker}
+                                  onClick={() => handleRequestSignal(row.ticker || "")}
+                                >
+                                  {isRequesting ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    "Request signal"
+                                  )}
+                                </Button>
+                              </span>
+                            ) : (
+                              value
+                            )}
                           </td>
                         );
                       })}

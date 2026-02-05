@@ -30,6 +30,7 @@ from .api.webhooks import router as webhooks_router
 from .api.halt_routes import router as halt_router
 from .api.options_routes import router as options_router
 from .api.ws_relay import router as ws_relay_router
+from .api.krj_routes import router as krj_router
 from .edgar.database import EdgarDatabase
 
 # Configure logging
@@ -68,6 +69,9 @@ app.include_router(options_router)
 
 # Include WebSocket relay for remote IB data providers
 app.include_router(ws_relay_router)
+
+# Include KRJ single-ticker signal (Polygon, no IB)
+app.include_router(krj_router)
 
 # Configure CORS - allow requests from Next.js frontend
 app.add_middleware(
