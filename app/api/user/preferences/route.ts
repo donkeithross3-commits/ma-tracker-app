@@ -16,6 +16,8 @@ interface MAOptionsPrefs {
   defaultExpiration?: string
   /** Ticker keys selected in Account positions view (persisted per user) */
   positionsSelectedTickers?: string[]
+  /** Manually added tickers for position boxes without an IB position (SEC-validated) */
+  positionsManualTickers?: { ticker: string; name?: string }[]
   [key: string]: unknown
 }
 

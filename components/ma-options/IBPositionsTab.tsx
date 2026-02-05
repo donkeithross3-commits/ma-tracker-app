@@ -117,6 +117,35 @@ interface GroupAggregate {
   callCount: number;
   putCount: number;
   typeCounts: Record<string, number>;
+  /** True if this group is from a manually added ticker (no IB position). */
+  isManual?: boolean;
+}
+
+/** Manual ticker entry for position boxes without an IB position (persisted in preferences). */
+export interface ManualTickerEntry {
+  ticker: string;
+  name?: string;
+}
+
+interface TickerMatch {
+  ticker: string;
+  name: string;
+}
+
+/** Build a synthetic group for a manual ticker (no positions). */
+function syntheticGroup(key: string): GroupAggregate {
+  return {
+    key,
+    rows: [],
+    costBasis: 0,
+    netPosition: 0,
+    longPosition: 0,
+    shortPosition: 0,
+    callCount: 0,
+    putCount: 0,
+    typeCounts: {},
+    isManual: true,
+  };
 }
 
 function computeGroups(positions: IBPositionRow[]): GroupAggregate[] {
@@ -219,6 +248,25 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   }, []);
   const [krjSignals, setKrjSignals] = useState<Record<string, "Long" | "Short" | "Neutral" | null>>({});
 
+  // Manual tickers (position boxes without an IB position); persisted in user preferences
+  const [manualTickers, setManualTickers] = useState<ManualTickerEntry[]>([]);
+  const manualTickersAppliedRef = useRef(false);
+  const manualTickersLoadedRef = useRef(false);
+  // Add-ticker modal: same SEC EDGAR validation as Curate tab
+  const [addTickerOpen, setAddTickerOpen] = useState(false);
+  const [addTickerInput, setAddTickerInput] = useState("");
+  const [addTickerName, setAddTickerName] = useState("");
+  const [addTickerSuggestions, setAddTickerSuggestions] = useState<TickerMatch[]>([]);
+  const [addTickerShowSuggestions, setAddTickerShowSuggestions] = useState(false);
+  const [addTickerSearching, setAddTickerSearching] = useState(false);
+  const [addTickerError, setAddTickerError] = useState<string | null>(null);
+  const [addTickerSubmitting, setAddTickerSubmitting] = useState(false);
+  const addTickerInputRef = useRef<HTMLInputElement>(null);
+  const addTickerSuggestionsRef = useRef<HTMLDivElement>(null);
+  // Stock quotes per group key (underlying ticker); null = not fetched, { price, timestamp } or { error }
+  const [quotes, setQuotes] = useState<Record<string, { price: number; timestamp: string } | { error: string } | null>>({});
+  const [quoteLoading, setQuoteLoading] = useState<Record<string, boolean>>({});
+
   const fetchPositions = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -274,6 +322,135 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setSellScanError(null);
     setOrderContract(null);
     setOrderError(null);
+  }, []);
+
+  /** Underlying ticker for a group key (e.g. AAPL or SPCE 250117). */
+  const underlyingTickerForGroupKey = useCallback((key: string) => key.split(" ")[0]?.toUpperCase() ?? key, []);
+
+  const fetchQuote = useCallback(async (ticker: string) => {
+    const key = ticker.toUpperCase();
+    setQuoteLoading((prev) => ({ ...prev, [key]: true }));
+    try {
+      const res = await fetch("/api/ma-options/stock-quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: key }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setQuotes((prev) => ({ ...prev, [key]: { error: data?.error || "Failed to fetch quote" } }));
+        return;
+      }
+      setQuotes((prev) => ({
+        ...prev,
+        [key]: { price: data.price, timestamp: data.timestamp || new Date().toISOString() },
+      }));
+    } catch (e) {
+      setQuotes((prev) => ({ ...prev, [key]: { error: e instanceof Error ? e.message : "Failed to fetch quote" } }));
+    } finally {
+      setQuoteLoading((prev) => ({ ...prev, [key]: false }));
+    }
+  }, []);
+
+  // Add-ticker modal: close suggestions on click outside
+  useEffect(() => {
+    if (!addTickerOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        addTickerSuggestionsRef.current &&
+        !addTickerSuggestionsRef.current.contains(e.target as Node) &&
+        addTickerInputRef.current &&
+        !addTickerInputRef.current.contains(e.target as Node)
+      ) {
+        setAddTickerShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [addTickerOpen]);
+
+  // Add-ticker modal: debounced SEC ticker lookup (same as Curate tab)
+  useEffect(() => {
+    if (!addTickerOpen || !addTickerInput.trim()) {
+      setAddTickerSuggestions([]);
+      setAddTickerShowSuggestions(false);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setAddTickerSearching(true);
+      try {
+        const res = await fetch(`/api/ticker-lookup?q=${encodeURIComponent(addTickerInput.trim())}`);
+        if (res.ok) {
+          const data = await res.json();
+          setAddTickerSuggestions(data.matches || []);
+          setAddTickerShowSuggestions((data.matches?.length ?? 0) > 0);
+        }
+      } catch {
+        setAddTickerSuggestions([]);
+      } finally {
+        setAddTickerSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [addTickerOpen, addTickerInput]);
+
+  const handleAddTickerSelectSuggestion = useCallback((m: TickerMatch) => {
+    setAddTickerInput(m.ticker);
+    setAddTickerName(m.name);
+    setAddTickerShowSuggestions(false);
+    setAddTickerError(null);
+  }, []);
+
+  const handleAddTickerConfirm = useCallback(async () => {
+    const ticker = addTickerInput.trim().toUpperCase();
+    if (!ticker) {
+      setAddTickerError("Enter a ticker symbol");
+      return;
+    }
+    setAddTickerError(null);
+    setAddTickerSubmitting(true);
+    try {
+      // Validate via SEC: exact ticker match (user must select from dropdown or we require one exact match)
+      const res = await fetch(`/api/ticker-lookup?q=${encodeURIComponent(ticker)}`);
+      if (!res.ok) throw new Error("Lookup failed");
+      const data = await res.json();
+      const matches: TickerMatch[] = data.matches || [];
+      const exact = matches.find((m: TickerMatch) => m.ticker.toUpperCase() === ticker);
+      if (!exact) {
+        setAddTickerError("Ticker not found in SEC EDGAR. Type a few letters and pick from the list.");
+        setAddTickerSubmitting(false);
+        return;
+      }
+      const name = addTickerName.trim() || exact.name;
+      if (manualTickers.some((m) => m.ticker.toUpperCase() === ticker)) {
+        setAddTickerError("This ticker is already in your list.");
+        setAddTickerSubmitting(false);
+        return;
+      }
+      const next = [...manualTickers, { ticker, name }].sort((a, b) => a.ticker.localeCompare(b.ticker));
+      setManualTickers(next);
+      setSelectedTickers((prev) => new Set([...prev, ticker]));
+      setAddTickerOpen(false);
+      setAddTickerInput("");
+      setAddTickerName("");
+      setAddTickerSuggestions([]);
+      fetchQuote(ticker);
+    } catch {
+      setAddTickerError("Could not validate ticker. Try again.");
+    } finally {
+      setAddTickerSubmitting(false);
+    }
+  }, [addTickerInput, addTickerName, manualTickers, fetchQuote]);
+
+  const removeManualTicker = useCallback((ticker: string) => {
+    const key = ticker.toUpperCase();
+    setManualTickers((prev) => prev.filter((m) => m.ticker.toUpperCase() !== key));
+    setSelectedTickers((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
   }, []);
 
   const placeOrderFromScan = useCallback(
@@ -332,7 +509,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     return () => clearInterval(interval);
   }, [autoRefresh, isConnected, fetchPositions]);
 
-  // Load saved position ticker selection from user preferences
+  // Load saved position ticker selection and manual tickers from user preferences
   useEffect(() => {
     let cancelled = false;
     fetch("/api/user/preferences", { credentials: "include" })
@@ -342,6 +519,18 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         const tickers = prefs.maOptionsPrefs.positionsSelectedTickers;
         if (Array.isArray(tickers)) setSavedPositionsTickers(tickers);
         else setSavedPositionsTickers(null);
+        const manual = prefs.maOptionsPrefs.positionsManualTickers;
+        if (Array.isArray(manual)) {
+          setManualTickers(
+            manual.filter(
+              (m: unknown) =>
+                typeof m === "object" &&
+                m !== null &&
+                typeof (m as ManualTickerEntry).ticker === "string"
+            ) as ManualTickerEntry[]
+          );
+        }
+        manualTickersLoadedRef.current = true;
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -363,10 +552,17 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         : positions,
     [positions, selectedAccount]
   );
-  const groups = computeGroups(filteredPositions);
+  const positionGroups = computeGroups(filteredPositions);
+  const positionGroupKeys = useMemo(() => new Set(positionGroups.map((g) => g.key)), [positionGroups]);
+  // Merge manual tickers that don't already have a position group (e.g. AAPL with no position still shows as manual box)
+  const groups = useMemo(() => {
+    const manualOnly = manualTickers.filter((m) => !positionGroupKeys.has(m.ticker));
+    const synthetic = manualOnly.map((m) => syntheticGroup(m.ticker));
+    return [...positionGroups, ...synthetic].sort((a, b) => a.key.localeCompare(b.key));
+  }, [positionGroups, positionGroupKeys, manualTickers]);
   const groupKeysSignature = useMemo(
     () => groups.map((g) => g.key).sort().join(","),
-    [filteredPositions.length, filteredPositions.map((p) => groupKey(p)).join(",")]
+    [groups]
   );
 
   // For KRJ: default to Personal (U127613) on first load when that account exists
@@ -432,11 +628,42 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     return () => clearTimeout(timeoutId);
   }, [selectedTickers]);
 
+  // Persist manual tickers when they change (only after we've loaded prefs so we don't overwrite)
+  useEffect(() => {
+    if (!manualTickersLoadedRef.current) return;
+    fetch("/api/user/preferences", { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((prefs) => {
+        if (!prefs) return;
+        const maOptionsPrefs = { ...(prefs.maOptionsPrefs || {}), positionsManualTickers: manualTickers };
+        return fetch("/api/user/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ maOptionsPrefs }),
+        });
+      })
+      .catch(() => {});
+  }, [manualTickers]);
+
   const selectedGroups = groups.filter((g) => selectedTickers.has(g.key));
+  const manualTickerNames = useMemo(
+    () => Object.fromEntries(manualTickers.map((m) => [m.ticker.toUpperCase(), m.name || ""])),
+    [manualTickers]
+  );
   const selectedGroupKeysSig = useMemo(
     () => [...selectedTickers].sort().join(","),
     [selectedTickers]
   );
+
+  // Fetch stock quote for each selected group's underlying ticker when first shown (page load or new box)
+  useEffect(() => {
+    if (selectedGroups.length === 0) return;
+    const tickers = [...new Set(selectedGroups.map((g) => underlyingTickerForGroupKey(g.key)).filter(Boolean))];
+    for (const ticker of tickers) {
+      if (quotes[ticker] === undefined) fetchQuote(ticker);
+    }
+  }, [selectedGroupKeysSig, quotes, fetchQuote, underlyingTickerForGroupKey]);
 
   // Fetch KRJ signal for selected tickers (underlying symbol: first token of group.key)
   useEffect(() => {
@@ -578,8 +805,21 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
           <div className="flex gap-4 min-h-0">
             {/* Left: one big box listing all tickers (one row each, STK/OPT on same line) */}
             <div className="w-64 shrink-0 flex flex-col rounded-lg border border-gray-600 bg-gray-800/80 overflow-hidden">
-              <div className="px-3 py-2 border-b border-gray-600 text-sm font-semibold text-gray-200">
-                Tickers ({groups.length})
+              <div className="px-3 py-2 border-b border-gray-600 flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-gray-200">Tickers ({groups.length})</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddTickerOpen(true);
+                    setAddTickerInput("");
+                    setAddTickerName("");
+                    setAddTickerError(null);
+                    setTimeout(() => addTickerInputRef.current?.focus(), 100);
+                  }}
+                  className="shrink-0 min-h-[36px] px-2.5 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white"
+                >
+                  Add ticker
+                </button>
               </div>
               <div className="overflow-y-auto flex-1 min-h-[200px]">
                 {groups.map((group) => {
@@ -624,6 +864,10 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   selectedGroups.map((group, idx) => {
                     const accent = accentColors[idx % accentColors.length];
                     const headerAccent = headerAccents[idx % headerAccents.length];
+                    const underlyingTicker = underlyingTickerForGroupKey(group.key);
+                    const quote = quotes[underlyingTicker];
+                    const quoteLoadingThis = quoteLoading[underlyingTicker];
+                    const companyName = group.isManual ? manualTickerNames[group.key] : null;
                     return (
                       <div
                         key={`group-${group.key}`}
@@ -636,6 +880,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             <span className="text-xl font-bold text-white tracking-tight">
                               {group.key}
                             </span>
+                            {companyName && (
+                              <span className="text-sm text-gray-400 truncate max-w-[200px]" title={companyName}>
+                                {companyName}
+                              </span>
+                            )}
                             <span
                               className={`text-sm font-medium px-2 py-0.5 rounded ${
                                 krjSignals[group.key] === "Long"
@@ -650,12 +899,22 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             >
                               KRJ: {krjSignals[group.key] ?? "Not available"}
                             </span>
+                            {group.isManual && (
+                              <button
+                                type="button"
+                                onClick={() => removeManualTicker(group.key)}
+                                className="ml-auto text-xs text-gray-400 hover:text-red-400"
+                                title="Remove from list"
+                              >
+                                Remove
+                              </button>
+                            )}
                           </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-200">
                             <span>
-                              {Object.entries(group.typeCounts)
-                                .map(([t, n]) => `${t} ${n}`)
-                                .join(", ")}
+                              {Object.keys(group.typeCounts).length > 0
+                                ? Object.entries(group.typeCounts).map(([t, n]) => `${t} ${n}`).join(", ")
+                                : "No position"}
                             </span>
                             {group.callCount + group.putCount > 0 && (
                               <span className="text-gray-300">
@@ -668,6 +927,24 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             <span className="tabular-nums font-semibold text-white">
                               {formatCostBasis(group.costBasis)}
                             </span>
+                            <span className="tabular-nums text-gray-300">
+                              Spot:{" "}
+                              {quoteLoadingThis
+                                ? "…"
+                                : quote && "price" in quote
+                                  ? `$${quote.price.toFixed(2)}`
+                                  : quote && "error" in quote
+                                    ? quote.error
+                                    : "—"}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => fetchQuote(underlyingTicker)}
+                              disabled={quoteLoadingThis}
+                              className="min-h-[32px] px-2 py-1 rounded text-xs font-medium bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-white"
+                            >
+                              Refresh quote
+                            </button>
                           </div>
                           <div className="flex flex-wrap gap-2 mt-2">
                             <button
@@ -750,6 +1027,117 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
           {loading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
+
+      {/* Add ticker modal: SEC EDGAR validation, same as Curate tab */}
+      {addTickerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="add-ticker-title"
+        >
+          <div className="bg-gray-900 border border-gray-600 rounded-xl shadow-xl max-w-md w-full">
+            <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-gray-600">
+              <h2 id="add-ticker-title" className="text-xl font-bold text-white">
+                Add position box (no position required)
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setAddTickerOpen(false);
+                  setAddTickerInput("");
+                  setAddTickerName("");
+                  setAddTickerError(null);
+                }}
+                className="min-h-[44px] min-w-[44px] px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-base font-medium"
+              >
+                Close
+              </button>
+            </div>
+            <div className="px-4 py-4 space-y-4">
+              <p className="text-sm text-gray-400">
+                Enter a ticker to create a position box and get a stock quote. Use the same SEC EDGAR validation as the Curate tab.
+              </p>
+              <div className="relative">
+                <label className="block text-sm text-gray-400 mb-1">Ticker</label>
+                <input
+                  ref={addTickerInputRef}
+                  type="text"
+                  value={addTickerInput}
+                  onChange={(e) => {
+                    setAddTickerInput(e.target.value.toUpperCase());
+                    setAddTickerError(null);
+                  }}
+                  onFocus={() => addTickerSuggestions.length > 0 && setAddTickerShowSuggestions(true)}
+                  placeholder="e.g. AAPL"
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 focus:border-blue-500 focus:outline-none"
+                  disabled={addTickerSubmitting}
+                  autoComplete="off"
+                />
+                {addTickerSearching && (
+                  <div className="absolute right-3 top-9 text-gray-400">
+                    <div className="w-4 h-4 border-2 border-gray-500 border-t-blue-500 rounded-full animate-spin" />
+                  </div>
+                )}
+                {addTickerShowSuggestions && addTickerSuggestions.length > 0 && (
+                  <div
+                    ref={addTickerSuggestionsRef}
+                    className="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-48 overflow-y-auto"
+                  >
+                    {addTickerSuggestions.map((m) => (
+                      <button
+                        key={m.ticker}
+                        type="button"
+                        onClick={() => handleAddTickerSelectSuggestion(m)}
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700 flex items-center gap-2"
+                      >
+                        <span className="font-mono text-blue-400 font-medium min-w-[56px]">{m.ticker}</span>
+                        <span className="text-gray-300 truncate">{m.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Company name (from SEC)</label>
+                <input
+                  type="text"
+                  value={addTickerName}
+                  onChange={(e) => setAddTickerName(e.target.value)}
+                  placeholder="Pick from list or type"
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 focus:border-blue-500 focus:outline-none"
+                  disabled={addTickerSubmitting}
+                />
+              </div>
+              {addTickerError && (
+                <p className="text-sm text-red-400">{addTickerError}</p>
+              )}
+            </div>
+            <div className="px-4 py-3 border-t border-gray-600 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAddTickerOpen(false);
+                  setAddTickerInput("");
+                  setAddTickerName("");
+                  setAddTickerError(null);
+                }}
+                className="min-h-[44px] px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAddTickerConfirm}
+                disabled={addTickerSubmitting}
+                className="min-h-[44px] px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50"
+              >
+                {addTickerSubmitting ? "Adding…" : "Add"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sell-scan modal: NTM calls/puts for next 0–15 business days */}
       {sellScanTicker != null && (
