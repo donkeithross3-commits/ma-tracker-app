@@ -36,9 +36,8 @@ export const authConfig: NextAuthConfig = {
       const isInternalAPI = pathname === "/api/ma-options/validate-agent-key" ||
                             pathname === "/api/ma-options/agent-version" ||
                             pathname === "/api/ma-options/download-agent-update"
-      // Admin endpoints (protected by query secret, not session)
-      const isAdminEndpoint = pathname === "/api/admin/seed-whitelist" ||
-                              pathname === "/api/admin/restore-etfs-fx"
+      // Admin seed (protected by query secret, not session)
+      const isAdminEndpoint = pathname === "/api/admin/seed-whitelist"
       
       // Allow public paths
       if (isLoginPage || isAuthAPI || isInternalAPI || isAdminEndpoint) {

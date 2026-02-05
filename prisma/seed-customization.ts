@@ -37,9 +37,13 @@ const KRJ_LISTS = [
     isEditable: true,
     displayOrder: 1,
     tickers: [
+      "c:EURUSD", "c:GBPUSD", "c:USDJPY", "c:CADUSD", "c:EURGBP",
       "DIA", "SPY", "QQQ", "MDY", "IWM", "OEF", "SLV", "GLD", "USO",
-      "XLE", "XLF", "XLV", "XLK", "XLI", "XLY", "XLP", "XLB", "XLU", "XLRE",
-      "c:EURUSD", "c:GBPUSD", "c:USDJPY", "c:AUDUSD", "c:USDCAD"
+      "XLE", "XLF", "EEM", "ARKK", "UVXY",
+      "BIL", "BILS", "SPTS", "SPTI", "SPTL",
+      "HYG", "JNK", "TLT", "IEF", "SHY",
+      "VEA", "IEFA", "BND", "AGG",
+      "VUG", "VWO", "IEMG", "IJR", "IJH", "VIG", "IWF", "EFA",
     ],
   },
   {
@@ -118,7 +122,23 @@ async function main() {
     });
 
     if (existingList) {
-      console.log(`  ⚠ List "${listConfig.name}" already exists, skipping...`);
+      // Restore ETFs/FX tickers from seed if list already exists (e.g. after recovery)
+      if (listConfig.slug === "etfs_fx" && listConfig.tickers.length > 0) {
+        await prisma.krjTicker.deleteMany({ where: { listId: existingList.id } });
+        const owner = await prisma.user.findFirst({
+          where: { alias: listConfig.ownerAlias },
+        });
+        await prisma.krjTicker.createMany({
+          data: listConfig.tickers.map((ticker) => ({
+            listId: existingList.id,
+            ticker,
+            addedById: owner?.id,
+          })),
+        });
+        console.log(`  ✓ Restored ${listConfig.tickers.length} tickers for "${listConfig.name}"`);
+      } else {
+        console.log(`  ⚠ List "${listConfig.name}" already exists, skipping...`);
+      }
       continue;
     }
 
