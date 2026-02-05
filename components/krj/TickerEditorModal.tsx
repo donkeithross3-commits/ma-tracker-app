@@ -8,12 +8,14 @@ import { Plus, Trash2, Edit3, X, Loader2 } from "lucide-react";
 interface TickerEditorModalProps {
   listId: string;
   listName: string;
+  listSlug?: string;
   trigger: React.ReactNode;
 }
 
 export function TickerEditorModal({
   listId,
   listName,
+  listSlug,
   trigger,
 }: TickerEditorModalProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -22,8 +24,10 @@ export function TickerEditorModal({
   const [isLoading, setIsLoading] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [isRemoving, setIsRemoving] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
+  const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
 
   // Load tickers from API when modal opens
   const loadTickers = async () => {
@@ -46,8 +50,30 @@ export function TickerEditorModal({
       loadTickers();
       setNewTicker("");
       setAddSuccess(null);
+      setRestoreSuccess(null);
     }
     setIsOpen(open);
+  };
+
+  const handleRestoreEtfsFx = async () => {
+    if (listSlug !== "etfs_fx") return;
+    setIsRestoring(true);
+    setError(null);
+    setRestoreSuccess(null);
+    try {
+      const response = await fetch("/api/krj/lists/restore-etfs-fx", { method: "POST" });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Restore failed");
+      }
+      const data = await response.json();
+      setRestoreSuccess(data.message ?? "List restored.");
+      await loadTickers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Restore failed");
+    } finally {
+      setIsRestoring(false);
+    }
   };
 
   const handleAddTicker = async () => {
@@ -164,6 +190,33 @@ export function TickerEditorModal({
             {addSuccess && (
               <div className="text-green-400 text-sm bg-green-900/20 border border-green-800 rounded px-3 py-2">
                 {addSuccess}
+              </div>
+            )}
+
+            {restoreSuccess && (
+              <div className="text-green-400 text-sm bg-green-900/20 border border-green-800 rounded px-3 py-2">
+                {restoreSuccess}
+              </div>
+            )}
+
+            {listSlug === "etfs_fx" && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRestoreEtfsFx}
+                  disabled={isRestoring}
+                  className="border-amber-600 text-amber-400 hover:bg-amber-900/30"
+                >
+                  {isRestoring ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      Restoring...
+                    </>
+                  ) : (
+                    "Restore default ETFs/FX list"
+                  )}
+                </Button>
               </div>
             )}
 

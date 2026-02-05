@@ -521,6 +521,7 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
               <TickerEditorModal
                 listId={group.listId}
                 listName={group.label}
+                listSlug={group.key}
                 trigger={
                   <Button
                     variant="outline"
