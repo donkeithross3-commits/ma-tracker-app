@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useIBConnection } from "./IBConnectionContext";
 
 export interface IBPositionContract {
@@ -153,6 +153,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [data, setData] = useState<IBPositionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set());
 
   const fetchPositions = useCallback(async () => {
     setLoading(true);
@@ -188,6 +189,32 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   const positions = data?.positions ?? [];
   const groups = computeGroups(positions);
+  const groupKeysSignature = useMemo(
+    () => computeGroups(data?.positions ?? []).map((g) => g.key).sort().join(","),
+    [data]
+  );
+
+  // When groups load or change, keep selection in sync (default all selected, add new tickers)
+  useEffect(() => {
+    if (groups.length === 0) return;
+    setSelectedTickers((prev) => {
+      const allKeys = new Set(groups.map((g) => g.key));
+      if (prev.size === 0) return allKeys;
+      const next = new Set(prev);
+      for (const k of allKeys) next.add(k);
+      return next;
+    });
+  }, [groupKeysSignature, groups.length]);
+
+  const toggleTicker = (key: string) => {
+    setSelectedTickers((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const selectedGroups = groups.filter((g) => selectedTickers.has(g.key));
   const byType = positions.reduce<Record<string, number>>((acc, row) => {
     const t = row.contract?.secType || "?";
     acc[t] = (acc[t] || 0) + 1;
@@ -265,81 +292,131 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         </div>
       ) : (
         <>
-          {/* 2–3 column grid of symbol blocks */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {groups.map((group, idx) => {
-              const accent = accentColors[idx % accentColors.length];
-              const headerAccent = headerAccents[idx % headerAccents.length];
-              return (
-                <div
-                  key={`group-${group.key}`}
-                  className={`rounded-lg border border-gray-600 overflow-hidden border-l-4 ${accent}`}
-                >
-                  {/* Block header - colorful, large type */}
-                  <div
-                    className={`flex flex-col gap-1.5 px-4 py-3 border-b border-gray-600 ${headerAccent}`}
-                  >
-                    <span className="text-xl font-bold text-white tracking-tight">{group.key}</span>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-200">
-                      <span>
-                        {Object.entries(group.typeCounts)
-                          .map(([t, n]) => `${t} ${n}`)
-                          .join(", ")}
+          <div className="flex gap-4 min-h-0">
+            {/* Left: one big box listing all tickers (one row each, STK/OPT on same line) */}
+            <div className="w-64 shrink-0 flex flex-col rounded-lg border border-gray-600 bg-gray-800/80 overflow-hidden">
+              <div className="px-3 py-2 border-b border-gray-600 text-sm font-semibold text-gray-200">
+                Tickers ({groups.length})
+              </div>
+              <div className="overflow-y-auto flex-1 min-h-[200px]">
+                {groups.map((group) => {
+                  const selected = selectedTickers.has(group.key);
+                  const typeLine = [
+                    ...Object.entries(group.typeCounts).map(([t, n]) => `${t} ${n}`),
+                    group.callCount + group.putCount > 0
+                      ? `(${group.callCount}C/${group.putCount}P)`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+                  return (
+                    <button
+                      key={group.key}
+                      type="button"
+                      onClick={() => toggleTicker(group.key)}
+                      className={`w-full text-left px-3 py-2.5 border-b border-gray-700/50 text-base font-medium transition-colors min-h-[44px] flex items-center justify-between gap-2 ${
+                        selected
+                          ? "bg-blue-900/40 text-white border-l-4 border-l-blue-400"
+                          : "text-gray-300 hover:bg-gray-700/50 border-l-4 border-l-transparent"
+                      }`}
+                    >
+                      <span className="font-semibold truncate">{group.key}</span>
+                      <span className="text-sm text-gray-400 shrink-0 truncate max-w-[50%]">
+                        {typeLine}
                       </span>
-                      {group.callCount + group.putCount > 0 && (
-                        <span className="text-gray-300">
-                          ({group.callCount}C / {group.putCount}P)
-                        </span>
-                      )}
-                      <span className="tabular-nums font-medium text-white">
-                        Pos {formatGroupPosition(group)}
-                      </span>
-                      <span className="tabular-nums font-semibold text-white">
-                        {formatCostBasis(group.costBasis)}
-                      </span>
-                    </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right: two columns of detail boxes for selected tickers only */}
+            <div className="flex-1 min-w-0 flex flex-col">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 content-start">
+                {selectedGroups.length === 0 ? (
+                  <div className="col-span-2 rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-8 text-center text-base text-gray-400">
+                    Select one or more tickers from the list to see details.
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-700/50 text-gray-200 text-sm border-b border-gray-600">
-                          <th className="text-left py-2 px-3">Account</th>
-                          <th className="text-left py-2 px-3">Symbol</th>
-                          <th className="text-left py-2 px-3">Type</th>
-                          <th className="text-right py-2 px-3">Pos</th>
-                          <th className="text-right py-2 px-3">Avg cost</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.rows.map((row, i) => (
-                          <tr
-                            key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
-                            className="border-b border-gray-700/50 hover:bg-gray-700/30"
-                          >
-                            <td className="py-2 px-3 text-gray-300 text-sm">{row.account}</td>
-                            <td className="py-2 px-3 text-gray-100 whitespace-nowrap text-sm font-medium">
-                              {displaySymbol(row)}
-                            </td>
-                            <td className="py-2 px-3 text-gray-400 text-sm">{row.contract?.secType ?? "—"}</td>
-                            <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm font-medium">
-                              {formatPosition(row.position)}
-                            </td>
-                            <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm">
-                              {formatAvgCost(row.avgCost)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {/* Grand total - prominent */}
-          <div className="rounded-lg border-2 border-gray-500 bg-gray-800 px-4 py-3 flex justify-end items-center gap-6 text-base font-semibold text-white">
-            <span>Total cost basis</span>
-            <span className="tabular-nums text-lg">{formatCostBasis(totalCostBasis)}</span>
+                ) : (
+                  selectedGroups.map((group, idx) => {
+                    const accent = accentColors[idx % accentColors.length];
+                    const headerAccent = headerAccents[idx % headerAccents.length];
+                    return (
+                      <div
+                        key={`group-${group.key}`}
+                        className={`rounded-lg border border-gray-600 overflow-hidden border-l-4 ${accent}`}
+                      >
+                        <div
+                          className={`flex flex-col gap-1.5 px-4 py-3 border-b border-gray-600 ${headerAccent}`}
+                        >
+                          <span className="text-xl font-bold text-white tracking-tight">
+                            {group.key}
+                          </span>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-200">
+                            <span>
+                              {Object.entries(group.typeCounts)
+                                .map(([t, n]) => `${t} ${n}`)
+                                .join(", ")}
+                            </span>
+                            {group.callCount + group.putCount > 0 && (
+                              <span className="text-gray-300">
+                                ({group.callCount}C / {group.putCount}P)
+                              </span>
+                            )}
+                            <span className="tabular-nums font-medium text-white">
+                              Pos {formatGroupPosition(group)}
+                            </span>
+                            <span className="tabular-nums font-semibold text-white">
+                              {formatCostBasis(group.costBasis)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-gray-700/50 text-gray-200 text-sm border-b border-gray-600">
+                                <th className="text-left py-2 px-3">Account</th>
+                                <th className="text-left py-2 px-3">Symbol</th>
+                                <th className="text-left py-2 px-3">Type</th>
+                                <th className="text-right py-2 px-3">Pos</th>
+                                <th className="text-right py-2 px-3">Avg cost</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.rows.map((row, i) => (
+                                <tr
+                                  key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
+                                  className="border-b border-gray-700/50 hover:bg-gray-700/30"
+                                >
+                                  <td className="py-2 px-3 text-gray-300 text-sm">{row.account}</td>
+                                  <td className="py-2 px-3 text-gray-100 whitespace-nowrap text-sm font-medium">
+                                    {displaySymbol(row)}
+                                  </td>
+                                  <td className="py-2 px-3 text-gray-400 text-sm">
+                                    {row.contract?.secType ?? "—"}
+                                  </td>
+                                  <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm font-medium">
+                                    {formatPosition(row.position)}
+                                  </td>
+                                  <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm">
+                                    {formatAvgCost(row.avgCost)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              {/* Grand total - prominent */}
+              <div className="rounded-lg border-2 border-gray-500 bg-gray-800 px-4 py-3 flex justify-end items-center gap-6 text-base font-semibold text-white mt-4">
+                <span>Total cost basis</span>
+                <span className="tabular-nums text-lg">{formatCostBasis(totalCostBasis)}</span>
+              </div>
+            </div>
           </div>
         </>
       )}
