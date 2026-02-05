@@ -5,6 +5,7 @@ import * as Tabs from "@radix-ui/react-tabs";
 import type { ScannerDeal } from "@/types/ma-options";
 import CuratorTab from "./CuratorTab";
 import MonitoringTab from "./MonitoringTab";
+import IBPositionsTab from "./IBPositionsTab";
 
 interface OptionsScannerTabsProps {
   deals: ScannerDeal[];
@@ -34,6 +35,12 @@ export default function OptionsScannerTabs({
         >
           Monitor
         </Tabs.Trigger>
+        <Tabs.Trigger
+          value="account"
+          className="px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
+        >
+          Account
+        </Tabs.Trigger>
       </Tabs.List>
 
       <Tabs.Content value="curate">
@@ -42,6 +49,10 @@ export default function OptionsScannerTabs({
 
       <Tabs.Content value="monitor">
         <MonitoringTab />
+      </Tabs.Content>
+
+      <Tabs.Content value="account">
+        <IBPositionsTab autoRefresh />
       </Tabs.Content>
     </Tabs.Root>
   );
