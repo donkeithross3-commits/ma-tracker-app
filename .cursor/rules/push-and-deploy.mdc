@@ -1,0 +1,20 @@
+---
+description: Commit, push, and deploy to production when a task is completed
+alwaysApply: true
+---
+
+# Push and Deploy on Task Completion
+
+When you **complete a task** that changed code in this repo:
+
+1. **Commit** the relevant files with a clear message.
+2. **Push** to `origin main`: `git push origin main`
+3. **Deploy** to production (droplet):
+   ```bash
+   ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && docker build -f Dockerfile.prod -t ma-tracker-app-dev . && cd ~/apps && docker compose up -d web'
+   ```
+
+Do this **automatically** at the end of the task—do not wait for the user to ask. The agent has permission to push and deploy.
+
+- If only the Python service changed (no Next.js/agent bundle): use the lighter deploy that restarts uvicorn (see `.cursorrules` Deployment Process).
+- Production: https://dr3-dashboard.com — Droplet SSH alias: `droplet`
