@@ -199,7 +199,7 @@ export function BidAskGrids({ legs }: { legs: StrategyLeg[] }) {
                 ${leg.bid.toFixed(2)}
               </div>
               {/* Volume / Open interest */}
-              <div className="px-1 py-0.5 text-[10px] text-gray-300 text-right border-t border-gray-700">
+              <div className="px-1 py-0.5 text-[10px] text-gray-300 text-center border-t border-gray-700">
                 V {formatCompactVolOi(leg.volume)}  OI {formatCompactVolOi(leg.openInterest)}
               </div>
             </div>
