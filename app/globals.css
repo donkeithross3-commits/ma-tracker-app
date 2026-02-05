@@ -109,10 +109,10 @@
     display: block !important;
   }
 
-  /* Print group styling */
+  /* Print group styling: allow table to break across pages so group name in thead repeats */
   .print-group {
     margin-bottom: 1rem;
-    page-break-inside: avoid;
+    page-break-inside: auto;
   }
 
   .print-group-title {
@@ -163,6 +163,12 @@
     font-size: 9px;
     line-height: 1.2;
     color: black !important;
+  }
+
+  /* Group name row in thead (repeats on each page when table breaks) */
+  .print-table-group-header {
+    font-size: 12px !important;
+    padding: 4px 6px !important;
   }
 
   .print-table td.numeric,

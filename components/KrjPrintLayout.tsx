@@ -139,9 +139,23 @@ export default function KrjPrintLayout({ groups, columns, filterDescription }: K
             <strong>Total:</strong> {group.summary.totals.current}
           </div>
 
-          {/* Data table */}
+          {/* Data table: group name in first thead row so it repeats on every page when table breaks */}
           <table className="print-table">
             <thead>
+              <tr>
+                <th
+                  colSpan={columns.length}
+                  className="print-table-group-header"
+                  style={{ textAlign: 'left' }}
+                >
+                  {group.label}
+                  {filterDescription && (
+                    <span style={{ fontSize: '0.9em', fontWeight: 'normal', marginLeft: '8px', color: '#666' }}>
+                      (Filtered: {filterDescription})
+                    </span>
+                  )}
+                </th>
+              </tr>
               <tr>
                 {columns.map((col) => {
                   const isNumeric = numericCols.includes(col.key);
