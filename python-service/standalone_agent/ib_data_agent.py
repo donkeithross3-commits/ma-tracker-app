@@ -573,7 +573,7 @@ class IBDataAgent:
 
             lower = spot * (1 - ntm_pct)
             upper = spot * (1 + ntm_pct)
-            contracts = []
+            batch: list = []
             expirations_used = []
             increment = 5.0 if spot > 50 else 2.5
             for expiry in in_range:
@@ -582,24 +582,27 @@ class IBDataAgent:
                 if not ntm_strikes and strikes:
                     ntm_strikes = [s for s in strikes if lower <= s <= upper][:15]
                 for strike in ntm_strikes:
-                    opt = self.scanner.get_option_data(ticker, expiry, strike, right)
-                    if opt:
-                        contracts.append({
-                            "symbol": opt.symbol,
-                            "strike": opt.strike,
-                            "expiry": opt.expiry,
-                            "right": opt.right,
-                            "bid": opt.bid,
-                            "ask": opt.ask,
-                            "mid": opt.mid_price,
-                            "last": opt.last,
-                            "volume": opt.volume,
-                            "open_interest": opt.open_interest,
-                            "implied_vol": opt.implied_vol,
-                            "delta": opt.delta,
-                        })
+                    batch.append((expiry, strike, right))
                 if ntm_strikes:
                     expirations_used.append(expiry)
+            results = self.scanner.get_option_data_batch(ticker, batch)
+            contracts = []
+            for opt in results:
+                if opt:
+                    contracts.append({
+                        "symbol": opt.symbol,
+                        "strike": opt.strike,
+                        "expiry": opt.expiry,
+                        "right": opt.right,
+                        "bid": opt.bid,
+                        "ask": opt.ask,
+                        "mid": opt.mid_price,
+                        "last": opt.last,
+                        "volume": opt.volume,
+                        "open_interest": opt.open_interest,
+                        "implied_vol": opt.implied_vol,
+                        "delta": opt.delta,
+                    })
             return {
                 "ticker": ticker,
                 "spotPrice": spot,

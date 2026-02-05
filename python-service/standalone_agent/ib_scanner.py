@@ -16,7 +16,7 @@ if sys.platform == 'win32':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import time
 import logging
@@ -758,6 +758,7 @@ class IBMergerArbScanner(EWrapper, EClient):
 
             # Use only IB strikes when available, filtered to standard grid to avoid "No security definition" for half-dollar strikes.
             increment = 5.0 if deal_price_to_use > 50 else 2.5
+            batch: List[Tuple[str, float, str]] = []
             for expiry in selected_expiries:
                 if expiry in self.available_strikes and self.available_strikes[expiry]:
                     all_strikes = self.available_strikes[expiry]
@@ -772,12 +773,11 @@ class IBMergerArbScanner(EWrapper, EClient):
                     )
                     print(f"[{ticker}]   {expiry}: {len(strikes)} strikes (estimated - IB returned no strikes)", flush=True)
                 total_planned += len(strikes) * 2
-
                 for strike in strikes:
                     for right in ['C', 'P']:
-                        opt = self.get_option_data(ticker, expiry, strike, right)
-                        if opt:
-                            options.append(opt)
+                        batch.append((expiry, strike, right))
+            results = self.get_option_data_batch(ticker, batch)
+            options = [opt for opt in results if opt is not None]
 
         # #region agent log
         _debug_log("ib_scanner:fetch_option_chain", "chain_done", {"ticker": ticker, "options_count": len(options), "total_planned": total_planned, "duration_sec": round(time.time() - _chain_start, 2)}, "H1")
@@ -833,3 +833,65 @@ class IBMergerArbScanner(EWrapper, EClient):
             # #endregion
             return OptionData(**data)
         return None
+
+    BATCH_CHUNK_SIZE = 50
+    BATCH_WAIT_SEC = 2.5
+
+    def get_option_data_batch(
+        self, ticker: str, contracts: List[Tuple[str, float, str]]
+    ) -> List[Optional[OptionData]]:
+        """Get data for many option contracts at once (batch reqMktData, single wait, then cancel).
+        Processes in chunks of BATCH_CHUNK_SIZE to stay under IB concurrent limits.
+        Returns list in same order as contracts; missing/empty data is None."""
+        if not contracts:
+            return []
+        results: List[Optional[OptionData]] = []
+        for start in range(0, len(contracts), self.BATCH_CHUNK_SIZE):
+            chunk = contracts[start : start + self.BATCH_CHUNK_SIZE]
+            req_ids: List[int] = []
+            for expiry, strike, right in chunk:
+                contract = Contract()
+                contract.symbol = ticker
+                contract.secType = "OPT"
+                contract.exchange = "SMART"
+                contract.currency = "USD"
+                contract.lastTradeDateOrContractMonth = expiry
+                contract.strike = strike
+                contract.right = right
+                contract.multiplier = "100"
+                req_id = self.get_next_req_id()
+                req_ids.append(req_id)
+                self.req_id_map[req_id] = f"option_{ticker}_{expiry}_{strike}_{right}"
+                self.option_chain[req_id] = {
+                    "symbol": ticker,
+                    "strike": strike,
+                    "expiry": expiry,
+                    "right": right,
+                    "bid": 0,
+                    "ask": 0,
+                    "last": 0,
+                    "volume": 0,
+                    "open_interest": 0,
+                    "implied_vol": 0,
+                    "delta": 0,
+                    "gamma": 0,
+                    "theta": 0,
+                    "vega": 0,
+                    "bid_size": 0,
+                    "ask_size": 0,
+                }
+                self.reqMktData(req_id, contract, "100,101,104,106", False, False, [])
+            time.sleep(self.BATCH_WAIT_SEC)
+            for req_id in req_ids:
+                self.cancelMktData(req_id)
+            for req_id, (expiry, strike, right) in zip(req_ids, chunk):
+                data = self.option_chain.get(req_id)
+                try:
+                    if data:
+                        results.append(OptionData(**data))
+                    else:
+                        results.append(None)
+                finally:
+                    self.option_chain.pop(req_id, None)
+                    self.req_id_map.pop(req_id, None)
+        return results
