@@ -197,9 +197,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   if (!isConnected) {
     return (
-      <div className="rounded border border-gray-700 bg-gray-900/50 px-3 py-4 text-sm text-gray-300">
-        <p className="mb-2">Connect your agent to see live positions.</p>
-        <p className="text-xs text-gray-500">
+      <div className="rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-5 text-base text-gray-200">
+        <p className="mb-2 font-medium">Connect your agent to see live positions.</p>
+        <p className="text-sm text-gray-400">
           Download and start the IB Data Agent, then ensure TWS is running.
         </p>
       </div>
@@ -208,7 +208,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   if (loading && positions.length === 0) {
     return (
-      <div className="rounded border border-gray-700 bg-gray-900/50 px-3 py-4 text-sm text-gray-400">
+      <div className="rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-5 text-base text-gray-300">
         Loading positions…
       </div>
     );
@@ -216,12 +216,12 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   if (error && positions.length === 0) {
     return (
-      <div className="rounded border border-gray-700 bg-gray-900/50 px-3 py-4 text-sm">
-        <p className="text-red-400 mb-2">{error}</p>
+      <div className="rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-5 text-base">
+        <p className="text-red-300 mb-3 font-medium">{error}</p>
         <button
           type="button"
           onClick={fetchPositions}
-          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+          className="min-h-[44px] px-5 py-2.5 bg-gray-600 hover:bg-gray-500 text-white rounded-lg text-base font-medium"
         >
           Refresh
         </button>
@@ -229,89 +229,119 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     );
   }
 
+  const accentColors = [
+    "border-l-blue-500 bg-gray-800/80",
+    "border-l-emerald-500 bg-gray-800/80",
+    "border-l-amber-500 bg-gray-800/80",
+    "border-l-violet-500 bg-gray-800/80",
+    "border-l-cyan-500 bg-gray-800/80",
+    "border-l-rose-500 bg-gray-800/80",
+  ];
+  const headerAccents = [
+    "bg-blue-900/50 border-blue-500/50",
+    "bg-emerald-900/50 border-emerald-500/50",
+    "bg-amber-900/50 border-amber-500/50",
+    "bg-violet-900/50 border-violet-500/50",
+    "bg-cyan-900/50 border-cyan-500/50",
+    "bg-rose-900/50 border-rose-500/50",
+  ];
+
   return (
-    <div className="space-y-3">
-      {/* Top-level summary */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-400">
-        <span>Positions: {positions.length} total</span>
+    <div className="space-y-4">
+      {/* Top-level summary - larger, higher contrast */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-base text-gray-200">
+        <span className="font-medium">Positions: {positions.length} total</span>
         {Object.keys(byType).length > 0 && (
           <span>By type: {Object.entries(byType).map(([t, n]) => `${t} ${n}`).join(", ")}</span>
         )}
-        <span>Cost basis: {formatCostBasis(totalCostBasis)}</span>
+        <span className="font-semibold text-white tabular-nums">
+          Cost basis: {formatCostBasis(totalCostBasis)}
+        </span>
       </div>
 
       {positions.length === 0 ? (
-        <div className="rounded border border-gray-700 bg-gray-900/50 px-3 py-4 text-sm text-gray-400">
+        <div className="rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-6 text-base text-gray-300">
           No positions.
         </div>
       ) : (
-        <div className="space-y-3">
-          {groups.map((group) => (
-            <div
-              key={`group-${group.key}`}
-              className="rounded border border-gray-700 overflow-hidden bg-gray-900/30"
-            >
-              {/* Block header: underlying name + aggregates */}
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-gray-800 border-b border-gray-700">
-                <span className="font-semibold text-gray-100">{group.key}</span>
-                <span className="text-xs text-gray-400">
-                  {Object.entries(group.typeCounts)
-                    .map(([t, n]) => `${t} ${n}`)
-                    .join(", ")}
-                  {group.callCount + group.putCount > 0 && (
-                    <span className="ml-1">
-                      ({group.callCount}C / {group.putCount}P)
-                    </span>
-                  )}
-                </span>
-                <span className="text-xs tabular-nums text-gray-300">
-                  Pos {formatGroupPosition(group)}
-                </span>
-                <span className="text-xs tabular-nums text-gray-300 font-medium">
-                  {formatCostBasis(group.costBasis)}
-                </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-800/50 text-gray-400 text-xs border-b border-gray-700">
-                      <th className="text-left py-1.5 px-2">Account</th>
-                      <th className="text-left py-1.5 px-2">Symbol</th>
-                      <th className="text-left py-1.5 px-2">Type</th>
-                      <th className="text-right py-1.5 px-2">Position</th>
-                      <th className="text-right py-1.5 px-2">Avg cost</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.rows.map((row, i) => (
-                      <tr
-                        key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
-                        className="border-b border-gray-800 hover:bg-gray-800/50"
-                      >
-                        <td className="py-1 px-2 text-gray-400 text-xs">{row.account}</td>
-                        <td className="py-1 px-2 text-gray-300 whitespace-nowrap text-xs">
-                          {displaySymbol(row)}
-                        </td>
-                        <td className="py-1 px-2 text-gray-500 text-xs">{row.contract?.secType ?? "—"}</td>
-                        <td className="py-1 px-2 text-right text-gray-300 tabular-nums text-xs">
-                          {formatPosition(row.position)}
-                        </td>
-                        <td className="py-1 px-2 text-right text-gray-300 tabular-nums text-xs">
-                          {formatAvgCost(row.avgCost)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
-          {/* Grand total */}
-          <div className="rounded border border-gray-600 bg-gray-800 px-3 py-2 flex justify-end gap-4 text-sm font-medium text-gray-200">
-            <span>Total cost basis</span>
-            <span className="tabular-nums">{formatCostBasis(totalCostBasis)}</span>
+        <>
+          {/* 2–3 column grid of symbol blocks */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {groups.map((group, idx) => {
+              const accent = accentColors[idx % accentColors.length];
+              const headerAccent = headerAccents[idx % headerAccents.length];
+              return (
+                <div
+                  key={`group-${group.key}`}
+                  className={`rounded-lg border border-gray-600 overflow-hidden border-l-4 ${accent}`}
+                >
+                  {/* Block header - colorful, large type */}
+                  <div
+                    className={`flex flex-col gap-1.5 px-4 py-3 border-b border-gray-600 ${headerAccent}`}
+                  >
+                    <span className="text-xl font-bold text-white tracking-tight">{group.key}</span>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-200">
+                      <span>
+                        {Object.entries(group.typeCounts)
+                          .map(([t, n]) => `${t} ${n}`)
+                          .join(", ")}
+                      </span>
+                      {group.callCount + group.putCount > 0 && (
+                        <span className="text-gray-300">
+                          ({group.callCount}C / {group.putCount}P)
+                        </span>
+                      )}
+                      <span className="tabular-nums font-medium text-white">
+                        Pos {formatGroupPosition(group)}
+                      </span>
+                      <span className="tabular-nums font-semibold text-white">
+                        {formatCostBasis(group.costBasis)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-700/50 text-gray-200 text-sm border-b border-gray-600">
+                          <th className="text-left py-2 px-3">Account</th>
+                          <th className="text-left py-2 px-3">Symbol</th>
+                          <th className="text-left py-2 px-3">Type</th>
+                          <th className="text-right py-2 px-3">Pos</th>
+                          <th className="text-right py-2 px-3">Avg cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((row, i) => (
+                          <tr
+                            key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
+                            className="border-b border-gray-700/50 hover:bg-gray-700/30"
+                          >
+                            <td className="py-2 px-3 text-gray-300 text-sm">{row.account}</td>
+                            <td className="py-2 px-3 text-gray-100 whitespace-nowrap text-sm font-medium">
+                              {displaySymbol(row)}
+                            </td>
+                            <td className="py-2 px-3 text-gray-400 text-sm">{row.contract?.secType ?? "—"}</td>
+                            <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm font-medium">
+                              {formatPosition(row.position)}
+                            </td>
+                            <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm">
+                              {formatAvgCost(row.avgCost)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
+          {/* Grand total - prominent */}
+          <div className="rounded-lg border-2 border-gray-500 bg-gray-800 px-4 py-3 flex justify-end items-center gap-6 text-base font-semibold text-white">
+            <span>Total cost basis</span>
+            <span className="tabular-nums text-lg">{formatCostBasis(totalCostBasis)}</span>
+          </div>
+        </>
       )}
 
       <div className="flex items-center gap-2">
@@ -319,7 +349,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
           type="button"
           onClick={fetchPositions}
           disabled={loading}
-          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-200 rounded text-xs"
+          className="min-h-[44px] px-5 py-2.5 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-white rounded-lg text-base font-medium"
         >
           {loading ? "Refreshing…" : "Refresh"}
         </button>
