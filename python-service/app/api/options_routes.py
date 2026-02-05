@@ -688,6 +688,7 @@ async def relay_positions(user_id: Optional[str] = Query(None)):
     Request positions from the user's agent only (reqPositions).
     Requires user_id. Never routes to another user's agent (permission: own account only).
     """
+    logger.info("relay_positions called: user_id=%s", "***" if user_id else None)
     try:
         if not user_id or not user_id.strip():
             raise HTTPException(status_code=400, detail="user_id query param required for positions")

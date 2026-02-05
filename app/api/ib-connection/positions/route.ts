@@ -16,8 +16,11 @@ export async function GET(request: NextRequest) {
     }
     const url = new URL(`${PYTHON_SERVICE_URL}/options/relay/positions`);
     url.searchParams.set("user_id", String(userId));
+    const targetUrl = url.toString();
+    // Omit user_id from logs for privacy
+    console.log("[positions] Fetching from Python relay:", `${PYTHON_SERVICE_URL}/options/relay/positions?user_id=...`);
 
-    const response = await fetch(url.toString(), {
+    const response = await fetch(targetUrl, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
     });
@@ -30,7 +33,11 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       let errorDetail: string;
-      if (isJson) {
+      if (response.status === 404) {
+        console.error("[positions] Python returned 404. URL:", targetUrl.replace(userId, "***"), "body:", text.slice(0, 200));
+        errorDetail =
+          "Positions endpoint not found (404). Ensure the Python service on the server is up to date and restarted so /options/relay/positions is available.";
+      } else if (isJson) {
         try {
           const errorData = JSON.parse(text);
           errorDetail =
