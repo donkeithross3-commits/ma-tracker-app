@@ -1051,6 +1051,13 @@ class StockQuoteRequest(BaseModel):
     ticker: str
     userId: Optional[str] = None  # For routing to user's own IB agent
 
+
+class SellScanRequest(BaseModel):
+    ticker: str
+    right: str = "C"  # "C" or "P"
+    userId: Optional[str] = None  # For routing to user's own IB agent
+
+
 class StockQuoteResponse(BaseModel):
     ticker: str
     price: float
@@ -1106,5 +1113,39 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
         raise
     except Exception as e:
         logger.error(f"Relay stock quote error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/relay/sell-scan")
+async def relay_sell_scan(request: SellScanRequest):
+    """
+    Fetch near-the-money calls or puts for expirations in the next 0-15 business days
+    (for selling). Routes to the user's IB agent.
+    """
+    try:
+        right = (request.right or "C").upper()
+        if right not in ("C", "P"):
+            raise HTTPException(status_code=400, detail="right must be C or P")
+        logger.info(f"Relay: Sell scan for {request.ticker} {right}")
+        registry = get_registry()
+        status = registry.get_status()
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        response_data = await send_request_to_provider(
+            request_type="sell_scan",
+            payload={"ticker": request.ticker.upper(), "right": right},
+            timeout=120.0,
+            user_id=request.userId,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay sell-scan error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

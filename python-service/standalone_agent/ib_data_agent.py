@@ -27,7 +27,7 @@ import os
 import signal
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import websockets
@@ -150,6 +150,8 @@ class IBDataAgent:
                 return await self._handle_cancel_order(payload)
             elif request_type == "fetch_prices":
                 return await self._run_in_thread(self._handle_fetch_prices_sync, payload)
+            elif request_type == "sell_scan":
+                return await self._run_in_thread(self._handle_sell_scan_sync, payload)
             else:
                 return {"error": f"Unknown request type: {request_type}"}
         except Exception as e:
@@ -525,7 +527,90 @@ class IBDataAgent:
                 results.append(None)
         
         return {"success": True, "contracts": results}
-    
+
+    def _handle_sell_scan_sync(self, payload: dict) -> dict:
+        """Fetch near-the-money calls or puts for expirations in the next 0-15 business days (for selling)."""
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": "IB not connected"}
+        ticker = (payload.get("ticker") or "").upper()
+        right = (payload.get("right") or "C").upper()
+        if right not in ("C", "P"):
+            return {"error": "right must be C or P"}
+        ntm_pct = float(payload.get("ntm_pct", 0.05))
+        business_days = int(payload.get("business_days", 15))
+        try:
+            underlying = self.scanner.fetch_underlying_data(ticker)
+            spot = underlying.get("price")
+            if not spot:
+                return {"error": f"Could not fetch price for {ticker}"}
+            contract_id = self.scanner.resolve_contract(ticker) or 0
+            all_expirations = self.scanner.get_available_expirations(ticker, contract_id)
+            if not all_expirations:
+                return {"error": f"No option expirations for {ticker}"}
+
+            def add_business_days(start_date, n):
+                d = start_date
+                count = 0
+                while count < n:
+                    d += timedelta(days=1)
+                    if d.weekday() < 5:
+                        count += 1
+                return d
+
+            today = datetime.now().date()
+            end_date = add_business_days(today, business_days)
+            sorted_expirations = sorted(set(all_expirations))
+            in_range = []
+            for exp in sorted_expirations:
+                try:
+                    exp_date = datetime.strptime(exp, "%Y%m%d").date()
+                except ValueError:
+                    continue
+                if today <= exp_date <= end_date:
+                    in_range.append(exp)
+            if not in_range:
+                return {"error": f"No expirations in the next {business_days} business days for {ticker}"}
+
+            lower = spot * (1 - ntm_pct)
+            upper = spot * (1 + ntm_pct)
+            contracts = []
+            expirations_used = []
+            increment = 5.0 if spot > 50 else 2.5
+            for expiry in in_range:
+                strikes = getattr(self.scanner, "available_strikes", {}).get(expiry, [])
+                ntm_strikes = [s for s in strikes if lower <= s <= upper and self.scanner._strike_on_grid(s, increment)]
+                if not ntm_strikes and strikes:
+                    ntm_strikes = [s for s in strikes if lower <= s <= upper][:15]
+                for strike in ntm_strikes:
+                    opt = self.scanner.get_option_data(ticker, expiry, strike, right)
+                    if opt:
+                        contracts.append({
+                            "symbol": opt.symbol,
+                            "strike": opt.strike,
+                            "expiry": opt.expiry,
+                            "right": opt.right,
+                            "bid": opt.bid,
+                            "ask": opt.ask,
+                            "mid": opt.mid_price,
+                            "last": opt.last,
+                            "volume": opt.volume,
+                            "open_interest": opt.open_interest,
+                            "implied_vol": opt.implied_vol,
+                            "delta": opt.delta,
+                        })
+                if ntm_strikes:
+                    expirations_used.append(expiry)
+            return {
+                "ticker": ticker,
+                "spotPrice": spot,
+                "right": right,
+                "expirations": expirations_used,
+                "contracts": contracts,
+            }
+        except Exception as e:
+            logger.exception(f"sell_scan failed for {ticker} {right}")
+            return {"error": str(e)}
+
     async def send_heartbeat(self):
         """Send periodic heartbeats"""
         while self.running and self.websocket:

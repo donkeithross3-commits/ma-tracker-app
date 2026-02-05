@@ -44,6 +44,30 @@ interface IBPositionsResponse {
   error?: string;
 }
 
+/** Sell-scan result from POST /api/ma-options/sell-scan */
+interface SellScanContract {
+  symbol: string;
+  strike: number;
+  expiry: string;
+  right: string;
+  bid: number;
+  ask: number;
+  mid: number;
+  last: number;
+  volume: number;
+  open_interest: number;
+  implied_vol?: number;
+  delta?: number;
+}
+
+interface SellScanResponse {
+  ticker: string;
+  spotPrice: number;
+  right: string;
+  expirations: string[];
+  contracts: SellScanContract[];
+}
+
 function formatAvgCost(n: number): string {
   if (n === 0) return "—";
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -172,6 +196,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set());
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const hasSetDefaultAccountRef = useRef(false);
+  const [sellScanTicker, setSellScanTicker] = useState<string | null>(null);
+  const [sellScanRight, setSellScanRight] = useState<"C" | "P" | null>(null);
+  const [sellScanLoading, setSellScanLoading] = useState(false);
+  const [sellScanResult, setSellScanResult] = useState<SellScanResponse | null>(null);
+  const [sellScanError, setSellScanError] = useState<string | null>(null);
 
   const fetchPositions = useCallback(async () => {
     setLoading(true);
@@ -193,6 +222,39 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const runSellScan = useCallback(async (ticker: string, right: "C" | "P") => {
+    setSellScanTicker(ticker);
+    setSellScanRight(right);
+    setSellScanLoading(true);
+    setSellScanResult(null);
+    setSellScanError(null);
+    try {
+      const res = await fetch("/api/ma-options/sell-scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, right }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSellScanError(data?.error || `Request failed: ${res.status}`);
+        return;
+      }
+      setSellScanResult(data as SellScanResponse);
+    } catch (e) {
+      setSellScanError(e instanceof Error ? e.message : "Sell scan failed");
+    } finally {
+      setSellScanLoading(false);
+    }
+  }, []);
+
+  const closeSellScanModal = useCallback(() => {
+    setSellScanTicker(null);
+    setSellScanRight(null);
+    setSellScanResult(null);
+    setSellScanError(null);
   }, []);
 
   useEffect(() => {
@@ -452,6 +514,24 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               {formatCostBasis(group.costBasis)}
                             </span>
                           </div>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            <button
+                              type="button"
+                              onClick={() => runSellScan(group.key, "C")}
+                              disabled={sellScanLoading}
+                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white"
+                            >
+                              Sell calls
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => runSellScan(group.key, "P")}
+                              disabled={sellScanLoading}
+                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white"
+                            >
+                              Sell puts
+                            </button>
+                          </div>
                         </div>
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm">
@@ -515,6 +595,91 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
           {loading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
+
+      {/* Sell-scan modal: NTM calls/puts for next 0–15 business days */}
+      {sellScanTicker != null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sell-scan-title"
+        >
+          <div className="bg-gray-900 border border-gray-600 rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-gray-600 shrink-0">
+              <h2 id="sell-scan-title" className="text-xl font-bold text-white">
+                {sellScanLoading
+                  ? `Loading…`
+                  : sellScanRight === "C"
+                    ? `Sell calls — ${sellScanTicker}`
+                    : `Sell puts — ${sellScanTicker}`}
+              </h2>
+              <button
+                type="button"
+                onClick={closeSellScanModal}
+                className="min-h-[44px] min-w-[44px] px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-base font-medium"
+              >
+                Close
+              </button>
+            </div>
+            <div className="overflow-auto flex-1 px-4 py-3">
+              {sellScanLoading && (
+                <p className="text-lg text-gray-300 py-8">Fetching option chain and quotes…</p>
+              )}
+              {sellScanError && !sellScanLoading && (
+                <div className="py-4">
+                  <p className="text-lg text-red-300 font-medium">{sellScanError}</p>
+                  <p className="text-base text-gray-400 mt-2">
+                    Ensure your IB Data Agent is running and TWS has options data for {sellScanTicker}.
+                  </p>
+                </div>
+              )}
+              {sellScanResult && !sellScanLoading && (
+                <div className="space-y-4">
+                  <p className="text-base text-gray-200">
+                    Spot: <span className="font-semibold text-white tabular-nums">${sellScanResult.spotPrice.toFixed(2)}</span>
+                    {" · "}
+                    {sellScanResult.contracts.length} contracts (0–15 business days, near the money)
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-base border-collapse">
+                      <thead>
+                        <tr className="border-b border-gray-600 text-gray-200">
+                          <th className="text-left py-3 px-3 font-semibold">Expiration</th>
+                          <th className="text-right py-3 px-3 font-semibold">Strike</th>
+                          <th className="text-right py-3 px-3 font-semibold">Bid</th>
+                          <th className="text-right py-3 px-3 font-semibold">Ask</th>
+                          <th className="text-right py-3 px-3 font-semibold">Mid</th>
+                          <th className="text-right py-3 px-3 font-semibold">Vol</th>
+                          <th className="text-right py-3 px-3 font-semibold">OI</th>
+                          <th className="text-right py-3 px-3 font-semibold">Delta</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sellScanResult.contracts.map((c, i) => (
+                          <tr key={`${c.expiry}-${c.strike}-${i}`} className="border-b border-gray-700/50 hover:bg-gray-800/50">
+                            <td className="py-2.5 px-3 text-gray-100">
+                              {c.expiry.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3")}
+                            </td>
+                            <td className="py-2.5 px-3 text-right text-white tabular-nums font-medium">{c.strike}</td>
+                            <td className="py-2.5 px-3 text-right text-gray-100 tabular-nums">{c.bid?.toFixed(2) ?? "—"}</td>
+                            <td className="py-2.5 px-3 text-right text-gray-100 tabular-nums">{c.ask?.toFixed(2) ?? "—"}</td>
+                            <td className="py-2.5 px-3 text-right text-white tabular-nums font-medium">{c.mid?.toFixed(2) ?? "—"}</td>
+                            <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">{c.volume ?? "—"}</td>
+                            <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">{c.open_interest ?? "—"}</td>
+                            <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">
+                              {c.delta != null ? c.delta.toFixed(2) : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
