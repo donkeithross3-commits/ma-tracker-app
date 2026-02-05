@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useCallback, useEffect } from "react";
 import type { ScannerDeal } from "@/types/ma-options";
 import { IBConnectionProvider } from "./IBConnectionContext";
@@ -45,13 +46,21 @@ export default function MAOptionsContent({ initialDeals, initialUser }: MAOption
   return (
     <IBConnectionProvider>
       <div className="flex items-center justify-between mb-1">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-100">
-            M&A Options Scanner
-          </h1>
-          <p className="text-sm text-gray-400">
-            Curate and monitor options strategies for merger arbitrage deals ({deals.length} deal{deals.length !== 1 ? "s" : ""})
-          </p>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/"
+            className="text-sm text-gray-400 hover:text-gray-100 whitespace-nowrap"
+          >
+            ← DR3 Dashboard
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-100">
+              M&A Options Scanner
+            </h1>
+            <p className="text-sm text-gray-400">
+              Curate and monitor options strategies for merger arbitrage deals ({deals.length} deal{deals.length !== 1 ? "s" : ""})
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <IBConnectionStatus />

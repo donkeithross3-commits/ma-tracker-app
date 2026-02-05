@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getKrjListsForUser } from "@/lib/krj-data";
 import KrjTabsClient from "@/components/KrjTabsClient";
 import { auth } from "@/auth";
@@ -82,7 +83,13 @@ export default async function KrjPage() {
   return (
     <div className="p-3 bg-gray-950 text-gray-100 min-h-screen">
       <div className="flex justify-between items-center mb-2 no-print">
-        <div>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/"
+            className="text-sm text-gray-400 hover:text-gray-100 whitespace-nowrap"
+          >
+            ← DR3 Dashboard
+          </Link>
           <h1 className="text-3xl font-semibold text-gray-100">
             KRJ Weekly Signals
             <span className="text-xl text-gray-400 ml-3 font-normal">
