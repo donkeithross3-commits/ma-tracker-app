@@ -154,6 +154,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set());
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
 
   const fetchPositions = useCallback(async () => {
     setLoading(true);
@@ -188,10 +189,21 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   }, [autoRefresh, isConnected, fetchPositions]);
 
   const positions = data?.positions ?? [];
-  const groups = computeGroups(positions);
+  const accounts = useMemo(
+    () => [...new Set(positions.map((p) => p.account))].sort(),
+    [positions]
+  );
+  const filteredPositions = useMemo(
+    () =>
+      selectedAccount
+        ? positions.filter((p) => p.account === selectedAccount)
+        : positions,
+    [positions, selectedAccount]
+  );
+  const groups = computeGroups(filteredPositions);
   const groupKeysSignature = useMemo(
-    () => computeGroups(data?.positions ?? []).map((g) => g.key).sort().join(","),
-    [data]
+    () => groups.map((g) => g.key).sort().join(","),
+    [filteredPositions.length, filteredPositions.map((p) => groupKey(p)).join(",")]
   );
 
   // When groups load or change: default no selection; keep only tickers that still exist
@@ -213,7 +225,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     });
   };
   const selectedGroups = groups.filter((g) => selectedTickers.has(g.key));
-  const byType = positions.reduce<Record<string, number>>((acc, row) => {
+  const byType = filteredPositions.reduce<Record<string, number>>((acc, row) => {
     const t = row.contract?.secType || "?";
     acc[t] = (acc[t] || 0) + 1;
     return acc;
@@ -273,9 +285,44 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   return (
     <div className="space-y-4">
+      {/* Account filter - one, other, or both */}
+      {accounts.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-base font-medium text-gray-300 mr-1">Account:</span>
+          <button
+            type="button"
+            onClick={() => setSelectedAccount(null)}
+            className={`min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium transition-colors ${
+              selectedAccount === null
+                ? "bg-blue-600 text-white"
+                : "bg-gray-700 text-gray-200 hover:bg-gray-600"
+            }`}
+          >
+            All ({positions.length})
+          </button>
+          {accounts.map((acct) => (
+            <button
+              key={acct}
+              type="button"
+              onClick={() => setSelectedAccount(acct)}
+              className={`min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium transition-colors ${
+                selectedAccount === acct
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-700 text-gray-200 hover:bg-gray-600"
+              }`}
+            >
+              {acct} ({positions.filter((p) => p.account === acct).length})
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Top-level summary - larger, higher contrast */}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-base text-gray-200">
-        <span className="font-medium">Positions: {positions.length} total</span>
+        <span className="font-medium">
+          Positions: {filteredPositions.length} total
+          {selectedAccount !== null && ` (${selectedAccount})`}
+        </span>
         {Object.keys(byType).length > 0 && (
           <span>By type: {Object.entries(byType).map(([t, n]) => `${t} ${n}`).join(", ")}</span>
         )}
@@ -284,9 +331,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         </span>
       </div>
 
-      {positions.length === 0 ? (
+      {filteredPositions.length === 0 ? (
         <div className="rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-6 text-base text-gray-300">
-          No positions.
+          {selectedAccount !== null
+            ? `No positions in account ${selectedAccount}.`
+            : "No positions."}
         </div>
       ) : (
         <>
