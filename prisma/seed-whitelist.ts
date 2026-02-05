@@ -17,6 +17,7 @@ const WHITELIST_ENTRIES = [
   { email: "luis@limitlessventures.us", alias: "LVS" },
   { email: "alexander@limitlessventures.us", alias: "ASH" },
   { email: "dmartensen@myvbu.com", alias: "DOM" },
+  { email: "dr79.cipriano@gmail.com", alias: "DRC" },
 ];
 
 async function main() {
