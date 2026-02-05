@@ -194,15 +194,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     [data]
   );
 
-  // When groups load or change, keep selection in sync (default all selected, add new tickers)
+  // When groups load or change: default no selection; keep only tickers that still exist
   useEffect(() => {
     if (groups.length === 0) return;
     setSelectedTickers((prev) => {
       const allKeys = new Set(groups.map((g) => g.key));
-      if (prev.size === 0) return allKeys;
-      const next = new Set(prev);
-      for (const k of allKeys) next.add(k);
-      return next;
+      if (prev.size === 0) return new Set<string>();
+      return new Set([...prev].filter((k) => allKeys.has(k)));
     });
   }, [groupKeysSignature, groups.length]);
 
