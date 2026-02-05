@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { useSession } from "next-auth/react";
 import { useIBConnection } from "./IBConnectionContext";
 
@@ -677,49 +677,88 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   </p>
                 </div>
               )}
-              {sellScanResult && !sellScanLoading && (
-                <div className="space-y-4">
-                  <p className="text-base text-gray-200">
-                    Spot: <span className="font-semibold text-white tabular-nums">${sellScanResult.spotPrice.toFixed(2)}</span>
-                    {" · "}
-                    {sellScanResult.contracts.length} contracts (0–15 business days, near the money)
-                  </p>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-base border-collapse">
-                      <thead>
-                        <tr className="border-b border-gray-600 text-gray-200">
-                          <th className="text-left py-3 px-3 font-semibold">Expiration</th>
-                          <th className="text-right py-3 px-3 font-semibold">Strike</th>
-                          <th className="text-right py-3 px-3 font-semibold">Bid</th>
-                          <th className="text-right py-3 px-3 font-semibold">Ask</th>
-                          <th className="text-right py-3 px-3 font-semibold">Mid</th>
-                          <th className="text-right py-3 px-3 font-semibold">Vol</th>
-                          <th className="text-right py-3 px-3 font-semibold">OI</th>
-                          <th className="text-right py-3 px-3 font-semibold">Delta</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sellScanResult.contracts.map((c, i) => (
-                          <tr key={`${c.expiry}-${c.strike}-${i}`} className="border-b border-gray-700/50 hover:bg-gray-800/50">
-                            <td className="py-2.5 px-3 text-gray-100">
-                              {c.expiry.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3")}
-                            </td>
-                            <td className="py-2.5 px-3 text-right text-white tabular-nums font-medium">{c.strike}</td>
-                            <td className="py-2.5 px-3 text-right text-gray-100 tabular-nums">{c.bid?.toFixed(2) ?? "—"}</td>
-                            <td className="py-2.5 px-3 text-right text-gray-100 tabular-nums">{c.ask?.toFixed(2) ?? "—"}</td>
-                            <td className="py-2.5 px-3 text-right text-white tabular-nums font-medium">{c.mid?.toFixed(2) ?? "—"}</td>
-                            <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">{c.volume ?? "—"}</td>
-                            <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">{c.open_interest ?? "—"}</td>
-                            <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">
-                              {c.delta != null ? c.delta.toFixed(2) : "—"}
-                            </td>
+              {sellScanResult && !sellScanLoading && (() => {
+                const contracts = sellScanResult.contracts;
+                const byExpiry = new Map<string, SellScanContract[]>();
+                for (const c of contracts) {
+                  const list = byExpiry.get(c.expiry) ?? [];
+                  list.push(c);
+                  byExpiry.set(c.expiry, list);
+                }
+                const expiryOrder = sellScanResult.expirations?.length
+                  ? sellScanResult.expirations
+                  : [...byExpiry.keys()].sort();
+                const strikeCount = new Map<number, number>();
+                for (const c of contracts) {
+                  strikeCount.set(c.strike, (strikeCount.get(c.strike) ?? 0) + 1);
+                }
+                const repeatedStrikes = new Set<number>([...strikeCount.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+                const groupBg = ["bg-gray-800", "bg-gray-800/90", "bg-gray-700/70"];
+                const groupBorder = "border-t-2 border-gray-500";
+                return (
+                  <div className="space-y-4">
+                    <p className="text-base text-gray-200">
+                      Spot: <span className="font-semibold text-white tabular-nums">${sellScanResult.spotPrice.toFixed(2)}</span>
+                      {" · "}
+                      {contracts.length} contracts (0–15 business days, near the money)
+                    </p>
+                    <div className="overflow-x-auto rounded-lg border border-gray-500 overflow-hidden">
+                      <table className="w-full text-base border-collapse">
+                        <thead>
+                          <tr className="bg-gray-700 text-gray-100 border-b-2 border-gray-500">
+                            <th className="text-left py-3 px-3 font-bold">Expiration</th>
+                            <th className="text-right py-3 px-3 font-bold">Strike</th>
+                            <th className="text-right py-3 px-3 font-bold">Bid</th>
+                            <th className="text-right py-3 px-3 font-bold">Ask</th>
+                            <th className="text-right py-3 px-3 font-bold">Mid</th>
+                            <th className="text-right py-3 px-3 font-bold">Vol</th>
+                            <th className="text-right py-3 px-3 font-bold">OI</th>
+                            <th className="text-right py-3 px-3 font-bold">Delta</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {expiryOrder.map((expiry, groupIdx) => {
+                            const rows = byExpiry.get(expiry) ?? [];
+                            const expDisplay = expiry.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3");
+                            const bg = groupBg[groupIdx % groupBg.length];
+                            return (
+                              <Fragment key={expiry}>
+                                <tr className={`${groupBorder} ${bg}`} aria-label={`Expiration ${expDisplay}`}>
+                                  <td colSpan={8} className="py-1.5 px-3 text-sm font-bold text-amber-200/95 tracking-wide">
+                                    {expDisplay}
+                                  </td>
+                                </tr>
+                                {rows.map((c, i) => {
+                                  const isRepeatedStrike = repeatedStrikes.has(c.strike);
+                                  return (
+                                    <tr
+                                      key={`${c.expiry}-${c.strike}-${i}`}
+                                      className={`${bg} border-b border-gray-600/80 hover:brightness-110`}
+                                    >
+                                      <td className="py-2.5 px-3 text-gray-500/80 text-sm" aria-hidden="true">&nbsp;</td>
+                                      <td className={`py-2.5 px-3 text-right tabular-nums font-medium ${isRepeatedStrike ? "text-amber-200 font-bold border-l-2 border-amber-500/80 pl-2" : "text-white"}`}>
+                                        {c.strike}
+                                      </td>
+                                      <td className="py-2.5 px-3 text-right text-gray-100 tabular-nums">{c.bid?.toFixed(2) ?? "—"}</td>
+                                      <td className="py-2.5 px-3 text-right text-gray-100 tabular-nums">{c.ask?.toFixed(2) ?? "—"}</td>
+                                      <td className="py-2.5 px-3 text-right text-white tabular-nums font-bold">{c.mid?.toFixed(2) ?? "—"}</td>
+                                      <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">{c.volume ?? "—"}</td>
+                                      <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">{c.open_interest ?? "—"}</td>
+                                      <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">
+                                        {c.delta != null ? c.delta.toFixed(2) : "—"}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           </div>
         </div>
