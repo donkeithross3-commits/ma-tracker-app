@@ -43,10 +43,20 @@ echo "✅ Python $PYTHON_VERSION detected"
 CONFIG_FILE="$SCRIPT_DIR/config.env"
 if [ -f "$CONFIG_FILE" ]; then
     echo "Loading config.env..."
-    # Export variables, skipping comments and empty lines
-    set -a
-    source <(grep -v '^#' "$CONFIG_FILE" | grep -v '^$')
-    set +a
+    # Parse config file and explicitly export each variable.
+    # Uses explicit export to guarantee override of any pre-existing
+    # environment variables (e.g. IB_PROVIDER_KEY inherited from parent shell).
+    while IFS='=' read -r key value; do
+        # Skip empty lines and comments
+        case "$key" in
+            ''|\#*) continue ;;
+        esac
+        # Trim whitespace from key
+        key=$(echo "$key" | tr -d '[:space:]')
+        if [ -n "$key" ] && [ -n "$value" ]; then
+            export "$key=$value"
+        fi
+    done < "$CONFIG_FILE"
     echo ""
 else
     echo "ERROR: config.env not found"
