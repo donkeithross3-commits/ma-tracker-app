@@ -100,10 +100,11 @@ class IBDataAgent:
         """Connect to IB TWS"""
         logger.info(f"Connecting to IB TWS at {IB_HOST}:{IB_PORT}...")
         
-        # Use a fixed client_id so orders placed in one session can be
-        # cancelled after a restart. Random client_ids cause IB to reject
-        # cancelOrder for orders placed by a different client_id.
-        client_id = 100
+        # Use clientId=0 (the "default client") so that:
+        # 1) reqAutoOpenOrders(True) works (IB only allows this for clientId 0)
+        # 2) reqOpenOrders() returns ALL orders (TWS + API) with valid orderIds
+        # 3) Orders from previous sessions can be modified/cancelled
+        client_id = 0
         
         self.scanner = IBMergerArbScanner()
         connected = self.scanner.connect_to_ib(
