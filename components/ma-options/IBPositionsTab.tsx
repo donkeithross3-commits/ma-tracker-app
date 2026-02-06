@@ -512,6 +512,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   }, [legPrices, openOrderForContract]);
 
   const [krjSignals, setKrjSignals] = useState<Record<string, "Long" | "Short" | "Neutral" | null>>({});
+  const [requestingSignalTicker, setRequestingSignalTicker] = useState<string | null>(null);
+  const [requestSignalError, setRequestSignalError] = useState<string | null>(null);
   // Stock quotes per group key (underlying ticker); null = not fetched, { price, timestamp } or { error }
   const [quotes, setQuotes] = useState<Record<string, { price: number; timestamp: string } | { error: string } | null>>({});
   const [quoteLoading, setQuoteLoading] = useState<Record<string, boolean>>({});
@@ -1167,6 +1169,44 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       .catch(() => setKrjSignals({}));
   }, [selectedGroupKeysSig]);
 
+  /** Request on-demand KRJ signal for a ticker missing from the weekly batch. */
+  const handleRequestSignal = useCallback(async (groupKey: string) => {
+    const ticker = groupKey.split(" ")[0]?.trim().toUpperCase();
+    if (!ticker) return;
+    setRequestSignalError(null);
+    setRequestingSignalTicker(ticker);
+    try {
+      const res = await fetch("/api/krj/signals/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ticker }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Request failed");
+      // Update the local signal state with the returned signal value
+      const signal = data?.row?.signal as "Long" | "Short" | "Neutral" | undefined;
+      if (signal) {
+        setKrjSignals((prev) => {
+          const next = { ...prev };
+          // Update all group keys that share this underlying ticker
+          for (const key of Object.keys(next)) {
+            if (key.split(" ")[0]?.toUpperCase() === ticker) {
+              next[key] = signal;
+            }
+          }
+          // Also set for the current group key in case it wasn't in the map yet
+          next[groupKey] = signal;
+          return next;
+        });
+      }
+    } catch (e) {
+      setRequestSignalError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setRequestingSignalTicker(null);
+    }
+  }, []);
+
   const byType = filteredPositions.reduce<Record<string, number>>((acc, row) => {
     const t = row.contract?.secType || "?";
     acc[t] = (acc[t] || 0) + 1;
@@ -1491,6 +1531,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
             {/* Right: two columns of detail boxes for selected tickers only */}
             <div className="flex-1 min-w-0 flex flex-col">
+              {requestSignalError && (
+                <div className="mb-2 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-2 py-1">
+                  {requestSignalError}
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 content-start">
                 {selectedGroups.length === 0 ? (
                   <div className="col-span-2 rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-8 text-center text-base text-gray-400">
@@ -1545,20 +1590,37 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                 {companyName}
                               </span>
                             )}
-                            <span
-                              className={`text-sm font-medium px-2 py-0.5 rounded ${
-                                krjSignals[group.key] === "Long"
-                                  ? "bg-blue-900/60 text-blue-200"
-                                  : krjSignals[group.key] === "Short"
-                                    ? "bg-red-900/60 text-red-200"
-                                    : krjSignals[group.key] === "Neutral"
-                                      ? "bg-gray-600/60 text-gray-200"
-                                      : "bg-gray-700/40 text-gray-500"
-                              }`}
-                              title="KRJ weekly signal"
-                            >
-                              KRJ: {krjSignals[group.key] ?? "Not available"}
-                            </span>
+                            {krjSignals[group.key] != null ? (
+                              <span
+                                className={`text-sm font-medium px-2 py-0.5 rounded ${
+                                  krjSignals[group.key] === "Long"
+                                    ? "bg-blue-900/60 text-blue-200"
+                                    : krjSignals[group.key] === "Short"
+                                      ? "bg-red-900/60 text-red-200"
+                                      : "bg-gray-600/60 text-gray-200"
+                                }`}
+                                title="KRJ weekly signal"
+                              >
+                                KRJ: {krjSignals[group.key]}
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={requestingSignalTicker === group.key.split(" ")[0]?.toUpperCase()}
+                                onClick={(e) => { e.stopPropagation(); handleRequestSignal(group.key); }}
+                                className="text-xs font-medium px-2 py-0.5 rounded bg-gray-700/40 text-gray-400 hover:bg-gray-600 hover:text-gray-200 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                                title="Request KRJ signal for this ticker"
+                              >
+                                {requestingSignalTicker === group.key.split(" ")[0]?.toUpperCase() ? (
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-3 h-3 border-2 border-gray-500 border-t-blue-400 rounded-full animate-spin inline-block" />
+                                    Requesting…
+                                  </span>
+                                ) : (
+                                  "Request KRJ signal"
+                                )}
+                              </button>
+                            )}
                             {group.isManual && (
                               <button
                                 type="button"
