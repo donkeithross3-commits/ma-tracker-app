@@ -111,6 +111,20 @@ Defined in `auth.config.ts` under `isInternalAPI`:
 - **Update downloads but extraction fails**: Check ZIP is valid (not HTML error page), file size > 1KB
 - **Version always shows update available**: Check for whitespace in version.txt (use printf, not echo)
 
+## Ticker Input Convention — SEC EDGAR Autocomplete
+**Every UI where a user types a ticker symbol MUST use the SEC EDGAR autocomplete pattern.**
+- API endpoint: `GET /api/ticker-lookup?q=<query>` (returns `{ matches: { ticker, name }[] }`)
+- Debounced search (300ms) with loading spinner
+- Dropdown shows ticker (monospace, blue) + company name
+- Keyboard navigation: ArrowUp/Down to move, Enter to select, Escape to close
+- Click-outside closes dropdown
+- On submit/add, validate exact ticker match exists in SEC EDGAR; show error if not found:
+  `"Ticker not found in SEC EDGAR. Type a few letters and pick from the list."`
+- Current implementations (follow these as reference):
+  - `components/ma-options/AddDealForm.tsx` — Add Deal form
+  - `components/ma-options/IBPositionsTab.tsx` — Add manual ticker modal
+  - `components/krj/TickerEditorModal.tsx` — Edit ticker lists (DRC, ETFs/FX, etc.)
+
 ## Framework
 - This is a Next.js 16 app using the App Router.
 - /app/krj/page.tsx:

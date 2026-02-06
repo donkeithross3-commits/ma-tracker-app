@@ -6,6 +6,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2, Edit3, X, Loader2, ChevronUp, ChevronDown, GripVertical, Save } from "lucide-react";
 
+interface TickerMatch {
+  ticker: string;
+  name: string;
+}
+
 interface TickerEditorModalProps {
   listId: string;
   listName: string;
@@ -36,6 +41,13 @@ export function TickerEditorModal({
   // Drag state for reordering
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  // Ticker autocomplete state (SEC EDGAR lookup)
+  const [suggestions, setSuggestions] = useState<TickerMatch[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const tickerInputRef = useRef<HTMLInputElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
 
   // Load tickers from API when modal opens
   const loadTickers = async () => {
@@ -91,6 +103,59 @@ export function TickerEditorModal({
       listModifiedRef.current = false;
     }
   }, [isOpen]);
+
+  // Debounced ticker autocomplete search (SEC EDGAR)
+  useEffect(() => {
+    if (!newTicker || newTicker.length < 1) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const response = await fetch(
+          `/api/ticker-lookup?q=${encodeURIComponent(newTicker)}`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          setSuggestions(data.matches || []);
+          setShowSuggestions(data.matches?.length > 0);
+          setSelectedIndex(-1);
+        }
+      } catch (err) {
+        console.error("Ticker lookup error:", err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [newTicker]);
+
+  // Close suggestions dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        suggestionsRef.current &&
+        !suggestionsRef.current.contains(e.target as Node) &&
+        tickerInputRef.current &&
+        !tickerInputRef.current.contains(e.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelectSuggestion = (match: TickerMatch) => {
+    setNewTicker(match.ticker);
+    setShowSuggestions(false);
+    setSuggestions([]);
+  };
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
@@ -217,6 +282,25 @@ export function TickerEditorModal({
     setIsAdding(true);
     setError(null);
     setAddSuccess(null);
+    setShowSuggestions(false);
+
+    // Validate ticker exists in SEC EDGAR
+    try {
+      const lookupRes = await fetch(`/api/ticker-lookup?q=${encodeURIComponent(ticker)}`);
+      if (lookupRes.ok) {
+        const lookupData = await lookupRes.json();
+        const exactMatch = (lookupData.matches || []).find(
+          (m: TickerMatch) => m.ticker === ticker
+        );
+        if (!exactMatch) {
+          setError("Ticker not found in SEC EDGAR. Type a few letters and pick from the list.");
+          setIsAdding(false);
+          return;
+        }
+      }
+    } catch {
+      // If lookup fails, allow the add to proceed (don't block on network issues)
+    }
 
     try {
       const response = await fetch(`/api/krj/lists/${listId}/tickers`, {
@@ -271,6 +355,26 @@ export function TickerEditorModal({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showSuggestions && suggestions.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedIndex((prev) =>
+          prev < suggestions.length - 1 ? prev + 1 : prev
+        );
+        return;
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : -1));
+        return;
+      } else if (e.key === "Enter" && selectedIndex >= 0) {
+        e.preventDefault();
+        handleSelectSuggestion(suggestions[selectedIndex]);
+        return;
+      } else if (e.key === "Escape") {
+        setShowSuggestions(false);
+        return;
+      }
+    }
     if (e.key === "Enter") {
       e.preventDefault();
       handleAddTicker();
@@ -299,17 +403,53 @@ export function TickerEditorModal({
           </DialogHeader>
 
           <div className="flex-1 overflow-hidden flex flex-col gap-4">
-            {/* Add new ticker */}
+            {/* Add new ticker with SEC EDGAR autocomplete */}
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={newTicker}
-                onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
-                onKeyDown={handleKeyDown}
-                placeholder="Enter ticker symbol..."
-                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                disabled={isAdding}
-              />
+              <div className="flex-1 relative">
+                <div className="relative">
+                  <input
+                    ref={tickerInputRef}
+                    type="text"
+                    value={newTicker}
+                    onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
+                    onKeyDown={handleKeyDown}
+                    onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                    placeholder="Type ticker or company name..."
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                    disabled={isAdding}
+                    autoComplete="off"
+                  />
+                  {isSearching && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <div className="w-4 h-4 border-2 border-gray-500 border-t-blue-500 rounded-full animate-spin"></div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Suggestions Dropdown */}
+                {showSuggestions && suggestions.length > 0 && (
+                  <div
+                    ref={suggestionsRef}
+                    className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-60 overflow-y-auto"
+                  >
+                    {suggestions.map((match, index) => (
+                      <button
+                        key={match.ticker}
+                        type="button"
+                        onClick={() => handleSelectSuggestion(match)}
+                        className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-700 flex items-center gap-2 ${
+                          index === selectedIndex ? "bg-gray-700" : ""
+                        }`}
+                      >
+                        <span className="font-mono text-blue-400 font-medium min-w-[60px]">
+                          {match.ticker}
+                        </span>
+                        <span className="text-gray-300 truncate">{match.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <Button
                 onClick={handleAddTicker}
                 disabled={isAdding || !newTicker.trim()}
