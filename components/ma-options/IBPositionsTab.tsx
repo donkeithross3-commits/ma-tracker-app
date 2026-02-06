@@ -251,6 +251,38 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [quotes, setQuotes] = useState<Record<string, { price: number; timestamp: string } | { error: string } | null>>({});
   const [quoteLoading, setQuoteLoading] = useState<Record<string, boolean>>({});
 
+  const fetchQuote = useCallback(async (ticker: string) => {
+    const key = ticker.toUpperCase();
+    setQuoteLoading((prev) => ({ ...prev, [key]: true }));
+    try {
+      const res = await fetch("/api/ma-options/stock-quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: key }),
+        credentials: "include",
+      });
+      // Guard against non-JSON responses (e.g. auth redirect returning HTML)
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        setQuotes((prev) => ({ ...prev, [key]: { error: `Could not get price for ${key}` } }));
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        setQuotes((prev) => ({ ...prev, [key]: { error: data?.error || "Failed to fetch quote" } }));
+        return;
+      }
+      setQuotes((prev) => ({
+        ...prev,
+        [key]: { price: data.price, timestamp: data.timestamp || new Date().toISOString() },
+      }));
+    } catch (e) {
+      setQuotes((prev) => ({ ...prev, [key]: { error: e instanceof Error ? e.message : "Failed to fetch quote" } }));
+    } finally {
+      setQuoteLoading((prev) => ({ ...prev, [key]: false }));
+    }
+  }, []);
+
   // ---- Stock order entry state ----
   type StockOrderType = "LMT" | "STP LMT" | "MOC";
   type StockOrderTif = "DAY" | "GTC";
@@ -267,6 +299,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [stockOrderStkPosition, setStockOrderStkPosition] = useState(0); // absolute STK position for quick-fill
   const [stockOrderDeltaSign, setStockOrderDeltaSign] = useState<1 | -1>(1); // +/- toggle for delta buttons
   const [stockOrderQuoteRefreshing, setStockOrderQuoteRefreshing] = useState(false);
+  const [stockOrderTicker, setStockOrderTicker] = useState(""); // underlying ticker for open ticket
+  const stockOrderPriceInitRef = useRef(false); // track whether we've auto-filled price
 
   const openStockOrder = useCallback((groupKey: string, action: "BUY" | "SELL", group: GroupAggregate) => {
     const ticker = groupKey.split(" ")[0]?.toUpperCase() ?? groupKey;
@@ -279,23 +313,44 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
     setStockOrderStkPosition(Math.abs(stkPos));
     setStockOrderKey(groupKey);
+    setStockOrderTicker(ticker);
     setStockOrderAction(action);
     setStockOrderType("LMT");
     setStockOrderTif("DAY");
     setStockOrderQty("");
     setStockOrderLmtPrice(spotPrice);
     setStockOrderStopPrice("");
+    setStockOrderDeltaSign(1);
+    // If we already have a price, mark as initialized; otherwise fetch a fresh quote
+    if (spotPrice) {
+      stockOrderPriceInitRef.current = true;
+    } else {
+      stockOrderPriceInitRef.current = false;
+      fetchQuote(ticker);
+    }
     // Default account to first row's account or first in accounts list
     const acct = group.rows[0]?.account || data?.accounts?.[0] || "";
     setStockOrderAccount(acct);
     setStockOrderSubmitting(false);
     setStockOrderResult(null);
-  }, [quotes, data]);
+  }, [quotes, data, fetchQuote]);
 
   const closeStockOrder = useCallback(() => {
     setStockOrderKey(null);
     setStockOrderResult(null);
+    stockOrderPriceInitRef.current = false;
   }, []);
+
+  // Auto-fill limit price when a fresh quote arrives for the open order ticket
+  useEffect(() => {
+    if (!stockOrderTicker || !stockOrderKey) return;
+    if (stockOrderPriceInitRef.current) return; // already initialized
+    const q = quotes[stockOrderTicker];
+    if (q && "price" in q) {
+      setStockOrderLmtPrice(q.price.toFixed(2));
+      stockOrderPriceInitRef.current = true;
+    }
+  }, [quotes, stockOrderTicker, stockOrderKey]);
 
   const submitStockOrder = useCallback(async () => {
     if (!stockOrderKey) return;
@@ -430,38 +485,6 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   /** Underlying ticker for a group key (e.g. AAPL or SPCE 250117). */
   const underlyingTickerForGroupKey = useCallback((key: string) => key.split(" ")[0]?.toUpperCase() ?? key, []);
-
-  const fetchQuote = useCallback(async (ticker: string) => {
-    const key = ticker.toUpperCase();
-    setQuoteLoading((prev) => ({ ...prev, [key]: true }));
-    try {
-      const res = await fetch("/api/ma-options/stock-quote", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker: key }),
-        credentials: "include",
-      });
-      // Guard against non-JSON responses (e.g. auth redirect returning HTML)
-      const ct = res.headers.get("content-type") || "";
-      if (!ct.includes("application/json")) {
-        setQuotes((prev) => ({ ...prev, [key]: { error: `Could not get price for ${key}` } }));
-        return;
-      }
-      const data = await res.json();
-      if (!res.ok) {
-        setQuotes((prev) => ({ ...prev, [key]: { error: data?.error || "Failed to fetch quote" } }));
-        return;
-      }
-      setQuotes((prev) => ({
-        ...prev,
-        [key]: { price: data.price, timestamp: data.timestamp || new Date().toISOString() },
-      }));
-    } catch (e) {
-      setQuotes((prev) => ({ ...prev, [key]: { error: e instanceof Error ? e.message : "Failed to fetch quote" } }));
-    } finally {
-      setQuoteLoading((prev) => ({ ...prev, [key]: false }));
-    }
-  }, []);
 
   // Add-ticker modal: close suggestions on click outside
   useEffect(() => {
@@ -1118,7 +1141,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                   <span className={`text-3xl font-extrabold ${stockOrderAction === "BUY" ? "text-blue-300" : "text-red-300"}`}>
                                     {stockOrderAction} {underlyingTicker}
                                   </span>
-                                  {/* Live spot price + refresh */}
+                                  {/* Live spot price + refresh + snap-to-price */}
                                   <div className="flex items-center gap-2">
                                     {spotPrice != null && (
                                       <span className="text-2xl font-bold text-green-400">${spotPrice.toFixed(2)}</span>
@@ -1127,7 +1150,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       <span className="text-base text-red-400">No quote</span>
                                     )}
                                     {!liveQuote && !stockOrderQuoteRefreshing && (
-                                      <span className="text-base text-gray-500">—</span>
+                                      <span className="text-base text-gray-500">fetching...</span>
                                     )}
                                     <button
                                       type="button"
@@ -1142,6 +1165,16 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     >
                                       {stockOrderQuoteRefreshing ? "..." : "\u21BB"}
                                     </button>
+                                    {spotPrice != null && stockOrderType !== "MOC" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setStockOrderLmtPrice(spotPrice.toFixed(2))}
+                                        className="min-h-[40px] px-3 rounded-lg bg-green-800 hover:bg-green-700 text-green-200 text-sm font-medium"
+                                        title="Set limit price to spot"
+                                      >
+                                        Use as price
+                                      </button>
+                                    )}
                                   </div>
                                   {(data?.accounts?.length ?? 0) > 1 && (
                                     <select
