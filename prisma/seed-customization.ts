@@ -72,7 +72,7 @@ const KRJ_LISTS = [
     name: "DRC",
     slug: "drc",
     description: "Custom DRC watchlist",
-    ownerAlias: "DR3",
+    ownerAlias: "DR3_dev",
     isSystem: false,
     isEditable: true,
     displayOrder: 4,

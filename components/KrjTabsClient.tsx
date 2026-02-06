@@ -193,13 +193,53 @@ function computeSummaryFromRows(rows: RawRow[]) {
   return { rowsSummary, totals };
 }
 
-export default function KrjTabsClient({ groups, columns, userId, userAlias }: KrjTabsClientProps) {
+export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias }: KrjTabsClientProps) {
   const router = useRouter()
+  // Local groups state — allows immediate UI updates when tickers are added/removed
+  const [localGroups, setLocalGroups] = useState<GroupData[]>(groupsProp)
+  // Sync from server when props change (e.g. after router.refresh())
+  useEffect(() => { setLocalGroups(groupsProp) }, [groupsProp])
+
+  // Callback for TickerEditorModal to remove a ticker from a group immediately
+  const handleTickerRemovedFromGroup = (listId: string, ticker: string) => {
+    setLocalGroups((prev) =>
+      prev.map((g) => {
+        if (g.listId !== listId) return g;
+        const newRows = g.rows.filter(
+          (r) => (r.ticker || "").toUpperCase() !== ticker.toUpperCase()
+        );
+        return {
+          ...g,
+          rows: newRows,
+          summary: computeSummaryFromRows(newRows),
+          tickerCount: (g.tickerCount ?? g.rows.length) - 1,
+        };
+      })
+    );
+  };
+
+  // Callback for TickerEditorModal to add a ticker to a group immediately
+  const handleTickerAddedToGroup = (listId: string, ticker: string) => {
+    setLocalGroups((prev) =>
+      prev.map((g) => {
+        if (g.listId !== listId) return g;
+        // Add a placeholder row for the new ticker
+        const newRows = [...g.rows, { ticker } as RawRow];
+        return {
+          ...g,
+          rows: newRows,
+          summary: computeSummaryFromRows(newRows),
+          tickerCount: (g.tickerCount ?? g.rows.length) + 1,
+        };
+      })
+    );
+  };
+
   // Print state management
   const [printMode, setPrintMode] = useState(false)
   const [showPrintDialog, setShowPrintDialog] = useState(false)
-  const [currentTab, setCurrentTab] = useState(groups[0]?.key || "equities")
-  const [selectedGroups, setSelectedGroups] = useState<string[]>(() => [groups[0]?.key || "equities"])
+  const [currentTab, setCurrentTab] = useState(localGroups[0]?.key || "equities")
+  const [selectedGroups, setSelectedGroups] = useState<string[]>(() => [localGroups[0]?.key || "equities"])
   const [printLongShortOnly, setPrintLongShortOnly] = useState(false)
   // Payload for current print run (set when user clicks Print or Print all Long/Short)
   const [selectedGroupsForPrint, setSelectedGroupsForPrint] = useState<string[]>([])
@@ -212,7 +252,7 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
   const [hiddenListIds, setHiddenListIds] = useState<string[]>([])
   
   // Filter visible groups based on hidden list IDs
-  const visibleGroups = groups.filter((g) => !g.listId || !hiddenListIds.includes(g.listId))
+  const visibleGroups = localGroups.filter((g) => !g.listId || !hiddenListIds.includes(g.listId))
   
   // Sort state management
   const [sortConfig, setSortConfig] = useState<SortConfig>({ column: null, direction: "asc" })
@@ -304,15 +344,15 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
 
   // Groups to print: from dialog selection + optional Long/Short filter
   const getGroupsForPrint = useMemo(() => {
-    const keys = selectedGroupsForPrint.length > 0 ? selectedGroupsForPrint : groups.map((g) => g.key);
-    return groups
+    const keys = selectedGroupsForPrint.length > 0 ? selectedGroupsForPrint : localGroups.map((g) => g.key);
+    return localGroups
       .filter((g) => keys.includes(g.key))
       .map((g) => {
         const rows = longShortOnlyForPrint ? filterAndSortLongShort(g.rows) : g.rows;
         const summary = computeSummaryFromRows(rows);
         return { ...g, rows, summary };
       });
-  }, [groups, selectedGroupsForPrint, longShortOnlyForPrint]);
+  }, [localGroups, selectedGroupsForPrint, longShortOnlyForPrint]);
 
   const handleOpenPrintDialog = () => {
     setShowPrintDialog(true);
@@ -327,14 +367,14 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
   };
 
   const handlePrintAllLongShort = () => {
-    setSelectedGroupsForPrint(groups.map((g) => g.key));
+    setSelectedGroupsForPrint(localGroups.map((g) => g.key));
     setLongShortOnlyForPrint(true);
     setShowPrintDialog(false);
     setTimeout(() => setPrintMode(true), 150);
   };
 
   const handleSelectCurrentTab = () => setSelectedGroups([currentTab]);
-  const handleSelectAll = () => setSelectedGroups(groups.map((g) => g.key));
+  const handleSelectAll = () => setSelectedGroups(localGroups.map((g) => g.key));
   const handleToggleGroup = (groupKey: string) => {
     setSelectedGroups((prev) =>
       prev.includes(groupKey) ? prev.filter((k) => k !== groupKey) : [...prev, groupKey]
@@ -396,7 +436,7 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
             <div>
               <p className="text-sm text-gray-400 mb-3">Select groups to print:</p>
               <div className="space-y-2">
-                {groups.map((group) => (
+                {localGroups.map((group) => (
                   <div key={group.key} className="flex items-center space-x-2">
                     <Checkbox
                       id={`print-${group.key}`}
@@ -514,7 +554,7 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
             </TabsList>
             <div className="flex items-center gap-2">
               <ListSettingsModal
-                lists={groups.map((g) => ({
+                lists={localGroups.map((g) => ({
                   listId: g.listId || g.key,
                   key: g.key,
                   label: g.label,
@@ -589,6 +629,8 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
                 listId={group.listId}
                 listName={group.label}
                 listSlug={group.key}
+                onTickerRemoved={(ticker) => handleTickerRemovedFromGroup(group.listId!, ticker)}
+                onTickerAdded={(ticker) => handleTickerAddedToGroup(group.listId!, ticker)}
               />
             )}
 

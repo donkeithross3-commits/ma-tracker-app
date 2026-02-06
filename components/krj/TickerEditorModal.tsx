@@ -15,12 +15,16 @@ interface TickerEditorModalProps {
   listId: string;
   listName: string;
   listSlug?: string;
+  onTickerRemoved?: (ticker: string) => void;
+  onTickerAdded?: (ticker: string) => void;
 }
 
 export function TickerEditorModal({
   listId,
   listName,
   listSlug,
+  onTickerRemoved,
+  onTickerAdded,
 }: TickerEditorModalProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
@@ -317,8 +321,9 @@ export function TickerEditorModal({
       // Add to end of list (preserve order)
       setLocalTickers((prev) => [...prev, ticker]);
       setNewTicker("");
-      setAddSuccess(`${ticker} added to list. Close and use "Request signal" in the table for data, or refresh the page.`);
+      setAddSuccess(`${ticker} added to list. Use "Request signal" in the table for data, or wait for the weekly batch.`);
       listModifiedRef.current = true;
+      onTickerAdded?.(ticker);
       // #region agent log
       fetch("http://127.0.0.1:7242/ingest/5eb096b0-06f6-4f03-a0db-0e4112629bad", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "TickerEditorModal.tsx:handleAddTicker", message: "add ticker success", data: { ticker, listId }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H4" }) }).catch(() => {});
       // #endregion
@@ -347,6 +352,7 @@ export function TickerEditorModal({
 
       setLocalTickers((prev) => prev.filter((t) => t !== ticker));
       listModifiedRef.current = true;
+      onTickerRemoved?.(ticker);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove ticker");
     } finally {
