@@ -66,7 +66,8 @@ export function TickerEditorModal({
       if (!data.tickers || !Array.isArray(data.tickers)) {
         throw new Error(`Invalid response: ${JSON.stringify(data).substring(0, 100)}`);
       }
-      setLocalTickers(data.tickers.map((t: { ticker: string }) => t.ticker).sort());
+      // Preserve order from API (sorted by position)
+      setLocalTickers(data.tickers.map((t: { ticker: string }) => t.ticker));
     } catch (err) {
       setError(`listId=${listId}, error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -142,7 +143,8 @@ export function TickerEditorModal({
         throw new Error(data.error || "Failed to add ticker");
       }
 
-      setLocalTickers((prev) => [...prev, ticker].sort());
+      // Add to end of list (preserve order)
+      setLocalTickers((prev) => [...prev, ticker]);
       setNewTicker("");
       setAddSuccess(`${ticker} added to list. Close and use "Request signal" in the table for data, or refresh the page.`);
       listModifiedRef.current = true;
@@ -207,7 +209,6 @@ export function TickerEditorModal({
               <Edit3 className="h-5 w-5" />
               Edit {listName} Tickers
             </DialogTitle>
-            <p className="text-xs text-gray-500 font-mono">ID: {listId || "undefined"}</p>
           </DialogHeader>
 
           <div className="flex-1 overflow-hidden flex flex-col gap-4">

@@ -12,18 +12,15 @@ export async function GET(
   { params }: { params: Promise<{ listId: string }> }
 ) {
   const { listId } = await params;
-  console.log("[API /krj/lists/tickers GET] listId:", listId);
 
   try {
     const tickers = await prisma.krjTicker.findMany({
       where: { listId },
-      orderBy: { ticker: "asc" },
+      orderBy: { position: "asc" },
       include: {
         addedBy: { select: { alias: true } },
       },
     });
-    
-    console.log("[API /krj/lists/tickers GET] Found", tickers.length, "tickers");
 
     return NextResponse.json({
       tickers: tickers.map((t) => ({
@@ -95,12 +92,20 @@ export async function POST(
       t.trim().toUpperCase()
     );
 
-    // Add tickers (skip duplicates)
+    // Get max position in the list to add new tickers at the end
+    const maxPositionResult = await prisma.krjTicker.aggregate({
+      where: { listId },
+      _max: { position: true },
+    });
+    let nextPosition = (maxPositionResult._max.position ?? -1) + 1;
+
+    // Add tickers at the end of the list (skip duplicates)
     const created = await prisma.krjTicker.createMany({
-      data: normalizedTickers.map((ticker) => ({
+      data: normalizedTickers.map((ticker, idx) => ({
         listId,
         ticker,
         addedById: session.user.id,
+        position: nextPosition + idx,
       })),
       skipDuplicates: true,
     });

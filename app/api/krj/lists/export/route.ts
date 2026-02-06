@@ -13,7 +13,7 @@ async function exportTickerLists() {
   const lists = await prisma.krjTickerList.findMany({
     include: {
       tickers: {
-        orderBy: { ticker: "asc" },
+        orderBy: { position: "asc" },
       },
     },
   });
@@ -24,9 +24,9 @@ async function exportTickerLists() {
     const tickers = list.tickers.map((t) => t.ticker);
     
     // Always ensure SPY is in etfs_fx (batch needs it for vol_ratio calculations)
+    // Add at end if missing (don't sort - preserve order)
     if (list.slug === "etfs_fx" && !tickers.includes("SPY")) {
       tickers.push("SPY");
-      tickers.sort();
     }
     
     exportData[list.slug] = tickers;

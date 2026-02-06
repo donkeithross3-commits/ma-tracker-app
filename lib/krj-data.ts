@@ -199,7 +199,10 @@ export async function getKrjListsForUser(userId: string | null): Promise<{
   const dbLists = await prisma.krjTickerList.findMany({
     include: {
       owner: { select: { id: true, alias: true } },
-      tickers: { select: { ticker: true } },
+      tickers: { 
+        select: { ticker: true },
+        orderBy: { position: "asc" },
+      },
     },
     orderBy: { displayOrder: "asc" },
   });

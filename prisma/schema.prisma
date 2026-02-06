@@ -372,6 +372,7 @@ model KrjTicker {
   addedById String?       @map("added_by")
   addedBy   User?         @relation(fields: [addedById], references: [id])
   addedAt   DateTime      @default(now()) @map("added_at")
+  position  Int           @default(0)
   
   @@unique([listId, ticker])
   @@index([listId])

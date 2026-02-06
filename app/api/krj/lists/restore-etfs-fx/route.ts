@@ -43,10 +43,11 @@ export async function POST() {
   await prisma.$transaction(async (tx) => {
     await tx.krjTicker.deleteMany({ where: { listId: list.id } });
     await tx.krjTicker.createMany({
-      data: ETFS_FX_TICKERS.map((ticker) => ({
+      data: ETFS_FX_TICKERS.map((ticker, idx) => ({
         listId: list.id,
         ticker,
         addedById: session!.user!.id,
+        position: idx,
       })),
     });
   });
