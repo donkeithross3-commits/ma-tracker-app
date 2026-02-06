@@ -1800,18 +1800,29 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                           })()}
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
+                          <table className="w-full text-sm table-fixed">
+                            <colgroup>
+                              <col className="w-[80px]" />
+                              <col />
+                              <col className="w-[50px]" />
+                              <col className="w-[55px]" />
+                              <col className="w-[70px]" />
+                              <col className="w-[55px]" />
+                              <col className="w-[75px]" />
+                              <col className="w-[85px]" />
+                              <col className="w-[62px]" />
+                            </colgroup>
                             <thead>
                               <tr className="bg-gray-700/50 text-gray-200 text-sm border-b border-gray-600">
-                                <th className="text-left py-2 px-3">Account</th>
-                                <th className="text-left py-2 px-3">Symbol</th>
-                                <th className="text-left py-2 px-3">Type</th>
-                                <th className="text-right py-2 px-3">Pos</th>
-                                <th className="text-right py-2 px-3">Avg cost</th>
-                                <th className="text-right py-2 px-3">Last</th>
-                                <th className="text-right py-2 px-3">Mkt val</th>
-                                <th className="text-right py-2 px-3">P&L</th>
-                                <th className="text-center py-2 px-2">Trade</th>
+                                <th className="text-left py-2 px-2">Account</th>
+                                <th className="text-left py-2 px-2">Symbol</th>
+                                <th className="text-left py-2 px-2">Type</th>
+                                <th className="text-right py-2 px-2">Pos</th>
+                                <th className="text-right py-2 px-2">Avg cost</th>
+                                <th className="text-right py-2 px-2">Last</th>
+                                <th className="text-right py-2 px-2">Mkt val</th>
+                                <th className="text-right py-2 px-2">P&L</th>
+                                <th className="text-center py-2 px-1">Trade</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1826,28 +1837,28 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
                                     className="border-b border-gray-700/50 hover:bg-gray-700/30"
                                   >
-                                    <td className="py-2 px-3 text-gray-300 text-sm">
+                                    <td className="py-1.5 px-2 text-gray-300 text-sm truncate">
                                       {getAccountLabel(row.account, userAlias)}
                                     </td>
-                                    <td className="py-2 px-3 text-gray-100 whitespace-nowrap text-sm font-medium">
+                                    <td className="py-1.5 px-2 text-gray-100 text-sm font-medium truncate">
                                       {displaySymbol(row)}
                                     </td>
-                                    <td className="py-2 px-3 text-gray-400 text-sm">
+                                    <td className="py-1.5 px-2 text-gray-400 text-sm">
                                       {row.contract?.secType ?? "—"}
                                     </td>
-                                    <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm font-medium">
+                                    <td className="py-1.5 px-2 text-right text-gray-100 tabular-nums text-sm font-medium">
                                       {formatPosition(row.position)}
                                     </td>
-                                    <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm">
+                                    <td className="py-1.5 px-2 text-right text-gray-100 tabular-nums text-sm">
                                       {formatAvgCost(row.avgCost)}
                                     </td>
-                                    <td className="py-2 px-3 text-right tabular-nums text-sm text-gray-200">
+                                    <td className="py-1.5 px-2 text-right tabular-nums text-sm text-gray-200">
                                       {isLegLoading ? "…" : rowPrice != null ? rowPrice.toFixed(2) : "—"}
                                     </td>
-                                    <td className="py-2 px-3 text-right tabular-nums text-sm text-gray-100">
+                                    <td className="py-1.5 px-2 text-right tabular-nums text-sm text-gray-100">
                                       {rowMktVal != null ? formatCostBasis(rowMktVal) : "—"}
                                     </td>
-                                    <td className={`py-2 px-3 text-right tabular-nums text-sm font-medium whitespace-nowrap ${
+                                    <td className={`py-1.5 px-2 text-right tabular-nums text-sm font-medium whitespace-nowrap ${
                                       rowPnl != null && rowPnl > 0
                                         ? "text-green-400"
                                         : rowPnl != null && rowPnl < 0
@@ -1856,11 +1867,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     }`}>
                                       {rowPnl != null ? formatPnl(rowPnl) : "—"}
                                     </td>
-                                    <td className="py-1.5 px-2 text-center">
+                                    <td className="py-1 px-1 text-center">
                                       <button
                                         type="button"
                                         onClick={() => openTradeTicket(group.key, group, row)}
-                                        className="px-3 py-1 rounded text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white"
+                                        className="px-2 py-1 rounded text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white whitespace-nowrap"
                                       >
                                         Trade
                                       </button>
@@ -1872,17 +1883,17 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             {groupHasAnyPrice && (
                               <tfoot>
                                 <tr className="bg-gray-700/30 border-t border-gray-500 font-semibold text-sm">
-                                  <td colSpan={5} className="py-2 px-3 text-right text-gray-300">Totals</td>
-                                  <td className="py-2 px-3"></td>
-                                  <td className="py-2 px-3 text-right tabular-nums text-white">
+                                  <td colSpan={5} className="py-1.5 px-2 text-right text-gray-300">Totals</td>
+                                  <td className="py-1.5 px-2"></td>
+                                  <td className="py-1.5 px-2 text-right tabular-nums text-white">
                                     {formatCostBasis(groupMktVal)}
                                   </td>
-                                  <td className={`py-2 px-3 text-right tabular-nums font-bold whitespace-nowrap ${
+                                  <td className={`py-1.5 px-2 text-right tabular-nums font-bold whitespace-nowrap ${
                                     groupPnl != null && groupPnl >= 0 ? "text-green-400" : "text-red-400"
                                   }`}>
                                     {groupPnl != null ? formatPnl(groupPnl) : "—"}
                                   </td>
-                                  <td className="py-2 px-2"></td>
+                                  <td className="py-1.5 px-1"></td>
                                 </tr>
                               </tfoot>
                             )}
