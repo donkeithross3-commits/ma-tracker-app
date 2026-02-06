@@ -336,6 +336,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         for i in range(5):
             time.sleep(1)
             if self.isConnected():
+                # Bind orders from ALL clients (TWS, other API sessions) to this client
+                # so we can cancel them. Without this, cancelOrder only works for orders
+                # placed by this specific client_id.
+                self.reqAutoOpenOrders(True)
                 print(f"✅ Connected to IB successfully (took {i+1}s)")
                 return True
             if i < 4:
