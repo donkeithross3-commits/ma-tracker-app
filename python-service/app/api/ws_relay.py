@@ -93,6 +93,7 @@ class DataProvider:
     provider_id: str
     websocket: WebSocket
     user_id: str  # The user this provider belongs to
+    agent_version: str = "0.0.0"  # Version reported by agent on auth
     connected_at: float = field(default_factory=time.time)
     last_heartbeat: float = field(default_factory=time.time)
     is_active: bool = True
@@ -106,13 +107,14 @@ class ProviderRegistry:
         self.pending_requests: Dict[str, PendingRequest] = {}
         self._lock = asyncio.Lock()
     
-    async def register_provider(self, provider_id: str, websocket: WebSocket, user_id: str) -> DataProvider:
+    async def register_provider(self, provider_id: str, websocket: WebSocket, user_id: str, agent_version: str = "0.0.0") -> DataProvider:
         """Register a new data provider"""
         async with self._lock:
             provider = DataProvider(
                 provider_id=provider_id,
                 websocket=websocket,
-                user_id=user_id
+                user_id=user_id,
+                agent_version=agent_version
             )
             self.providers[provider_id] = provider
             logger.info(f"Provider registered: {provider_id} for user {user_id}")
@@ -148,14 +150,23 @@ class ProviderRegistry:
         """
         async with self._lock:
             if user_id:
-                # When multiple providers match the same user_id, prefer
-                # the most recently connected one. It is more likely to be
-                # running the latest agent code (e.g. after an update).
+                # When multiple providers match the same user_id, prefer the
+                # one with the highest agent version (most features). On a tie,
+                # prefer the most recently connected one.
                 best: Optional[DataProvider] = None
                 for provider in self.providers.values():
                     if provider.is_active and provider.user_id == user_id:
-                        if best is None or provider.connected_at > best.connected_at:
+                        if best is None:
                             best = provider
+                        else:
+                            # Compare versions as tuples, fall back to connected_at
+                            try:
+                                cur = tuple(int(x) for x in best.agent_version.split("."))
+                                new = tuple(int(x) for x in provider.agent_version.split("."))
+                            except (ValueError, AttributeError):
+                                cur, new = (0,), (0,)
+                            if new > cur or (new == cur and provider.connected_at > best.connected_at):
+                                best = provider
                 if best:
                     return best
                 if not allow_fallback_to_any:
@@ -206,6 +217,7 @@ class ProviderRegistry:
                 {
                     "id": p.provider_id,
                     "user_id": p.user_id,
+                    "agent_version": p.agent_version,
                     "connected_at": datetime.fromtimestamp(p.connected_at).isoformat(),
                     "last_heartbeat": datetime.fromtimestamp(p.last_heartbeat).isoformat(),
                     "is_active": p.is_active
@@ -288,7 +300,8 @@ async def data_provider_websocket(websocket: WebSocket):
         
         # Generate provider ID and register with user association
         provider_id = str(uuid.uuid4())[:8]
-        provider = await registry.register_provider(provider_id, websocket, user_id)
+        agent_version = auth_msg.get("version", "0.0.0")
+        provider = await registry.register_provider(provider_id, websocket, user_id, agent_version=agent_version)
         
         await websocket.send_json({
             "type": "auth_response",
@@ -296,7 +309,7 @@ async def data_provider_websocket(websocket: WebSocket):
             "provider_id": provider_id
         })
         
-        logger.info(f"Provider {provider_id} authenticated for user {user_id}")
+        logger.info(f"Provider {provider_id} authenticated for user {user_id} (agent v{agent_version})")
         
         # Main message loop
         while True:

@@ -696,9 +696,19 @@ class IBDataAgent:
                 ping_timeout=60
             )
             
+            # Read version from version.txt next to this script
+            _agent_version = "0.0.0"
+            try:
+                _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
+                with open(_vf) as _f:
+                    _agent_version = _f.read().strip()
+            except Exception:
+                pass
+
             await self.websocket.send(json.dumps({
                 "type": "auth",
-                "api_key": IB_PROVIDER_KEY
+                "api_key": IB_PROVIDER_KEY,
+                "version": _agent_version
             }))
             
             response = await asyncio.wait_for(
