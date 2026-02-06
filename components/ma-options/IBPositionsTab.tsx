@@ -315,6 +315,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [sellScanResult, setSellScanResult] = useState<SellScanResponse | null>(null);
   const [sellScanError, setSellScanError] = useState<string | null>(null);
   const [orderContract, setOrderContract] = useState<SellScanContract | null>(null);
+  const [orderAction, setOrderAction] = useState<"BUY" | "SELL">("SELL");
   const [orderQuantity, setOrderQuantity] = useState(1);
   const [orderOrderType, setOrderOrderType] = useState<"MKT" | "LMT">("MKT");
   const [orderLmtPrice, setOrderLmtPrice] = useState("");
@@ -482,13 +483,34 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     });
   }, [openOrders]);
 
-  const openOrderForContract = useCallback((c: SellScanContract) => {
+  const openOrderForContract = useCallback((c: SellScanContract, action: "BUY" | "SELL" = "SELL") => {
     setOrderContract(c);
+    setOrderAction(action);
     setOrderQuantity(1);
-    setOrderOrderType("MKT");
+    setOrderOrderType("LMT");
     setOrderLmtPrice(c.mid != null ? c.mid.toFixed(2) : "");
     setOrderError(null);
   }, []);
+
+  /** Open order ticket from a position row (options only; stocks use openStockOrder) */
+  const openPositionOrder = useCallback((row: IBPositionRow, action: "BUY" | "SELL") => {
+    const c = row.contract;
+    const lp = legPrices[legKey(row)];
+    const scanContract: SellScanContract = {
+      symbol: c.symbol,
+      strike: c.strike ?? 0,
+      expiry: c.lastTradeDateOrContractMonth ?? "",
+      right: c.right ?? "C",
+      bid: lp?.bid ?? 0,
+      ask: lp?.ask ?? 0,
+      mid: lp?.mid ?? 0,
+      last: lp?.last ?? 0,
+      volume: 0,
+      open_interest: 0,
+    };
+    openOrderForContract(scanContract, action);
+  }, [legPrices, openOrderForContract]);
+
   const [krjSignals, setKrjSignals] = useState<Record<string, "Long" | "Short" | "Neutral" | null>>({});
   // Stock quotes per group key (underlying ticker); null = not fetched, { price, timestamp } or { error }
   const [quotes, setQuotes] = useState<Record<string, { price: number; timestamp: string } | { error: string } | null>>({});
@@ -895,7 +917,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   }, []);
 
   const placeOrderFromScan = useCallback(
-    async (contract: SellScanContract, quantity: number, orderType: "MKT" | "LMT", lmtPrice?: number) => {
+    async (contract: SellScanContract, action: "BUY" | "SELL", quantity: number, orderType: "MKT" | "LMT", lmtPrice?: number) => {
       setOrderSubmitting(true);
       setOrderError(null);
       try {
@@ -911,7 +933,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
             multiplier: "100",
           },
           order: {
-            action: "SELL",
+            action,
             totalQuantity: quantity,
             orderType,
             ...(orderType === "LMT" && lmtPrice != null && { lmtPrice }),
@@ -1601,7 +1623,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               disabled={sellScanLoading}
                               className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white"
                             >
-                              Sell calls
+                              Scan calls
                             </button>
                             <button
                               type="button"
@@ -1609,7 +1631,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               disabled={sellScanLoading}
                               className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white"
                             >
-                              Sell puts
+                              Scan puts
                             </button>
                             <button
                               type="button"
@@ -2064,6 +2086,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                 <th className="text-right py-2 px-3">Last</th>
                                 <th className="text-right py-2 px-3">Mkt val</th>
                                 <th className="text-right py-2 px-3">P&L</th>
+                                <th className="text-center py-2 px-2">Trade</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -2108,6 +2131,21 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     }`}>
                                       {rowPnl != null ? formatPnl(rowPnl) : "—"}
                                     </td>
+                                    <td className="py-1.5 px-2 text-center whitespace-nowrap">
+                                      <div className="flex items-center justify-center gap-1">
+                                        {row.contract?.secType === "STK" ? (
+                                          <>
+                                            <button type="button" onClick={() => openStockOrder(group.key, "BUY", group)} className="px-2 py-1 rounded text-xs font-semibold bg-blue-700 hover:bg-blue-600 text-white">Buy</button>
+                                            <button type="button" onClick={() => openStockOrder(group.key, "SELL", group)} className="px-2 py-1 rounded text-xs font-semibold bg-red-700 hover:bg-red-600 text-white">Sell</button>
+                                          </>
+                                        ) : row.contract?.secType === "OPT" ? (
+                                          <>
+                                            <button type="button" onClick={() => openPositionOrder(row, "BUY")} className="px-2 py-1 rounded text-xs font-semibold bg-blue-700 hover:bg-blue-600 text-white">Buy</button>
+                                            <button type="button" onClick={() => openPositionOrder(row, "SELL")} className="px-2 py-1 rounded text-xs font-semibold bg-red-700 hover:bg-red-600 text-white">Sell</button>
+                                          </>
+                                        ) : null}
+                                      </div>
+                                    </td>
                                   </tr>
                                 );
                               })}
@@ -2125,6 +2163,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                   }`}>
                                     {groupPnl != null ? formatPnl(groupPnl) : "—"}
                                   </td>
+                                  <td className="py-2 px-2"></td>
                                 </tr>
                               </tfoot>
                             )}
@@ -2281,8 +2320,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                 {sellScanLoading
                   ? `Loading…`
                   : sellScanRight === "C"
-                    ? `Sell calls — ${sellScanTicker}`
-                    : `Sell puts — ${sellScanTicker}`}
+                    ? `Scan calls — ${sellScanTicker}`
+                    : `Scan puts — ${sellScanTicker}`}
               </h2>
               <button
                 type="button"
@@ -2341,7 +2380,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             <th className="text-right py-3 px-3 font-bold">Vol</th>
                             <th className="text-right py-3 px-3 font-bold">OI</th>
                             <th className="text-right py-3 px-3 font-bold">Delta</th>
-                            <th className="text-center py-3 px-2 font-bold w-20">Trade</th>
+                            <th className="text-center py-3 px-2 font-bold">Trade</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2375,14 +2414,23 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       <td className="py-2.5 px-3 text-right text-gray-300 tabular-nums">
                                         {c.delta != null ? c.delta.toFixed(2) : "—"}
                                       </td>
-                                      <td className="py-2 px-2 text-center">
-                                        <button
-                                          type="button"
-                                          onClick={() => openOrderForContract(c)}
-                                          className="min-h-[40px] px-3 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white"
-                                        >
-                                          Trade
-                                        </button>
+                                      <td className="py-2 px-2 text-center whitespace-nowrap">
+                                        <div className="flex items-center justify-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => openOrderForContract(c, "BUY")}
+                                            className="min-h-[36px] px-2.5 py-1 rounded text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white"
+                                          >
+                                            Buy
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => openOrderForContract(c, "SELL")}
+                                            className="min-h-[36px] px-2.5 py-1 rounded text-sm font-semibold bg-red-600 hover:bg-red-500 text-white"
+                                          >
+                                            Sell
+                                          </button>
+                                        </div>
                                       </td>
                                     </tr>
                                   );
@@ -2428,7 +2476,16 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Action</label>
-                  <div className="py-2 px-3 rounded-lg bg-gray-800 text-white font-medium">SELL</div>
+                  <select
+                    value={orderAction}
+                    onChange={(e) => setOrderAction(e.target.value as "BUY" | "SELL")}
+                    className={`w-full py-2 px-3 rounded-lg border border-gray-600 font-bold focus:border-blue-500 focus:outline-none ${
+                      orderAction === "BUY" ? "bg-blue-900/40 text-blue-300" : "bg-red-900/40 text-red-300"
+                    }`}
+                  >
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Quantity</label>
@@ -2489,12 +2546,14 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                     setOrderError("Enter a valid limit price");
                     return;
                   }
-                  placeOrderFromScan(orderContract, qty, orderOrderType, lmt);
+                  placeOrderFromScan(orderContract, orderAction, qty, orderOrderType, lmt);
                 }}
                 disabled={orderSubmitting}
-                className="min-h-[44px] px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50"
+                className={`min-h-[44px] px-4 rounded-lg font-semibold disabled:opacity-50 text-white ${
+                  orderAction === "BUY" ? "bg-blue-600 hover:bg-blue-500" : "bg-red-600 hover:bg-red-500"
+                }`}
               >
-                {orderSubmitting ? "Sending…" : "Place order"}
+                {orderSubmitting ? "Sending…" : `Place ${orderAction} order`}
               </button>
             </div>
           </div>
