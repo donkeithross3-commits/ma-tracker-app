@@ -950,9 +950,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                     setAddTickerError(null);
                     setTimeout(() => addTickerInputRef.current?.focus(), 100);
                   }}
-                  className="shrink-0 min-h-[36px] px-2.5 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white"
+                  className="shrink-0 min-h-[40px] px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white"
                 >
-                  Add ticker
+                  + Add ticker
                 </button>
               </div>
               <div className="overflow-y-auto flex-1 min-h-[200px]">

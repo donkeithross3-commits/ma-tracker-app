@@ -224,6 +224,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         o.tif = (d.get("tif") or "DAY").strip().upper()
         o.transmit = bool(d.get("transmit", True))
         o.whatIf = bool(d.get("whatIf", False))
+        # Newer TWS versions reject these deprecated attributes (error 10268)
+        o.eTradeOnly = False
+        o.firmQuoteOnly = False
         if d.get("account"):
             o.account = str(d["account"]).strip()
         if d.get("openClose"):
