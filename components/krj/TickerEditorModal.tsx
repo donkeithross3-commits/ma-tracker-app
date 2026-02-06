@@ -35,10 +35,14 @@ export function TickerEditorModal({
   const loadTickers = async () => {
     setIsLoading(true);
     setError(null);
+    console.log("[TickerEditorModal] Loading tickers for listId:", listId);
     try {
       const response = await fetch(`/api/krj/lists/${listId}/tickers`);
+      console.log("[TickerEditorModal] Response status:", response.status);
       if (!response.ok) throw new Error("Failed to load tickers");
       const data = await response.json();
+      console.log("[TickerEditorModal] Received data:", data);
+      console.log("[TickerEditorModal] Tickers count:", data.tickers?.length || 0);
       setLocalTickers(data.tickers.map((t: { ticker: string }) => t.ticker).sort());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tickers");
