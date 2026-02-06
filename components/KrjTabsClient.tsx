@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Printer, Filter, X, User, GitFork, Loader2 } from "lucide-react"
+import { Printer, Filter, X, User, GitFork, Loader2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import KrjPrintLayout from "@/components/KrjPrintLayout"
 import { ListSettingsModal } from "@/components/krj/ListSettingsModal"
 import { TickerEditorModal } from "@/components/krj/TickerEditorModal"
@@ -59,6 +59,46 @@ interface KrjTabsClientProps {
 // Signal filter types
 type FilterColumn = "signal" | "signal_status_prior_week" | "both" | null;
 const SIGNAL_VALUES = ["Long", "Neutral", "Short"] as const;
+
+// Sort types
+type SortDirection = "asc" | "desc";
+type SortConfig = {
+  column: string | null; // null = custom/database order
+  direction: SortDirection;
+};
+
+/** Compare two row values for sorting. Handles numeric, percentage, and string values. */
+function compareRowValues(a: string, b: string, direction: SortDirection): number {
+  // Empty values always sort to the end
+  const aEmpty = a === undefined || a === null || a === "";
+  const bEmpty = b === undefined || b === null || b === "";
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+
+  // Try numeric comparison first
+  const aNum = Number(a);
+  const bNum = Number(b);
+  if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) {
+    return direction === "asc" ? aNum - bNum : bNum - aNum;
+  }
+
+  // String comparison
+  const cmp = a.localeCompare(b, undefined, { sensitivity: "base" });
+  return direction === "asc" ? cmp : -cmp;
+}
+
+/** Sort rows based on sort config. Returns a new sorted array. */
+function sortRows(rows: RawRow[], sort: SortConfig): RawRow[] {
+  if (!sort.column) return rows; // Custom order - preserve original
+  const sorted = [...rows];
+  sorted.sort((a, b) => {
+    const aVal = (a[sort.column!] || "").toString().trim();
+    const bVal = (b[sort.column!] || "").toString().trim();
+    return compareRowValues(aVal, bVal, sort.direction);
+  });
+  return sorted;
+}
 
 // Formatting helper functions
 function formatPrice(x: string | number | undefined): string {
@@ -174,6 +214,9 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
   // Filter visible groups based on hidden list IDs
   const visibleGroups = groups.filter((g) => !g.listId || !hiddenListIds.includes(g.listId))
   
+  // Sort state management
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ column: null, direction: "asc" })
+
   // Filter state management
   const [filterColumn, setFilterColumn] = useState<FilterColumn>(null)
   const [filterValues, setFilterValues] = useState<string[]>([])
@@ -323,6 +366,22 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
   const handleClearFilter = () => {
     setFilterColumn(null);
     setFilterValues([]);
+  };
+
+  // Sort handlers
+  const handleColumnSort = (columnKey: string) => {
+    setSortConfig((prev) => {
+      if (prev.column === columnKey) {
+        // Toggle direction, then back to custom
+        if (prev.direction === "asc") return { column: columnKey, direction: "desc" };
+        return { column: null, direction: "asc" }; // Reset to custom order
+      }
+      return { column: columnKey, direction: "asc" };
+    });
+  };
+
+  const handleResetSort = () => {
+    setSortConfig({ column: null, direction: "asc" });
   };
 
   return (
@@ -494,6 +553,7 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
 
       {visibleGroups.map((group) => {
         const filteredRows = getFilteredRows(group.rows);
+        const sortedRows = sortRows(filteredRows, sortConfig);
         const displaySummary = isFilterActive ? computeSummaryFromRows(filteredRows) : group.summary;
         
         return (
@@ -584,9 +644,27 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
               </span>
             )}
 
+            {/* Sort indicator */}
+            {sortConfig.column && (
+              <span className="flex items-center gap-1 text-sm text-blue-400">
+                <ArrowUpDown className="h-3 w-3" />
+                Sort: {columns.find((c) => c.key === sortConfig.column)?.label || sortConfig.column}
+                {sortConfig.direction === "asc" ? " ↑" : " ↓"}
+                <Button
+                  onClick={handleResetSort}
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-400 hover:text-gray-100 hover:bg-gray-700 h-5 px-1 ml-0.5"
+                  title="Reset to custom order"
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </span>
+            )}
+
             {/* Tooltip hint */}
             <span className="text-xs text-gray-500 ml-auto">
-              hold mouse motionless over column titles until &apos;?&apos; changes to text box to see more
+              click column headers to sort &bull; hold mouse over titles for details
             </span>
           </div>
 
@@ -604,20 +682,31 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
                   {columns.map((col) => {
                     const numericCols = ['c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size'];
                     const isNumeric = numericCols.includes(col.key);
+                    const isSorted = sortConfig.column === col.key;
                     return (
                       <th
                         key={col.key}
                         title={col.description}
-                        className={`px-1 py-1 ${isNumeric ? 'text-right' : 'text-left'} font-bold text-gray-100 border-b border-gray-600 whitespace-normal max-w-[50px] text-[14px] leading-tight cursor-help`}
+                        onClick={() => handleColumnSort(col.key)}
+                        className={`px-1 py-1 ${isNumeric ? 'text-right' : 'text-left'} font-bold text-gray-100 border-b border-gray-600 whitespace-normal max-w-[50px] text-[14px] leading-tight cursor-pointer select-none hover:bg-gray-700/50 transition-colors ${isSorted ? 'text-blue-300' : ''}`}
                       >
-                        {col.label}
+                        <span className="inline-flex items-center gap-0.5">
+                          {col.label}
+                          {isSorted ? (
+                            sortConfig.direction === "asc" ? (
+                              <ArrowUp className="h-3 w-3 text-blue-400 inline flex-shrink-0" />
+                            ) : (
+                              <ArrowDown className="h-3 w-3 text-blue-400 inline flex-shrink-0" />
+                            )
+                          ) : null}
+                        </span>
                       </th>
                     );
                   })}
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((row, idx) => {
+                {sortedRows.map((row, idx) => {
                   const numericCols = ['c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size'];
                   return (
                     <tr

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, Edit3, X, Loader2 } from "lucide-react";
+import { Plus, Trash2, Edit3, X, Loader2, ChevronUp, ChevronDown, GripVertical, Save } from "lucide-react";
 
 interface TickerEditorModalProps {
   listId: string;
@@ -30,6 +30,12 @@ export function TickerEditorModal({
   const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
   // Track if list was modified this session (to refresh on close)
   const listModifiedRef = useRef(false);
+  // Reorder state
+  const [orderChanged, setOrderChanged] = useState(false);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  // Drag state for reordering
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // Load tickers from API when modal opens
   const loadTickers = async () => {
@@ -109,6 +115,87 @@ export function TickerEditorModal({
       }
       const data = await response.json();
       setRestoreSuccess(data.message ?? "List restored.");
+      listModifiedRef.current = true;
+      await loadTickers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Restore failed");
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  // Move ticker up/down in the list
+  const handleMoveTicker = useCallback((index: number, direction: "up" | "down") => {
+    setLocalTickers((prev) => {
+      const newList = [...prev];
+      const targetIdx = direction === "up" ? index - 1 : index + 1;
+      if (targetIdx < 0 || targetIdx >= newList.length) return prev;
+      [newList[index], newList[targetIdx]] = [newList[targetIdx], newList[index]];
+      return newList;
+    });
+    setOrderChanged(true);
+  }, []);
+
+  // Drag-and-drop handlers
+  const handleDragStart = (idx: number) => {
+    setDragIdx(idx);
+  };
+  const handleDragOver = (e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    setDragOverIdx(idx);
+  };
+  const handleDragEnd = () => {
+    if (dragIdx !== null && dragOverIdx !== null && dragIdx !== dragOverIdx) {
+      setLocalTickers((prev) => {
+        const newList = [...prev];
+        const [dragged] = newList.splice(dragIdx, 1);
+        newList.splice(dragOverIdx, 0, dragged);
+        return newList;
+      });
+      setOrderChanged(true);
+    }
+    setDragIdx(null);
+    setDragOverIdx(null);
+  };
+
+  // Save reordered ticker list to server
+  const handleSaveOrder = async () => {
+    setIsSavingOrder(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/krj/lists/${listId}/tickers/reorder`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickers: localTickers }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to save order");
+      }
+      setOrderChanged(false);
+      listModifiedRef.current = true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save order");
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
+
+  // Restore DRC list to canonical tickers
+  const handleRestoreDrc = async () => {
+    if (listSlug !== "drc") return;
+    setIsRestoring(true);
+    setError(null);
+    setRestoreSuccess(null);
+    try {
+      const response = await fetch("/api/krj/lists/restore-drc", { method: "POST" });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Restore failed");
+      }
+      const data = await response.json();
+      setRestoreSuccess(data.message ?? "DRC list restored.");
+      setOrderChanged(false);
       listModifiedRef.current = true;
       await loadTickers();
     } catch (err) {
@@ -251,8 +338,9 @@ export function TickerEditorModal({
               </div>
             )}
 
-            {listSlug === "etfs_fx" && (
-              <div className="flex items-center gap-2">
+            {/* Restore buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {listSlug === "etfs_fx" && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -269,8 +357,46 @@ export function TickerEditorModal({
                     "Restore default ETFs/FX list"
                   )}
                 </Button>
-              </div>
-            )}
+              )}
+              {listSlug === "drc" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRestoreDrc}
+                  disabled={isRestoring}
+                  className="border-amber-600 text-amber-400 hover:bg-amber-900/30"
+                >
+                  {isRestoring ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      Restoring...
+                    </>
+                  ) : (
+                    "Restore default DRC list"
+                  )}
+                </Button>
+              )}
+              {orderChanged && (
+                <Button
+                  size="sm"
+                  onClick={handleSaveOrder}
+                  disabled={isSavingOrder}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {isSavingOrder ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-1" />
+                      Save Order
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
 
             {/* Ticker list */}
             <div className="flex-1 overflow-y-auto border border-gray-700 rounded">
@@ -283,16 +409,47 @@ export function TickerEditorModal({
                 </div>
               ) : (
                 <div className="divide-y divide-gray-800">
-                  {localTickers.map((ticker) => (
+                  {localTickers.map((ticker, idx) => (
                     <div
                       key={ticker}
-                      className="flex items-center justify-between px-3 py-2 hover:bg-gray-800"
+                      draggable
+                      onDragStart={() => handleDragStart(idx)}
+                      onDragOver={(e) => handleDragOver(e, idx)}
+                      onDragEnd={handleDragEnd}
+                      className={`flex items-center gap-1 px-2 py-1.5 hover:bg-gray-800 transition-colors ${
+                        dragIdx === idx ? "opacity-50 bg-gray-800" : ""
+                      } ${dragOverIdx === idx && dragIdx !== idx ? "border-t-2 border-blue-500" : ""}`}
                     >
-                      <span className="font-mono text-sm">{ticker}</span>
+                      {/* Drag handle */}
+                      <GripVertical className="h-4 w-4 text-gray-600 cursor-grab flex-shrink-0" />
+                      {/* Position number */}
+                      <span className="text-xs text-gray-500 w-5 text-right flex-shrink-0">{idx + 1}</span>
+                      {/* Ticker */}
+                      <span className="font-mono text-sm flex-1 ml-1">{ticker}</span>
+                      {/* Up/Down arrows */}
+                      <div className="flex flex-col flex-shrink-0">
+                        <button
+                          onClick={() => handleMoveTicker(idx, "up")}
+                          disabled={idx === 0}
+                          className="text-gray-500 hover:text-gray-200 disabled:opacity-20 p-0 leading-none"
+                          title="Move up"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleMoveTicker(idx, "down")}
+                          disabled={idx === localTickers.length - 1}
+                          className="text-gray-500 hover:text-gray-200 disabled:opacity-20 p-0 leading-none"
+                          title="Move down"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      {/* Remove button */}
                       <button
                         onClick={() => handleRemoveTicker(ticker)}
                         disabled={isRemoving === ticker}
-                        className="text-gray-500 hover:text-red-400 disabled:opacity-50"
+                        className="text-gray-500 hover:text-red-400 disabled:opacity-50 flex-shrink-0 ml-1"
                         title="Remove ticker"
                       >
                         {isRemoving === ticker ? (
@@ -313,11 +470,16 @@ export function TickerEditorModal({
             </div>
 
             <p className="text-xs text-gray-500">
-              Newly added tickers appear in the table right away. Use &quot;Request signal&quot; on a row to fetch signal data on demand, or wait for the next weekly batch.
+              Drag tickers or use arrows to reorder, then click Save Order. Newly added tickers appear at the end. Use &quot;Request signal&quot; in the table for data, or wait for the weekly batch.
             </p>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="flex items-center gap-2">
+            {orderChanged && (
+              <span className="text-xs text-amber-400 mr-auto">
+                Unsaved order changes — click Save Order above
+              </span>
+            )}
             <Button
               variant="outline"
               onClick={() => setIsOpen(false)}
