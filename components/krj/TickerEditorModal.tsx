@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2, Edit3, X, Loader2 } from "lucide-react";
 
@@ -159,10 +159,10 @@ export function TickerEditorModal({
   };
 
   return (
-    <>
-      <span onClick={() => setIsOpen(true)}>{trigger}</span>
-
-      <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>
+        {trigger}
+      </DialogTrigger>
         <DialogContent className="bg-gray-900 text-gray-100 border-gray-700 max-w-lg max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -288,6 +288,5 @@ export function TickerEditorModal({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
   );
 }
