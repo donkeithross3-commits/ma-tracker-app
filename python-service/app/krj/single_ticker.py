@@ -165,31 +165,37 @@ def compute_signal_for_ticker(ticker: str) -> dict[str, Any] | None:
     # Compute volume/ADV metrics from Polygon daily data
     last_25_bars = recent[-25:] if len(recent) >= 25 else recent
     
-    # 25-day average daily volume (in millions of shares)
+    # 25-day average daily volume (in shares)
     volumes = [float(b.get("v", 0)) for b in last_25_bars]
     adv_shares = sum(volumes) / len(volumes) if volumes else 0
-    adv_shares_mm = f"{adv_shares / 1_000_000:.1f}M" if adv_shares > 0 else ""
+    adv_shares_mm = adv_shares / 1_000_000 if adv_shares > 0 else 0
     
     # 25-day ADV notional (in $B) = ADV shares * average close price
     avg_close = sum(closes_25) / len(closes_25) if closes_25 else c
     adv_notional = adv_shares * avg_close
-    adv_notional_b = f"{adv_notional / 1_000_000_000:.2f}B" if adv_notional > 0 else ""
+    adv_notional_b = adv_notional / 1_000_000_000 if adv_notional > 0 else 0
     
     # Average trade size = volume / number of trades
     trade_counts = [float(b.get("n", 0)) for b in last_25_bars]
     total_volume = sum(volumes)
     total_trades = sum(trade_counts)
-    avg_trade_size = f"{int(total_volume / total_trades)}" if total_trades > 0 else ""
+    avg_trade_size = total_volume / total_trades if total_trades > 0 else 0
     
-    # 25DMA range in bps = (price range / 25DMA) * 10000
-    price_range = max(closes_25) - min(closes_25) if closes_25 else 0
-    dma_range_bps = f"{(price_range / dma25) * 10000:.0f}" if dma25 > 0 else ""
+    # 25DMA range = average of daily (high - low) / close for each day
+    daily_ranges = []
+    for b in last_25_bars:
+        bar_close = float(b.get("c", 0))
+        bar_high = float(b.get("h", 0))
+        bar_low = float(b.get("l", 0))
+        if bar_close > 0:
+            daily_range = (bar_high - bar_low) / bar_close
+            daily_ranges.append(daily_range)
+    dma_range_bps = sum(daily_ranges) / len(daily_ranges) if daily_ranges else 0
     
-    # Vol ratio to SP500: ticker ADV / SPY ADV
+    # Vol ratio to SP500: ticker ADV (in millions) / SPY ADV (in millions)
     spy_adv = _get_spy_adv_shares()
-    adv_shares_millions = adv_shares / 1_000_000 if adv_shares > 0 else 0
-    if spy_adv and spy_adv > 0 and adv_shares_millions > 0:
-        vol_ratio = f"{(adv_shares_millions / spy_adv) * 100:.0f}%"
+    if spy_adv and spy_adv > 0 and adv_shares_mm > 0:
+        vol_ratio = adv_shares_mm / spy_adv
     else:
         vol_ratio = ""
 
