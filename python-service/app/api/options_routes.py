@@ -826,6 +826,47 @@ async def relay_cancel_order(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/relay/open-orders")
+async def relay_open_orders(
+    user_id: Optional[str] = Query(None),
+):
+    """
+    Fetch all open/working orders from the user's agent.
+    """
+    try:
+        if not user_id or not user_id.strip():
+            raise HTTPException(status_code=400, detail="user_id query param required")
+        target_user_id = user_id.strip()
+        registry = get_registry()
+        status = registry.get_status()
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        provider = await registry.get_active_provider(user_id=target_user_id)
+        if not provider:
+            raise HTTPException(
+                status_code=503,
+                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
+            )
+        response_data = await send_request_to_provider(
+            request_type="get_open_orders",
+            payload={"timeout_sec": 10.0},
+            timeout=20.0,
+            user_id=target_user_id,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay open orders error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/relay/registry")
 async def relay_registry():
     """

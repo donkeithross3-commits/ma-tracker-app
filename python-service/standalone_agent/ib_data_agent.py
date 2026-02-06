@@ -144,6 +144,8 @@ class IBDataAgent:
                 return await self._handle_test_futures(payload)
             elif request_type == "get_positions":
                 return await self._run_in_thread(self._handle_get_positions_sync, payload)
+            elif request_type == "get_open_orders":
+                return await self._run_in_thread(self._handle_get_open_orders_sync, payload)
             elif request_type == "place_order":
                 return await self._run_in_thread(self._handle_place_order_sync, payload)
             elif request_type == "cancel_order":
@@ -217,6 +219,18 @@ class IBDataAgent:
             return {"positions": positions, "accounts": accounts}
         except Exception as e:
             logger.error(f"Error fetching positions: {e}")
+            return {"error": str(e)}
+
+    def _handle_get_open_orders_sync(self, payload: dict) -> dict:
+        """Fetch all open/working orders from IB (reqAllOpenOrders -> openOrder/openOrderEnd)."""
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": "IB not connected"}
+        timeout = float(payload.get("timeout_sec", 10.0))
+        try:
+            orders = self.scanner.get_open_orders_snapshot(timeout_sec=timeout)
+            return {"orders": orders}
+        except Exception as e:
+            logger.error(f"Error fetching open orders: {e}")
             return {"error": str(e)}
 
     def _handle_place_order_sync(self, payload: dict) -> dict:

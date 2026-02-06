@@ -144,6 +144,12 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._order_events: Dict[int, Event] = {}
         self._order_results: Dict[int, dict] = {}
 
+        # Open orders: for get_open_orders snapshot
+        self._open_orders_list: List[dict] = []
+        self._open_orders_done = Event()
+        self._open_orders_lock = Lock()
+        self._open_orders_active = False  # True when snapshot is in progress
+
     def managedAccounts(self, accountsList: str):
         """Store comma-separated account ids from TWS on connect."""
         self._managed_accounts = [a.strip() for a in (accountsList or "").split(",") if a.strip()]
@@ -189,6 +195,19 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self.logger.warning("get_positions_snapshot: timeout waiting for positionEnd")
             self.cancelPositions()
             return list(self._positions_list)
+
+    def get_open_orders_snapshot(self, timeout_sec: float = 10.0) -> List[dict]:
+        """Request all open orders, wait for openOrderEnd(), return list.
+        Thread-safe: only one snapshot at a time (concurrent callers block)."""
+        with self._open_orders_lock:
+            self._open_orders_list = []
+            self._open_orders_done.clear()
+            self._open_orders_active = True
+            self.reqAllOpenOrders()
+            if not self._open_orders_done.wait(timeout=timeout_sec):
+                self.logger.warning("get_open_orders_snapshot: timeout waiting for openOrderEnd")
+            self._open_orders_active = False
+            return list(self._open_orders_list)
 
     def _contract_from_dict(self, d: dict) -> Contract:
         """Build Contract from payload dict (symbol, secType, exchange, currency, etc.)."""
@@ -394,6 +413,29 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def openOrder(self, orderId: int, contract: Contract, order: Order, orderState):
         """Open order / what-if; may include warningText (e.g. price capping)."""
+        # Snapshot collection when get_open_orders_snapshot is active
+        if self._open_orders_active:
+            self._open_orders_list.append({
+                "orderId": orderId,
+                "contract": self._contract_to_dict(contract),
+                "order": {
+                    "action": getattr(order, "action", ""),
+                    "totalQuantity": float(getattr(order, "totalQuantity", 0)),
+                    "orderType": getattr(order, "orderType", ""),
+                    "lmtPrice": float(getattr(order, "lmtPrice", 0)) if getattr(order, "lmtPrice", None) is not None else None,
+                    "auxPrice": float(getattr(order, "auxPrice", 0)) if getattr(order, "auxPrice", None) is not None else None,
+                    "tif": getattr(order, "tif", ""),
+                    "account": getattr(order, "account", ""),
+                    "parentId": getattr(order, "parentId", 0),
+                    "ocaGroup": getattr(order, "ocaGroup", ""),
+                },
+                "orderState": {
+                    "status": getattr(orderState, "status", ""),
+                    "warningText": getattr(orderState, "warningText", "") or "",
+                    "commission": float(getattr(orderState, "commission", 0)) if getattr(orderState, "commission", None) is not None else None,
+                },
+            })
+        # Place-order tracking
         if orderId in self._order_events:
             self._order_results[orderId] = self._order_results.get(orderId) or {}
             if getattr(orderState, "warningText", None):
@@ -404,7 +446,8 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def openOrderEnd(self):
         """End of open orders list."""
-        pass
+        if self._open_orders_active:
+            self._open_orders_done.set()
 
     def execDetails(self, reqId: int, contract: Contract, execution):
         """Fill notification; optional for place_order (orderStatus is primary)."""

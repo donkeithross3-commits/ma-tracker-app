@@ -44,6 +44,28 @@ interface IBPositionsResponse {
   error?: string;
 }
 
+/** Open/working order from IB */
+interface IBOpenOrder {
+  orderId: number;
+  contract: IBPositionContract;
+  order: {
+    action: string;
+    totalQuantity: number;
+    orderType: string;
+    lmtPrice?: number | null;
+    auxPrice?: number | null;
+    tif: string;
+    account: string;
+    parentId?: number;
+    ocaGroup?: string;
+  };
+  orderState: {
+    status: string;
+    warningText?: string;
+    commission?: number | null;
+  };
+}
+
 /** Sell-scan result from POST /api/ma-options/sell-scan */
 interface SellScanContract {
   symbol: string;
@@ -197,6 +219,25 @@ function formatCostBasis(n: number): string {
   return sign + "$" + abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function displayOrderSymbol(o: IBOpenOrder): string {
+  const c = o.contract;
+  if (c.secType === "OPT" && (c.lastTradeDateOrContractMonth || c.strike)) {
+    const exp = (c.lastTradeDateOrContractMonth || "").replace(/(\d{4})(\d{2})(\d{2})/, "$2/$3");
+    return `${c.symbol} ${exp} ${c.strike} ${c.right || ""}`.trim();
+  }
+  return c.symbol || c.localSymbol || "—";
+}
+
+function formatOrderPrice(o: IBOpenOrder): string {
+  const { orderType, lmtPrice, auxPrice } = o.order;
+  if (orderType === "MKT" || orderType === "MOC") return orderType;
+  if (orderType === "LMT" && lmtPrice != null) return `LMT ${lmtPrice.toFixed(2)}`;
+  if (orderType === "STP LMT" && lmtPrice != null && auxPrice != null)
+    return `STP ${auxPrice.toFixed(2)} LMT ${lmtPrice.toFixed(2)}`;
+  if (orderType === "STP" && auxPrice != null) return `STP ${auxPrice.toFixed(2)}`;
+  return orderType;
+}
+
 function formatGroupPosition(group: GroupAggregate): string {
   if (group.rows.length === 1 && group.rows[0].contract?.secType !== "OPT") {
     return formatPosition(group.netPosition);
@@ -238,6 +279,69 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [orderLmtPrice, setOrderLmtPrice] = useState("");
   const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
+
+  // ---- Open/working orders state ----
+  const [openOrders, setOpenOrders] = useState<IBOpenOrder[]>([]);
+  const [openOrdersLoading, setOpenOrdersLoading] = useState(false);
+  const [openOrdersError, setOpenOrdersError] = useState<string | null>(null);
+  const [cancellingOrderId, setCancellingOrderId] = useState<number | null>(null);
+  const [showAllOrders, setShowAllOrders] = useState(true);
+
+  const fetchOpenOrders = useCallback(async () => {
+    setOpenOrdersLoading(true);
+    setOpenOrdersError(null);
+    try {
+      const res = await fetch("/api/ib-connection/open-orders", { credentials: "include" });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        setOpenOrdersError("Unexpected response from server");
+        return;
+      }
+      const json = await res.json();
+      if (!res.ok) {
+        setOpenOrdersError(json?.error || `Request failed: ${res.status}`);
+        return;
+      }
+      setOpenOrders(json.orders || []);
+    } catch (e) {
+      setOpenOrdersError(e instanceof Error ? e.message : "Failed to fetch orders");
+    } finally {
+      setOpenOrdersLoading(false);
+    }
+  }, []);
+
+  const cancelOrder = useCallback(async (orderId: number) => {
+    setCancellingOrderId(orderId);
+    try {
+      const res = await fetch("/api/ib-connection/cancel-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId }),
+        credentials: "include",
+      });
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        const json = await res.json();
+        if (json.error) {
+          setOpenOrdersError(`Cancel failed: ${json.error}`);
+        }
+      }
+      // Refresh orders after cancel attempt
+      setTimeout(() => fetchOpenOrders(), 500);
+    } catch (e) {
+      setOpenOrdersError(e instanceof Error ? e.message : "Cancel failed");
+    } finally {
+      setCancellingOrderId(null);
+    }
+  }, [fetchOpenOrders]);
+
+  /** Get open orders for a specific underlying symbol */
+  const ordersForTicker = useCallback((ticker: string) => {
+    return openOrders.filter((o) => {
+      const sym = o.contract?.symbol?.toUpperCase() || "";
+      return sym === ticker.toUpperCase();
+    });
+  }, [openOrders]);
 
   const openOrderForContract = useCallback((c: SellScanContract) => {
     setOrderContract(c);
@@ -403,13 +507,15 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         setStockOrderResult({ error: json.error || `Order failed: ${res.status}` });
       } else {
         setStockOrderResult({ orderId: json.orderId, status: json.status });
+        // Refresh open orders after successful placement
+        setTimeout(() => fetchOpenOrders(), 500);
       }
     } catch (e) {
       setStockOrderResult({ error: e instanceof Error ? e.message : "Order failed" });
     } finally {
       setStockOrderSubmitting(false);
     }
-  }, [stockOrderKey, stockOrderAction, stockOrderType, stockOrderTif, stockOrderQty, stockOrderLmtPrice, stockOrderStopPrice, stockOrderAccount]);
+  }, [stockOrderKey, stockOrderAction, stockOrderType, stockOrderTif, stockOrderQty, stockOrderLmtPrice, stockOrderStopPrice, stockOrderAccount, fetchOpenOrders]);
 
   // Manual tickers (position boxes without an IB position); persisted in user preferences
   const [manualTickers, setManualTickers] = useState<ManualTickerEntry[]>([]);
@@ -624,24 +730,27 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         }
         setOrderContract(null);
         setOrderError(null);
+        // Refresh open orders after successful placement
+        setTimeout(() => fetchOpenOrders(), 500);
       } catch (e) {
         setOrderError(e instanceof Error ? e.message : "Order failed");
       } finally {
         setOrderSubmitting(false);
       }
     },
-    []
+    [fetchOpenOrders]
   );
 
   useEffect(() => {
     fetchPositions();
-  }, [fetchPositions]);
+    fetchOpenOrders();
+  }, [fetchPositions, fetchOpenOrders]);
 
   useEffect(() => {
     if (!autoRefresh || !isConnected) return;
-    const interval = setInterval(fetchPositions, 60000);
+    const interval = setInterval(() => { fetchPositions(); fetchOpenOrders(); }, 60000);
     return () => clearInterval(interval);
-  }, [autoRefresh, isConnected, fetchPositions]);
+  }, [autoRefresh, isConnected, fetchPositions, fetchOpenOrders]);
 
   // Load saved position ticker selection and manual tickers from user preferences
   useEffect(() => {
@@ -928,6 +1037,95 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         </span>
       </div>
 
+      {/* ─── Working Orders section ─── */}
+      <div className="rounded-lg border border-gray-600 bg-gray-800/80 overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-600 bg-gray-800/60">
+          <button
+            type="button"
+            onClick={() => setShowAllOrders((v) => !v)}
+            className="flex items-center gap-2 text-sm font-semibold text-gray-200 hover:text-white"
+          >
+            <span className={`transition-transform ${showAllOrders ? "rotate-90" : ""}`}>&#9654;</span>
+            Working Orders ({openOrders.length})
+          </button>
+          <button
+            type="button"
+            onClick={fetchOpenOrders}
+            disabled={openOrdersLoading}
+            className="min-h-[32px] px-3 py-1 rounded text-xs font-medium bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-white"
+          >
+            {openOrdersLoading ? "Loading…" : "Refresh"}
+          </button>
+        </div>
+        {showAllOrders && (
+          <div className="overflow-x-auto">
+            {openOrdersError && (
+              <div className="px-3 py-2 text-sm text-red-400">{openOrdersError}</div>
+            )}
+            {openOrders.length === 0 ? (
+              <div className="px-3 py-3 text-sm text-gray-400">No working orders.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-700/50 text-gray-300 border-b border-gray-600">
+                    <th className="text-left py-1.5 px-3">Account</th>
+                    <th className="text-left py-1.5 px-3">Symbol</th>
+                    <th className="text-left py-1.5 px-3">Type</th>
+                    <th className="text-left py-1.5 px-3">Side</th>
+                    <th className="text-right py-1.5 px-3">Qty</th>
+                    <th className="text-left py-1.5 px-3">Price</th>
+                    <th className="text-left py-1.5 px-3">TIF</th>
+                    <th className="text-left py-1.5 px-3">Status</th>
+                    <th className="text-center py-1.5 px-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {openOrders.map((o) => (
+                    <tr
+                      key={o.orderId}
+                      className="border-b border-gray-700/50 hover:bg-gray-700/30"
+                    >
+                      <td className="py-1.5 px-3 text-gray-300">{getAccountLabel(o.order.account, userAlias)}</td>
+                      <td className="py-1.5 px-3 text-gray-100 font-medium whitespace-nowrap">{displayOrderSymbol(o)}</td>
+                      <td className="py-1.5 px-3 text-gray-400">{o.contract.secType}</td>
+                      <td className={`py-1.5 px-3 font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
+                        {o.order.action}
+                      </td>
+                      <td className="py-1.5 px-3 text-right tabular-nums text-gray-100">{o.order.totalQuantity}</td>
+                      <td className="py-1.5 px-3 text-gray-200 tabular-nums whitespace-nowrap">{formatOrderPrice(o)}</td>
+                      <td className="py-1.5 px-3 text-gray-400">{o.order.tif}</td>
+                      <td className="py-1.5 px-3">
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                          o.orderState.status === "Submitted" || o.orderState.status === "PreSubmitted"
+                            ? "bg-blue-900/60 text-blue-300"
+                            : o.orderState.status === "Filled"
+                              ? "bg-green-900/60 text-green-300"
+                              : o.orderState.status === "Cancelled"
+                                ? "bg-gray-600/60 text-gray-300"
+                                : "bg-yellow-900/60 text-yellow-300"
+                        }`}>
+                          {o.orderState.status || "Unknown"}
+                        </span>
+                      </td>
+                      <td className="py-1.5 px-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => cancelOrder(o.orderId)}
+                          disabled={cancellingOrderId === o.orderId}
+                          className="min-h-[28px] px-2 py-0.5 rounded text-xs font-medium bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white"
+                        >
+                          {cancellingOrderId === o.orderId ? "…" : "Cancel"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+
       {filteredPositions.length === 0 ? (
         <div className="rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-6 text-base text-gray-300">
           {selectedAccount !== null
@@ -1112,6 +1310,49 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               Sell stock
                             </button>
                           </div>
+                          {/* ---- Per-position working orders ---- */}
+                          {(() => {
+                            const tickerOrders = ordersForTicker(underlyingTicker);
+                            if (tickerOrders.length === 0) return null;
+                            return (
+                              <div className="mt-2 rounded border border-gray-600/60 bg-gray-900/40 overflow-hidden">
+                                <div className="px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-900/20 border-b border-gray-600/40">
+                                  Working Orders ({tickerOrders.length})
+                                </div>
+                                {tickerOrders.map((o) => (
+                                  <div
+                                    key={o.orderId}
+                                    className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-700/30 text-xs last:border-b-0"
+                                  >
+                                    <span className={`font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
+                                      {o.order.action}
+                                    </span>
+                                    <span className="tabular-nums text-gray-100">{o.order.totalQuantity}</span>
+                                    <span className="text-gray-300 truncate max-w-[120px]" title={displayOrderSymbol(o)}>
+                                      {o.contract.secType === "STK" ? "STK" : displayOrderSymbol(o)}
+                                    </span>
+                                    <span className="tabular-nums text-gray-200">{formatOrderPrice(o)}</span>
+                                    <span className="text-gray-500">{o.order.tif}</span>
+                                    <span className={`px-1 py-0.5 rounded text-xs ${
+                                      o.orderState.status === "Submitted" || o.orderState.status === "PreSubmitted"
+                                        ? "bg-blue-900/40 text-blue-300"
+                                        : "bg-yellow-900/40 text-yellow-300"
+                                    }`}>
+                                      {o.orderState.status}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => cancelOrder(o.orderId)}
+                                      disabled={cancellingOrderId === o.orderId}
+                                      className="ml-auto min-h-[24px] px-2 py-0.5 rounded text-xs font-medium bg-red-800/80 hover:bg-red-700 disabled:opacity-50 text-white"
+                                    >
+                                      {cancellingOrderId === o.orderId ? "…" : "Cancel"}
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
                           {/* ---- Full-screen stock order overlay ---- */}
                           {stockOrderKey === group.key && (() => {
                             const posQty = stockOrderStkPosition;
