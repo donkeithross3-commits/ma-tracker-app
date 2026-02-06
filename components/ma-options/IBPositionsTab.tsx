@@ -322,6 +322,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [openOrdersError, setOpenOrdersError] = useState<string | null>(null);
   const [cancellingOrderId, setCancellingOrderId] = useState<number | null>(null);
   const [showAllOrders, setShowAllOrders] = useState(true);
+  const [collapsedBoxOrders, setCollapsedBoxOrders] = useState<Record<string, boolean>>({});
 
   // ---- Order modification state ----
   const [editingOrderIdx, setEditingOrderIdx] = useState<number | null>(null);
@@ -1698,12 +1699,18 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                           {(() => {
                             const tickerOrders = ordersForTicker(underlyingTicker);
                             if (tickerOrders.length === 0) return null;
+                            const boxOpen = collapsedBoxOrders[group.key] !== true;
                             return (
                               <div className="mt-2 rounded border border-gray-600/60 bg-gray-900/40 overflow-hidden">
-                                <div className="px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-900/20 border-b border-gray-600/40">
+                                <button
+                                  type="button"
+                                  onClick={() => setCollapsedBoxOrders((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-900/20 border-b border-gray-600/40 hover:bg-amber-900/30"
+                                >
+                                  <span className={`transition-transform text-[10px] ${boxOpen ? "rotate-90" : ""}`}>&#9654;</span>
                                   Working Orders ({tickerOrders.length})
-                                </div>
-                                {tickerOrders.map((o) => {
+                                </button>
+                                {boxOpen && tickerOrders.map((o) => {
                                   const globalIdx = openOrders.indexOf(o);
                                   const isEd = editingOrderIdx === globalIdx;
                                   return (
