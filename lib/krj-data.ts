@@ -327,21 +327,19 @@ export async function getKrjListsForUser(userId: string | null): Promise<{
         fetch("http://127.0.0.1:7242/ingest/5eb096b0-06f6-4f03-a0db-0e4112629bad", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "krj-data.ts:placeholders", message: "placeholder rows added", data: { listSlug: dbList.slug, placeholderTickers: placeholderRows.map((r) => r.ticker), count: placeholderRows.length }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H1" }) }).catch(() => {});
       }
       // #endregion
-      // Placeholders at end so "No signal yet" rows are grouped
-      rows = [...rowsFromOwnCsv, ...rowsFromMaster, ...placeholderRows];
-    }
-
-    // Sort currency pairs first for ETFs/FX
-    if (dbList.slug === "etfs_fx") {
-      rows = [...rows].sort((a, b) => {
-        const tickerA = (a.ticker || "").trim();
-        const tickerB = (b.ticker || "").trim();
-        const isACurrency = tickerA.startsWith("c:");
-        const isBCurrency = tickerB.startsWith("c:");
-        if (isACurrency && !isBCurrency) return -1;
-        if (!isACurrency && isBCurrency) return 1;
-        return tickerA.localeCompare(tickerB);
-      });
+      // Build rows map for quick lookup
+      const rowMap = new Map<string, RawRow>();
+      for (const row of [...rowsFromOwnCsv, ...rowsFromMaster, ...placeholderRows]) {
+        const ticker = (row.ticker || "").toUpperCase();
+        if (ticker) rowMap.set(ticker, row);
+      }
+      
+      // Preserve ticker order from database (position column)
+      rows = [];
+      for (const ticker of tickers) {
+        const row = rowMap.get(ticker.toUpperCase());
+        if (row) rows.push(row);
+      }
     }
 
     lists.push({
