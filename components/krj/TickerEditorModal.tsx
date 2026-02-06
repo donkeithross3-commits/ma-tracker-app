@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2, Edit3, X, Loader2 } from "lucide-react";
 
@@ -10,14 +10,12 @@ interface TickerEditorModalProps {
   listId: string;
   listName: string;
   listSlug?: string;
-  trigger: React.ReactNode;
 }
 
 export function TickerEditorModal({
   listId,
   listName,
   listSlug,
-  trigger,
 }: TickerEditorModalProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
@@ -159,10 +157,18 @@ export function TickerEditorModal({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        {trigger}
-      </DialogTrigger>
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700"
+        onClick={() => setIsOpen(true)}
+      >
+        <Edit3 className="h-4 w-4 mr-1" />
+        Edit Tickers
+      </Button>
+
+      <Dialog open={isOpen} onOpenChange={handleOpenChange}>
         <DialogContent className="bg-gray-900 text-gray-100 border-gray-700 max-w-lg max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -288,5 +294,6 @@ export function TickerEditorModal({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </>
   );
 }

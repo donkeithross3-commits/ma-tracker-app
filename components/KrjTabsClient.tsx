@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
-import { Printer, Filter, X, User, GitFork, Edit3, Loader2 } from "lucide-react"
+import { Printer, Filter, X, User, GitFork, Loader2 } from "lucide-react"
 import KrjPrintLayout from "@/components/KrjPrintLayout"
 import { ListSettingsModal } from "@/components/krj/ListSettingsModal"
 import { TickerEditorModal } from "@/components/krj/TickerEditorModal"
@@ -522,16 +522,6 @@ export default function KrjTabsClient({ groups, columns, userId, userAlias }: Kr
                 listId={group.listId}
                 listName={group.label}
                 listSlug={group.key}
-                trigger={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="bg-gray-800 border-gray-600 text-gray-100 hover:bg-gray-700"
-                  >
-                    <Edit3 className="h-4 w-4 mr-1" />
-                    Edit Tickers
-                  </Button>
-                }
               />
             )}
 
