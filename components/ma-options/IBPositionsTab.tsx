@@ -319,7 +319,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setStockOrderTif("DAY");
     setStockOrderQty("");
     setStockOrderLmtPrice(spotPrice);
-    setStockOrderStopPrice("");
+    setStockOrderStopPrice(spotPrice);
     setStockOrderDeltaSign(1);
     // If we already have a price, mark as initialized; otherwise fetch a fresh quote
     if (spotPrice) {
@@ -348,6 +348,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     const q = quotes[stockOrderTicker];
     if (q && "price" in q) {
       setStockOrderLmtPrice(q.price.toFixed(2));
+      setStockOrderStopPrice(q.price.toFixed(2));
       stockOrderPriceInitRef.current = true;
     }
   }, [quotes, stockOrderTicker, stockOrderKey]);
