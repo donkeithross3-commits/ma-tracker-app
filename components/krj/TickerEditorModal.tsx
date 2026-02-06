@@ -35,13 +35,33 @@ export function TickerEditorModal({
   const loadTickers = async () => {
     setIsLoading(true);
     setError(null);
+    
+    if (!listId) {
+      setError("No listId provided to modal");
+      setIsLoading(false);
+      return;
+    }
+    
     try {
       const url = `/api/krj/lists/${listId}/tickers`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`API error ${response.status}: ${text.substring(0, 100)}`);
+      const response = await fetch(url, { credentials: 'include' });
+      
+      // Check for redirect (auth failure)
+      if (response.redirected) {
+        throw new Error(`Auth redirect to: ${response.url}`);
       }
+      
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(`Non-JSON response (${contentType}): ${text.substring(0, 100)}`);
+      }
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(`API error ${response.status}: ${data.error || JSON.stringify(data)}`);
+      }
+      
       const data = await response.json();
       if (!data.tickers || !Array.isArray(data.tickers)) {
         throw new Error(`Invalid response: ${JSON.stringify(data).substring(0, 100)}`);
