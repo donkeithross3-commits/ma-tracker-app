@@ -10,7 +10,7 @@
 ## Deployment Process (ALWAYS DO THIS AFTER CHANGES)
 After committing and pushing changes, deploy to production:
 ```bash
-ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && docker build -f Dockerfile.prod -t ma-tracker-app-dev . && cd ~/apps && docker compose up -d web'
+ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
 ```
 For Python service changes only (no Docker rebuild needed):
 ```bash
