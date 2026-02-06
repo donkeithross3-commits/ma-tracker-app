@@ -17,6 +17,20 @@ For Python service changes only (no Docker rebuild needed):
 ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && kill $(lsof -t -i :8000) 2>/dev/null; sleep 2 && cd python-service && source .venv/bin/activate && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &'
 ```
 
+### Docker Build — Critical Rules
+- **ALWAYS use `docker compose build`**, never bare `docker build`.
+  `docker-compose.yml` defines the image tag as `ma-tracker-app-prod:latest`.
+  A bare `docker build -t <anything-else>` produces an image that compose ignores —
+  the container keeps running the old `ma-tracker-app-prod:latest` image silently.
+- **ALWAYS pass `--no-cache`** when deploying. BuildKit layer caching can serve stale
+  copies of `COPY . .` even after `git pull` updates files on disk.
+- **ALWAYS pass `--force-recreate`** to `docker compose up`. Without it, compose may
+  decide the existing container already matches and skip replacement.
+- The standalone agent bundle (`python-service/standalone_agent/`) is copied into the
+  Docker image at build time. The `/api/ma-options/agent-version` endpoint reads
+  `version.txt` from inside the running container, NOT from disk. So a `git pull` alone
+  does nothing — the image must be rebuilt and the container recreated.
+
 ## IB Data Agent Architecture
 
 ### Overview

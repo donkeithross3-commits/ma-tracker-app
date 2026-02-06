@@ -50,7 +50,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Copy public files (if any)
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
-# Copy standalone agent for download
+# Copy standalone agent bundle for download + version endpoint.
+# The /api/ma-options/agent-version endpoint reads version.txt from THIS path
+# inside the running container — NOT from the host filesystem.
+# Therefore: any change to standalone_agent/ (especially version.txt) requires
+# a full image rebuild + container recreate to take effect in production.
+# Use: docker compose build --no-cache web && docker compose up -d --force-recreate web
 COPY --from=builder --chown=nextjs:nodejs /app/python-service/standalone_agent ./python-service/standalone_agent
 
 # Create data directory for volume mount

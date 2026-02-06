@@ -154,7 +154,7 @@ download_update() {
     
     # Download (update endpoint uses API key; preserves config.env on extract)
     UPDATE_URL="https://dr3-dashboard.com/api/ma-options/download-agent-update?key=${IB_PROVIDER_KEY}"
-    curl -s -o "$ZIP_PATH" "$UPDATE_URL"
+    HTTP_CODE=$(curl -s -o "$ZIP_PATH" -w "%{http_code}" "$UPDATE_URL")
     
     if [ ! -f "$ZIP_PATH" ]; then
         echo "ERROR: Failed to download update"
@@ -162,18 +162,51 @@ download_update() {
         return 1
     fi
     
-    echo "Download complete. Installing update..."
+    # Check HTTP status code
+    if [ "$HTTP_CODE" != "200" ]; then
+        echo "ERROR: Server returned HTTP $HTTP_CODE"
+        echo "Response: $(head -c 200 "$ZIP_PATH" 2>/dev/null)"
+        rm -rf "$TEMP_DIR"
+        echo "Skipping update, starting with current version..."
+        return 1
+    fi
+    
+    # Check file is a valid ZIP (not an error page) - must be > 1KB
+    ZIP_SIZE=$(wc -c < "$ZIP_PATH" | tr -d '[:space:]')
+    if [ "$ZIP_SIZE" -lt 1000 ]; then
+        echo "ERROR: Download too small (${ZIP_SIZE} bytes) - likely an error page"
+        echo "Response: $(head -c 200 "$ZIP_PATH" 2>/dev/null)"
+        rm -rf "$TEMP_DIR"
+        echo "Skipping update, starting with current version..."
+        return 1
+    fi
+    
+    echo "Download complete (${ZIP_SIZE} bytes). Installing update..."
     
     # Backup config.env
     cp "$SCRIPT_DIR/config.env" "$TEMP_DIR/config.env.backup" 2>/dev/null
     
-    # Extract
-    unzip -q -o "$ZIP_PATH" -d "$TEMP_DIR/extracted"
+    # Extract — abort if unzip fails (prevents infinite restart loop)
+    if ! unzip -q -o "$ZIP_PATH" -d "$TEMP_DIR/extracted"; then
+        echo "ERROR: Failed to extract update (corrupt or invalid ZIP)"
+        rm -rf "$TEMP_DIR"
+        echo "Skipping update, starting with current version..."
+        return 1
+    fi
     
     # Find extracted contents (handle nested folder if present)
     EXTRACT_SRC="$TEMP_DIR/extracted"
     if [ -d "$TEMP_DIR/extracted/ib-data-agent" ]; then
         EXTRACT_SRC="$TEMP_DIR/extracted/ib-data-agent"
+    fi
+    
+    # Verify extraction produced files
+    FILE_COUNT=$(ls -1 "$EXTRACT_SRC" 2>/dev/null | wc -l | tr -d '[:space:]')
+    if [ "$FILE_COUNT" -lt 1 ]; then
+        echo "ERROR: Extraction produced no files"
+        rm -rf "$TEMP_DIR"
+        echo "Skipping update, starting with current version..."
+        return 1
     fi
     
     # Copy files (but not config.env)
@@ -193,7 +226,7 @@ download_update() {
     # Cleanup
     rm -rf "$TEMP_DIR"
     
-    echo "✅ Update installed successfully!"
+    echo "Update installed successfully!"
     echo ""
     echo "Restarting with new version..."
     echo ""

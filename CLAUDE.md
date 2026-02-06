@@ -394,68 +394,87 @@ See `start-claude-session.sh` for session initialization.
 
 ## Deployment Architecture
 
-### Production/Staging Environment
+### Production Environment
 
-**Three-tier architecture with Windows backend server**:
+**Three-tier architecture on a single DigitalOcean droplet + Neon DB**:
 
-1. **Frontend** (Next.js on Vercel)
-   - URL: https://ma-tracker-app.vercel.app/
-   - Auto-deploys from `main` branch on GitHub
-   - Connects to backend API via `NEXT_PUBLIC_API_URL`
-   - Serves user interface, handles client-side routing
+1. **Frontend** (Next.js in Docker on Droplet)
+   - URL: https://dr3-dashboard.com
+   - Runs as `ma-tracker-app-web` container via `docker-compose.yml`
+   - Image tag: `ma-tracker-app-prod:latest` (defined in `docker-compose.yml`)
+   - Built from `Dockerfile.prod` (multi-stage: builder → runner)
 
-2. **Backend** (FastAPI on Windows Server)
-   - Runs on Windows server (local or cloud Windows VM)
-   - **Must run on Windows** to access Interactive Brokers TWS/Gateway
-   - Deployed via `deploy-staging.bat` script (pulls from git, restarts services)
-   - Exposes REST API on port 8000
-   - **Critical**: Backend and IB Gateway run on same Windows machine
+2. **Backend** (FastAPI on Droplet — bare metal, not Docker)
+   - Runs directly on the droplet host via uvicorn on port 8000
+   - The Docker container reaches the host via `host.docker.internal`
+   - Also runs on Windows locally for IB TWS access during development
 
 3. **Database** (PostgreSQL on Neon)
    - Cloud-hosted PostgreSQL database
-   - Accessed by backend via `DATABASE_URL` environment variable
-   - Shared between all environments
-
-### Why Windows Backend?
-
-The backend **must run on Windows** because:
-- Interactive Brokers TWS/IB Gateway only runs on Windows/Mac
-- Options scanner (`app/scanner.py`) requires direct connection to IB API
-- In production, power users' IB credentials power the options scanning system
-- Backend and IB Gateway must be on the same machine (localhost connection)
-
-### Deployment Process
-
-**Frontend** (automatic):
-```bash
-git push origin main
-# Vercel automatically builds and deploys
-```
-
-**Backend** (manual - on Windows server):
-```bash
-# On Windows staging/production server:
-cd ma-tracker-app
-deploy-staging.bat  # Pulls latest code, restarts backend
-```
-
-The `deploy-staging.bat` script:
-1. Stops backend services
-2. Pulls latest code from `main` branch
-3. Cleans Python cache
-4. Restarts backend with new code
-5. Auto-starts intelligence monitoring
+   - Accessed by both frontend and backend via `DATABASE_URL`
 
 ### Architecture Diagram
 ```
 User Browser
     ↓
-Next.js (Vercel)
-    ↓ API calls
-FastAPI Backend (Windows Server) ←→ IB Gateway (same Windows machine)
-    ↓
-PostgreSQL (Neon Cloud)
+Next.js Docker container (port 3000, droplet)
+    ↓ API calls via host.docker.internal
+FastAPI (port 8000, droplet host)
+    ↓                          ↑ WebSocket
+PostgreSQL (Neon Cloud)    Local IB Agents (users' machines)
 ```
+
+### Docker Build System — How It Works
+
+The Next.js frontend runs inside a Docker container on the droplet.
+Understanding how this build pipeline works is critical to avoid deployment bugs.
+
+**Image lifecycle:**
+1. `docker compose build web` builds from `Dockerfile.prod` and tags as `ma-tracker-app-prod:latest`
+2. `docker compose up -d --force-recreate web` stops the old container and starts a new one from that image
+3. Files inside the container are **baked in at build time** — they do NOT update when you `git pull`
+
+**Key facts:**
+- The `docker-compose.yml` (in `~/apps/`) defines `image: ma-tracker-app-prod:latest`
+- You MUST use `docker compose build` (not bare `docker build`) so the image gets the correct tag
+- A bare `docker build -t ma-tracker-app-dev .` creates an image that compose **silently ignores**
+- The standalone agent bundle is copied into the image (`Dockerfile.prod` line: `COPY ... standalone_agent`)
+- The `/api/ma-options/agent-version` endpoint reads `version.txt` from **inside the container**, not from the host filesystem
+- So `git pull` alone does NOT update the agent version — you must rebuild the image
+
+**Correct deploy command:**
+```bash
+ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
+```
+
+**Why `--no-cache`?** BuildKit layer caching can serve stale `COPY . .` content even after `git pull` changes files on disk.
+
+**Why `--force-recreate`?** Without it, compose may decide the container already matches and skip replacement.
+
+**`.dockerignore` and the agent bundle:**
+- `python-service/` is excluded from the Docker build context
+- `!python-service/standalone_agent/` re-includes the agent directory
+- This means only `standalone_agent/` is available inside the image — the rest of `python-service/` is not
+
+### Deployment Process
+
+**Full deploy** (Next.js + agent bundle changes):
+```bash
+ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
+```
+
+**Python service only** (no Docker rebuild needed):
+```bash
+ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && kill $(lsof -t -i :8000) 2>/dev/null; sleep 2 && cd python-service && source .venv/bin/activate && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &'
+```
+
+### IB Gateway Access
+
+The IB Data Agent architecture means the backend no longer needs direct IB TWS access:
+- Users run a local agent on their own machine (Windows/Mac) with IB TWS
+- The agent connects to the server via WebSocket relay
+- The server routes requests to the user's own agent
+- See "IB Data Agent Architecture" in `.cursorrules` for full details
 
 ---
 
