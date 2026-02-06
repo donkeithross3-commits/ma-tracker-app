@@ -265,6 +265,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [stockOrderSubmitting, setStockOrderSubmitting] = useState(false);
   const [stockOrderResult, setStockOrderResult] = useState<{ orderId?: number; status?: string; error?: string } | null>(null);
   const [stockOrderStkPosition, setStockOrderStkPosition] = useState(0); // absolute STK position for quick-fill
+  const [stockOrderDeltaSign, setStockOrderDeltaSign] = useState<1 | -1>(1); // +/- toggle for delta buttons
+  const [stockOrderQuoteRefreshing, setStockOrderQuoteRefreshing] = useState(false);
 
   const openStockOrder = useCallback((groupKey: string, action: "BUY" | "SELL", group: GroupAggregate) => {
     const ticker = groupKey.split(" ")[0]?.toUpperCase() ?? groupKey;
@@ -1088,18 +1090,59 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                           </div>
                           {/* ---- Full-screen stock order overlay ---- */}
                           {stockOrderKey === group.key && (() => {
-                            // Build qty quick-fill buttons: position first (if >0), then standard values
                             const posQty = stockOrderStkPosition;
-                            const stdQtys = [10, 25, 50, 100, 250, 500];
-                            const qtyButtons: number[] = posQty > 0 ? [posQty, ...stdQtys.filter((n) => n !== posQty)] : stdQtys;
+                            const tickerForQuote = underlyingTicker;
+                            const liveQuote = quotes[tickerForQuote];
+                            const spotPrice = liveQuote && "price" in liveQuote ? liveQuote.price : null;
+                            const spotError = liveQuote && "error" in liveQuote ? liveQuote.error : null;
+                            const sign = stockOrderDeltaSign;
+                            // Qty delta values
+                            const qtyDeltas = [1, 5, 10, 25, 50, 100, 500, 1000];
+                            // Price delta values
+                            const priceDeltas = [0.01, 0.05, 0.1, 0.5, 1, 10];
+                            // Helper: apply delta to qty
+                            const applyQtyDelta = (d: number) => {
+                              const cur = parseInt(stockOrderQty) || 0;
+                              setStockOrderQty(String(Math.max(0, cur + d * sign)));
+                            };
+                            // Helper: apply delta to a price field
+                            const applyPriceDelta = (setter: (v: string) => void, current: string, d: number) => {
+                              const cur = parseFloat(current) || 0;
+                              setter(Math.max(0, cur + d * sign).toFixed(2));
+                            };
                             return (
                             <div className="fixed inset-0 z-50 bg-gray-950/95 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeStockOrder(); }}>
                               <div className="max-w-6xl mx-auto px-5 py-4 min-h-screen flex flex-col">
-                                {/* ── Top bar: header + account + close ── */}
+                                {/* ── Top bar: header + spot price + account + close ── */}
                                 <div className="flex items-center gap-4 mb-4 flex-wrap">
                                   <span className={`text-3xl font-extrabold ${stockOrderAction === "BUY" ? "text-blue-300" : "text-red-300"}`}>
                                     {stockOrderAction} {underlyingTicker}
                                   </span>
+                                  {/* Live spot price + refresh */}
+                                  <div className="flex items-center gap-2">
+                                    {spotPrice != null && (
+                                      <span className="text-2xl font-bold text-green-400">${spotPrice.toFixed(2)}</span>
+                                    )}
+                                    {spotError && (
+                                      <span className="text-base text-red-400">No quote</span>
+                                    )}
+                                    {!liveQuote && !stockOrderQuoteRefreshing && (
+                                      <span className="text-base text-gray-500">—</span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      disabled={stockOrderQuoteRefreshing}
+                                      onClick={async () => {
+                                        setStockOrderQuoteRefreshing(true);
+                                        await fetchQuote(tickerForQuote);
+                                        setStockOrderQuoteRefreshing(false);
+                                      }}
+                                      className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-lg disabled:opacity-40"
+                                      title="Refresh quote"
+                                    >
+                                      {stockOrderQuoteRefreshing ? "..." : "\u21BB"}
+                                    </button>
+                                  </div>
                                   {(data?.accounts?.length ?? 0) > 1 && (
                                     <select
                                       value={stockOrderAccount}
@@ -1112,13 +1155,40 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     </select>
                                   )}
                                   {posQty > 0 && (
-                                    <span className="text-base text-gray-400">Position: <span className="text-white font-semibold">{posQty.toLocaleString()}</span> shares</span>
+                                    <span className="text-base text-gray-400">Position: <span className="text-white font-semibold">{posQty.toLocaleString()}</span></span>
                                   )}
                                   <div className="ml-auto">
                                     <button type="button" onClick={closeStockOrder} className="min-h-[52px] min-w-[52px] rounded-xl bg-gray-700 hover:bg-gray-600 text-white text-2xl font-bold">
                                       ✕
                                     </button>
                                   </div>
+                                </div>
+
+                                {/* ── +/- Toggle ── */}
+                                <div className="flex items-center gap-2 mb-3">
+                                  <span className="text-sm text-gray-400 mr-1">Delta mode:</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setStockOrderDeltaSign(1)}
+                                    className={`min-h-[52px] min-w-[80px] rounded-xl text-2xl font-extrabold transition-colors ${
+                                      sign === 1
+                                        ? "bg-green-700 text-white ring-2 ring-green-400"
+                                        : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
+                                    }`}
+                                  >
+                                    +
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setStockOrderDeltaSign(-1)}
+                                    className={`min-h-[52px] min-w-[80px] rounded-xl text-2xl font-extrabold transition-colors ${
+                                      sign === -1
+                                        ? "bg-red-700 text-white ring-2 ring-red-400"
+                                        : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
+                                    }`}
+                                  >
+                                    −
+                                  </button>
                                 </div>
 
                                 {/* ── Main body: 3-column layout ── */}
@@ -1166,13 +1236,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     </div>
                                   </div>
 
-                                  {/* Column 2: Quantity */}
+                                  {/* Column 2: Quantity (delta-based) */}
                                   <div className="flex flex-col">
                                     <label className="block text-sm text-gray-400 mb-1.5">Quantity (shares)</label>
                                     <input
                                       type="number"
                                       inputMode="numeric"
-                                      min="1"
+                                      min="0"
                                       step="1"
                                       value={stockOrderQty}
                                       onChange={(e) => setStockOrderQty(e.target.value)}
@@ -1180,24 +1250,33 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none mb-3"
                                     />
                                     <div className="grid grid-cols-2 gap-2 flex-1 content-start">
-                                      {qtyButtons.map((n, i) => (
+                                      {posQty > 0 && (
                                         <button
-                                          key={`qty-${n}-${i}`}
                                           type="button"
-                                          onClick={() => setStockOrderQty(String(n))}
+                                          onClick={() => applyQtyDelta(posQty)}
+                                          className="min-h-[68px] rounded-xl border bg-amber-800/60 hover:bg-amber-700/60 border-amber-500 text-amber-200 text-2xl font-bold col-span-2"
+                                        >
+                                          {sign === 1 ? "+" : "−"}{posQty.toLocaleString()} (pos)
+                                        </button>
+                                      )}
+                                      {qtyDeltas.map((d) => (
+                                        <button
+                                          key={`qd-${d}`}
+                                          type="button"
+                                          onClick={() => applyQtyDelta(d)}
                                           className={`min-h-[68px] rounded-xl border text-2xl font-bold ${
-                                            n === posQty && posQty > 0
-                                              ? "bg-amber-800/60 hover:bg-amber-700/60 border-amber-500 text-amber-200"
-                                              : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-gray-100"
+                                            sign === 1
+                                              ? "bg-gray-800 hover:bg-gray-700 border-gray-600 text-green-300"
+                                              : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-red-300"
                                           }`}
                                         >
-                                          {n === posQty && posQty > 0 ? `${n} (pos)` : n}
+                                          {sign === 1 ? "+" : "−"}{d.toLocaleString()}
                                         </button>
                                       ))}
                                     </div>
                                   </div>
 
-                                  {/* Column 3: Prices */}
+                                  {/* Column 3: Prices (delta-based) */}
                                   <div className="flex flex-col">
                                     {/* Limit price (not shown for MOC) */}
                                     {stockOrderType !== "MOC" && (
@@ -1214,17 +1293,18 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                           className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
                                         />
                                         <div className="grid grid-cols-3 gap-2 mt-2">
-                                          {[-0.10, -0.05, -0.01, +0.01, +0.05, +0.10].map((delta) => (
+                                          {priceDeltas.map((d) => (
                                             <button
-                                              key={delta}
+                                              key={`lmt-${d}`}
                                               type="button"
-                                              onClick={() => {
-                                                const cur = parseFloat(stockOrderLmtPrice) || 0;
-                                                setStockOrderLmtPrice(Math.max(0, cur + delta).toFixed(2));
-                                              }}
-                                              className="min-h-[68px] rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-100 text-2xl font-bold"
+                                              onClick={() => applyPriceDelta(setStockOrderLmtPrice, stockOrderLmtPrice, d)}
+                                              className={`min-h-[68px] rounded-xl border text-2xl font-bold ${
+                                                sign === 1
+                                                  ? "bg-gray-800 hover:bg-gray-700 border-gray-600 text-green-300"
+                                                  : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-red-300"
+                                              }`}
                                             >
-                                              {delta > 0 ? "+" : ""}{delta.toFixed(2)}
+                                              {sign === 1 ? "+" : "−"}{d < 1 ? d.toFixed(2) : d}
                                             </button>
                                           ))}
                                         </div>
@@ -1245,17 +1325,18 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                           className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
                                         />
                                         <div className="grid grid-cols-3 gap-2 mt-2">
-                                          {[-0.10, -0.05, -0.01, +0.01, +0.05, +0.10].map((delta) => (
+                                          {priceDeltas.map((d) => (
                                             <button
-                                              key={delta}
+                                              key={`stp-${d}`}
                                               type="button"
-                                              onClick={() => {
-                                                const cur = parseFloat(stockOrderStopPrice) || 0;
-                                                setStockOrderStopPrice(Math.max(0, cur + delta).toFixed(2));
-                                              }}
-                                              className="min-h-[68px] rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-100 text-2xl font-bold"
+                                              onClick={() => applyPriceDelta(setStockOrderStopPrice, stockOrderStopPrice, d)}
+                                              className={`min-h-[68px] rounded-xl border text-2xl font-bold ${
+                                                sign === 1
+                                                  ? "bg-gray-800 hover:bg-gray-700 border-gray-600 text-green-300"
+                                                  : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-red-300"
+                                              }`}
                                             >
-                                              {delta > 0 ? "+" : ""}{delta.toFixed(2)}
+                                              {sign === 1 ? "+" : "−"}{d < 1 ? d.toFixed(2) : d}
                                             </button>
                                           ))}
                                         </div>
