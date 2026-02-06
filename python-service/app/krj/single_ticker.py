@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 KRJ_DATA_DIR = Path(os.getenv("KRJ_DATA_DIR", "/home/don/apps/data/krj"))
 
 
-def _get_spy_adv_shares() -> float | None:
-    """Read SPY's 25D ADV (shares) from the latest ETFs/FX CSV."""
+def _get_spy_daily_range() -> float | None:
+    """Read SPY's 25D average daily range from the latest ETFs/FX CSV."""
     csv_path = KRJ_DATA_DIR / "latest_etfs_fx.csv"
     if not csv_path.exists():
         logger.warning("ETFs/FX CSV not found at %s", csv_path)
@@ -29,13 +29,12 @@ def _get_spy_adv_shares() -> float | None:
             reader = csv.DictReader(f)
             for row in reader:
                 if row.get("ticker", "").upper() == "SPY":
-                    adv_str = row.get("25D_ADV_Shares_MM", "")
-                    if adv_str:
-                        # Value is in millions already
-                        return float(adv_str)
+                    range_str = row.get("25DMA_range_bps", "")
+                    if range_str:
+                        return float(range_str)
         logger.warning("SPY not found in ETFs/FX CSV")
     except Exception as e:
-        logger.warning("Error reading SPY ADV: %s", e)
+        logger.warning("Error reading SPY daily range: %s", e)
     return None
 
 # CSV row keys to match dashboard schema
@@ -192,10 +191,10 @@ def compute_signal_for_ticker(ticker: str) -> dict[str, Any] | None:
             daily_ranges.append(daily_range)
     dma_range_bps = sum(daily_ranges) / len(daily_ranges) if daily_ranges else 0
     
-    # Vol ratio to SP500: ticker ADV (in millions) / SPY ADV (in millions)
-    spy_adv = _get_spy_adv_shares()
-    if spy_adv and spy_adv > 0 and adv_shares_mm > 0:
-        vol_ratio = adv_shares_mm / spy_adv
+    # Vol ratio = ticker's average daily range / SPY's average daily range
+    spy_daily_range = _get_spy_daily_range()
+    if spy_daily_range and spy_daily_range > 0 and dma_range_bps > 0:
+        vol_ratio = dma_range_bps / spy_daily_range
     else:
         vol_ratio = ""
 
