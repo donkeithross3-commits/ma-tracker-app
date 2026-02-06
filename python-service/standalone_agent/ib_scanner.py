@@ -197,13 +197,15 @@ class IBMergerArbScanner(EWrapper, EClient):
             return list(self._positions_list)
 
     def get_open_orders_snapshot(self, timeout_sec: float = 10.0) -> List[dict]:
-        """Request all open orders, wait for openOrderEnd(), return list.
+        """Request open orders for this client, wait for openOrderEnd(), return list.
+        Uses reqOpenOrders() (not reqAllOpenOrders) so that returned orders have
+        valid orderIds the current client can use for modify/cancel.
         Thread-safe: only one snapshot at a time (concurrent callers block)."""
         with self._open_orders_lock:
             self._open_orders_list = []
             self._open_orders_done.clear()
             self._open_orders_active = True
-            self.reqAllOpenOrders()
+            self.reqOpenOrders()
             if not self._open_orders_done.wait(timeout=timeout_sec):
                 self.logger.warning("get_open_orders_snapshot: timeout waiting for openOrderEnd")
             self._open_orders_active = False
@@ -311,6 +313,9 @@ class IBMergerArbScanner(EWrapper, EClient):
     def modify_order_sync(self, order_id: int, contract_d: dict, order_d: dict, timeout_sec: float = 30.0) -> dict:
         """Modify an existing order by re-sending placeOrder with the same orderId.
         IB treats placeOrder with an existing orderId as a modification."""
+        if order_id <= 0:
+            return {"error": f"Cannot modify order: invalid orderId ({order_id}). "
+                    "This order may belong to a different session. Try cancelling and re-placing it."}
         ok, err = self.validate_contract_for_order(contract_d)
         if not ok:
             return {"error": err}
@@ -460,6 +465,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         if self._open_orders_active:
             self._open_orders_list.append({
                 "orderId": orderId,
+                "permId": getattr(order, "permId", 0),
                 "contract": self._contract_to_dict(contract),
                 "order": {
                     "action": getattr(order, "action", ""),
