@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { auth } from "@/auth";
+import { exportTickerLists } from "../export/route";
 
 /**
  * GET /api/krj/lists/[listId]/tickers
@@ -101,6 +102,9 @@ export async function POST(
       skipDuplicates: true,
     });
 
+    // Export updated lists for weekly batch
+    await exportTickerLists().catch((e) => console.error("Export failed:", e));
+
     return NextResponse.json({
       added: created.count,
       message: `Added ${created.count} ticker(s)`,
@@ -175,6 +179,9 @@ export async function DELETE(
         ticker: { in: normalizedTickers },
       },
     });
+
+    // Export updated lists for weekly batch
+    await exportTickerLists().catch((e) => console.error("Export failed:", e));
 
     return NextResponse.json({
       removed: deleted.count,

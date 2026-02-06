@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
+import { exportTickerLists } from "../export/route";
 
 /** Canonical ETFs/FX list (matches seed-customization.ts). */
 const ETFS_FX_TICKERS = [
@@ -49,6 +50,9 @@ export async function POST() {
       })),
     });
   });
+
+  // Export updated lists for weekly batch
+  await exportTickerLists().catch((e) => console.error("Export failed:", e));
 
   return NextResponse.json({
     ok: true,
