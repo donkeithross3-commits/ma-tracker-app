@@ -12,6 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ listId: string }> }
 ) {
   const { listId } = await params;
+  console.log("[API /krj/lists/tickers GET] listId:", listId);
 
   try {
     const tickers = await prisma.krjTicker.findMany({
@@ -21,6 +22,8 @@ export async function GET(
         addedBy: { select: { alias: true } },
       },
     });
+    
+    console.log("[API /krj/lists/tickers GET] Found", tickers.length, "tickers");
 
     return NextResponse.json({
       tickers: tickers.map((t) => ({
@@ -30,7 +33,7 @@ export async function GET(
       })),
     });
   } catch (error) {
-    console.error("Error fetching tickers:", error);
+    console.error("[API /krj/lists/tickers GET] Error:", error);
     return NextResponse.json(
       { error: "Failed to fetch tickers" },
       { status: 500 }
