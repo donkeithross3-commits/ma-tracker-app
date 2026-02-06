@@ -61,55 +61,62 @@ type FilterColumn = "signal" | "signal_status_prior_week" | "both" | null;
 const SIGNAL_VALUES = ["Long", "Neutral", "Short"] as const;
 
 // Formatting helper functions
-function formatPrice(x: string | undefined): string {
-  if (!x) return "";
+function formatPrice(x: string | number | undefined): string {
+  if (x === undefined || x === null || x === "") return "";
+  const str = String(x);
   const num = Number(x);
-  if (Number.isNaN(num)) return x;
+  if (Number.isNaN(num)) return str;
   return num.toFixed(2);
 }
 
-function formatPercent(x: string | undefined): string {
-  if (!x) return "";
-  if (x.includes("%")) return x;
+function formatPercent(x: string | number | undefined): string {
+  if (x === undefined || x === null || x === "") return "";
+  const str = String(x);
+  if (str.includes("%")) return str;
   const num = Number(x);
-  if (Number.isNaN(num)) return x;
+  if (Number.isNaN(num)) return str;
   return (num * 100).toFixed(1) + "%";
 }
 
-function formatPercentInteger(x: string | undefined): string {
-  if (!x) return "";
-  if (x.includes("%")) return x;
+function formatPercentInteger(x: string | number | undefined): string {
+  if (x === undefined || x === null || x === "") return "";
+  const str = String(x);
+  if (str.includes("%")) return str;
   const num = Number(x);
-  if (Number.isNaN(num)) return x;
+  if (Number.isNaN(num)) return str;
   return Math.round(num * 100) + "%";
 }
 
-function formatDailyRange(x: string | undefined): string {
-  if (!x) return "";
+function formatDailyRange(x: string | number | undefined): string {
+  if (x === undefined || x === null || x === "") return "";
+  const str = String(x);
   const num = Number(x);
-  if (Number.isNaN(num)) return x;
+  if (Number.isNaN(num)) return str;
   // Format as percentage with 2 decimal places (e.g., 0.68%)
   return (num * 100).toFixed(2) + "%";
 }
 
-function formatMillions(x: string | undefined): string {
-  if (!x) return "";
+function formatMillions(x: string | number | undefined): string {
+  if (x === undefined || x === null || x === "") return "";
+  const str = String(x);
   const num = Number(x);
-  if (Number.isNaN(num)) return x;
+  if (Number.isNaN(num)) return str;
   return num.toFixed(1) + "M";
 }
 
-function formatBillions(x: string | undefined): string {
-  if (!x) return "";
+function formatBillions(x: string | number | undefined): string {
+  if (x === undefined || x === null || x === "") return "";
+  const str = String(x);
   const num = Number(x);
-  if (Number.isNaN(num)) return x;
+  if (Number.isNaN(num)) return str;
   return num.toFixed(2) + "B";
 }
 
-function formatDecimal(x: string | undefined, decimals: number): string {
-  if (!x) return "";
+function formatDecimal(x: string | number | undefined, decimals: number): string {
+  if (x === undefined || x === null || x === "") return "";
+  const str = String(x);
   const num = Number(x);
-  if (Number.isNaN(num)) return x;
+  if (Number.isNaN(num)) return str;
   return num.toFixed(decimals);
 }
 
