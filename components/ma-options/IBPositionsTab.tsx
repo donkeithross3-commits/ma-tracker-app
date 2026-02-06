@@ -329,7 +329,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [showAllOrders, setShowAllOrders] = useState(true);
 
   // ---- Order modification state ----
-  const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+  const [editingOrderIdx, setEditingOrderIdx] = useState<number | null>(null);
   const [editLmtPrice, setEditLmtPrice] = useState("");
   const [editQty, setEditQty] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -388,9 +388,10 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
   }, [fetchOpenOrders]);
 
-  /** Start editing an order — pre-fill with current values */
-  const startEditOrder = useCallback((o: IBOpenOrder) => {
-    setEditingOrderId(o.orderId);
+  /** Start editing an order — pre-fill with current values.
+   *  We track by array index (not orderId) because multiple orders can share the same orderId. */
+  const startEditOrder = useCallback((o: IBOpenOrder, idx: number) => {
+    setEditingOrderIdx(idx);
     setEditLmtPrice(
       o.order.lmtPrice != null ? o.order.lmtPrice.toFixed(2) : ""
     );
@@ -399,7 +400,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   }, []);
 
   const cancelEditOrder = useCallback(() => {
-    setEditingOrderId(null);
+    setEditingOrderIdx(null);
     setEditError(null);
   }, []);
 
@@ -463,7 +464,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         }
       }
       // Success — close editor and refresh orders
-      setEditingOrderId(null);
+      setEditingOrderIdx(null);
       setEditError(null);
       setTimeout(() => fetchOpenOrders(), 500);
     } catch (e) {
@@ -1294,11 +1295,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   </tr>
                 </thead>
                 <tbody>
-                  {openOrders.map((o) => {
-                    const isEditing = editingOrderId === o.orderId;
+                  {openOrders.map((o, oIdx) => {
+                    const isEditing = editingOrderIdx === oIdx;
                     return (
                       <tr
-                        key={o.orderId}
+                        key={`order-${oIdx}-${o.orderId}`}
                         className={`border-b border-gray-700/50 ${isEditing ? "bg-indigo-900/20" : "hover:bg-gray-700/30"}`}
                       >
                         <td className="py-1.5 px-3 text-gray-300">{getAccountLabel(o.order.account, userAlias)}</td>
@@ -1377,7 +1378,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               <>
                                 <button
                                   type="button"
-                                  onClick={() => startEditOrder(o)}
+                                  onClick={() => startEditOrder(o, oIdx)}
                                   className="min-h-[28px] px-2 py-0.5 rounded text-xs font-medium bg-indigo-800 hover:bg-indigo-700 text-white"
                                 >
                                   Edit
@@ -1565,7 +1566,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               {formatCostBasis(group.costBasis)}
                             </span>
                             {groupPnl != null && (
-                              <span className={`tabular-nums font-semibold ${groupPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                              <span className={`tabular-nums font-semibold whitespace-nowrap ${groupPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
                                 P&L: {formatPnl(groupPnl)}
                                 {group.costBasis !== 0 && (
                                   <span className="text-xs ml-1 opacity-75">
@@ -1635,10 +1636,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                   Working Orders ({tickerOrders.length})
                                 </div>
                                 {tickerOrders.map((o) => {
-                                  const isEd = editingOrderId === o.orderId;
+                                  const globalIdx = openOrders.indexOf(o);
+                                  const isEd = editingOrderIdx === globalIdx;
                                   return (
                                   <div
-                                    key={o.orderId}
+                                    key={`ticker-order-${globalIdx}-${o.orderId}`}
                                     className={`flex flex-wrap items-center gap-2 px-3 py-1.5 border-b border-gray-700/30 text-xs last:border-b-0 ${isEd ? "bg-indigo-900/20" : ""}`}
                                   >
                                     <span className={`font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
@@ -1703,7 +1705,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                         <>
                                           <button
                                             type="button"
-                                            onClick={() => startEditOrder(o)}
+                                            onClick={() => startEditOrder(o, globalIdx)}
                                             className="min-h-[24px] px-2 py-0.5 rounded text-xs font-medium bg-indigo-800/80 hover:bg-indigo-700 text-white"
                                           >
                                             Edit
@@ -2097,7 +2099,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     <td className="py-2 px-3 text-right tabular-nums text-sm text-gray-100">
                                       {rowMktVal != null ? formatCostBasis(rowMktVal) : "—"}
                                     </td>
-                                    <td className={`py-2 px-3 text-right tabular-nums text-sm font-medium ${
+                                    <td className={`py-2 px-3 text-right tabular-nums text-sm font-medium whitespace-nowrap ${
                                       rowPnl != null && rowPnl > 0
                                         ? "text-green-400"
                                         : rowPnl != null && rowPnl < 0
@@ -2118,7 +2120,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                   <td className="py-2 px-3 text-right tabular-nums text-white">
                                     {formatCostBasis(groupMktVal)}
                                   </td>
-                                  <td className={`py-2 px-3 text-right tabular-nums font-bold ${
+                                  <td className={`py-2 px-3 text-right tabular-nums font-bold whitespace-nowrap ${
                                     groupPnl != null && groupPnl >= 0 ? "text-green-400" : "text-red-400"
                                   }`}>
                                     {groupPnl != null ? formatPnl(groupPnl) : "—"}
