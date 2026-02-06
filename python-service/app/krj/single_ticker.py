@@ -136,12 +136,31 @@ def compute_signal_for_ticker(ticker: str) -> dict[str, Any] | None:
     # Prior week signal: optional – use Neutral for on-demand to keep logic simple
     signal_status_prior_week = "Neutral"
 
-    # Optional fields we don't compute from Polygon daily (leave empty or approximate)
+    # Compute volume/ADV metrics from Polygon daily data
+    last_25_bars = recent[-25:] if len(recent) >= 25 else recent
+    
+    # 25-day average daily volume (in millions of shares)
+    volumes = [float(b.get("v", 0)) for b in last_25_bars]
+    adv_shares = sum(volumes) / len(volumes) if volumes else 0
+    adv_shares_mm = f"{adv_shares / 1_000_000:.1f}M" if adv_shares > 0 else ""
+    
+    # 25-day ADV notional (in $B) = ADV shares * average close price
+    avg_close = sum(closes_25) / len(closes_25) if closes_25 else c
+    adv_notional = adv_shares * avg_close
+    adv_notional_b = f"{adv_notional / 1_000_000_000:.2f}B" if adv_notional > 0 else ""
+    
+    # Average trade size = volume / number of trades
+    trade_counts = [float(b.get("n", 0)) for b in last_25_bars]
+    total_volume = sum(volumes)
+    total_trades = sum(trade_counts)
+    avg_trade_size = f"{int(total_volume / total_trades)}" if total_trades > 0 else ""
+    
+    # 25DMA range in bps = (price range / 25DMA) * 10000
+    price_range = max(closes_25) - min(closes_25) if closes_25 else 0
+    dma_range_bps = f"{(price_range / dma25) * 10000:.0f}" if dma25 > 0 else ""
+    
+    # Vol ratio to SP500: would need SPY data - leave empty for now (or fetch separately)
     vol_ratio = ""
-    dma_range_bps = ""
-    adv_shares_mm = ""
-    adv_notional_b = ""
-    avg_trade_size = ""
 
     row = {
         "ticker": ticker,
