@@ -314,13 +314,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [sellScanLoading, setSellScanLoading] = useState(false);
   const [sellScanResult, setSellScanResult] = useState<SellScanResponse | null>(null);
   const [sellScanError, setSellScanError] = useState<string | null>(null);
-  const [orderContract, setOrderContract] = useState<SellScanContract | null>(null);
-  const [orderAction, setOrderAction] = useState<"BUY" | "SELL">("SELL");
-  const [orderQuantity, setOrderQuantity] = useState(1);
-  const [orderOrderType, setOrderOrderType] = useState<"MKT" | "LMT">("MKT");
-  const [orderLmtPrice, setOrderLmtPrice] = useState("");
-  const [orderSubmitting, setOrderSubmitting] = useState(false);
-  const [orderError, setOrderError] = useState<string | null>(null);
+  const [sellScanGroupKey, setSellScanGroupKey] = useState<string>("");
 
   // ---- Open/working orders state ----
   const [openOrders, setOpenOrders] = useState<IBOpenOrder[]>([]);
@@ -483,34 +477,6 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     });
   }, [openOrders]);
 
-  const openOrderForContract = useCallback((c: SellScanContract, action: "BUY" | "SELL" = "SELL") => {
-    setOrderContract(c);
-    setOrderAction(action);
-    setOrderQuantity(1);
-    setOrderOrderType("LMT");
-    setOrderLmtPrice(c.mid != null ? c.mid.toFixed(2) : "");
-    setOrderError(null);
-  }, []);
-
-  /** Open order ticket from a position row (options only; stocks use openStockOrder) */
-  const openPositionOrder = useCallback((row: IBPositionRow, action: "BUY" | "SELL") => {
-    const c = row.contract;
-    const lp = legPrices[legKey(row)];
-    const scanContract: SellScanContract = {
-      symbol: c.symbol,
-      strike: c.strike ?? 0,
-      expiry: c.lastTradeDateOrContractMonth ?? "",
-      right: c.right ?? "C",
-      bid: lp?.bid ?? 0,
-      ask: lp?.ask ?? 0,
-      mid: lp?.mid ?? 0,
-      last: lp?.last ?? 0,
-      volume: 0,
-      open_interest: 0,
-    };
-    openOrderForContract(scanContract, action);
-  }, [legPrices, openOrderForContract]);
-
   const [krjSignals, setKrjSignals] = useState<Record<string, "Long" | "Short" | "Neutral" | null>>({});
   const [requestingSignalTicker, setRequestingSignalTicker] = useState<string | null>(null);
   const [requestSignalError, setRequestSignalError] = useState<string | null>(null);
@@ -612,7 +578,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
   }, [fetchQuote]);
 
-  // ---- Stock order entry state ----
+  // ---- Unified trade ticket state (stocks AND options) ----
   type StockOrderType = "LMT" | "STP LMT" | "MOC";
   type StockOrderTif = "DAY" | "GTC";
   const [stockOrderKey, setStockOrderKey] = useState<string | null>(null); // group key
@@ -625,39 +591,105 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [stockOrderAccount, setStockOrderAccount] = useState("");
   const [stockOrderSubmitting, setStockOrderSubmitting] = useState(false);
   const [stockOrderResult, setStockOrderResult] = useState<{ orderId?: number; status?: string; error?: string } | null>(null);
-  const [stockOrderStkPosition, setStockOrderStkPosition] = useState(0); // absolute STK position for quick-fill
+  const [stockOrderStkPosition, setStockOrderStkPosition] = useState(0); // absolute position for quick-fill
   const [stockOrderDeltaSign, setStockOrderDeltaSign] = useState<1 | -1>(1); // +/- toggle for delta buttons
   const [stockOrderQuoteRefreshing, setStockOrderQuoteRefreshing] = useState(false);
   const [stockOrderTicker, setStockOrderTicker] = useState(""); // underlying ticker for open ticket
   const stockOrderPriceInitRef = useRef(false); // track whether we've auto-filled price
+  // Option-specific fields (used when ticketSecType === "OPT")
+  const [ticketSecType, setTicketSecType] = useState<"STK" | "OPT">("STK");
+  const [ticketExpiry, setTicketExpiry] = useState("");
+  const [ticketStrike, setTicketStrike] = useState<number>(0);
+  const [ticketRight, setTicketRight] = useState<"C" | "P">("C");
 
-  const openStockOrder = useCallback((groupKey: string, action: "BUY" | "SELL", group: GroupAggregate) => {
+  /** Open the unified trade ticket for a stock or option.
+   *  If a specific position row is given, defaults to exit that position.
+   *  Otherwise defaults to STK trade. */
+  const openTradeTicket = useCallback((groupKey: string, group: GroupAggregate, row?: IBPositionRow) => {
     const ticker = groupKey.split(" ")[0]?.toUpperCase() ?? groupKey;
     const q = quotes[ticker];
     const spotPrice = q && "price" in q ? q.price.toFixed(2) : "";
-    // Compute absolute stock (STK) position across all rows in this group
-    let stkPos = 0;
-    for (const r of group.rows) {
-      if (r.contract?.secType === "STK") stkPos += r.position;
+
+    const isOpt = row ? row.contract?.secType === "OPT" : false;
+    const posQty = row ? row.position : (() => {
+      let s = 0; for (const r of group.rows) { if (r.contract?.secType === "STK") s += r.position; } return s;
+    })();
+    // Exit direction: if long → SELL, if short → BUY, if flat → BUY
+    const exitAction: "BUY" | "SELL" = posQty > 0 ? "SELL" : "BUY";
+    const absPos = Math.abs(posQty);
+
+    // Price: for options use legPrices mid, for stocks use spot quote
+    let initPrice = spotPrice;
+    if (isOpt && row) {
+      const lp = legPrices[legKey(row)];
+      if (lp?.mid) initPrice = lp.mid.toFixed(2);
+      else if (lp?.last) initPrice = lp.last.toFixed(2);
     }
-    setStockOrderStkPosition(Math.abs(stkPos));
+
     setStockOrderKey(groupKey);
     setStockOrderTicker(ticker);
-    setStockOrderAction(action);
+    setTicketSecType(isOpt ? "OPT" : "STK");
+    setStockOrderAction(exitAction);
     setStockOrderType("LMT");
     setStockOrderTif("DAY");
-    setStockOrderQty("");
-    setStockOrderLmtPrice(spotPrice);
-    setStockOrderStopPrice(spotPrice);
+    setStockOrderQty(absPos > 0 ? String(absPos) : "");
+    setStockOrderLmtPrice(initPrice);
+    setStockOrderStopPrice(initPrice);
     setStockOrderDeltaSign(1);
-    // If we already have a price, mark as initialized; otherwise fetch a fresh quote
-    if (spotPrice) {
+    setStockOrderStkPosition(absPos);
+
+    // Option fields
+    if (isOpt && row) {
+      setTicketExpiry(row.contract.lastTradeDateOrContractMonth || "");
+      setTicketStrike(row.contract.strike || 0);
+      setTicketRight((row.contract.right || "C") as "C" | "P");
+    } else {
+      setTicketExpiry("");
+      setTicketStrike(0);
+      setTicketRight("C");
+    }
+
+    // If no price yet, fetch a fresh quote
+    if (initPrice) {
       stockOrderPriceInitRef.current = true;
     } else {
       stockOrderPriceInitRef.current = false;
       fetchQuote(ticker);
     }
-    // Default account to first row's account or first in accounts list
+    const acct = row?.account || group.rows[0]?.account || data?.accounts?.[0] || "";
+    setStockOrderAccount(acct);
+    setStockOrderSubmitting(false);
+    setStockOrderResult(null);
+  }, [quotes, data, fetchQuote, legPrices]);
+
+  /** Open trade ticket from a scan result contract */
+  const openTradeTicketForScan = useCallback((groupKey: string, group: GroupAggregate, c: SellScanContract, action: "BUY" | "SELL") => {
+    const ticker = groupKey.split(" ")[0]?.toUpperCase() ?? groupKey;
+    const q = quotes[ticker];
+    const spotPrice = q && "price" in q ? q.price.toFixed(2) : "";
+    const initPrice = c.mid ? c.mid.toFixed(2) : (c.last ? c.last.toFixed(2) : spotPrice);
+
+    setStockOrderKey(groupKey);
+    setStockOrderTicker(ticker);
+    setTicketSecType("OPT");
+    setStockOrderAction(action);
+    setStockOrderType("LMT");
+    setStockOrderTif("DAY");
+    setStockOrderQty("");
+    setStockOrderLmtPrice(initPrice);
+    setStockOrderStopPrice(initPrice);
+    setStockOrderDeltaSign(1);
+    setStockOrderStkPosition(0);
+    setTicketExpiry(c.expiry);
+    setTicketStrike(c.strike);
+    setTicketRight(c.right as "C" | "P");
+
+    if (initPrice) {
+      stockOrderPriceInitRef.current = true;
+    } else {
+      stockOrderPriceInitRef.current = false;
+      fetchQuote(ticker);
+    }
     const acct = group.rows[0]?.account || data?.accounts?.[0] || "";
     setStockOrderAccount(acct);
     setStockOrderSubmitting(false);
@@ -698,10 +730,16 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     try {
       const contract: Record<string, unknown> = {
         symbol: ticker,
-        secType: "STK",
+        secType: ticketSecType,
         exchange: "SMART",
         currency: "USD",
       };
+      if (ticketSecType === "OPT") {
+        contract.lastTradeDateOrContractMonth = ticketExpiry;
+        contract.strike = ticketStrike;
+        contract.right = ticketRight;
+        contract.multiplier = "100";
+      }
       const order: Record<string, unknown> = {
         action: stockOrderAction,
         totalQuantity: qty,
@@ -740,7 +778,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     } finally {
       setStockOrderSubmitting(false);
     }
-  }, [stockOrderKey, stockOrderAction, stockOrderType, stockOrderTif, stockOrderQty, stockOrderLmtPrice, stockOrderStopPrice, stockOrderAccount, fetchOpenOrders]);
+  }, [stockOrderKey, stockOrderAction, stockOrderType, stockOrderTif, stockOrderQty, stockOrderLmtPrice, stockOrderStopPrice, stockOrderAccount, ticketSecType, ticketExpiry, ticketStrike, ticketRight, fetchOpenOrders]);
 
   // Manual tickers (position boxes without an IB position); persisted in user preferences
   const [manualTickers, setManualTickers] = useState<ManualTickerEntry[]>([]);
@@ -780,7 +818,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
   }, []);
 
-  const runSellScan = useCallback(async (ticker: string, right: "C" | "P") => {
+  const runSellScan = useCallback(async (groupKey: string, right: "C" | "P") => {
+    const ticker = groupKey.split(" ")[0]?.toUpperCase() ?? groupKey;
+    setSellScanGroupKey(groupKey);
     setSellScanTicker(ticker);
     setSellScanRight(right);
     setSellScanLoading(true);
@@ -811,8 +851,6 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setSellScanRight(null);
     setSellScanResult(null);
     setSellScanError(null);
-    setOrderContract(null);
-    setOrderError(null);
   }, []);
 
   /** Underlying ticker for a group key (e.g. AAPL or SPCE 250117). */
@@ -918,53 +956,6 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     });
   }, []);
 
-  const placeOrderFromScan = useCallback(
-    async (contract: SellScanContract, action: "BUY" | "SELL", quantity: number, orderType: "MKT" | "LMT", lmtPrice?: number) => {
-      setOrderSubmitting(true);
-      setOrderError(null);
-      try {
-        const payload = {
-          contract: {
-            symbol: contract.symbol,
-            secType: "OPT",
-            exchange: "SMART",
-            currency: "USD",
-            lastTradeDateOrContractMonth: contract.expiry,
-            strike: contract.strike,
-            right: contract.right,
-            multiplier: "100",
-          },
-          order: {
-            action,
-            totalQuantity: quantity,
-            orderType,
-            ...(orderType === "LMT" && lmtPrice != null && { lmtPrice }),
-          },
-          timeout_sec: 30,
-        };
-        const res = await fetch("/api/ib-connection/place-order", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          credentials: "include",
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setOrderError(data?.error ?? `Order failed: ${res.status}`);
-          return;
-        }
-        setOrderContract(null);
-        setOrderError(null);
-        // Refresh open orders after successful placement
-        setTimeout(() => fetchOpenOrders(), 500);
-      } catch (e) {
-        setOrderError(e instanceof Error ? e.message : "Order failed");
-      } finally {
-        setOrderSubmitting(false);
-      }
-    },
-    [fetchOpenOrders]
-  );
 
   useEffect(() => {
     fetchPositions();
@@ -1697,17 +1688,10 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             </button>
                             <button
                               type="button"
-                              onClick={() => openStockOrder(group.key, "BUY", group)}
-                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-bold bg-blue-700 hover:bg-blue-600 text-white"
+                              onClick={() => openTradeTicket(group.key, group)}
+                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-bold bg-gray-600 hover:bg-gray-500 text-white"
                             >
-                              Buy stock
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openStockOrder(group.key, "SELL", group)}
-                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-bold bg-red-700 hover:bg-red-600 text-white"
-                            >
-                              Sell stock
+                              Trade stock
                             </button>
                           </div>
                           {/* ---- Per-position working orders ---- */}
@@ -1814,327 +1798,6 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               </div>
                             );
                           })()}
-                          {/* ---- Full-screen stock order overlay ---- */}
-                          {stockOrderKey === group.key && (() => {
-                            const posQty = stockOrderStkPosition;
-                            const tickerForQuote = underlyingTicker;
-                            const liveQuote = quotes[tickerForQuote];
-                            const spotPrice = liveQuote && "price" in liveQuote ? liveQuote.price : null;
-                            const spotError = liveQuote && "error" in liveQuote ? liveQuote.error : null;
-                            const sign = stockOrderDeltaSign;
-                            // Qty delta values
-                            const qtyDeltas = [1, 5, 10, 25, 50, 100, 500, 1000];
-                            // Price delta values
-                            const priceDeltas = [0.01, 0.05, 0.1, 0.5, 1, 10];
-                            // Helper: apply delta to qty
-                            const applyQtyDelta = (d: number) => {
-                              const cur = parseInt(stockOrderQty) || 0;
-                              setStockOrderQty(String(Math.max(0, cur + d * sign)));
-                            };
-                            // Helper: apply delta to a price field
-                            const applyPriceDelta = (setter: (v: string) => void, current: string, d: number) => {
-                              const cur = parseFloat(current) || 0;
-                              setter(Math.max(0, cur + d * sign).toFixed(2));
-                            };
-                            return (
-                            <div className="fixed inset-0 z-50 bg-gray-950/95 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeStockOrder(); }}>
-                              <div className="max-w-6xl mx-auto px-5 py-4 min-h-screen flex flex-col">
-                                {/* ── Top bar: header + spot price + account + close ── */}
-                                <div className="flex items-center gap-4 mb-4 flex-wrap">
-                                  <span className={`text-3xl font-extrabold ${stockOrderAction === "BUY" ? "text-blue-300" : "text-red-300"}`}>
-                                    {stockOrderAction} {underlyingTicker}
-                                  </span>
-                                  {/* Live spot price + refresh + snap-to-price */}
-                                  <div className="flex items-center gap-2">
-                                    {spotPrice != null && (
-                                      <span className="text-2xl font-bold text-green-400">${spotPrice.toFixed(2)}</span>
-                                    )}
-                                    {spotError && (
-                                      <span className="text-base text-red-400">No quote</span>
-                                    )}
-                                    {!liveQuote && !stockOrderQuoteRefreshing && (
-                                      <span className="text-base text-gray-500">fetching...</span>
-                                    )}
-                                    <button
-                                      type="button"
-                                      disabled={stockOrderQuoteRefreshing}
-                                      onClick={async () => {
-                                        setStockOrderQuoteRefreshing(true);
-                                        await fetchQuote(tickerForQuote);
-                                        setStockOrderQuoteRefreshing(false);
-                                      }}
-                                      className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-lg disabled:opacity-40"
-                                      title="Refresh quote"
-                                    >
-                                      {stockOrderQuoteRefreshing ? "..." : "\u21BB"}
-                                    </button>
-                                    {spotPrice != null && stockOrderType !== "MOC" && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setStockOrderLmtPrice(spotPrice.toFixed(2))}
-                                        className="min-h-[40px] px-3 rounded-lg bg-green-800 hover:bg-green-700 text-green-200 text-sm font-medium"
-                                        title="Set limit price to spot"
-                                      >
-                                        Use as price
-                                      </button>
-                                    )}
-                                  </div>
-                                  {(data?.accounts?.length ?? 0) > 1 && (
-                                    <select
-                                      value={stockOrderAccount}
-                                      onChange={(e) => setStockOrderAccount(e.target.value)}
-                                      className="min-h-[48px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-lg px-4 py-2"
-                                    >
-                                      {data?.accounts?.map((a) => (
-                                        <option key={a} value={a}>{getAccountLabel(a, userAlias)}</option>
-                                      ))}
-                                    </select>
-                                  )}
-                                  {posQty > 0 && (
-                                    <span className="text-base text-gray-400">Position: <span className="text-white font-semibold">{posQty.toLocaleString()}</span></span>
-                                  )}
-                                  <div className="ml-auto">
-                                    <button type="button" onClick={closeStockOrder} className="min-h-[52px] min-w-[52px] rounded-xl bg-gray-700 hover:bg-gray-600 text-white text-2xl font-bold">
-                                      ✕
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* ── +/- Toggle ── */}
-                                <div className="flex items-center gap-2 mb-3">
-                                  <span className="text-sm text-gray-400 mr-1">Delta mode:</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setStockOrderDeltaSign(1)}
-                                    className={`min-h-[52px] min-w-[80px] rounded-xl text-2xl font-extrabold transition-colors ${
-                                      sign === 1
-                                        ? "bg-green-700 text-white ring-2 ring-green-400"
-                                        : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
-                                    }`}
-                                  >
-                                    +
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setStockOrderDeltaSign(-1)}
-                                    className={`min-h-[52px] min-w-[80px] rounded-xl text-2xl font-extrabold transition-colors ${
-                                      sign === -1
-                                        ? "bg-red-700 text-white ring-2 ring-red-400"
-                                        : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
-                                    }`}
-                                  >
-                                    −
-                                  </button>
-                                </div>
-
-                                {/* ── Main body: 3-column layout ── */}
-                                <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_1fr] gap-5 flex-1">
-
-                                  {/* Column 1: Order type + TIF */}
-                                  <div className="flex flex-col gap-3">
-                                    <div>
-                                      <label className="block text-sm text-gray-400 mb-1.5">Order type</label>
-                                      <div className="flex flex-col gap-2">
-                                        {(["LMT", "STP LMT", "MOC"] as StockOrderType[]).map((ot) => (
-                                          <button
-                                            key={ot}
-                                            type="button"
-                                            onClick={() => setStockOrderType(ot)}
-                                            className={`w-full min-h-[60px] rounded-xl text-xl font-bold transition-colors ${
-                                              stockOrderType === ot
-                                                ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
-                                                : "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-600"
-                                            }`}
-                                          >
-                                            {ot === "STP LMT" ? "Stop Limit" : ot === "MOC" ? "MOC" : "Limit"}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <label className="block text-sm text-gray-400 mb-1.5">Time in force</label>
-                                      <div className="flex flex-col gap-2">
-                                        {(["DAY", "GTC"] as StockOrderTif[]).map((t) => (
-                                          <button
-                                            key={t}
-                                            type="button"
-                                            onClick={() => setStockOrderTif(t)}
-                                            className={`w-full min-h-[60px] rounded-xl text-xl font-bold transition-colors ${
-                                              stockOrderTif === t
-                                                ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
-                                                : "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-600"
-                                            }`}
-                                          >
-                                            {t}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Column 2: Quantity (delta-based) */}
-                                  <div className="flex flex-col">
-                                    <label className="block text-sm text-gray-400 mb-1.5">Quantity (shares)</label>
-                                    <input
-                                      type="number"
-                                      inputMode="numeric"
-                                      min="0"
-                                      step="1"
-                                      value={stockOrderQty}
-                                      onChange={(e) => setStockOrderQty(e.target.value)}
-                                      placeholder="0"
-                                      className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none mb-3"
-                                    />
-                                    <div className="grid grid-cols-2 gap-2 flex-1 content-start">
-                                      {posQty > 0 && (
-                                        <button
-                                          type="button"
-                                          onClick={() => applyQtyDelta(posQty)}
-                                          className="min-h-[68px] rounded-xl border bg-amber-800/60 hover:bg-amber-700/60 border-amber-500 text-amber-200 text-2xl font-bold col-span-2"
-                                        >
-                                          {sign === 1 ? "+" : "−"}{posQty.toLocaleString()} (pos)
-                                        </button>
-                                      )}
-                                      {qtyDeltas.map((d) => (
-                                        <button
-                                          key={`qd-${d}`}
-                                          type="button"
-                                          onClick={() => applyQtyDelta(d)}
-                                          className={`min-h-[68px] rounded-xl border text-2xl font-bold ${
-                                            sign === 1
-                                              ? "bg-gray-800 hover:bg-gray-700 border-gray-600 text-green-300"
-                                              : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-red-300"
-                                          }`}
-                                        >
-                                          {sign === 1 ? "+" : "−"}{d.toLocaleString()}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  {/* Column 3: Prices (delta-based) */}
-                                  <div className="flex flex-col">
-                                    {/* Limit price (not shown for MOC) */}
-                                    {stockOrderType !== "MOC" && (
-                                      <div className="mb-3">
-                                        <label className="block text-sm text-gray-400 mb-1.5">Limit price</label>
-                                        <input
-                                          type="number"
-                                          inputMode="decimal"
-                                          min="0"
-                                          step="0.01"
-                                          value={stockOrderLmtPrice}
-                                          onChange={(e) => setStockOrderLmtPrice(e.target.value)}
-                                          placeholder="0.00"
-                                          className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-                                        />
-                                        <div className="grid grid-cols-3 gap-2 mt-2">
-                                          {priceDeltas.map((d) => (
-                                            <button
-                                              key={`lmt-${d}`}
-                                              type="button"
-                                              onClick={() => applyPriceDelta(setStockOrderLmtPrice, stockOrderLmtPrice, d)}
-                                              className={`min-h-[68px] rounded-xl border text-2xl font-bold ${
-                                                sign === 1
-                                                  ? "bg-gray-800 hover:bg-gray-700 border-gray-600 text-green-300"
-                                                  : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-red-300"
-                                              }`}
-                                            >
-                                              {sign === 1 ? "+" : "−"}{d < 1 ? d.toFixed(2) : d}
-                                            </button>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                    {/* Stop price (only for STP LMT) */}
-                                    {stockOrderType === "STP LMT" && (
-                                      <div className="mb-3">
-                                        <label className="block text-sm text-gray-400 mb-1.5">Stop price</label>
-                                        <input
-                                          type="number"
-                                          inputMode="decimal"
-                                          min="0"
-                                          step="0.01"
-                                          value={stockOrderStopPrice}
-                                          onChange={(e) => setStockOrderStopPrice(e.target.value)}
-                                          placeholder="0.00"
-                                          className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-                                        />
-                                        <div className="grid grid-cols-3 gap-2 mt-2">
-                                          {priceDeltas.map((d) => (
-                                            <button
-                                              key={`stp-${d}`}
-                                              type="button"
-                                              onClick={() => applyPriceDelta(setStockOrderStopPrice, stockOrderStopPrice, d)}
-                                              className={`min-h-[68px] rounded-xl border text-2xl font-bold ${
-                                                sign === 1
-                                                  ? "bg-gray-800 hover:bg-gray-700 border-gray-600 text-green-300"
-                                                  : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-red-300"
-                                              }`}
-                                            >
-                                              {sign === 1 ? "+" : "−"}{d < 1 ? d.toFixed(2) : d}
-                                            </button>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                    {/* MOC note */}
-                                    {stockOrderType === "MOC" && (
-                                      <div className="p-4 rounded-xl bg-gray-800 border border-gray-600 text-gray-300 text-lg">
-                                        Market on Close — no price needed. Order will execute at closing price.
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* ── Bottom bar: summary + submit ── */}
-                                <div className="mt-4 pt-4 border-t border-gray-700 space-y-3">
-                                  {stockOrderQty && parseFloat(stockOrderQty) > 0 && (
-                                    <div className="text-xl text-gray-200 text-center">
-                                      {stockOrderAction} <span className="font-bold text-white">{stockOrderQty}</span> {underlyingTicker} @{" "}
-                                      {stockOrderType === "MOC"
-                                        ? "Market on Close"
-                                        : stockOrderType === "STP LMT"
-                                          ? `Stop ${stockOrderStopPrice || "—"} / Limit ${stockOrderLmtPrice || "—"}`
-                                          : `Limit ${stockOrderLmtPrice || "—"}`}
-                                      {" · "}
-                                      {stockOrderTif}
-                                      {stockOrderLmtPrice && stockOrderType !== "MOC" && (
-                                        <span className="ml-3 font-extrabold text-white text-2xl">
-                                          ≈ ${(parseFloat(stockOrderQty) * parseFloat(stockOrderLmtPrice)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                        </span>
-                                      )}
-                                    </div>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={submitStockOrder}
-                                    disabled={stockOrderSubmitting || !stockOrderQty || parseFloat(stockOrderQty) <= 0}
-                                    className={`w-full min-h-[80px] rounded-2xl text-2xl font-extrabold transition-colors disabled:opacity-40 ${
-                                      stockOrderAction === "BUY"
-                                        ? "bg-blue-600 hover:bg-blue-500 text-white"
-                                        : "bg-red-600 hover:bg-red-500 text-white"
-                                    }`}
-                                  >
-                                    {stockOrderSubmitting
-                                      ? "Sending order…"
-                                      : `${stockOrderAction} ${stockOrderQty || "0"} shares`}
-                                  </button>
-                                  {stockOrderResult?.error && (
-                                    <div className="p-4 rounded-xl bg-red-900/50 border border-red-700 text-red-200 text-lg">
-                                      {stockOrderResult.error}
-                                    </div>
-                                  )}
-                                  {stockOrderResult?.orderId && !stockOrderResult.error && (
-                                    <div className="p-4 rounded-xl bg-green-900/50 border border-green-700 text-green-200 text-lg">
-                                      Order #{stockOrderResult.orderId} — {stockOrderResult.status || "Submitted"}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            );
-                          })()}
                         </div>
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm">
@@ -2193,20 +1856,14 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     }`}>
                                       {rowPnl != null ? formatPnl(rowPnl) : "—"}
                                     </td>
-                                    <td className="py-1.5 px-2 text-center whitespace-nowrap">
-                                      <div className="flex items-center justify-center gap-1">
-                                        {row.contract?.secType === "STK" ? (
-                                          <>
-                                            <button type="button" onClick={() => openStockOrder(group.key, "BUY", group)} className="px-2 py-1 rounded text-xs font-semibold bg-blue-700 hover:bg-blue-600 text-white">Buy</button>
-                                            <button type="button" onClick={() => openStockOrder(group.key, "SELL", group)} className="px-2 py-1 rounded text-xs font-semibold bg-red-700 hover:bg-red-600 text-white">Sell</button>
-                                          </>
-                                        ) : row.contract?.secType === "OPT" ? (
-                                          <>
-                                            <button type="button" onClick={() => openPositionOrder(row, "BUY")} className="px-2 py-1 rounded text-xs font-semibold bg-blue-700 hover:bg-blue-600 text-white">Buy</button>
-                                            <button type="button" onClick={() => openPositionOrder(row, "SELL")} className="px-2 py-1 rounded text-xs font-semibold bg-red-700 hover:bg-red-600 text-white">Sell</button>
-                                          </>
-                                        ) : null}
-                                      </div>
+                                    <td className="py-1.5 px-2 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => openTradeTicket(group.key, group, row)}
+                                        className="px-3 py-1 rounded text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white"
+                                      >
+                                        Trade
+                                      </button>
                                     </td>
                                   </tr>
                                 );
@@ -2368,6 +2025,359 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         </div>
       )}
 
+      {/* ---- Full-screen unified trade ticket overlay ---- */}
+      {stockOrderKey != null && (() => {
+        const posQty = stockOrderStkPosition;
+        const tickerForQuote = stockOrderTicker;
+        const liveQuote = quotes[tickerForQuote];
+        const spotPrice = liveQuote && "price" in liveQuote ? liveQuote.price : null;
+        const spotError = liveQuote && "error" in liveQuote ? liveQuote.error : null;
+        const sign = stockOrderDeltaSign;
+        const isOpt = ticketSecType === "OPT";
+        const unitLabel = isOpt ? "contracts" : "shares";
+        const costMultiplier = isOpt ? 100 : 1;
+        // Qty delta values — smaller for options
+        const qtyDeltas = isOpt ? [1, 2, 5, 10, 25, 50, 100] : [1, 5, 10, 25, 50, 100, 500, 1000];
+        // Price delta values — smaller for options
+        const priceDeltas = isOpt ? [0.01, 0.02, 0.05, 0.1, 0.25, 0.5] : [0.01, 0.05, 0.1, 0.5, 1, 10];
+        const applyQtyDelta = (d: number) => {
+          const cur = parseInt(stockOrderQty) || 0;
+          setStockOrderQty(String(Math.max(0, cur + d * sign)));
+        };
+        const applyPriceDelta = (setter: (v: string) => void, current: string, d: number) => {
+          const cur = parseFloat(current) || 0;
+          setter(Math.max(0, cur + d * sign).toFixed(2));
+        };
+        return (
+        <div className="fixed inset-0 z-50 bg-gray-950/95 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeStockOrder(); }}>
+          <div className="max-w-6xl mx-auto px-5 py-4 min-h-screen flex flex-col">
+            {/* ── Top bar: BUY/SELL toggle + contract info + spot + account + close ── */}
+            <div className="flex items-center gap-4 mb-4 flex-wrap">
+              {/* BUY / SELL toggle */}
+              <div className="flex rounded-xl overflow-hidden border border-gray-600">
+                <button
+                  type="button"
+                  onClick={() => setStockOrderAction("BUY")}
+                  className={`min-h-[52px] px-6 text-xl font-extrabold transition-colors ${
+                    stockOrderAction === "BUY"
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                  }`}
+                >
+                  BUY
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStockOrderAction("SELL")}
+                  className={`min-h-[52px] px-6 text-xl font-extrabold transition-colors ${
+                    stockOrderAction === "SELL"
+                      ? "bg-red-600 text-white"
+                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                  }`}
+                >
+                  SELL
+                </button>
+              </div>
+              <span className="text-3xl font-extrabold text-white">
+                {stockOrderTicker}
+                {isOpt && (
+                  <span className="text-2xl ml-2 text-gray-300">
+                    {ticketExpiry.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3")} {ticketStrike} {ticketRight === "C" ? "Call" : "Put"}
+                  </span>
+                )}
+              </span>
+              {/* Live spot price + refresh + snap-to-price */}
+              <div className="flex items-center gap-2">
+                {spotPrice != null && (
+                  <span className="text-2xl font-bold text-green-400">${spotPrice.toFixed(2)}</span>
+                )}
+                {spotError && (
+                  <span className="text-base text-red-400">No quote</span>
+                )}
+                {!liveQuote && !stockOrderQuoteRefreshing && (
+                  <span className="text-base text-gray-500">fetching...</span>
+                )}
+                <button
+                  type="button"
+                  disabled={stockOrderQuoteRefreshing}
+                  onClick={async () => {
+                    setStockOrderQuoteRefreshing(true);
+                    await fetchQuote(tickerForQuote);
+                    setStockOrderQuoteRefreshing(false);
+                  }}
+                  className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-lg disabled:opacity-40"
+                  title="Refresh quote"
+                >
+                  {stockOrderQuoteRefreshing ? "..." : "\u21BB"}
+                </button>
+                {spotPrice != null && stockOrderType !== "MOC" && (
+                  <button
+                    type="button"
+                    onClick={() => setStockOrderLmtPrice(spotPrice.toFixed(2))}
+                    className="min-h-[40px] px-3 rounded-lg bg-green-800 hover:bg-green-700 text-green-200 text-sm font-medium"
+                    title="Set limit price to spot"
+                  >
+                    Use as price
+                  </button>
+                )}
+              </div>
+              {(data?.accounts?.length ?? 0) > 1 && (
+                <select
+                  value={stockOrderAccount}
+                  onChange={(e) => setStockOrderAccount(e.target.value)}
+                  className="min-h-[48px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-lg px-4 py-2"
+                >
+                  {data?.accounts?.map((a) => (
+                    <option key={a} value={a}>{getAccountLabel(a, userAlias)}</option>
+                  ))}
+                </select>
+              )}
+              {posQty > 0 && (
+                <span className="text-base text-gray-400">Position: <span className="text-white font-semibold">{posQty.toLocaleString()}</span></span>
+              )}
+              <div className="ml-auto">
+                <button type="button" onClick={closeStockOrder} className="min-h-[52px] min-w-[52px] rounded-xl bg-gray-700 hover:bg-gray-600 text-white text-2xl font-bold">
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* ── +/- Toggle ── */}
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm text-gray-400 mr-1">Delta mode:</span>
+              <button
+                type="button"
+                onClick={() => setStockOrderDeltaSign(1)}
+                className={`min-h-[52px] min-w-[80px] rounded-xl text-2xl font-extrabold transition-colors ${
+                  sign === 1
+                    ? "bg-green-700 text-white ring-2 ring-green-400"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
+                }`}
+              >
+                +
+              </button>
+              <button
+                type="button"
+                onClick={() => setStockOrderDeltaSign(-1)}
+                className={`min-h-[52px] min-w-[80px] rounded-xl text-2xl font-extrabold transition-colors ${
+                  sign === -1
+                    ? "bg-red-700 text-white ring-2 ring-red-400"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
+                }`}
+              >
+                −
+              </button>
+            </div>
+
+            {/* ── Main body: 3-column layout ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_1fr] gap-5 flex-1">
+
+              {/* Column 1: Order type + TIF */}
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">Order type</label>
+                  <div className="flex flex-col gap-2">
+                    {(["LMT", "STP LMT", "MOC"] as StockOrderType[]).map((ot) => (
+                      <button
+                        key={ot}
+                        type="button"
+                        onClick={() => setStockOrderType(ot)}
+                        className={`w-full min-h-[60px] rounded-xl text-xl font-bold transition-colors ${
+                          stockOrderType === ot
+                            ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
+                            : "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-600"
+                        }`}
+                      >
+                        {ot === "STP LMT" ? "Stop Limit" : ot === "MOC" ? "MOC" : "Limit"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">Time in force</label>
+                  <div className="flex flex-col gap-2">
+                    {(["DAY", "GTC"] as StockOrderTif[]).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setStockOrderTif(t)}
+                        className={`w-full min-h-[60px] rounded-xl text-xl font-bold transition-colors ${
+                          stockOrderTif === t
+                            ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
+                            : "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-600"
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Column 2: Quantity (delta-based) */}
+              <div className="flex flex-col">
+                <label className="block text-sm text-gray-400 mb-1.5">Quantity ({unitLabel})</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="0"
+                  step="1"
+                  value={stockOrderQty}
+                  onChange={(e) => setStockOrderQty(e.target.value)}
+                  placeholder="0"
+                  className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none mb-3"
+                />
+                <div className="grid grid-cols-2 gap-2 flex-1 content-start">
+                  {posQty > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => applyQtyDelta(posQty)}
+                      className="min-h-[68px] rounded-xl border bg-amber-800/60 hover:bg-amber-700/60 border-amber-500 text-amber-200 text-2xl font-bold col-span-2"
+                    >
+                      {sign === 1 ? "+" : "−"}{posQty.toLocaleString()} (pos)
+                    </button>
+                  )}
+                  {qtyDeltas.map((d) => (
+                    <button
+                      key={`qd-${d}`}
+                      type="button"
+                      onClick={() => applyQtyDelta(d)}
+                      className={`min-h-[68px] rounded-xl border text-2xl font-bold ${
+                        sign === 1
+                          ? "bg-gray-800 hover:bg-gray-700 border-gray-600 text-green-300"
+                          : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-red-300"
+                      }`}
+                    >
+                      {sign === 1 ? "+" : "−"}{d.toLocaleString()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Column 3: Prices (delta-based) */}
+              <div className="flex flex-col">
+                {/* Limit price (not shown for MOC) */}
+                {stockOrderType !== "MOC" && (
+                  <div className="mb-3">
+                    <label className="block text-sm text-gray-400 mb-1.5">Limit price</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.01"
+                      value={stockOrderLmtPrice}
+                      onChange={(e) => setStockOrderLmtPrice(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                    />
+                    <div className="grid grid-cols-3 gap-2 mt-2">
+                      {priceDeltas.map((d) => (
+                        <button
+                          key={`lmt-${d}`}
+                          type="button"
+                          onClick={() => applyPriceDelta(setStockOrderLmtPrice, stockOrderLmtPrice, d)}
+                          className={`min-h-[68px] rounded-xl border text-2xl font-bold ${
+                            sign === 1
+                              ? "bg-gray-800 hover:bg-gray-700 border-gray-600 text-green-300"
+                              : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-red-300"
+                          }`}
+                        >
+                          {sign === 1 ? "+" : "−"}{d < 1 ? d.toFixed(2) : d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Stop price (only for STP LMT) */}
+                {stockOrderType === "STP LMT" && (
+                  <div className="mb-3">
+                    <label className="block text-sm text-gray-400 mb-1.5">Stop price</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.01"
+                      value={stockOrderStopPrice}
+                      onChange={(e) => setStockOrderStopPrice(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                    />
+                    <div className="grid grid-cols-3 gap-2 mt-2">
+                      {priceDeltas.map((d) => (
+                        <button
+                          key={`stp-${d}`}
+                          type="button"
+                          onClick={() => applyPriceDelta(setStockOrderStopPrice, stockOrderStopPrice, d)}
+                          className={`min-h-[68px] rounded-xl border text-2xl font-bold ${
+                            sign === 1
+                              ? "bg-gray-800 hover:bg-gray-700 border-gray-600 text-green-300"
+                              : "bg-gray-800 hover:bg-gray-700 border-gray-600 text-red-300"
+                          }`}
+                        >
+                          {sign === 1 ? "+" : "−"}{d < 1 ? d.toFixed(2) : d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* MOC note */}
+                {stockOrderType === "MOC" && (
+                  <div className="p-4 rounded-xl bg-gray-800 border border-gray-600 text-gray-300 text-lg">
+                    Market on Close — no price needed. Order will execute at closing price.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Bottom bar: summary + submit ── */}
+            <div className="mt-4 pt-4 border-t border-gray-700 space-y-3">
+              {stockOrderQty && parseFloat(stockOrderQty) > 0 && (
+                <div className="text-xl text-gray-200 text-center">
+                  {stockOrderAction} <span className="font-bold text-white">{stockOrderQty}</span> {stockOrderTicker}{isOpt ? ` ${ticketExpiry.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3")} ${ticketStrike} ${ticketRight}` : ""} @{" "}
+                  {stockOrderType === "MOC"
+                    ? "Market on Close"
+                    : stockOrderType === "STP LMT"
+                      ? `Stop ${stockOrderStopPrice || "—"} / Limit ${stockOrderLmtPrice || "—"}`
+                      : `Limit ${stockOrderLmtPrice || "—"}`}
+                  {" · "}
+                  {stockOrderTif}
+                  {stockOrderLmtPrice && stockOrderType !== "MOC" && (
+                    <span className="ml-3 font-extrabold text-white text-2xl">
+                      ≈ ${(parseFloat(stockOrderQty) * parseFloat(stockOrderLmtPrice) * costMultiplier).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  )}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={submitStockOrder}
+                disabled={stockOrderSubmitting || !stockOrderQty || parseFloat(stockOrderQty) <= 0}
+                className={`w-full min-h-[80px] rounded-2xl text-2xl font-extrabold transition-colors disabled:opacity-40 ${
+                  stockOrderAction === "BUY"
+                    ? "bg-blue-600 hover:bg-blue-500 text-white"
+                    : "bg-red-600 hover:bg-red-500 text-white"
+                }`}
+              >
+                {stockOrderSubmitting
+                  ? "Sending order…"
+                  : `${stockOrderAction} ${stockOrderQty || "0"} ${unitLabel}`}
+              </button>
+              {stockOrderResult?.error && (
+                <div className="p-4 rounded-xl bg-red-900/50 border border-red-700 text-red-200 text-lg">
+                  {stockOrderResult.error}
+                </div>
+              )}
+              {stockOrderResult?.orderId && !stockOrderResult.error && (
+                <div className="p-4 rounded-xl bg-green-900/50 border border-green-700 text-green-200 text-lg">
+                  Order #{stockOrderResult.orderId} — {stockOrderResult.status || "Submitted"}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
       {/* Sell-scan modal: NTM calls/puts for next 0–15 business days */}
       {sellScanTicker != null && (
         <div
@@ -2480,14 +2490,22 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                         <div className="flex items-center justify-center gap-1">
                                           <button
                                             type="button"
-                                            onClick={() => openOrderForContract(c, "BUY")}
+                                            onClick={() => {
+                                              const g = groups.find((gg) => gg.key === sellScanGroupKey) || syntheticGroup(sellScanGroupKey);
+                                              openTradeTicketForScan(sellScanGroupKey, g, c, "BUY");
+                                              setSellScanTicker(null);
+                                            }}
                                             className="min-h-[36px] px-2.5 py-1 rounded text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white"
                                           >
                                             Buy
                                           </button>
                                           <button
                                             type="button"
-                                            onClick={() => openOrderForContract(c, "SELL")}
+                                            onClick={() => {
+                                              const g = groups.find((gg) => gg.key === sellScanGroupKey) || syntheticGroup(sellScanGroupKey);
+                                              openTradeTicketForScan(sellScanGroupKey, g, c, "SELL");
+                                              setSellScanTicker(null);
+                                            }}
                                             className="min-h-[36px] px-2.5 py-1 rounded text-sm font-semibold bg-red-600 hover:bg-red-500 text-white"
                                           >
                                             Sell
@@ -2511,116 +2529,6 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         </div>
       )}
 
-      {/* Order entry modal (from sell-scan Trade button) */}
-      {orderContract != null && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="order-modal-title"
-        >
-          <div className="bg-gray-900 border border-gray-600 rounded-xl shadow-xl max-w-md w-full">
-            <div className="px-4 py-3 border-b border-gray-600">
-              <h2 id="order-modal-title" className="text-xl font-bold text-white">
-                Place order
-              </h2>
-            </div>
-            <div className="px-4 py-4 space-y-4">
-              <div className="bg-gray-800 rounded-lg px-3 py-2">
-                <div className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Contract</div>
-                <div className="font-mono text-base text-white">
-                  {orderContract.symbol} {orderContract.expiry.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3")} {orderContract.strike} {orderContract.right === "C" ? "Call" : "Put"}
-                </div>
-                <div className="text-sm text-gray-400 mt-1">
-                  Bid {orderContract.bid?.toFixed(2) ?? "—"} / Ask {orderContract.ask?.toFixed(2) ?? "—"} / Mid {orderContract.mid?.toFixed(2) ?? "—"}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Action</label>
-                  <select
-                    value={orderAction}
-                    onChange={(e) => setOrderAction(e.target.value as "BUY" | "SELL")}
-                    className={`w-full py-2 px-3 rounded-lg border border-gray-600 font-bold focus:border-blue-500 focus:outline-none ${
-                      orderAction === "BUY" ? "bg-blue-900/40 text-blue-300" : "bg-red-900/40 text-red-300"
-                    }`}
-                  >
-                    <option value="BUY">BUY</option>
-                    <option value="SELL">SELL</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Quantity</label>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={orderQuantity}
-                    onChange={(e) => setOrderQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-full py-2 px-3 rounded-lg bg-gray-800 border border-gray-600 text-white focus:border-blue-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Order type</label>
-                <select
-                  value={orderOrderType}
-                  onChange={(e) => setOrderOrderType(e.target.value as "MKT" | "LMT")}
-                  className="w-full py-2 px-3 rounded-lg bg-gray-800 border border-gray-600 text-white focus:border-blue-500 focus:outline-none"
-                >
-                  <option value="MKT">Market</option>
-                  <option value="LMT">Limit</option>
-                </select>
-              </div>
-              {orderOrderType === "LMT" && (
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Limit price</label>
-                  <input
-                    type="number"
-                    step={0.01}
-                    min={0}
-                    value={orderLmtPrice}
-                    onChange={(e) => setOrderLmtPrice(e.target.value)}
-                    placeholder={orderContract.mid?.toFixed(2)}
-                    className="w-full py-2 px-3 rounded-lg bg-gray-800 border border-gray-600 text-white focus:border-blue-500 focus:outline-none"
-                  />
-                </div>
-              )}
-              {orderError && (
-                <p className="text-sm text-red-300 font-medium">{orderError}</p>
-              )}
-            </div>
-            <div className="px-4 py-3 border-t border-gray-600 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => { setOrderContract(null); setOrderError(null); }}
-                disabled={orderSubmitting}
-                className="min-h-[44px] px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-medium disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const qty = Math.max(1, orderQuantity);
-                  const lmt = orderOrderType === "LMT" ? parseFloat(orderLmtPrice) : undefined;
-                  if (orderOrderType === "LMT" && (lmt == null || isNaN(lmt) || lmt < 0)) {
-                    setOrderError("Enter a valid limit price");
-                    return;
-                  }
-                  placeOrderFromScan(orderContract, orderAction, qty, orderOrderType, lmt);
-                }}
-                disabled={orderSubmitting}
-                className={`min-h-[44px] px-4 rounded-lg font-semibold disabled:opacity-50 text-white ${
-                  orderAction === "BUY" ? "bg-blue-600 hover:bg-blue-500" : "bg-red-600 hover:bg-red-500"
-                }`}
-              >
-                {orderSubmitting ? "Sending…" : `Place ${orderAction} order`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
