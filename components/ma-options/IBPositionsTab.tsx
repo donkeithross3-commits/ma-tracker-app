@@ -251,6 +251,32 @@ function formatGroupPosition(group: GroupAggregate): string {
   return "—";
 }
 
+/** Live price data for a single position leg (option or stock). */
+interface LegPrice {
+  bid: number;
+  ask: number;
+  mid: number;
+  last: number;
+}
+
+/** Stable key to uniquely identify a position row for price caching. */
+function legKey(row: IBPositionRow): string {
+  const c = row.contract;
+  if (c.secType === "OPT") {
+    return `${row.account}:OPT:${c.symbol}:${c.lastTradeDateOrContractMonth}:${c.strike}:${c.right}`;
+  }
+  return `${row.account}:${c.secType}:${c.symbol}`;
+}
+
+/** Format a P&L value with sign: +$1,234.56 or −$567.89 */
+function formatPnl(n: number): string {
+  const abs = Math.abs(n);
+  const formatted = "$" + abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (n > 0) return "+" + formatted;
+  if (n < 0) return "\u2212" + formatted;
+  return formatted;
+}
+
 interface IBPositionsTabProps {
   /** When true, auto-refresh positions every 60s (e.g. when tab is active). */
   autoRefresh?: boolean;
@@ -286,6 +312,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [openOrdersError, setOpenOrdersError] = useState<string | null>(null);
   const [cancellingOrderId, setCancellingOrderId] = useState<number | null>(null);
   const [showAllOrders, setShowAllOrders] = useState(true);
+
+  // ---- Leg prices for live P&L ----
+  const [legPrices, setLegPrices] = useState<Record<string, LegPrice>>({});
+  const [legPricesLoading, setLegPricesLoading] = useState<Record<string, boolean>>({});
+  const autoFetchedLegPricesRef = useRef<Set<string>>(new Set());
 
   const fetchOpenOrders = useCallback(async () => {
     setOpenOrdersLoading(true);
@@ -386,6 +417,68 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       setQuoteLoading((prev) => ({ ...prev, [key]: false }));
     }
   }, []);
+
+  /** Fetch live quotes for all legs (options + stock) in a position group. */
+  const fetchGroupPrices = useCallback(async (groupKey: string, rows: IBPositionRow[]) => {
+    setLegPricesLoading((prev) => ({ ...prev, [groupKey]: true }));
+    const ticker = groupKey.split(" ")[0]?.toUpperCase() ?? groupKey;
+
+    // Refresh stock quote (for STK legs and header Spot display)
+    fetchQuote(ticker);
+
+    // Batch-fetch option leg prices
+    const optRows = rows.filter(
+      (r) =>
+        r.contract?.secType === "OPT" &&
+        r.contract?.lastTradeDateOrContractMonth &&
+        r.contract?.strike != null &&
+        r.contract?.right
+    );
+    if (optRows.length === 0) {
+      setLegPricesLoading((prev) => ({ ...prev, [groupKey]: false }));
+      return;
+    }
+
+    const contracts = optRows.map((r) => ({
+      ticker: r.contract.symbol,
+      strike: r.contract.strike!,
+      expiry: r.contract.lastTradeDateOrContractMonth!,
+      right: r.contract.right!,
+    }));
+
+    try {
+      const res = await fetch("/api/ib-connection/fetch-prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contracts }),
+        credentials: "include",
+      });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) return;
+      const json = await res.json();
+      if (json.contracts && Array.isArray(json.contracts)) {
+        setLegPrices((prev) => {
+          const next = { ...prev };
+          for (let i = 0; i < optRows.length; i++) {
+            const price = json.contracts[i];
+            if (price) {
+              next[legKey(optRows[i])] = {
+                bid: price.bid,
+                ask: price.ask,
+                mid: price.mid,
+                last: price.last,
+              };
+            }
+          }
+          return next;
+        });
+      }
+    } catch {
+      // silently fail - prices just won't update
+    } finally {
+      setLegPricesLoading((prev) => ({ ...prev, [groupKey]: false }));
+    }
+  }, [fetchQuote]);
 
   // ---- Stock order entry state ----
   type StockOrderType = "LMT" | "STP LMT" | "MOC";
@@ -908,6 +1001,20 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
   }, [selectedGroupKeysSig, quotes, fetchQuote, underlyingTickerForGroupKey]);
 
+  // Auto-fetch leg prices when a position box is first shown
+  useEffect(() => {
+    if (selectedGroups.length === 0) return;
+    for (const group of selectedGroups) {
+      if (
+        !autoFetchedLegPricesRef.current.has(group.key) &&
+        group.rows.length > 0
+      ) {
+        autoFetchedLegPricesRef.current.add(group.key);
+        fetchGroupPrices(group.key, group.rows);
+      }
+    }
+  }, [selectedGroupKeysSig, selectedGroups, fetchGroupPrices]);
+
   // Fetch KRJ signal for selected tickers (underlying symbol: first token of group.key)
   useEffect(() => {
     if (selectedGroups.length === 0) {
@@ -1200,6 +1307,29 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                     const quote = quotes[underlyingTicker];
                     const quoteLoadingThis = quoteLoading[underlyingTicker];
                     const companyName = group.isManual ? manualTickerNames[group.key] : null;
+                    const isLegLoading = legPricesLoading[group.key] ?? false;
+
+                    // Per-row live price lookup
+                    const getRowLastPrice = (row: IBPositionRow): number | null => {
+                      if (row.contract?.secType === "STK") {
+                        return quote && "price" in quote ? quote.price : null;
+                      }
+                      const lp = legPrices[legKey(row)];
+                      return lp ? lp.mid : null;
+                    };
+
+                    // Compute group-level market value and P&L
+                    let groupMktVal = 0;
+                    let groupHasAnyPrice = false;
+                    for (const row of group.rows) {
+                      const price = getRowLastPrice(row);
+                      if (price != null) {
+                        groupMktVal += row.position * price;
+                        groupHasAnyPrice = true;
+                      }
+                    }
+                    const groupPnl = groupHasAnyPrice ? groupMktVal - group.costBasis : null;
+
                     return (
                       <div
                         key={`group-${group.key}`}
@@ -1259,6 +1389,16 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             <span className="tabular-nums font-semibold text-white">
                               {formatCostBasis(group.costBasis)}
                             </span>
+                            {groupPnl != null && (
+                              <span className={`tabular-nums font-semibold ${groupPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                P&L: {formatPnl(groupPnl)}
+                                {group.costBasis !== 0 && (
+                                  <span className="text-xs ml-1 opacity-75">
+                                    ({((groupPnl / Math.abs(group.costBasis)) * 100).toFixed(1)}%)
+                                  </span>
+                                )}
+                              </span>
+                            )}
                             <span className="tabular-nums text-gray-300">
                               Spot:{" "}
                               {quoteLoadingThis
@@ -1271,11 +1411,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             </span>
                             <button
                               type="button"
-                              onClick={() => fetchQuote(underlyingTicker)}
-                              disabled={quoteLoadingThis}
+                              onClick={() => fetchGroupPrices(group.key, group.rows)}
+                              disabled={isLegLoading || quoteLoadingThis}
                               className="min-h-[32px] px-2 py-1 rounded text-xs font-medium bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-white"
                             >
-                              Refresh quote
+                              {isLegLoading ? "Loading…" : "Refresh quotes"}
                             </button>
                           </div>
                           <div className="flex flex-wrap gap-2 mt-2">
@@ -1684,32 +1824,72 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                 <th className="text-left py-2 px-3">Type</th>
                                 <th className="text-right py-2 px-3">Pos</th>
                                 <th className="text-right py-2 px-3">Avg cost</th>
+                                <th className="text-right py-2 px-3">Last</th>
+                                <th className="text-right py-2 px-3">Mkt val</th>
+                                <th className="text-right py-2 px-3">P&L</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {group.rows.map((row, i) => (
-                                <tr
-                                  key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
-                                  className="border-b border-gray-700/50 hover:bg-gray-700/30"
-                                >
-                                  <td className="py-2 px-3 text-gray-300 text-sm">
-                                    {getAccountLabel(row.account, userAlias)}
+                              {group.rows.map((row, i) => {
+                                const rowPrice = getRowLastPrice(row);
+                                const rowCost = row.position * row.avgCost;
+                                const rowMktVal = rowPrice != null ? row.position * rowPrice : null;
+                                const rowPnl = rowMktVal != null ? rowMktVal - rowCost : null;
+                                return (
+                                  <tr
+                                    key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
+                                    className="border-b border-gray-700/50 hover:bg-gray-700/30"
+                                  >
+                                    <td className="py-2 px-3 text-gray-300 text-sm">
+                                      {getAccountLabel(row.account, userAlias)}
+                                    </td>
+                                    <td className="py-2 px-3 text-gray-100 whitespace-nowrap text-sm font-medium">
+                                      {displaySymbol(row)}
+                                    </td>
+                                    <td className="py-2 px-3 text-gray-400 text-sm">
+                                      {row.contract?.secType ?? "—"}
+                                    </td>
+                                    <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm font-medium">
+                                      {formatPosition(row.position)}
+                                    </td>
+                                    <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm">
+                                      {formatAvgCost(row.avgCost)}
+                                    </td>
+                                    <td className="py-2 px-3 text-right tabular-nums text-sm text-gray-200">
+                                      {isLegLoading ? "…" : rowPrice != null ? rowPrice.toFixed(2) : "—"}
+                                    </td>
+                                    <td className="py-2 px-3 text-right tabular-nums text-sm text-gray-100">
+                                      {rowMktVal != null ? formatCostBasis(rowMktVal) : "—"}
+                                    </td>
+                                    <td className={`py-2 px-3 text-right tabular-nums text-sm font-medium ${
+                                      rowPnl != null && rowPnl > 0
+                                        ? "text-green-400"
+                                        : rowPnl != null && rowPnl < 0
+                                          ? "text-red-400"
+                                          : "text-gray-400"
+                                    }`}>
+                                      {rowPnl != null ? formatPnl(rowPnl) : "—"}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                            {groupHasAnyPrice && (
+                              <tfoot>
+                                <tr className="bg-gray-700/30 border-t border-gray-500 font-semibold text-sm">
+                                  <td colSpan={5} className="py-2 px-3 text-right text-gray-300">Totals</td>
+                                  <td className="py-2 px-3"></td>
+                                  <td className="py-2 px-3 text-right tabular-nums text-white">
+                                    {formatCostBasis(groupMktVal)}
                                   </td>
-                                  <td className="py-2 px-3 text-gray-100 whitespace-nowrap text-sm font-medium">
-                                    {displaySymbol(row)}
-                                  </td>
-                                  <td className="py-2 px-3 text-gray-400 text-sm">
-                                    {row.contract?.secType ?? "—"}
-                                  </td>
-                                  <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm font-medium">
-                                    {formatPosition(row.position)}
-                                  </td>
-                                  <td className="py-2 px-3 text-right text-gray-100 tabular-nums text-sm">
-                                    {formatAvgCost(row.avgCost)}
+                                  <td className={`py-2 px-3 text-right tabular-nums font-bold ${
+                                    groupPnl != null && groupPnl >= 0 ? "text-green-400" : "text-red-400"
+                                  }`}>
+                                    {groupPnl != null ? formatPnl(groupPnl) : "—"}
                                   </td>
                                 </tr>
-                              ))}
-                            </tbody>
+                              </tfoot>
+                            )}
                           </table>
                         </div>
                       </div>
