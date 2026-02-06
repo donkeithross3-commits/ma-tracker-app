@@ -744,6 +744,15 @@ class IBDataAgent:
                     await asyncio.sleep(RECONNECT_DELAY)
                     continue
                 
+                # Report IB managed accounts to relay for diagnostics / routing
+                ib_accounts = getattr(self.scanner, "_managed_accounts", [])
+                if ib_accounts and self.websocket:
+                    await self.websocket.send(json.dumps({
+                        "type": "ib_accounts",
+                        "accounts": ib_accounts
+                    }))
+                    logger.info(f"Reported IB accounts to relay: {ib_accounts}")
+
                 heartbeat_task = asyncio.create_task(self.send_heartbeat())
                 handler_task = asyncio.create_task(self.message_handler())
                 

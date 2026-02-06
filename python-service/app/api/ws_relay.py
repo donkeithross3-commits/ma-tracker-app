@@ -30,8 +30,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ws", tags=["websocket"])
 
 # Configuration
-# Legacy single API key (still supported for backwards compatibility)
-LEGACY_PROVIDER_API_KEY = os.environ.get("IB_PROVIDER_API_KEY", "")
 # Base URL for API key validation (the Next.js app)
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:3000")
 REQUEST_TIMEOUT_SECONDS = 120  # Option chain fetches can take 60+ seconds
@@ -43,16 +41,11 @@ async def validate_api_key(api_key: str) -> Optional[str]:
     Validate an API key against the database.
     
     Returns the user_id if valid, None if invalid.
-    Also supports legacy single-key mode for backwards compatibility.
+    All agents must use per-user API keys (legacy single-key mode removed).
     """
     # Log key prefix for debugging (first 10 chars only)
     key_prefix = api_key[:10] if len(api_key) > 10 else api_key
     logger.info(f"Validating API key starting with: {key_prefix}...")
-    
-    # Check legacy key first (for backwards compatibility)
-    if LEGACY_PROVIDER_API_KEY and api_key == LEGACY_PROVIDER_API_KEY:
-        logger.info("Using legacy API key authentication")
-        return "legacy"
     
     # Validate against database via internal API
     try:
@@ -94,6 +87,7 @@ class DataProvider:
     websocket: WebSocket
     user_id: str  # The user this provider belongs to
     agent_version: str = "0.0.0"  # Version reported by agent on auth
+    ib_accounts: list = field(default_factory=list)  # IB account IDs reported by agent
     connected_at: float = field(default_factory=time.time)
     last_heartbeat: float = field(default_factory=time.time)
     is_active: bool = True
@@ -218,6 +212,7 @@ class ProviderRegistry:
                     "id": p.provider_id,
                     "user_id": p.user_id,
                     "agent_version": p.agent_version,
+                    "ib_accounts": p.ib_accounts,
                     "connected_at": datetime.fromtimestamp(p.connected_at).isoformat(),
                     "last_heartbeat": datetime.fromtimestamp(p.last_heartbeat).isoformat(),
                     "is_active": p.is_active
@@ -333,6 +328,12 @@ async def data_provider_websocket(websocket: WebSocket):
                     else:
                         # Return error as data so callers can show the agent's message (e.g. relay_test_futures rewrite)
                         await registry.resolve_request(request_id, {"error": msg.get("error", "Unknown error")})
+                
+                elif msg_type == "ib_accounts":
+                    # Agent reports which IB accounts it manages
+                    accounts = msg.get("accounts", [])
+                    provider.ib_accounts = accounts
+                    logger.info(f"Provider {provider_id} reported IB accounts: {accounts}")
                 
                 else:
                     logger.warning(f"Unknown message type from provider: {msg_type}")
