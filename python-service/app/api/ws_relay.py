@@ -148,9 +148,16 @@ class ProviderRegistry:
         """
         async with self._lock:
             if user_id:
+                # When multiple providers match the same user_id, prefer
+                # the most recently connected one. It is more likely to be
+                # running the latest agent code (e.g. after an update).
+                best: Optional[DataProvider] = None
                 for provider in self.providers.values():
                     if provider.is_active and provider.user_id == user_id:
-                        return provider
+                        if best is None or provider.connected_at > best.connected_at:
+                            best = provider
+                if best:
+                    return best
                 if not allow_fallback_to_any:
                     return None
             for provider in self.providers.values():
