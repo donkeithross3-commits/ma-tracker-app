@@ -198,6 +198,7 @@ def compute_signal_for_ticker(ticker: str) -> dict[str, Any] | None:
     else:
         vol_ratio = ""
 
+    # Convert all values to strings to match CSV format expected by frontend
     row = {
         "ticker": ticker,
         "c": str(c),
@@ -208,10 +209,10 @@ def compute_signal_for_ticker(ticker: str) -> dict[str, Any] | None:
         "short_signal_value": str(short_signal_value),
         "signal": signal,
         "signal_status_prior_week": signal_status_prior_week,
-        "vol_ratio": vol_ratio,
-        "25DMA_range_bps": dma_range_bps,
-        "25D_ADV_Shares_MM": adv_shares_mm,
-        "25D_ADV_nortional_B": adv_notional_b,
-        "avg_trade_size": avg_trade_size,
+        "vol_ratio": str(vol_ratio) if vol_ratio != "" else "",
+        "25DMA_range_bps": str(dma_range_bps) if dma_range_bps else "",
+        "25D_ADV_Shares_MM": str(adv_shares_mm) if adv_shares_mm else "",
+        "25D_ADV_nortional_B": str(adv_notional_b) if adv_notional_b else "",
+        "avg_trade_size": str(avg_trade_size) if avg_trade_size else "",
     }
     return row
