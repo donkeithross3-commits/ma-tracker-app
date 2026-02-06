@@ -10,6 +10,7 @@ const USER_ALIASES: Record<string, string> = {
   "luis@limitlessventures.us": "LVS",
   "alexander@limitlessventures.us": "ASH",
   "dmartensen@myvbu.com": "DOM",
+  "dr79.cipriano@gmail.com": "DRC",
 };
 
 // KRJ Ticker Lists configuration
@@ -72,7 +73,7 @@ const KRJ_LISTS = [
     name: "DRC",
     slug: "drc",
     description: "Custom DRC watchlist",
-    ownerAlias: "DR3_dev",
+    ownerAlias: "DRC",
     isSystem: false,
     isEditable: true,
     displayOrder: 4,
