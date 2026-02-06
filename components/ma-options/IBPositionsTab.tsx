@@ -1079,204 +1079,213 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               Sell stock
                             </button>
                           </div>
-                          {/* ---- Stock order entry panel ---- */}
+                          {/* ---- Full-screen stock order overlay ---- */}
                           {stockOrderKey === group.key && (
-                            <div className="mt-3 p-4 rounded-xl border-2 border-gray-500 bg-gray-800/90">
-                              <div className="flex items-center justify-between mb-3">
-                                <span className={`text-xl font-bold ${stockOrderAction === "BUY" ? "text-blue-300" : "text-red-300"}`}>
-                                  {stockOrderAction} {underlyingTicker}
-                                </span>
-                                <button type="button" onClick={closeStockOrder} className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-600 hover:bg-gray-500 text-white text-lg font-bold">
-                                  ✕
-                                </button>
-                              </div>
-                              {/* Account selector (if multiple) */}
-                              {(data?.accounts?.length ?? 0) > 1 && (
-                                <div className="mb-3">
-                                  <label className="block text-sm text-gray-400 mb-1">Account</label>
-                                  <select
-                                    value={stockOrderAccount}
-                                    onChange={(e) => setStockOrderAccount(e.target.value)}
-                                    className="w-full min-h-[48px] rounded-lg bg-gray-700 border border-gray-500 text-white text-lg px-3 py-2"
+                            <div className="fixed inset-0 z-50 bg-gray-950/95 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeStockOrder(); }}>
+                              <div className="max-w-2xl mx-auto px-4 py-6 min-h-screen flex flex-col">
+                                {/* Header */}
+                                <div className="flex items-center justify-between mb-6">
+                                  <span className={`text-3xl font-extrabold ${stockOrderAction === "BUY" ? "text-blue-300" : "text-red-300"}`}>
+                                    {stockOrderAction} {underlyingTicker}
+                                  </span>
+                                  <button type="button" onClick={closeStockOrder} className="min-h-[56px] min-w-[56px] rounded-xl bg-gray-700 hover:bg-gray-600 text-white text-2xl font-bold">
+                                    ✕
+                                  </button>
+                                </div>
+
+                                {/* Account selector (if multiple) */}
+                                {(data?.accounts?.length ?? 0) > 1 && (
+                                  <div className="mb-5">
+                                    <label className="block text-base text-gray-400 mb-1">Account</label>
+                                    <select
+                                      value={stockOrderAccount}
+                                      onChange={(e) => setStockOrderAccount(e.target.value)}
+                                      className="w-full min-h-[56px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-xl px-4 py-3"
+                                    >
+                                      {data?.accounts?.map((a) => (
+                                        <option key={a} value={a}>{getAccountLabel(a, userAlias)}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+
+                                {/* Order type + TIF side by side */}
+                                <div className="grid grid-cols-2 gap-4 mb-5">
+                                  <div>
+                                    <label className="block text-base text-gray-400 mb-2">Order type</label>
+                                    <div className="flex flex-col gap-2">
+                                      {(["LMT", "STP LMT", "MOC"] as StockOrderType[]).map((ot) => (
+                                        <button
+                                          key={ot}
+                                          type="button"
+                                          onClick={() => setStockOrderType(ot)}
+                                          className={`w-full min-h-[64px] rounded-xl text-xl font-bold transition-colors ${
+                                            stockOrderType === ot
+                                              ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
+                                              : "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-600"
+                                          }`}
+                                        >
+                                          {ot === "STP LMT" ? "Stop Limit" : ot === "MOC" ? "MOC" : "Limit"}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="block text-base text-gray-400 mb-2">Time in force</label>
+                                    <div className="flex flex-col gap-2">
+                                      {(["DAY", "GTC"] as StockOrderTif[]).map((t) => (
+                                        <button
+                                          key={t}
+                                          type="button"
+                                          onClick={() => setStockOrderTif(t)}
+                                          className={`w-full min-h-[64px] rounded-xl text-xl font-bold transition-colors ${
+                                            stockOrderTif === t
+                                              ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
+                                              : "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-600"
+                                          }`}
+                                        >
+                                          {t}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Quantity */}
+                                <div className="mb-5">
+                                  <label className="block text-base text-gray-400 mb-2">Quantity (shares)</label>
+                                  <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min="1"
+                                    step="1"
+                                    value={stockOrderQty}
+                                    onChange={(e) => setStockOrderQty(e.target.value)}
+                                    placeholder="0"
+                                    className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                                  />
+                                  <div className="grid grid-cols-3 gap-3 mt-3">
+                                    {[10, 25, 50, 100, 250, 500].map((n) => (
+                                      <button
+                                        key={n}
+                                        type="button"
+                                        onClick={() => setStockOrderQty(String(n))}
+                                        className="min-h-[72px] rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-100 text-2xl font-bold"
+                                      >
+                                        {n}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* Limit price (not shown for MOC) */}
+                                {stockOrderType !== "MOC" && (
+                                  <div className="mb-5">
+                                    <label className="block text-base text-gray-400 mb-2">Limit price</label>
+                                    <input
+                                      type="number"
+                                      inputMode="decimal"
+                                      min="0"
+                                      step="0.01"
+                                      value={stockOrderLmtPrice}
+                                      onChange={(e) => setStockOrderLmtPrice(e.target.value)}
+                                      placeholder="0.00"
+                                      className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                                    />
+                                    <div className="grid grid-cols-3 gap-3 mt-3">
+                                      {[-0.10, -0.05, -0.01, +0.01, +0.05, +0.10].map((delta) => (
+                                        <button
+                                          key={delta}
+                                          type="button"
+                                          onClick={() => {
+                                            const cur = parseFloat(stockOrderLmtPrice) || 0;
+                                            setStockOrderLmtPrice(Math.max(0, cur + delta).toFixed(2));
+                                          }}
+                                          className="min-h-[72px] rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-100 text-2xl font-bold"
+                                        >
+                                          {delta > 0 ? "+" : ""}{delta.toFixed(2)}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Stop price (only for STP LMT) */}
+                                {stockOrderType === "STP LMT" && (
+                                  <div className="mb-5">
+                                    <label className="block text-base text-gray-400 mb-2">Stop price</label>
+                                    <input
+                                      type="number"
+                                      inputMode="decimal"
+                                      min="0"
+                                      step="0.01"
+                                      value={stockOrderStopPrice}
+                                      onChange={(e) => setStockOrderStopPrice(e.target.value)}
+                                      placeholder="0.00"
+                                      className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                                    />
+                                    <div className="grid grid-cols-3 gap-3 mt-3">
+                                      {[-0.10, -0.05, -0.01, +0.01, +0.05, +0.10].map((delta) => (
+                                        <button
+                                          key={delta}
+                                          type="button"
+                                          onClick={() => {
+                                            const cur = parseFloat(stockOrderStopPrice) || 0;
+                                            setStockOrderStopPrice(Math.max(0, cur + delta).toFixed(2));
+                                          }}
+                                          className="min-h-[72px] rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-100 text-2xl font-bold"
+                                        >
+                                          {delta > 0 ? "+" : ""}{delta.toFixed(2)}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Order summary & submit - sticky at bottom */}
+                                <div className="mt-auto pt-6 space-y-3">
+                                  {stockOrderQty && parseFloat(stockOrderQty) > 0 && (
+                                    <div className="text-xl text-gray-200 text-center">
+                                      {stockOrderAction} <span className="font-bold text-white">{stockOrderQty}</span> {underlyingTicker} @{" "}
+                                      {stockOrderType === "MOC"
+                                        ? "Market on Close"
+                                        : stockOrderType === "STP LMT"
+                                          ? `Stop ${stockOrderStopPrice || "—"} / Limit ${stockOrderLmtPrice || "—"}`
+                                          : `Limit ${stockOrderLmtPrice || "—"}`}
+                                      {" · "}
+                                      {stockOrderTif}
+                                      {stockOrderLmtPrice && stockOrderType !== "MOC" && (
+                                        <span className="ml-3 font-extrabold text-white text-2xl">
+                                          ≈ ${(parseFloat(stockOrderQty) * parseFloat(stockOrderLmtPrice)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={submitStockOrder}
+                                    disabled={stockOrderSubmitting || !stockOrderQty || parseFloat(stockOrderQty) <= 0}
+                                    className={`w-full min-h-[80px] rounded-2xl text-2xl font-extrabold transition-colors disabled:opacity-40 ${
+                                      stockOrderAction === "BUY"
+                                        ? "bg-blue-600 hover:bg-blue-500 text-white"
+                                        : "bg-red-600 hover:bg-red-500 text-white"
+                                    }`}
                                   >
-                                    {data?.accounts?.map((a) => (
-                                      <option key={a} value={a}>{getAccountLabel(a, userAlias)}</option>
-                                    ))}
-                                  </select>
+                                    {stockOrderSubmitting
+                                      ? "Sending order…"
+                                      : `${stockOrderAction} ${stockOrderQty || "0"} shares`}
+                                  </button>
+                                  {stockOrderResult?.error && (
+                                    <div className="p-4 rounded-xl bg-red-900/50 border border-red-700 text-red-200 text-lg">
+                                      {stockOrderResult.error}
+                                    </div>
+                                  )}
+                                  {stockOrderResult?.orderId && !stockOrderResult.error && (
+                                    <div className="p-4 rounded-xl bg-green-900/50 border border-green-700 text-green-200 text-lg">
+                                      Order #{stockOrderResult.orderId} — {stockOrderResult.status || "Submitted"}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                              {/* Order type buttons - big & easy to tap */}
-                              <div className="mb-3">
-                                <label className="block text-sm text-gray-400 mb-1">Order type</label>
-                                <div className="flex gap-2">
-                                  {(["LMT", "STP LMT", "MOC"] as StockOrderType[]).map((ot) => (
-                                    <button
-                                      key={ot}
-                                      type="button"
-                                      onClick={() => setStockOrderType(ot)}
-                                      className={`flex-1 min-h-[52px] rounded-lg text-lg font-bold transition-colors ${
-                                        stockOrderType === ot
-                                          ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
-                                          : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-                                      }`}
-                                    >
-                                      {ot === "STP LMT" ? "Stop Limit" : ot === "MOC" ? "MOC" : "Limit"}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              {/* TIF buttons */}
-                              <div className="mb-3">
-                                <label className="block text-sm text-gray-400 mb-1">Time in force</label>
-                                <div className="flex gap-2">
-                                  {(["DAY", "GTC"] as StockOrderTif[]).map((t) => (
-                                    <button
-                                      key={t}
-                                      type="button"
-                                      onClick={() => setStockOrderTif(t)}
-                                      className={`flex-1 min-h-[48px] rounded-lg text-lg font-bold transition-colors ${
-                                        stockOrderTif === t
-                                          ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
-                                          : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-                                      }`}
-                                    >
-                                      {t}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              {/* Quantity */}
-                              <div className="mb-3">
-                                <label className="block text-sm text-gray-400 mb-1">Quantity (shares)</label>
-                                <input
-                                  type="number"
-                                  inputMode="numeric"
-                                  min="1"
-                                  step="1"
-                                  value={stockOrderQty}
-                                  onChange={(e) => setStockOrderQty(e.target.value)}
-                                  placeholder="0"
-                                  className="w-full min-h-[56px] rounded-lg bg-gray-700 border border-gray-500 text-white text-2xl font-bold text-center px-4 py-3 placeholder-gray-500 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-                                />
-                                <div className="flex gap-2 mt-2">
-                                  {[10, 25, 50, 100, 250, 500].map((n) => (
-                                    <button
-                                      key={n}
-                                      type="button"
-                                      onClick={() => setStockOrderQty(String(n))}
-                                      className="flex-1 min-h-[44px] rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-base font-medium"
-                                    >
-                                      {n}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              {/* Limit price (not shown for MOC) */}
-                              {stockOrderType !== "MOC" && (
-                                <div className="mb-3">
-                                  <label className="block text-sm text-gray-400 mb-1">Limit price</label>
-                                  <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    step="0.01"
-                                    value={stockOrderLmtPrice}
-                                    onChange={(e) => setStockOrderLmtPrice(e.target.value)}
-                                    placeholder="0.00"
-                                    className="w-full min-h-[56px] rounded-lg bg-gray-700 border border-gray-500 text-white text-2xl font-bold text-center px-4 py-3 placeholder-gray-500 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-                                  />
-                                  {/* Quick adjust buttons */}
-                                  <div className="flex gap-2 mt-2">
-                                    {[-0.10, -0.05, -0.01, +0.01, +0.05, +0.10].map((delta) => (
-                                      <button
-                                        key={delta}
-                                        type="button"
-                                        onClick={() => {
-                                          const cur = parseFloat(stockOrderLmtPrice) || 0;
-                                          setStockOrderLmtPrice(Math.max(0, cur + delta).toFixed(2));
-                                        }}
-                                        className="flex-1 min-h-[44px] rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-base font-medium"
-                                      >
-                                        {delta > 0 ? "+" : ""}{delta.toFixed(2)}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              {/* Stop price (only for STP LMT) */}
-                              {stockOrderType === "STP LMT" && (
-                                <div className="mb-3">
-                                  <label className="block text-sm text-gray-400 mb-1">Stop price</label>
-                                  <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    step="0.01"
-                                    value={stockOrderStopPrice}
-                                    onChange={(e) => setStockOrderStopPrice(e.target.value)}
-                                    placeholder="0.00"
-                                    className="w-full min-h-[56px] rounded-lg bg-gray-700 border border-gray-500 text-white text-2xl font-bold text-center px-4 py-3 placeholder-gray-500 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-                                  />
-                                  <div className="flex gap-2 mt-2">
-                                    {[-0.10, -0.05, -0.01, +0.01, +0.05, +0.10].map((delta) => (
-                                      <button
-                                        key={delta}
-                                        type="button"
-                                        onClick={() => {
-                                          const cur = parseFloat(stockOrderStopPrice) || 0;
-                                          setStockOrderStopPrice(Math.max(0, cur + delta).toFixed(2));
-                                        }}
-                                        className="flex-1 min-h-[44px] rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-base font-medium"
-                                      >
-                                        {delta > 0 ? "+" : ""}{delta.toFixed(2)}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              {/* Order summary & submit */}
-                              <div className="mt-4 space-y-2">
-                                {stockOrderQty && parseFloat(stockOrderQty) > 0 && (
-                                  <div className="text-base text-gray-300">
-                                    {stockOrderAction} {stockOrderQty} {underlyingTicker} @{" "}
-                                    {stockOrderType === "MOC"
-                                      ? "Market on Close"
-                                      : stockOrderType === "STP LMT"
-                                        ? `Stop ${stockOrderStopPrice || "—"} / Limit ${stockOrderLmtPrice || "—"}`
-                                        : `Limit ${stockOrderLmtPrice || "—"}`}
-                                    {" · "}
-                                    {stockOrderTif}
-                                    {stockOrderLmtPrice && stockOrderType !== "MOC" && (
-                                      <span className="ml-2 font-semibold text-white">
-                                        ≈ ${(parseFloat(stockOrderQty) * parseFloat(stockOrderLmtPrice)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={submitStockOrder}
-                                  disabled={stockOrderSubmitting || !stockOrderQty || parseFloat(stockOrderQty) <= 0}
-                                  className={`w-full min-h-[60px] rounded-xl text-xl font-bold transition-colors disabled:opacity-40 ${
-                                    stockOrderAction === "BUY"
-                                      ? "bg-blue-600 hover:bg-blue-500 text-white"
-                                      : "bg-red-600 hover:bg-red-500 text-white"
-                                  }`}
-                                >
-                                  {stockOrderSubmitting
-                                    ? "Sending order…"
-                                    : `${stockOrderAction} ${stockOrderQty || "0"} shares`}
-                                </button>
-                                {stockOrderResult?.error && (
-                                  <div className="p-3 rounded-lg bg-red-900/50 border border-red-700 text-red-200 text-base">
-                                    {stockOrderResult.error}
-                                  </div>
-                                )}
-                                {stockOrderResult?.orderId && !stockOrderResult.error && (
-                                  <div className="p-3 rounded-lg bg-green-900/50 border border-green-700 text-green-200 text-base">
-                                    Order #{stockOrderResult.orderId} — {stockOrderResult.status || "Submitted"}
-                                  </div>
-                                )}
                               </div>
                             </div>
                           )}
