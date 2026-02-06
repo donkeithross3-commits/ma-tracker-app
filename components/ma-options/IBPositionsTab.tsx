@@ -480,7 +480,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   const [krjSignals, setKrjSignals] = useState<Record<string, "Long" | "Short" | "Neutral" | null>>({});
   const [requestingSignalTicker, setRequestingSignalTicker] = useState<string | null>(null);
-  const [requestSignalError, setRequestSignalError] = useState<string | null>(null);
+  const [requestSignalError, setRequestSignalError] = useState<Record<string, string>>({});
   // Stock quotes per group key (underlying ticker); null = not fetched, { price, timestamp } or { error }
   const [quotes, setQuotes] = useState<Record<string, { price: number; timestamp: string } | { error: string } | null>>({});
   const [quoteLoading, setQuoteLoading] = useState<Record<string, boolean>>({});
@@ -522,7 +522,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setLegPricesLoading((prev) => ({ ...prev, [groupKey]: true }));
     const ticker = groupKey.split(" ")[0]?.toUpperCase() ?? groupKey;
 
-    // Refresh stock quote (for STK legs and header Spot display)
+    // Refresh stock quote (for STK legs and header Last trade display)
     fetchQuote(ticker);
 
     // Batch-fetch option leg prices
@@ -1165,7 +1165,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const handleRequestSignal = useCallback(async (groupKey: string) => {
     const ticker = groupKey.split(" ")[0]?.trim().toUpperCase();
     if (!ticker) return;
-    setRequestSignalError(null);
+    setRequestSignalError((prev) => { const next = { ...prev }; delete next[ticker]; return next; });
     setRequestingSignalTicker(ticker);
     try {
       const res = await fetch("/api/krj/signals/request", {
@@ -1193,7 +1193,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         });
       }
     } catch (e) {
-      setRequestSignalError(e instanceof Error ? e.message : "Request failed");
+      const msg = e instanceof Error ? e.message : "Request failed";
+      setRequestSignalError((prev) => ({ ...prev, [ticker]: msg }));
     } finally {
       setRequestingSignalTicker(null);
     }
@@ -1523,9 +1524,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
             {/* Right: two columns of detail boxes for selected tickers only */}
             <div className="flex-1 min-w-0 flex flex-col">
-              {requestSignalError && (
-                <div className="mb-2 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-2 py-1">
-                  {requestSignalError}
+              {Object.keys(requestSignalError).length > 0 && (
+                <div className="mb-2 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-2 py-1 space-y-0.5">
+                  {Object.entries(requestSignalError).map(([ticker, msg]) => (
+                    <div key={ticker}><span className="font-medium">{ticker}:</span> {msg}</div>
+                  ))}
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 content-start">
@@ -1652,7 +1655,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               </span>
                             )}
                             <span className="tabular-nums text-gray-300">
-                              Spot:{" "}
+                              Last trade:{" "}
                               {quoteLoadingThis
                                 ? "…"
                                 : quote && "price" in quote
@@ -2454,7 +2457,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                 return (
                   <div className="space-y-4">
                     <p className="text-base text-gray-200">
-                      Spot: <span className="font-semibold text-white tabular-nums">${sellScanResult.spotPrice.toFixed(2)}</span>
+                      Last trade: <span className="font-semibold text-white tabular-nums">${sellScanResult.spotPrice.toFixed(2)}</span>
                       {" · "}
                       {contracts.length} contracts (0–15 business days, near the money)
                     </p>

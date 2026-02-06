@@ -83,19 +83,25 @@ def _trading_days_back(from_date: datetime, n: int) -> datetime:
     return from_date - timedelta(days=days)
 
 
+class SignalError(Exception):
+    """Raised when signal computation fails with a user-friendly reason."""
+    pass
+
+
 def compute_signal_for_ticker(ticker: str) -> dict[str, Any] | None:
     """
     Fetch OHLCV from Polygon for the ticker, compute KRJ signal for the last completed week.
     Returns a row dict with keys matching the CSV schema, or None on error.
+    Raises SignalError with a specific user-friendly reason on failure.
     """
     api_key = os.getenv("POLYGON_API_KEY", "").strip()
     if not api_key:
         logger.warning("POLYGON_API_KEY not set; cannot compute KRJ signal")
-        return None
+        raise SignalError("POLYGON_API_KEY is not configured on the server")
 
     ticker = (ticker or "").strip().upper()
     if not ticker:
-        return None
+        raise SignalError("Ticker is empty")
 
     signal_date = _last_friday()
     to_date = signal_date.strftime("%Y-%m-%d")
@@ -106,14 +112,14 @@ def compute_signal_for_ticker(ticker: str) -> dict[str, Any] | None:
         bars = _fetch_daily_bars(ticker, from_date, to_date, api_key)
     except httpx.HTTPStatusError as e:
         logger.warning("Polygon API error for %s: %s", ticker, e)
-        return None
+        raise SignalError(f"Polygon API error for {ticker}: HTTP {e.response.status_code}")
     except Exception as e:
         logger.exception("Failed to fetch Polygon data for %s: %s", ticker, e)
-        return None
+        raise SignalError(f"Failed to fetch data from Polygon for {ticker}")
 
     if not bars:
         logger.warning("No daily bars returned for %s in range %s to %s", ticker, from_date, to_date)
-        return None
+        raise SignalError(f"No trading data found for {ticker} on Polygon (range {from_date} to {to_date})")
 
     # Bars are ascending by t (ms). Find the bar for signal_date (Friday) and the prior 24 days for 25DMA.
     from_ts = int(signal_date.timestamp() * 1000)
@@ -139,7 +145,7 @@ def compute_signal_for_ticker(ticker: str) -> dict[str, Any] | None:
     closes_25 = [float(b["c"]) for b in recent[-25:]]
     if len(closes_25) < 25:
         logger.warning("Insufficient bars for 25DMA for %s (have %d)", ticker, len(closes_25))
-        return None
+        raise SignalError(f"Insufficient trading history for {ticker}: need 25 days, have {len(closes_25)}")
     dma25 = sum(closes_25) / 25
 
     # 25DMA shifted 3 weeks (15 trading days) – approximate
