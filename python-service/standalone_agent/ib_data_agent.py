@@ -98,11 +98,12 @@ class IBDataAgent:
         
     def connect_to_ib(self) -> bool:
         """Connect to IB TWS"""
-        import random
-        
         logger.info(f"Connecting to IB TWS at {IB_HOST}:{IB_PORT}...")
         
-        client_id = random.randint(100, 999)
+        # Use a fixed client_id so orders placed in one session can be
+        # cancelled after a restart. Random client_ids cause IB to reject
+        # cancelOrder for orders placed by a different client_id.
+        client_id = 100
         
         self.scanner = IBMergerArbScanner()
         connected = self.scanner.connect_to_ib(
