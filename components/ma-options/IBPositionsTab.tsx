@@ -277,6 +277,21 @@ function formatPnl(n: number): string {
   return formatted;
 }
 
+/**
+ * Contract multiplier for market value calculation.
+ * IB market data returns option prices per-share, but avgCost from the
+ * position callback is per-contract (already includes the multiplier).
+ * So we must multiply lastPrice by the contract multiplier for options.
+ */
+function getMultiplier(row: IBPositionRow): number {
+  const c = row.contract;
+  if (c.secType === "OPT" || c.secType === "FOP") {
+    const m = parseInt(c.multiplier || "100", 10);
+    return isNaN(m) || m <= 0 ? 100 : m;
+  }
+  return 1;
+}
+
 interface IBPositionsTabProps {
   /** When true, auto-refresh positions every 60s (e.g. when tab is active). */
   autoRefresh?: boolean;
@@ -312,6 +327,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [openOrdersError, setOpenOrdersError] = useState<string | null>(null);
   const [cancellingOrderId, setCancellingOrderId] = useState<number | null>(null);
   const [showAllOrders, setShowAllOrders] = useState(true);
+
+  // ---- Order modification state ----
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+  const [editLmtPrice, setEditLmtPrice] = useState("");
+  const [editQty, setEditQty] = useState("");
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // ---- Leg prices for live P&L ----
   const [legPrices, setLegPrices] = useState<Record<string, LegPrice>>({});
@@ -365,6 +387,91 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       setCancellingOrderId(null);
     }
   }, [fetchOpenOrders]);
+
+  /** Start editing an order — pre-fill with current values */
+  const startEditOrder = useCallback((o: IBOpenOrder) => {
+    setEditingOrderId(o.orderId);
+    setEditLmtPrice(
+      o.order.lmtPrice != null ? o.order.lmtPrice.toFixed(2) : ""
+    );
+    setEditQty(String(o.order.totalQuantity));
+    setEditError(null);
+  }, []);
+
+  const cancelEditOrder = useCallback(() => {
+    setEditingOrderId(null);
+    setEditError(null);
+  }, []);
+
+  /** Submit order modification — calls modify-order API */
+  const submitModifyOrder = useCallback(async (o: IBOpenOrder) => {
+    const newQty = parseFloat(editQty);
+    if (!newQty || newQty <= 0) {
+      setEditError("Enter a valid quantity");
+      return;
+    }
+    const newLmt = parseFloat(editLmtPrice);
+    if (o.order.orderType === "LMT" && (!newLmt || newLmt <= 0)) {
+      setEditError("Enter a valid limit price");
+      return;
+    }
+    setEditSubmitting(true);
+    setEditError(null);
+    try {
+      // Rebuild the contract from the open order's contract data
+      const contract: Record<string, unknown> = {
+        symbol: o.contract.symbol,
+        secType: o.contract.secType,
+        exchange: o.contract.exchange || "SMART",
+        currency: o.contract.currency || "USD",
+      };
+      if (o.contract.lastTradeDateOrContractMonth)
+        contract.lastTradeDateOrContractMonth = o.contract.lastTradeDateOrContractMonth;
+      if (o.contract.strike) contract.strike = o.contract.strike;
+      if (o.contract.right) contract.right = o.contract.right;
+      if (o.contract.multiplier) contract.multiplier = o.contract.multiplier;
+      if (o.contract.conId) contract.conId = o.contract.conId;
+
+      // Build updated order
+      const order: Record<string, unknown> = {
+        action: o.order.action,
+        totalQuantity: newQty,
+        orderType: o.order.orderType,
+        tif: o.order.tif || "DAY",
+        transmit: true,
+      };
+      if (o.order.account) order.account = o.order.account;
+      if (o.order.orderType === "LMT" || o.order.orderType === "STP LMT") {
+        order.lmtPrice = newLmt;
+      }
+      if (o.order.orderType === "STP LMT" && o.order.auxPrice != null) {
+        order.auxPrice = o.order.auxPrice;
+      }
+
+      const res = await fetch("/api/ib-connection/modify-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: o.orderId, contract, order, timeout_sec: 15 }),
+        credentials: "include",
+      });
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        const json = await res.json();
+        if (json.error) {
+          setEditError(`Modify failed: ${json.error}`);
+          return;
+        }
+      }
+      // Success — close editor and refresh orders
+      setEditingOrderId(null);
+      setEditError(null);
+      setTimeout(() => fetchOpenOrders(), 500);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : "Modify failed");
+    } finally {
+      setEditSubmitting(false);
+    }
+  }, [editQty, editLmtPrice, fetchOpenOrders]);
 
   /** Get open orders for a specific underlying symbol */
   const ordersForTicker = useCallback((ticker: string) => {
@@ -1187,45 +1294,112 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   </tr>
                 </thead>
                 <tbody>
-                  {openOrders.map((o) => (
-                    <tr
-                      key={o.orderId}
-                      className="border-b border-gray-700/50 hover:bg-gray-700/30"
-                    >
-                      <td className="py-1.5 px-3 text-gray-300">{getAccountLabel(o.order.account, userAlias)}</td>
-                      <td className="py-1.5 px-3 text-gray-100 font-medium whitespace-nowrap">{displayOrderSymbol(o)}</td>
-                      <td className="py-1.5 px-3 text-gray-400">{o.contract.secType}</td>
-                      <td className={`py-1.5 px-3 font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
-                        {o.order.action}
-                      </td>
-                      <td className="py-1.5 px-3 text-right tabular-nums text-gray-100">{o.order.totalQuantity}</td>
-                      <td className="py-1.5 px-3 text-gray-200 tabular-nums whitespace-nowrap">{formatOrderPrice(o)}</td>
-                      <td className="py-1.5 px-3 text-gray-400">{o.order.tif}</td>
-                      <td className="py-1.5 px-3">
-                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-                          o.orderState.status === "Submitted" || o.orderState.status === "PreSubmitted"
-                            ? "bg-blue-900/60 text-blue-300"
-                            : o.orderState.status === "Filled"
-                              ? "bg-green-900/60 text-green-300"
-                              : o.orderState.status === "Cancelled"
-                                ? "bg-gray-600/60 text-gray-300"
-                                : "bg-yellow-900/60 text-yellow-300"
-                        }`}>
-                          {o.orderState.status || "Unknown"}
-                        </span>
-                      </td>
-                      <td className="py-1.5 px-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => cancelOrder(o.orderId)}
-                          disabled={cancellingOrderId === o.orderId}
-                          className="min-h-[28px] px-2 py-0.5 rounded text-xs font-medium bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white"
-                        >
-                          {cancellingOrderId === o.orderId ? "…" : "Cancel"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {openOrders.map((o) => {
+                    const isEditing = editingOrderId === o.orderId;
+                    return (
+                      <tr
+                        key={o.orderId}
+                        className={`border-b border-gray-700/50 ${isEditing ? "bg-indigo-900/20" : "hover:bg-gray-700/30"}`}
+                      >
+                        <td className="py-1.5 px-3 text-gray-300">{getAccountLabel(o.order.account, userAlias)}</td>
+                        <td className="py-1.5 px-3 text-gray-100 font-medium whitespace-nowrap">{displayOrderSymbol(o)}</td>
+                        <td className="py-1.5 px-3 text-gray-400">{o.contract.secType}</td>
+                        <td className={`py-1.5 px-3 font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
+                          {o.order.action}
+                        </td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-gray-100">
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              value={editQty}
+                              onChange={(e) => setEditQty(e.target.value)}
+                              className="w-16 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                            />
+                          ) : (
+                            o.order.totalQuantity
+                          )}
+                        </td>
+                        <td className="py-1.5 px-3 text-gray-200 tabular-nums whitespace-nowrap">
+                          {isEditing && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT") ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-gray-400 text-xs">{o.order.orderType === "STP LMT" ? "STP LMT" : "LMT"}</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={editLmtPrice}
+                                onChange={(e) => setEditLmtPrice(e.target.value)}
+                                className="w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                              />
+                            </div>
+                          ) : (
+                            formatOrderPrice(o)
+                          )}
+                        </td>
+                        <td className="py-1.5 px-3 text-gray-400">{o.order.tif}</td>
+                        <td className="py-1.5 px-3">
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                            o.orderState.status === "Submitted" || o.orderState.status === "PreSubmitted"
+                              ? "bg-blue-900/60 text-blue-300"
+                              : o.orderState.status === "Filled"
+                                ? "bg-green-900/60 text-green-300"
+                                : o.orderState.status === "Cancelled"
+                                  ? "bg-gray-600/60 text-gray-300"
+                                  : "bg-yellow-900/60 text-yellow-300"
+                          }`}>
+                            {o.orderState.status || "Unknown"}
+                          </span>
+                        </td>
+                        <td className="py-1.5 px-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => submitModifyOrder(o)}
+                                  disabled={editSubmitting}
+                                  className="min-h-[28px] px-2 py-0.5 rounded text-xs font-medium bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white"
+                                >
+                                  {editSubmitting ? "…" : "Save"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelEditOrder}
+                                  disabled={editSubmitting}
+                                  className="min-h-[28px] px-2 py-0.5 rounded text-xs font-medium bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-white"
+                                >
+                                  Esc
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => startEditOrder(o)}
+                                  className="min-h-[28px] px-2 py-0.5 rounded text-xs font-medium bg-indigo-800 hover:bg-indigo-700 text-white"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => cancelOrder(o.orderId)}
+                                  disabled={cancellingOrderId === o.orderId}
+                                  className="min-h-[28px] px-2 py-0.5 rounded text-xs font-medium bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white"
+                                >
+                                  {cancellingOrderId === o.orderId ? "…" : "Cancel"}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                          {isEditing && editError && (
+                            <div className="text-xs text-red-400 mt-1">{editError}</div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -1319,12 +1493,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                     };
 
                     // Compute group-level market value and P&L
+                    // Option lastPrice is per-share; multiply by contract multiplier (100)
                     let groupMktVal = 0;
                     let groupHasAnyPrice = false;
                     for (const row of group.rows) {
                       const price = getRowLastPrice(row);
                       if (price != null) {
-                        groupMktVal += row.position * price;
+                        groupMktVal += row.position * price * getMultiplier(row);
                         groupHasAnyPrice = true;
                       }
                     }
@@ -1459,19 +1634,43 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                 <div className="px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-900/20 border-b border-gray-600/40">
                                   Working Orders ({tickerOrders.length})
                                 </div>
-                                {tickerOrders.map((o) => (
+                                {tickerOrders.map((o) => {
+                                  const isEd = editingOrderId === o.orderId;
+                                  return (
                                   <div
                                     key={o.orderId}
-                                    className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-700/30 text-xs last:border-b-0"
+                                    className={`flex flex-wrap items-center gap-2 px-3 py-1.5 border-b border-gray-700/30 text-xs last:border-b-0 ${isEd ? "bg-indigo-900/20" : ""}`}
                                   >
                                     <span className={`font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
                                       {o.order.action}
                                     </span>
-                                    <span className="tabular-nums text-gray-100">{o.order.totalQuantity}</span>
+                                    {isEd ? (
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        value={editQty}
+                                        onChange={(e) => setEditQty(e.target.value)}
+                                        className="w-14 px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
+                                      />
+                                    ) : (
+                                      <span className="tabular-nums text-gray-100">{o.order.totalQuantity}</span>
+                                    )}
                                     <span className="text-gray-300 truncate max-w-[120px]" title={displayOrderSymbol(o)}>
                                       {o.contract.secType === "STK" ? "STK" : displayOrderSymbol(o)}
                                     </span>
-                                    <span className="tabular-nums text-gray-200">{formatOrderPrice(o)}</span>
+                                    {isEd && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT") ? (
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={editLmtPrice}
+                                        onChange={(e) => setEditLmtPrice(e.target.value)}
+                                        className="w-16 px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
+                                      />
+                                    ) : (
+                                      <span className="tabular-nums text-gray-200">{formatOrderPrice(o)}</span>
+                                    )}
                                     <span className="text-gray-500">{o.order.tif}</span>
                                     <span className={`px-1 py-0.5 rounded text-xs ${
                                       o.orderState.status === "Submitted" || o.orderState.status === "PreSubmitted"
@@ -1480,16 +1679,52 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     }`}>
                                       {o.orderState.status}
                                     </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => cancelOrder(o.orderId)}
-                                      disabled={cancellingOrderId === o.orderId}
-                                      className="ml-auto min-h-[24px] px-2 py-0.5 rounded text-xs font-medium bg-red-800/80 hover:bg-red-700 disabled:opacity-50 text-white"
-                                    >
-                                      {cancellingOrderId === o.orderId ? "…" : "Cancel"}
-                                    </button>
+                                    <div className="ml-auto flex items-center gap-1">
+                                      {isEd ? (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => submitModifyOrder(o)}
+                                            disabled={editSubmitting}
+                                            className="min-h-[24px] px-2 py-0.5 rounded text-xs font-medium bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white"
+                                          >
+                                            {editSubmitting ? "…" : "Save"}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={cancelEditOrder}
+                                            disabled={editSubmitting}
+                                            className="min-h-[24px] px-2 py-0.5 rounded text-xs font-medium bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-white"
+                                          >
+                                            Esc
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => startEditOrder(o)}
+                                            className="min-h-[24px] px-2 py-0.5 rounded text-xs font-medium bg-indigo-800/80 hover:bg-indigo-700 text-white"
+                                          >
+                                            Edit
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => cancelOrder(o.orderId)}
+                                            disabled={cancellingOrderId === o.orderId}
+                                            className="min-h-[24px] px-2 py-0.5 rounded text-xs font-medium bg-red-800/80 hover:bg-red-700 disabled:opacity-50 text-white"
+                                          >
+                                            {cancellingOrderId === o.orderId ? "…" : "Cancel"}
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                    {isEd && editError && (
+                                      <div className="w-full text-xs text-red-400 mt-0.5">{editError}</div>
+                                    )}
                                   </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             );
                           })()}
@@ -1832,8 +2067,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             <tbody>
                               {group.rows.map((row, i) => {
                                 const rowPrice = getRowLastPrice(row);
+                                const rowMult = getMultiplier(row);
                                 const rowCost = row.position * row.avgCost;
-                                const rowMktVal = rowPrice != null ? row.position * rowPrice : null;
+                                const rowMktVal = rowPrice != null ? row.position * rowPrice * rowMult : null;
                                 const rowPnl = rowMktVal != null ? rowMktVal - rowCost : null;
                                 return (
                                   <tr

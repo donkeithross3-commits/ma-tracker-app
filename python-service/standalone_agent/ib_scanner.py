@@ -308,6 +308,45 @@ class IBMergerArbScanner(EWrapper, EClient):
             self._order_events.pop(order_id, None)
             self._order_results.pop(order_id, None)
 
+    def modify_order_sync(self, order_id: int, contract_d: dict, order_d: dict, timeout_sec: float = 30.0) -> dict:
+        """Modify an existing order by re-sending placeOrder with the same orderId.
+        IB treats placeOrder with an existing orderId as a modification."""
+        ok, err = self.validate_contract_for_order(contract_d)
+        if not ok:
+            return {"error": err}
+        ok, err = self.validate_order_params(order_d)
+        if not ok:
+            return {"error": err}
+        self._order_events[order_id] = Event()
+        self._order_results[order_id] = {}
+        try:
+            contract = self._contract_from_dict(contract_d)
+            order = self._order_from_dict(order_d)
+            order.orderId = order_id
+            self.placeOrder(order_id, contract, order)
+            if not self._order_events[order_id].wait(timeout=timeout_sec):
+                return {"error": "Modify order timeout. Check TWS.", "orderId": order_id}
+            res = self._order_results.get(order_id) or {}
+            if res.get("errorCode") is not None:
+                code = res.get("errorCode")
+                text = res.get("errorString") or ""
+                return {
+                    "error": self._order_error_message(code, text),
+                    "orderId": order_id,
+                    "errorCode": code,
+                    "errorString": text,
+                }
+            return {
+                "orderId": order_id,
+                "status": res.get("status"),
+                "filled": res.get("filled"),
+                "remaining": res.get("remaining"),
+                "avgFillPrice": res.get("avgFillPrice"),
+            }
+        finally:
+            self._order_events.pop(order_id, None)
+            self._order_results.pop(order_id, None)
+
     def cancel_order_sync(self, order_id: int) -> dict:
         """Cancel order by id."""
         try:

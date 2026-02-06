@@ -149,6 +149,8 @@ class IBDataAgent:
                 return await self._run_in_thread(self._handle_get_open_orders_sync, payload)
             elif request_type == "place_order":
                 return await self._run_in_thread(self._handle_place_order_sync, payload)
+            elif request_type == "modify_order":
+                return await self._run_in_thread(self._handle_modify_order_sync, payload)
             elif request_type == "cancel_order":
                 return await self._handle_cancel_order(payload)
             elif request_type == "fetch_prices":
@@ -245,6 +247,22 @@ class IBDataAgent:
             return self.scanner.place_order_sync(contract_d, order_d, timeout_sec=timeout_sec)
         except Exception as e:
             logger.error(f"Error placing order: {e}")
+            return {"error": str(e)}
+
+    def _handle_modify_order_sync(self, payload: dict) -> dict:
+        """Modify existing order via IB (placeOrder with same orderId)."""
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": "IB not connected"}
+        order_id = payload.get("orderId")
+        if order_id is None:
+            return {"error": "orderId required"}
+        contract_d = payload.get("contract") or {}
+        order_d = payload.get("order") or {}
+        timeout_sec = float(payload.get("timeout_sec", 30.0))
+        try:
+            return self.scanner.modify_order_sync(int(order_id), contract_d, order_d, timeout_sec=timeout_sec)
+        except Exception as e:
+            logger.error(f"Error modifying order: {e}")
             return {"error": str(e)}
 
     async def _handle_cancel_order(self, payload: dict) -> dict:

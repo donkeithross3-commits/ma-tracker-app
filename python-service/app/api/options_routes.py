@@ -826,6 +826,63 @@ async def relay_cancel_order(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ModifyOrderBody(BaseModel):
+    orderId: int
+    contract: dict
+    order: dict
+    timeout_sec: float = 30.0
+
+
+@router.post("/relay/modify-order")
+async def relay_modify_order(
+    user_id: Optional[str] = Query(None),
+    body: Optional[ModifyOrderBody] = None,
+):
+    """
+    Modify an existing order via the user's agent (re-sends placeOrder with same orderId).
+    """
+    try:
+        if not user_id or not user_id.strip():
+            raise HTTPException(status_code=400, detail="user_id query param required")
+        if not body or body.orderId is None:
+            raise HTTPException(status_code=400, detail="orderId required in body")
+        target_user_id = user_id.strip()
+        registry = get_registry()
+        status = registry.get_status()
+        if status["providers_connected"] == 0:
+            raise HTTPException(
+                status_code=503,
+                detail="No IB data provider connected. Please start the local agent."
+            )
+        provider = await registry.get_active_provider(user_id=target_user_id)
+        if not provider:
+            raise HTTPException(
+                status_code=503,
+                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
+            )
+        payload = {
+            "orderId": body.orderId,
+            "contract": body.contract,
+            "order": body.order,
+            "timeout_sec": body.timeout_sec,
+        }
+        response_data = await send_request_to_provider(
+            request_type="modify_order",
+            payload=payload,
+            timeout=body.timeout_sec + 10,
+            user_id=target_user_id,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay modify order error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/relay/open-orders")
 async def relay_open_orders(
     user_id: Optional[str] = Query(None),
