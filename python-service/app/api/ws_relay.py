@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -24,6 +25,8 @@ from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
 import httpx
+
+from app.utils.timing import RequestTimer
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +46,7 @@ async def validate_api_key(api_key: str) -> Optional[str]:
     Returns the user_id if valid, None if invalid.
     All agents must use per-user API keys (legacy single-key mode removed).
     """
-    # Log key prefix for debugging (first 10 chars only)
-    key_prefix = api_key[:10] if len(api_key) > 10 else api_key
-    logger.info(f"Validating API key starting with: {key_prefix}...")
+    logger.info("Validating API key...")
     
     # Validate against database via internal API
     try:
@@ -56,7 +57,7 @@ async def validate_api_key(api_key: str) -> Optional[str]:
                 json={"key": api_key},
                 timeout=5.0
             )
-            logger.info(f"Validation response: status={response.status_code}, body={response.text[:100]}")
+            logger.info(f"Validation response: status={response.status_code}")
             if response.status_code == 200:
                 data = response.json()
                 if data.get("valid"):
@@ -378,10 +379,13 @@ async def send_request_to_provider(
     Raises:
         HTTPException if no provider is connected or request times out
     """
+    timer = RequestTimer(f"relay:{request_type}")
+
     provider = await registry.get_active_provider(
         user_id=user_id,
         allow_fallback_to_any=allow_fallback_to_any_provider,
     )
+    timer.stage("provider_lookup")
     
     if provider and user_id:
         logger.info(f"Routing request to provider for user {user_id}: {provider.provider_id}")
@@ -406,24 +410,37 @@ async def send_request_to_provider(
     
     try:
         # Send request to provider
+        payload_bytes = len(json.dumps(payload).encode())
         await provider.websocket.send_json({
             "type": "request",
             "request_id": request_id,
             "request_type": request_type,
             "payload": payload
         })
+        timer.stage("ws_send")
         
         # Wait for response
         result = await asyncio.wait_for(future, timeout=timeout)
+        response_bytes = len(json.dumps(result).encode()) if result else 0
+        timer.stage("response_wait")
+        timer.finish(extra={
+            "timeout": timeout,
+            "payload_bytes": payload_bytes,
+            "response_bytes": response_bytes,
+        })
         return result
         
     except asyncio.TimeoutError:
+        timer.stage("timeout")
+        timer.finish(extra={"timeout": timeout, "status": "timeout"})
         await registry.fail_request(request_id, "Request timeout")
         raise HTTPException(
             status_code=504,
             detail=f"Request to IB data provider timed out after {timeout}s"
         )
     except Exception as e:
+        timer.stage("error")
+        timer.finish(extra={"timeout": timeout, "status": "error"})
         await registry.fail_request(request_id, str(e))
         raise HTTPException(
             status_code=500,

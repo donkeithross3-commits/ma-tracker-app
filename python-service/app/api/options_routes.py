@@ -3,10 +3,11 @@ Options Scanner API Routes
 """
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 from typing import List, Optional
 import logging
+import re
 import uuid
 import asyncio
 
@@ -26,11 +27,31 @@ from ..options.models import (
     ScanParameters,
 )
 from ..scanner import MergerArbAnalyzer, DealInput
+from ..utils.timing import RequestTimer
 from .ws_relay import send_request_to_provider, get_registry, PendingRequest
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/options", tags=["options"])
+
+# --- Ticker validation helpers ---
+_TICKER_RE = re.compile(r"^[A-Z]{1,10}$")
+
+
+def validate_ticker(ticker: str) -> str:
+    """Validate and normalise a ticker symbol. Raises HTTPException on bad input."""
+    t = ticker.strip().upper()
+    if not _TICKER_RE.match(t):
+        raise HTTPException(status_code=400, detail=f"Invalid ticker format: {ticker!r}")
+    return t
+
+
+def _pydantic_ticker_validator(v: str) -> str:
+    """Re-usable Pydantic field_validator for ticker fields."""
+    t = v.strip().upper()
+    if not _TICKER_RE.match(t):
+        raise ValueError(f"Invalid ticker format: {v!r}")
+    return t
 
 
 @router.get("/ib-status")
@@ -91,10 +112,11 @@ async def reconnect_ib():
 
 
 @router.get("/check-availability")
-async def check_availability(ticker: str) -> AvailabilityCheckResponse:
+async def check_availability(ticker: str = Query(...)) -> AvailabilityCheckResponse:
     """
     Check if listed options exist for a ticker
     """
+    ticker = validate_ticker(ticker)
     try:
         logger.info(f"Checking option availability for {ticker}")
         
@@ -477,6 +499,7 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
     Fetch option chain through WebSocket relay to remote IB data provider.
     This is used when IB TWS runs on a different machine than this server.
     """
+    timer = RequestTimer("relay_fetch_chain")
     try:
         logger.info(f"Relay: Fetching chain for {request.ticker} via WebSocket provider")
         
@@ -489,6 +512,7 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
                 status_code=503,
                 detail="No IB data provider connected. Please start the local agent."
             )
+        timer.stage("registry_check")
         
         # Send request through WebSocket relay
         # Pass userId so requests are routed to the user's own agent when available
@@ -503,6 +527,7 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
             timeout=180.0,  # EA and similar can have 90+ options (90*1s); need headroom
             user_id=request.userId
         )
+        timer.stage("provider_roundtrip")
         
         # Check for errors in response
         if "error" in response_data:
@@ -527,6 +552,8 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
                 bid_size=c.get("bid_size", 0),
                 ask_size=c.get("ask_size", 0)
             ))
+        timer.stage("deserialize")
+        timer.finish(extra={"ticker": request.ticker, "contracts": len(contracts)})
         
         return FetchChainResponse(
             ticker=response_data.get("ticker", request.ticker),
@@ -688,6 +715,7 @@ async def relay_positions(user_id: Optional[str] = Query(None)):
     Request positions from the user's agent only (reqPositions).
     Requires user_id. Never routes to another user's agent (permission: own account only).
     """
+    timer = RequestTimer("relay_positions")
     logger.info("relay_positions called: user_id=%s", "***" if user_id else None)
     try:
         if not user_id or not user_id.strip():
@@ -706,6 +734,7 @@ async def relay_positions(user_id: Optional[str] = Query(None)):
                 status_code=503,
                 detail="Your agent is not connected. Start the local agent and ensure TWS is running."
             )
+        timer.stage("registry_check")
         response_data = await send_request_to_provider(
             request_type="get_positions",
             payload={"timeout_sec": 15.0},
@@ -713,8 +742,11 @@ async def relay_positions(user_id: Optional[str] = Query(None)):
             user_id=target_user_id,
             allow_fallback_to_any_provider=False,
         )
+        timer.stage("provider_roundtrip")
         if "error" in response_data:
             raise HTTPException(status_code=500, detail=response_data["error"])
+        position_count = len(response_data.get("positions", []))
+        timer.finish(extra={"positions": position_count})
         return response_data
     except HTTPException:
         raise
@@ -1064,6 +1096,11 @@ class ContractSpec(BaseModel):
     expiry: str
     right: str
 
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, v: str) -> str:
+        return _pydantic_ticker_validator(v)
+
 class FetchPricesRequest(BaseModel):
     contracts: List[ContractSpec]
     userId: Optional[str] = None  # For routing to user's own IB agent
@@ -1088,6 +1125,7 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
     Fetch prices for specific contracts through WebSocket relay.
     Used by the Monitor tab to refresh watched spread prices.
     """
+    timer = RequestTimer("relay_fetch_prices")
     try:
         logger.info(f"Relay: Fetching prices for {len(request.contracts)} contracts")
         
@@ -1111,6 +1149,7 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
             timeout=60.0,  # 60 seconds should be plenty for price fetches
             user_id=request.userId
         )
+        timer.stage("provider_roundtrip")
         
         # Check for errors in response
         if "error" in response_data:
@@ -1132,6 +1171,8 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
                 ))
             else:
                 contracts.append(None)
+        timer.stage("deserialize")
+        timer.finish(extra={"contracts_requested": len(request.contracts), "contracts_returned": len(contracts)})
         
         return FetchPricesResponse(
             success=True,
@@ -1149,11 +1190,21 @@ class StockQuoteRequest(BaseModel):
     ticker: str
     userId: Optional[str] = None  # For routing to user's own IB agent
 
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, v: str) -> str:
+        return _pydantic_ticker_validator(v)
+
 
 class SellScanRequest(BaseModel):
     ticker: str
     right: str = "C"  # "C" or "P"
     userId: Optional[str] = None  # For routing to user's own IB agent
+
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, v: str) -> str:
+        return _pydantic_ticker_validator(v)
 
 
 class StockQuoteResponse(BaseModel):

@@ -42,8 +42,8 @@ if not os.getenv("ANTHROPIC_API_KEY"):
     sys.exit(1)
 
 print("[OK] Environment variables loaded")
-print(f"[OK] DATABASE_URL: {os.getenv('DATABASE_URL')[:50]}...")
-print(f"[OK] ANTHROPIC_API_KEY: {os.getenv('ANTHROPIC_API_KEY')[:20]}...")
+print("[OK] DATABASE_URL: ***")
+print("[OK] ANTHROPIC_API_KEY: ***")
 
 # Start uvicorn
 import uvicorn

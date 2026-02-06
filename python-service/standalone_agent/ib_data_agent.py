@@ -656,9 +656,11 @@ class IBDataAgent:
     async def _process_request(self, request_id: str, data: dict):
         """Process a request and send response"""
         request_type = data.get("request_type", "unknown")
+        t_start = time.monotonic()
         try:
             logger.info(f"Processing request {request_id} ({request_type})...")
             result = await self.handle_request(data)
+            t_handler = time.monotonic() - t_start
             
             if "error" in result:
                 logger.error(f"Request {request_id} failed: {result.get('error')}")
@@ -675,10 +677,18 @@ class IBDataAgent:
             }
             
             if self.websocket:
-                await self.websocket.send(json.dumps(response))
-                logger.info(f"Response sent for {request_id}")
+                resp_json = json.dumps(response)
+                t_serialize = time.monotonic() - t_start - t_handler
+                await self.websocket.send(resp_json)
+                t_total = time.monotonic() - t_start
+                logger.info(
+                    f"[perf] {request_type} request_id={request_id} "
+                    f"handler={t_handler:.3f}s serialize={t_serialize:.3f}s "
+                    f"total={t_total:.3f}s response_bytes={len(resp_json)}"
+                )
         except Exception as e:
-            logger.error(f"Error processing request {request_id}: {e}")
+            t_total = time.monotonic() - t_start
+            logger.error(f"Error processing request {request_id} ({t_total:.3f}s): {e}")
             if self.websocket:
                 await self.websocket.send(json.dumps({
                     "type": "response",

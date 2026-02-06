@@ -67,8 +67,10 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     checkConnection();
-    // Check every 10 seconds silently (no isChecking state change)
-    const interval = setInterval(() => checkConnection(false), 10000);
+    // Check every 15 seconds silently; skip when tab is hidden to save resources
+    const interval = setInterval(() => {
+      if (!document.hidden) checkConnection(false);
+    }, 15_000);
     return () => clearInterval(interval);
   }, []);
 

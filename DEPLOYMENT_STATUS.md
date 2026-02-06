@@ -61,25 +61,25 @@ curl https://charissa-gesticulatory-grovelingly.ngrok-free.dev/health
 
 # 2. Check prerequisites
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"command": "node --version && npm --version && python --version && git --version"}'
 
 # 3. Check if project exists
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"command": "dir C:\\Projects\\ma-tracker-app"}'
 
 # 4. Pull latest code
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"command": "cd C:\\Projects\\ma-tracker-app && git pull"}'
 
 # 5. Run installation script (long running, may timeout)
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"command": "cd C:\\Projects\\ma-tracker-app && powershell -ExecutionPolicy Bypass -File .\\scripts\\windows-install.ps1", "timeout": 600}'
 ```

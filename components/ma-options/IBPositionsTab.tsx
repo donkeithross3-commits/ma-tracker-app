@@ -1015,7 +1015,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         : positions,
     [positions, selectedAccount]
   );
-  const positionGroups = computeGroups(filteredPositions);
+  const positionGroups = useMemo(() => computeGroups(filteredPositions), [filteredPositions]);
   const positionGroupKeys = useMemo(() => new Set(positionGroups.map((g) => g.key)), [positionGroups]);
   // Merge manual tickers that don't already have a position group (e.g. AAPL with no position still shows as manual box)
   const groups = useMemo(() => {

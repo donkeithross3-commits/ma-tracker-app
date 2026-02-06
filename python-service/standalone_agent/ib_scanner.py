@@ -808,7 +808,11 @@ class IBMergerArbScanner(EWrapper, EClient):
         """Fetch option chain from IB"""
         print(f"[{ticker}] Fetching option chain (price={current_price or self.underlying_price}, deal_close={deal_close_date})", flush=True)
 
+        _chain_start = time.time()
+        _step_times: dict = {}
+
         contract_id = self.resolve_contract(ticker)
+        _step_times["resolve_contract"] = round(time.time() - _chain_start, 3)
         if not contract_id:
             contract_id = 0
             print(f"[{ticker}] Using contract_id=0 for option params request", flush=True)
@@ -819,12 +823,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         options = []
         price_to_use = current_price or self.underlying_price
         total_planned = 0
-        # #region agent log
-        _chain_start = time.time()
-        # #endregion
 
         if price_to_use:
             # Get expirations
+            _exp_start = time.time()
             if deal_close_date:
                 all_expiries = self.get_available_expirations(ticker, contract_id)
                 if not all_expiries:
@@ -847,6 +849,7 @@ class IBMergerArbScanner(EWrapper, EClient):
                 # Always get fresh expirations/strikes from IB for this ticker (avoid stale data from a previous call).
                 self.get_available_expirations(ticker, contract_id)
                 selected_expiries = sorted(set(self.available_expirations))[:3]
+            _step_times["get_expirations"] = round(time.time() - _exp_start, 3)
 
             print(f"[{ticker}] Step 4: Selected expirations: {selected_expiries}", flush=True)
 
@@ -875,12 +878,20 @@ class IBMergerArbScanner(EWrapper, EClient):
                 for strike in strikes:
                     for right in ['C', 'P']:
                         batch.append((expiry, strike, right))
+            _batch_start = time.time()
             results = self.get_option_data_batch(ticker, batch)
+            _step_times["batch_option_data"] = round(time.time() - _batch_start, 3)
             options = [opt for opt in results if opt is not None]
 
+        _total = round(time.time() - _chain_start, 2)
         # #region agent log
-        _debug_log("ib_scanner:fetch_option_chain", "chain_done", {"ticker": ticker, "options_count": len(options), "total_planned": total_planned, "duration_sec": round(time.time() - _chain_start, 2)}, "H1")
+        _debug_log("ib_scanner:fetch_option_chain", "chain_done", {"ticker": ticker, "options_count": len(options), "total_planned": total_planned, "duration_sec": _total}, "H1")
         # #endregion
+        print(
+            f"[perf][{ticker}] fetch_option_chain total={_total}s "
+            f"steps={_step_times} planned={total_planned} returned={len(options)}",
+            flush=True,
+        )
         print(f"[{ticker}] Step 5: Fetched {len(options)} options total", flush=True)
         return options
 

@@ -93,7 +93,7 @@ from typing import Optional
 
 app = FastAPI(title="Windows Remote Agent")
 
-API_KEY = "HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU="
+API_KEY = "<YOUR_STAGING_AGENT_API_KEY>"
 
 class CommandRequest(BaseModel):
     command: str
@@ -267,7 +267,7 @@ curl https://charissa-gesticulatory-grovelingly.ngrok-free.dev/health
 
 # Test command execution
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"command": "node --version"}'
 

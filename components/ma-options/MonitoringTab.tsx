@@ -44,10 +44,11 @@ export default function MonitoringTab() {
   useEffect(() => {
     loadSpreads();
 
-    // Set up auto-refresh every 30 seconds
-    const interval = setInterval(() => {
-      refreshPrices();
-    }, 30000);
+    // Auto-refresh every 60s, paused when tab is hidden to save resources
+    const tick = () => {
+      if (!document.hidden) refreshPrices();
+    };
+    const interval = setInterval(tick, 60_000);
     setRefreshInterval(interval);
 
     return () => {

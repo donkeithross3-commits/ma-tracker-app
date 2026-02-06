@@ -25,7 +25,7 @@ We can test the deployment remotely using the AI agent running on the staging PC
 
 ```bash
 STAGING_AGENT_URL="https://charissa-gesticulatory-grovelingly.ngrok-free.dev"
-STAGING_AGENT_API_KEY="HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU="
+STAGING_AGENT_API_KEY="<YOUR_STAGING_AGENT_API_KEY>"
 ```
 
 ### Test Commands
@@ -34,7 +34,7 @@ STAGING_AGENT_API_KEY="HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU="
 
 ```bash
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "command": "node --version && npm --version && python --version && git --version"
@@ -47,7 +47,7 @@ Expected: All version numbers print successfully
 
 ```bash
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "command": "dir C:\\Projects\\ma-tracker-app"
@@ -58,7 +58,7 @@ curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
 
 ```bash
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "command": "cd C:\\Projects\\ma-tracker-app && git status && git pull"
@@ -69,7 +69,7 @@ curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
 
 ```bash
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "command": "cd C:\\Projects\\ma-tracker-app && powershell -ExecutionPolicy Bypass -File .\\scripts\\windows-install.ps1",
@@ -83,7 +83,7 @@ Expected: "Installation Complete! ✅"
 
 ```bash
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "command": "cd C:\\Projects\\ma-tracker-app && npm run db:generate"
@@ -96,7 +96,7 @@ Expected: "Generated Prisma Client"
 
 ```bash
 curl -X POST https://charissa-gesticulatory-grovelingly.ngrok-free.dev/execute \
-  -H "Authorization: Bearer HKJMKiQqisZBOX2zDbGTePJ03hCqX54XiTMf9SEAZFU=" \
+  -H "Authorization: Bearer <YOUR_STAGING_AGENT_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
     "command": "netstat -an | findstr :7497"

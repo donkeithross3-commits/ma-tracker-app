@@ -74,9 +74,13 @@ app.include_router(ws_relay_router)
 app.include_router(krj_router)
 
 # Configure CORS - allow requests from Next.js frontend
+# Set CORS_ALLOWED_ORIGINS env var to a comma-separated list of origins.
+# Defaults to production + local dev origins. Set to "*" to allow all (NOT recommended).
+_cors_env = os.environ.get("CORS_ALLOWED_ORIGINS", "https://dr3-dashboard.com,http://localhost:3000")
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,0 +1,30 @@
+# Security and Latency Non-Negotiables
+
+These rules apply to ALL code changes in this repository.
+
+## Security
+
+- **Never log secrets.** Do not print, log, or expose API keys, database credentials, auth tokens, or their prefixes. Use `***` if you need to confirm a secret is set.
+- **Never use `allow_origins=["*"]` in production.** CORS origins are configured via the `CORS_ALLOWED_ORIGINS` env var. Default: `https://dr3-dashboard.com,http://localhost:3000`.
+- **Never commit real API keys or passwords** to source files, markdown docs, or comments. Use `<PLACEHOLDER>` or env vars.
+- **Always validate ticker input.** Use `validate_ticker()` (in `options_routes.py`) for query params or the `_pydantic_ticker_validator` field_validator for Pydantic models. Tickers must match `^[A-Z]{1,10}$`.
+- **Security headers are enabled by default** via `next.config.ts`. Disable with `ENABLE_SECURITY_HEADERS=false` only if debugging.
+
+## Latency / Instrumentation
+
+- **All IB relay endpoints must have `RequestTimer` instrumentation** (from `app/utils/timing.py`). Log `[perf]` lines with operation name, per-stage timing, and payload size.
+- **Fixed sleeps in `ib_scanner.py`** (e.g. `time.sleep(3.0)`) exist because IB TWS needs time to populate tick data via callbacks. Do NOT remove them without measuring first. Document the reason in a code comment.
+- **Polling intervals** in React components must skip ticks when `document.hidden` to avoid wasting resources when the tab is backgrounded.
+- **The `computeGroups()` call in `IBPositionsTab.tsx`** must be wrapped in `useMemo` keyed on `filteredPositions`.
+
+## Feature Flags
+
+When adding a security or performance change that could affect behaviour:
+```python
+# Python: env-var flags
+FEATURE = os.environ.get("FEATURE_NAME", "default_value")
+```
+```typescript
+// Next.js: env-var flags
+const FEATURE = process.env.FEATURE_NAME !== "false"
+```
