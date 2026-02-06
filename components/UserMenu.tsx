@@ -38,7 +38,11 @@ export function UserMenu({ variant = "light", initialUser }: UserMenuProps) {
   }
 
   const handleSignOut = () => {
-    signOut({ callbackUrl: "/login" })
+    // Use absolute URL to avoid Docker container hostname issues
+    const callbackUrl = typeof window !== "undefined" 
+      ? `${window.location.origin}/login`
+      : "/login"
+    signOut({ callbackUrl })
   }
 
   const bgColor = variant === "dark" 
