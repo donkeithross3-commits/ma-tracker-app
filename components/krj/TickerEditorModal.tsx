@@ -202,6 +202,7 @@ export function TickerEditorModal({
               <Edit3 className="h-5 w-5" />
               Edit {listName} Tickers
             </DialogTitle>
+            <p className="text-xs text-gray-500 font-mono">ID: {listId || "undefined"}</p>
           </DialogHeader>
 
           <div className="flex-1 overflow-hidden flex flex-col gap-4">
