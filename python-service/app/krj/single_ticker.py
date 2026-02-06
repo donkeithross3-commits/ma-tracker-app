@@ -3,14 +3,40 @@ Single-ticker KRJ signal computation using Polygon API (no IB dependency).
 Reuses the same logic as the weekly batch: 25DMA, weekly low, Friday close, 3% rule.
 """
 
+import csv
 import os
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Path to KRJ data directory (on droplet: ~/apps/data/krj/)
+KRJ_DATA_DIR = Path(os.getenv("KRJ_DATA_DIR", "/home/don/apps/data/krj"))
+
+
+def _get_spy_adv_shares() -> float | None:
+    """Read SPY's 25D ADV (shares) from the latest ETFs/FX CSV."""
+    csv_path = KRJ_DATA_DIR / "latest_etfs_fx.csv"
+    if not csv_path.exists():
+        logger.warning("ETFs/FX CSV not found at %s", csv_path)
+        return None
+    try:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get("ticker", "").upper() == "SPY":
+                    adv_str = row.get("25D_ADV_Shares_MM", "")
+                    if adv_str:
+                        # Value is in millions already
+                        return float(adv_str)
+        logger.warning("SPY not found in ETFs/FX CSV")
+    except Exception as e:
+        logger.warning("Error reading SPY ADV: %s", e)
+    return None
 
 # CSV row keys to match dashboard schema
 KRJ_ROW_KEYS = [
@@ -159,8 +185,13 @@ def compute_signal_for_ticker(ticker: str) -> dict[str, Any] | None:
     price_range = max(closes_25) - min(closes_25) if closes_25 else 0
     dma_range_bps = f"{(price_range / dma25) * 10000:.0f}" if dma25 > 0 else ""
     
-    # Vol ratio to SP500: would need SPY data - leave empty for now (or fetch separately)
-    vol_ratio = ""
+    # Vol ratio to SP500: ticker ADV / SPY ADV
+    spy_adv = _get_spy_adv_shares()
+    adv_shares_millions = adv_shares / 1_000_000 if adv_shares > 0 else 0
+    if spy_adv and spy_adv > 0 and adv_shares_millions > 0:
+        vol_ratio = f"{(adv_shares_millions / spy_adv) * 100:.0f}%"
+    else:
+        vol_ratio = ""
 
     row = {
         "ticker": ticker,
