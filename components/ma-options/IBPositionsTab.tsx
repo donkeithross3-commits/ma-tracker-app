@@ -603,6 +603,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [ticketStrike, setTicketStrike] = useState<number>(0);
   const [ticketRight, setTicketRight] = useState<"C" | "P">("C");
 
+  // ---- Dev stress test toggle (positions table + ticket) ----
+  const [devStressTest, setDevStressTest] = useState(false);
+
   /** Open the unified trade ticket for a stock or option.
    *  If a specific position row is given, defaults to exit that position.
    *  Otherwise defaults to STK trade. */
@@ -1810,29 +1813,29 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                           })()}
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full text-sm table-fixed">
+                          <table className="w-full text-sm table-fixed" style={{ minWidth: 860 }}>
                             <colgroup>
-                              <col className="w-[80px]" />
-                              <col />
-                              <col className="w-[50px]" />
-                              <col className="w-[55px]" />
-                              <col className="w-[70px]" />
-                              <col className="w-[55px]" />
-                              <col className="w-[75px]" />
-                              <col className="w-[85px]" />
-                              <col className="w-[62px]" />
+                              <col className="w-[90px]" />   {/* Account – truncate ok */}
+                              <col />                         {/* Symbol – flex remaining */}
+                              <col className="w-[52px]" />    {/* Type */}
+                              <col className="w-[100px]" />   {/* Pos – handles ±999,999 */}
+                              <col className="w-[110px]" />   {/* Avg cost – $99,999.99 */}
+                              <col className="w-[90px]" />    {/* Last */}
+                              <col className="w-[135px]" />   {/* Mkt val – ±$9,999,999 */}
+                              <col className="w-[145px]" />   {/* P&L – ±$9,999,999.99 */}
+                              <col className="w-[84px]" />    {/* Trade – min 44px button */}
                             </colgroup>
                             <thead>
                               <tr className="bg-gray-700/50 text-gray-200 text-sm border-b border-gray-600">
-                                <th className="text-left py-2 px-2">Account</th>
-                                <th className="text-left py-2 px-2">Symbol</th>
-                                <th className="text-left py-2 px-2">Type</th>
-                                <th className="text-right py-2 px-2">Pos</th>
-                                <th className="text-right py-2 px-2">Avg cost</th>
-                                <th className="text-right py-2 px-2">Last</th>
-                                <th className="text-right py-2 px-2">Mkt val</th>
-                                <th className="text-right py-2 px-2">P&L</th>
-                                <th className="text-center py-2 px-1">Trade</th>
+                                <th className="text-left py-2 px-2 whitespace-nowrap">Account</th>
+                                <th className="text-left py-2 px-2 whitespace-nowrap">Symbol</th>
+                                <th className="text-left py-2 px-2 whitespace-nowrap">Type</th>
+                                <th className="text-right py-2 px-2 whitespace-nowrap">Pos</th>
+                                <th className="text-right py-2 px-2 whitespace-nowrap">Avg cost</th>
+                                <th className="text-right py-2 px-2 whitespace-nowrap">Last</th>
+                                <th className="text-right py-2 px-2 whitespace-nowrap">Mkt val</th>
+                                <th className="text-right py-2 px-2 whitespace-nowrap">P&L</th>
+                                <th className="text-center py-2 px-1 whitespace-nowrap">Trade</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1847,41 +1850,41 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
                                     className="border-b border-gray-700/50 hover:bg-gray-700/30"
                                   >
-                                    <td className="py-1.5 px-2 text-gray-300 text-sm truncate">
+                                    <td className="py-2 px-2 text-gray-300 text-sm truncate whitespace-nowrap" title={getAccountLabel(row.account, userAlias)}>
                                       {getAccountLabel(row.account, userAlias)}
                                     </td>
-                                    <td className="py-1.5 px-2 text-gray-100 text-sm font-medium truncate">
+                                    <td className="py-2 px-2 text-gray-100 text-sm font-medium truncate whitespace-nowrap" title={displaySymbol(row)}>
                                       {displaySymbol(row)}
                                     </td>
-                                    <td className="py-1.5 px-2 text-gray-400 text-sm">
+                                    <td className="py-2 px-2 text-gray-400 text-sm whitespace-nowrap">
                                       {row.contract?.secType ?? "—"}
                                     </td>
-                                    <td className="py-1.5 px-2 text-right text-gray-100 tabular-nums text-sm font-medium">
+                                    <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm font-medium whitespace-nowrap">
                                       {formatPosition(row.position)}
                                     </td>
-                                    <td className="py-1.5 px-2 text-right text-gray-100 tabular-nums text-sm">
+                                    <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm whitespace-nowrap">
                                       {formatAvgCost(row.avgCost)}
                                     </td>
-                                    <td className="py-1.5 px-2 text-right tabular-nums text-sm text-gray-200">
+                                    <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-200 whitespace-nowrap">
                                       {isLegLoading ? "…" : rowPrice != null ? rowPrice.toFixed(2) : "—"}
                                     </td>
-                                    <td className="py-1.5 px-2 text-right tabular-nums text-sm text-gray-100">
+                                    <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-100 whitespace-nowrap" title={rowMktVal != null ? formatCostBasis(rowMktVal) : undefined}>
                                       {rowMktVal != null ? formatCostBasis(rowMktVal) : "—"}
                                     </td>
-                                    <td className={`py-1.5 px-2 text-right tabular-nums text-sm font-medium whitespace-nowrap ${
+                                    <td className={`py-2 px-2 text-right tabular-nums text-sm font-medium whitespace-nowrap ${
                                       rowPnl != null && rowPnl > 0
                                         ? "text-green-400"
                                         : rowPnl != null && rowPnl < 0
                                           ? "text-red-400"
                                           : "text-gray-400"
-                                    }`}>
+                                    }`} title={rowPnl != null ? formatPnl(rowPnl) : undefined}>
                                       {rowPnl != null ? formatPnl(rowPnl) : "—"}
                                     </td>
-                                    <td className="py-1 px-1 text-center">
+                                    <td className="py-1.5 px-1 text-center whitespace-nowrap">
                                       <button
                                         type="button"
                                         onClick={() => openTradeTicket(group.key, group, row)}
-                                        className="px-2 py-1 rounded text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white whitespace-nowrap"
+                                        className="min-h-[44px] min-w-[44px] px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-700 hover:bg-indigo-600 text-white whitespace-nowrap"
                                       >
                                         Trade
                                       </button>
@@ -1893,17 +1896,17 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             {groupHasAnyPrice && (
                               <tfoot>
                                 <tr className="bg-gray-700/30 border-t border-gray-500 font-semibold text-sm">
-                                  <td colSpan={5} className="py-1.5 px-2 text-right text-gray-300">Totals</td>
-                                  <td className="py-1.5 px-2"></td>
-                                  <td className="py-1.5 px-2 text-right tabular-nums text-white">
+                                  <td colSpan={5} className="py-2 px-2 text-right text-gray-300 whitespace-nowrap">Totals</td>
+                                  <td className="py-2 px-2"></td>
+                                  <td className="py-2 px-2 text-right tabular-nums text-white whitespace-nowrap">
                                     {formatCostBasis(groupMktVal)}
                                   </td>
-                                  <td className={`py-1.5 px-2 text-right tabular-nums font-bold whitespace-nowrap ${
+                                  <td className={`py-2 px-2 text-right tabular-nums font-bold whitespace-nowrap ${
                                     groupPnl != null && groupPnl >= 0 ? "text-green-400" : "text-red-400"
                                   }`}>
                                     {groupPnl != null ? formatPnl(groupPnl) : "—"}
                                   </td>
-                                  <td className="py-1.5 px-1"></td>
+                                  <td className="py-2 px-1"></td>
                                 </tr>
                               </tfoot>
                             )}
@@ -1933,7 +1936,103 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         >
           {loading ? "Refreshing…" : "Refresh"}
         </button>
+        {process.env.NODE_ENV === "development" && (
+          <button
+            type="button"
+            onClick={() => setDevStressTest((v) => !v)}
+            className={`min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              devStressTest
+                ? "bg-yellow-600 text-white ring-2 ring-yellow-400"
+                : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+            }`}
+          >
+            {devStressTest ? "Stress ON" : "Stress Test"}
+          </button>
+        )}
       </div>
+
+      {/* ── Dev stress test panel ── */}
+      {devStressTest && (() => {
+        const stressRows = [
+          { label: "LONGTICKERXYZ", acct: "DU12345678", type: "STK", pos: 999999, avg: 99999.99, last: 101234.56, pnl: 1234567890.12 },
+          { label: "MEGA 2025-12-19 999 C", acct: "U999888777", type: "OPT", pos: -100000, avg: 54321.99, last: 67890.12, pnl: -9876543.21 },
+          { label: "T", acct: "DU1", type: "STK", pos: 1, avg: 0.01, last: 0.02, pnl: 0.01 },
+          { label: "BRK.A", acct: "U127613", type: "STK", pos: 3, avg: 623456.78, last: 650000.00, pnl: 79630.66 },
+          { label: "SPY 2026-01-16 580 P", acct: "DU12345678", type: "OPT", pos: 500, avg: 1234.56, last: 1500.00, pnl: 132720.00 },
+        ];
+        return (
+          <div className="mt-4 p-3 rounded-lg border-2 border-yellow-600/50 bg-yellow-900/10">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-lg font-bold text-yellow-300">Stress Test: Extreme Values</span>
+              <span className="text-sm text-gray-400">Table column sizing / overflow verification</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm table-fixed" style={{ minWidth: 860 }}>
+                <colgroup>
+                  <col className="w-[90px]" />
+                  <col />
+                  <col className="w-[52px]" />
+                  <col className="w-[100px]" />
+                  <col className="w-[110px]" />
+                  <col className="w-[90px]" />
+                  <col className="w-[135px]" />
+                  <col className="w-[145px]" />
+                  <col className="w-[84px]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-gray-700/50 text-gray-200 text-sm border-b border-gray-600">
+                    <th className="text-left py-2 px-2 whitespace-nowrap">Account</th>
+                    <th className="text-left py-2 px-2 whitespace-nowrap">Symbol</th>
+                    <th className="text-left py-2 px-2 whitespace-nowrap">Type</th>
+                    <th className="text-right py-2 px-2 whitespace-nowrap">Pos</th>
+                    <th className="text-right py-2 px-2 whitespace-nowrap">Avg cost</th>
+                    <th className="text-right py-2 px-2 whitespace-nowrap">Last</th>
+                    <th className="text-right py-2 px-2 whitespace-nowrap">Mkt val</th>
+                    <th className="text-right py-2 px-2 whitespace-nowrap">P&L</th>
+                    <th className="text-center py-2 px-1 whitespace-nowrap">Trade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stressRows.map((r, i) => (
+                    <tr key={i} className="border-b border-gray-700/50 hover:bg-gray-700/30">
+                      <td className="py-2 px-2 text-gray-300 text-sm truncate whitespace-nowrap" title={r.acct}>{r.acct}</td>
+                      <td className="py-2 px-2 text-gray-100 text-sm font-medium truncate whitespace-nowrap" title={r.label}>{r.label}</td>
+                      <td className="py-2 px-2 text-gray-400 text-sm whitespace-nowrap">{r.type}</td>
+                      <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm font-medium whitespace-nowrap">{formatPosition(r.pos)}</td>
+                      <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm whitespace-nowrap">{formatAvgCost(r.avg)}</td>
+                      <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-200 whitespace-nowrap">{r.last.toFixed(2)}</td>
+                      <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-100 whitespace-nowrap" title={formatCostBasis(r.pos * r.last)}>{formatCostBasis(r.pos * r.last)}</td>
+                      <td className={`py-2 px-2 text-right tabular-nums text-sm font-medium whitespace-nowrap ${r.pnl > 0 ? "text-green-400" : r.pnl < 0 ? "text-red-400" : "text-gray-400"}`} title={formatPnl(r.pnl)}>{formatPnl(r.pnl)}</td>
+                      <td className="py-1.5 px-1 text-center whitespace-nowrap">
+                        <button type="button" className="min-h-[44px] min-w-[44px] px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-700 hover:bg-indigo-600 text-white whitespace-nowrap">Trade</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-700/30 border-t border-gray-500 font-semibold text-sm">
+                    <td colSpan={5} className="py-2 px-2 text-right text-gray-300 whitespace-nowrap">Totals</td>
+                    <td className="py-2 px-2"></td>
+                    <td className="py-2 px-2 text-right tabular-nums text-white whitespace-nowrap">{formatCostBasis(stressRows.reduce((s, r) => s + r.pos * r.last, 0))}</td>
+                    <td className="py-2 px-2 text-right tabular-nums font-bold whitespace-nowrap text-green-400">{formatPnl(stressRows.reduce((s, r) => s + r.pnl, 0))}</td>
+                    <td className="py-2 px-1"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <div className="mt-3 p-2 rounded bg-gray-800 border border-gray-600">
+              <p className="text-sm text-yellow-200 font-semibold mb-1">Ticket Stress Scenarios:</p>
+              <ul className="text-xs text-gray-300 space-y-0.5 list-disc list-inside">
+                <li>No position (posQty = 0): "= Pos" disabled, "Clear" works</li>
+                <li>Small position (1 share): "= Pos (1)" sets qty to 1</li>
+                <li>Huge position (999,999): "= Pos (999,999)" sets qty to 999999</li>
+                <li>Short position: absPos used (e.g. -500 becomes 500 for quick-fill)</li>
+                <li>Non-step-aligned (e.g. 137 shares): exact value used (no rounding needed for shares)</li>
+              </ul>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Add ticker modal: SEC EDGAR validation, same as Curate tab */}
       {addTickerOpen && (
@@ -2248,6 +2347,32 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   placeholder="0"
                   className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none mb-3"
                 />
+
+                {/* ── Absolute quantity buttons (mode-independent) ── */}
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setStockOrderQty("0")}
+                    className="min-h-[68px] rounded-xl border-2 border-gray-500 bg-gray-700 hover:bg-gray-600 text-white text-2xl font-extrabold"
+                  >
+                    Clear (0)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStockOrderQty(posQty > 0 ? String(posQty) : "0")}
+                    disabled={posQty <= 0}
+                    className={`min-h-[68px] rounded-xl border-2 text-2xl font-extrabold ${
+                      posQty > 0
+                        ? "border-cyan-500 bg-cyan-900/60 hover:bg-cyan-800/60 text-cyan-100"
+                        : "border-gray-600 bg-gray-800 text-gray-500 cursor-not-allowed opacity-50"
+                    }`}
+                    title={posQty > 0 ? `Set quantity to position size: ${posQty.toLocaleString()}` : "No position"}
+                  >
+                    = Pos{posQty > 0 ? ` (${posQty.toLocaleString()})` : ""}
+                  </button>
+                </div>
+
+                {/* ── Delta buttons (sign-mode-dependent) ── */}
                 <div className="grid grid-cols-2 gap-2 flex-1 content-start">
                   {posQty > 0 && (
                     <button
