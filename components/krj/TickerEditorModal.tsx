@@ -74,14 +74,19 @@ export function TickerEditorModal({
     }
   };
 
-  const handleOpenChange = (open: boolean) => {
-    if (open) {
+  // Load tickers when modal opens
+  useEffect(() => {
+    if (isOpen) {
       loadTickers();
       setNewTicker("");
       setAddSuccess(null);
       setRestoreSuccess(null);
       listModifiedRef.current = false;
-    } else {
+    }
+  }, [isOpen]);
+
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
       // Modal is closing - refresh page if list was modified
       if (listModifiedRef.current) {
         router.refresh();
