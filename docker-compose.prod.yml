@@ -10,9 +10,9 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # KRJ data directory - read-only for safety
+      # KRJ data directory - writable for on-demand signals
       # CRITICAL: This path must not change - KRJ data flow depends on it
-      - ./data/krj:/app/data/krj:ro
+      - ./data/krj:/app/data/krj
     # So the container can reach the host (where Python runs on port 8000)
     extra_hosts:
       - "host.docker.internal:host-gateway"
