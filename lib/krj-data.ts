@@ -141,6 +141,7 @@ const SLUG_TO_CSV: Record<string, string> = {
   etfs_fx: "latest_etfs_fx.csv",
   sp500: "latest_sp500.csv",
   sp100: "latest_sp100.csv",
+  ndx100: "latest_ndx100.csv",
   drc: "latest_drc.csv",
 };
 

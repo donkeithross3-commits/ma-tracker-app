@@ -46,6 +46,7 @@ CATEGORIES = {
     'ETFs_and_FX': 'latest_etfs_fx.csv',
     'SP500': 'latest_sp500.csv',
     'SP100': 'latest_sp100.csv',
+    'NDX100': 'latest_ndx100.csv',
 }
 
 # Regex to extract date from filename: KRJ_signals_latest_week_{CATEGORY}_{YYYY-MM-DD}.csv

@@ -70,13 +70,24 @@ const KRJ_LISTS = [
     tickers: [] as string[],
   },
   {
+    name: "NDX100",
+    slug: "ndx100",
+    description: "NASDAQ 100 index constituents (auto-updated from QQQ holdings)",
+    ownerAlias: "DR3_dev",
+    isSystem: true,
+    isEditable: false,
+    displayOrder: 4,
+    // Tickers loaded from CSV - populated from ndx100_tickers.csv
+    tickers: [] as string[],
+  },
+  {
     name: "DRC",
     slug: "drc",
     description: "Custom DRC watchlist",
     ownerAlias: "DRC",
     isSystem: false,
     isEditable: true,
-    displayOrder: 4,
+    displayOrder: 5,
     tickers: [
       "AMZN", "BDX", "BMNR", "COIN", "CRML", "CRWD", "DVN", "ENVX", "GOOG",
       "GS", "HOOD", "IONQ", "JPM", "MARA", "META", "MSFT", "MU", "NVDA",
