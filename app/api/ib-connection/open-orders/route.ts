@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth-api";
 
+export const dynamic = "force-dynamic";
+
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
@@ -17,6 +19,7 @@ export async function GET(_request: NextRequest) {
     const response = await fetch(url.toString(), {
       method: "GET",
       headers: { "Content-Type": "application/json" },
+      cache: "no-store",
     });
 
     const contentType = response.headers.get("content-type") ?? "";

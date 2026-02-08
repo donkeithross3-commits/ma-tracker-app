@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { spawn } from "child_process";
 import path from "path";
 
+export const dynamic = "force-dynamic";
+
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
@@ -26,6 +28,7 @@ async function checkRelayProviderStatus(): Promise<{
         method: "GET",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
+        cache: "no-store",
       }
     );
     clearTimeout(timeoutId);

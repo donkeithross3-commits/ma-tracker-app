@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth-api";
 
+export const dynamic = "force-dynamic";
+
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
@@ -17,16 +19,17 @@ export async function GET(request: NextRequest) {
     const url = new URL(`${PYTHON_SERVICE_URL}/options/relay/positions`);
     url.searchParams.set("user_id", String(userId));
     const targetUrl = url.toString();
-    // Omit user_id from logs for privacy
-    console.log("[positions] Fetching from Python relay:", `${PYTHON_SERVICE_URL}/options/relay/positions?user_id=...`);
+    console.log("[positions] Fetching from Python relay:", `${PYTHON_SERVICE_URL}/options/relay/positions?user_id=${userId}`);
 
     const response = await fetch(targetUrl, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
+      cache: "no-store",
     });
 
     const contentType = response.headers.get("content-type") ?? "";
     const text = await response.text();
+    console.log(`[positions] Python relay response: status=${response.status} bodyLen=${text.length} body=${text.substring(0, 300)}`);
     const isJson =
       contentType.includes("application/json") ||
       (text.trimStart().startsWith("{") || text.trimStart().startsWith("["));
