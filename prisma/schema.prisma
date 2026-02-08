@@ -320,6 +320,9 @@ model UserPreferences {
   maOptionsPrefs Json?    @map("ma_options_prefs")
   dealListPrefs  Json?    @map("deal_list_prefs")
   
+  // UI preferences: density mode, column visibility, etc.
+  uiPrefs        Json?    @map("ui_prefs")
+  
   // Ticker watchlists
   customTickers  String[] @map("custom_tickers")
   

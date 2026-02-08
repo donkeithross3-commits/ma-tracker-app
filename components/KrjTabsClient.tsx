@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -10,6 +10,8 @@ import { Printer, Filter, X, User, GitFork, Loader2, ArrowUpDown, ArrowUp, Arrow
 import KrjPrintLayout from "@/components/KrjPrintLayout"
 import { ListSettingsModal } from "@/components/krj/ListSettingsModal"
 import { TickerEditorModal } from "@/components/krj/TickerEditorModal"
+import { ColumnChooser } from "@/components/ui/ColumnChooser"
+import { useUIPreferences } from "@/lib/ui-preferences"
 
 type RawRow = Record<string, string>;
 
@@ -201,8 +203,19 @@ function computeSummaryFromRows(rows: RawRow[]) {
   return { rowsSummary, totals };
 }
 
+/** Default columns shown when user has no column visibility preference. */
+const KRJ_DEFAULT_COLUMNS = [
+  "ticker", "c", "weekly_low", "25DMA", "25DMA_shifted",
+  "long_signal_value", "short_signal_value",
+  "signal", "signal_status_prior_week",
+  "25DMA_range_bps", "vol_ratio", "market_cap_b",
+  "25D_ADV_Shares_MM", "25D_ADV_nortional_B", "avg_trade_size",
+]
+
 export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias }: KrjTabsClientProps) {
   const router = useRouter()
+  const { getVisibleColumns, setVisibleColumns, isComfort } = useUIPreferences()
+
   // Local groups state — allows immediate UI updates when tickers are added/removed
   const [localGroups, setLocalGroups] = useState<GroupData[]>(groupsProp)
   // Sync from server when props change (e.g. after router.refresh())
@@ -261,7 +274,25 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
   
   // Filter visible groups based on hidden list IDs
   const visibleGroups = localGroups.filter((g) => !g.listId || !hiddenListIds.includes(g.listId))
-  
+
+  // Column visibility (from UIPreferences context)
+  const savedVisibleCols = getVisibleColumns("krj")
+  const visibleColKeys = useMemo(
+    () => savedVisibleCols ?? KRJ_DEFAULT_COLUMNS,
+    [savedVisibleCols]
+  )
+  const visibleColumns = useMemo(
+    () => {
+      const keySet = new Set(visibleColKeys)
+      return columns.filter((c) => keySet.has(c.key))
+    },
+    [columns, visibleColKeys]
+  )
+  const handleColumnsChange = useCallback(
+    (keys: string[]) => setVisibleColumns("krj", keys),
+    [setVisibleColumns]
+  )
+
   // Sort state management
   const [sortConfig, setSortConfig] = useState<SortConfig>({ column: null, direction: "asc" })
 
@@ -561,6 +592,13 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
               ))}
             </TabsList>
             <div className="flex items-center gap-2">
+              <ColumnChooser
+                columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+                visible={visibleColKeys}
+                defaults={KRJ_DEFAULT_COLUMNS}
+                onChange={handleColumnsChange}
+                locked={["ticker"]}
+              />
               <ListSettingsModal
                 lists={localGroups.map((g) => ({
                   listId: g.listId || g.key,
@@ -725,11 +763,14 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
           )}
 
           {/* Main table */}
-          <div className="border border-gray-600 rounded overflow-auto max-h-[80vh]">
-            <table className="min-w-full text-[16px]">
+          <div
+            className="d-table-wrap border border-gray-600 rounded overflow-auto max-h-[80vh]"
+            style={{ "--visible-cols": visibleColumns.length } as React.CSSProperties}
+          >
+            <table className="d-table min-w-full text-[16px]">
               <thead className="bg-gray-800 sticky top-0 z-10">
                 <tr>
-                  {columns.map((col) => {
+                  {visibleColumns.map((col) => {
                     const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size'];
                     const isNumeric = numericCols.includes(col.key);
                     const isSorted = sortConfig.column === col.key;
@@ -763,7 +804,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                       key={(row["ticker"] || "") + "-" + idx}
                       className={`${idx % 2 === 0 ? "bg-gray-900" : "bg-gray-800/50"} hover:bg-gray-700 transition-colors text-gray-100`}
                     >
-                      {columns.map((col) => {
+                      {visibleColumns.map((col) => {
                         let value = row[col.key] ?? "";
                         
                         // Apply formatting based on column type
@@ -792,7 +833,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                         
                         // Color coding for signal columns
                         let cellColorClass = "";
-                        if (col.key === "signal" || col.key === "signal_status_prior_week") {
+                        if (col.key === "signal" || col.key === "signal_status_prior_week" || col.key === "optimized_signal" || col.key === "optimized_signal_prior_week") {
                           if (value === "Long") {
                             cellColorClass = "text-blue-400";
                           } else if (value === "Short") {

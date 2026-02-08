@@ -55,6 +55,8 @@ export default async function KrjPage() {
     { key: "short_signal_value", label: "Short Signal Value", description: "(Friday Close - 25DMA) / 25DMA; negative values indicate weakness below the moving average" },
     { key: "signal", label: "Current Week Signal", description: "Long if weekly low >= 3% above 25DMA; Short if Friday close <= 3% below 25DMA; otherwise Neutral" },
     { key: "signal_status_prior_week", label: "Last Week Signal", description: "Signal status from the prior week" },
+    { key: "optimized_signal", label: "Optimized Signal", description: "Current week signal using optimized thresholds (when available)" },
+    { key: "optimized_signal_prior_week", label: "Last Week Opt Signal", description: "Optimized signal from the prior week (when available)" },
     { key: "25DMA_range_bps", label: "Avg Daily Range (25 DMA)", description: "25-day average of daily high-low range in basis points" },
     { key: "vol_ratio", label: "Vol Ratio (to SP500)", description: "Stock's average daily range divided by SPY's daily range; measures relative volatility" },
     { key: "market_cap_b", label: "Mkt Cap", description: "Market capitalization (updated weekly)" },

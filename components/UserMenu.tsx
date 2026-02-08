@@ -3,7 +3,8 @@
 import { useState } from "react"
 import { signOut, useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
-import { LogOut, Key, User, ChevronDown } from "lucide-react"
+import { LogOut, Key, User, ChevronDown, Accessibility } from "lucide-react"
+import { useUIPreferences } from "@/lib/ui-preferences"
 
 interface UserMenuProps {
   variant?: "light" | "dark"
@@ -18,6 +19,7 @@ interface UserMenuProps {
 export function UserMenu({ variant = "light", initialUser }: UserMenuProps) {
   const { data: session, status } = useSession()
   const [isOpen, setIsOpen] = useState(false)
+  const { isComfort, toggleDensity } = useUIPreferences()
 
   // Use session from client if available, otherwise use initial server data
   const user = session?.user || initialUser
@@ -99,6 +101,30 @@ export function UserMenu({ variant = "light", initialUser }: UserMenuProps) {
                 <Key className="h-4 w-4" />
                 Change Password
               </a>
+
+              {/* Comfort Mode toggle */}
+              <button
+                onClick={toggleDensity}
+                className={`flex items-center justify-between px-4 py-2 text-sm w-full text-left ${textColor} ${hoverColor}`}
+              >
+                <span className="flex items-center gap-2">
+                  <Accessibility className="h-4 w-4" />
+                  Comfort Mode
+                </span>
+                <span
+                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${
+                    isComfort ? "bg-emerald-500" : variant === "dark" ? "bg-slate-600" : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                      isComfort ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </span>
+              </button>
+
+              <div className={`my-1 border-t ${variant === "dark" ? "border-slate-600" : "border-gray-200"}`} />
               
               <button
                 onClick={handleSignOut}

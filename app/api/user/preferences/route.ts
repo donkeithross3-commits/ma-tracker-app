@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db"
 import { requireAuth, isAuthError } from "@/lib/auth-api"
 
@@ -28,9 +29,19 @@ interface DealListPrefs {
   [key: string]: unknown
 }
 
+interface UIPrefs {
+  densityMode?: "compact" | "comfort" | null
+  columnVisibility?: {
+    krj?: string[]
+    [key: string]: string[] | undefined
+  }
+  [key: string]: unknown
+}
+
 interface PreferencesPayload {
   maOptionsPrefs?: MAOptionsPrefs
   dealListPrefs?: DealListPrefs
+  uiPrefs?: UIPrefs
   customTickers?: string[]
 }
 
@@ -63,6 +74,7 @@ export async function GET() {
     return NextResponse.json({
       maOptionsPrefs: preferences.maOptionsPrefs || {},
       dealListPrefs: preferences.dealListPrefs || {},
+      uiPrefs: (preferences as Record<string, unknown>).uiPrefs || {},
       customTickers: preferences.customTickers || [],
     })
   } catch (error) {
@@ -97,6 +109,7 @@ export async function PUT(request: Request) {
     const updateData: {
       maOptionsPrefs?: object
       dealListPrefs?: object
+      uiPrefs?: object
       customTickers?: string[]
     } = {}
 
@@ -105,6 +118,9 @@ export async function PUT(request: Request) {
     }
     if (body.dealListPrefs !== undefined) {
       updateData.dealListPrefs = body.dealListPrefs
+    }
+    if (body.uiPrefs !== undefined) {
+      updateData.uiPrefs = body.uiPrefs
     }
     if (body.customTickers !== undefined) {
       if (!Array.isArray(body.customTickers)) {
@@ -122,8 +138,9 @@ export async function PUT(request: Request) {
       update: updateData,
       create: {
         userId: user.id,
-        maOptionsPrefs: body.maOptionsPrefs || {},
-        dealListPrefs: body.dealListPrefs || {},
+        maOptionsPrefs: (body.maOptionsPrefs || {}) as Prisma.InputJsonValue,
+        dealListPrefs: (body.dealListPrefs || {}) as Prisma.InputJsonValue,
+        uiPrefs: (body.uiPrefs || {}) as Prisma.InputJsonValue,
         customTickers: body.customTickers || [],
       },
     })
@@ -131,6 +148,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({
       maOptionsPrefs: preferences.maOptionsPrefs || {},
       dealListPrefs: preferences.dealListPrefs || {},
+      uiPrefs: (preferences as Record<string, unknown>).uiPrefs || {},
       customTickers: preferences.customTickers || [],
     })
   } catch (error) {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { useSession } from "next-auth/react";
 import { useIBConnection } from "./IBConnectionContext";
+import { useUIPreferences } from "@/lib/ui-preferences";
 
 /** Hardcoded account aliases for KRJ (display only; filtering still uses raw account id). */
 const KRJ_ACCOUNT_ALIASES: Record<string, string> = {
@@ -301,14 +302,15 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const { data: session } = useSession();
   const userAlias = session?.user?.alias ?? null;
   const { isConnected } = useIBConnection();
+  const { prefs, loaded: prefsLoaded, updatePrefs } = useUIPreferences();
   const [data, setData] = useState<IBPositionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set());
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const hasSetDefaultAccountRef = useRef(false);
-  const [savedPositionsTickers, setSavedPositionsTickers] = useState<string[] | null>(null);
-  const appliedSavedPositionsRef = useRef(false);
+  /** True once we've applied the saved selection OR the user has manually toggled a ticker. */
+  const userHasInteractedRef = useRef(false);
   const [sellScanTicker, setSellScanTicker] = useState<string | null>(null);
   const [sellScanRight, setSellScanRight] = useState<"C" | "P" | null>(null);
   const [sellScanLoading, setSellScanLoading] = useState(false);
@@ -937,6 +939,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       }
       const next = [...manualTickers, { ticker, name }].sort((a, b) => a.ticker.localeCompare(b.ticker));
       setManualTickers(next);
+      userHasInteractedRef.current = true;
       setSelectedTickers((prev) => new Set([...prev, ticker]));
       setAddTickerOpen(false);
       setAddTickerInput("");
@@ -952,6 +955,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   const removeManualTicker = useCallback((ticker: string) => {
     const key = ticker.toUpperCase();
+    userHasInteractedRef.current = true;
     setManualTickers((prev) => prev.filter((m) => m.ticker.toUpperCase() !== key));
     setSelectedTickers((prev) => {
       const next = new Set(prev);
@@ -972,32 +976,25 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     return () => clearInterval(interval);
   }, [autoRefresh, isConnected, fetchPositions, fetchOpenOrders]);
 
-  // Load saved position ticker selection and manual tickers from user preferences
+  // Load manual tickers from context preferences (replaces old per-component fetch)
   useEffect(() => {
-    let cancelled = false;
-    fetch("/api/user/preferences", { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((prefs) => {
-        if (cancelled || !prefs?.maOptionsPrefs) return;
-        const tickers = prefs.maOptionsPrefs.positionsSelectedTickers;
-        if (Array.isArray(tickers)) setSavedPositionsTickers(tickers);
-        else setSavedPositionsTickers(null);
-        const manual = prefs.maOptionsPrefs.positionsManualTickers;
-        if (Array.isArray(manual)) {
-          setManualTickers(
-            manual.filter(
-              (m: unknown) =>
-                typeof m === "object" &&
-                m !== null &&
-                typeof (m as ManualTickerEntry).ticker === "string"
-            ) as ManualTickerEntry[]
-          );
-        }
-        manualTickersLoadedRef.current = true;
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+    if (!prefsLoaded) return;
+    const maOpts = prefs.maOptionsPrefs as Record<string, unknown>;
+    const manual = maOpts?.positionsManualTickers;
+    if (Array.isArray(manual)) {
+      setManualTickers(
+        manual.filter(
+          (m: unknown) =>
+            typeof m === "object" &&
+            m !== null &&
+            typeof (m as ManualTickerEntry).ticker === "string"
+        ) as ManualTickerEntry[]
+      );
+    }
+    manualTickersLoadedRef.current = true;
+    // Only run once when prefs first load -- not on every prefs change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefsLoaded]);
 
   const positions = data?.positions ?? [];
   useEffect(() => {
@@ -1041,26 +1038,36 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
   }, [accounts, userAlias]);
 
-  // Apply saved ticker selection once when we have groups and preferences (e.g. after hard refresh)
+  // Apply saved ticker selection from context whenever groups change,
+  // UNTIL the user manually toggles a ticker in this session.
+  // This fixes the old race condition where appliedSavedPositionsRef locked out
+  // re-application when groups arrived in multiple waves.
   useEffect(() => {
-    if (groups.length === 0 || savedPositionsTickers === null || appliedSavedPositionsRef.current) return;
+    if (!prefsLoaded || groups.length === 0 || userHasInteractedRef.current) return;
+    const maOpts = prefs.maOptionsPrefs as Record<string, unknown>;
+    const saved = maOpts?.positionsSelectedTickers;
+    if (!Array.isArray(saved)) return;
     const validKeys = new Set(groups.map((g) => g.key));
-    const toSelect = savedPositionsTickers.filter((k) => validKeys.has(k));
-    if (toSelect.length > 0) setSelectedTickers(new Set(toSelect));
-    appliedSavedPositionsRef.current = true;
-  }, [groups, savedPositionsTickers]);
+    const toSelect = (saved as string[]).filter((k) => validKeys.has(k));
+    if (toSelect.length > 0) {
+      setSelectedTickers(new Set(toSelect));
+    }
+  }, [prefsLoaded, groups, prefs.maOptionsPrefs]);
 
-  // When groups load or change: default no selection; keep only tickers that still exist
+  // When groups change AFTER user has interacted: prune to valid keys only
   useEffect(() => {
-    if (groups.length === 0) return;
+    if (groups.length === 0 || !userHasInteractedRef.current) return;
     setSelectedTickers((prev) => {
       const allKeys = new Set(groups.map((g) => g.key));
-      if (prev.size === 0) return new Set<string>();
-      return new Set([...prev].filter((k) => allKeys.has(k)));
+      const pruned = new Set([...prev].filter((k) => allKeys.has(k)));
+      // Only update if something was actually removed
+      if (pruned.size === prev.size) return prev;
+      return pruned;
     });
-  }, [groupKeysSignature, groups.length]);
+  }, [groupKeysSignature]);
 
   const toggleTicker = (key: string) => {
+    userHasInteractedRef.current = true;
     setSelectedTickers((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -1069,45 +1076,22 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     });
   };
 
-  // Persist selected tickers to user preferences (debounced)
+  // Persist selected tickers via context (no more read-modify-write race)
   useEffect(() => {
-    if (!appliedSavedPositionsRef.current) return;
+    if (!userHasInteractedRef.current) return;
     const tickers = [...selectedTickers];
-    const timeoutId = setTimeout(() => {
-      fetch("/api/user/preferences", { credentials: "include" })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((prefs) => {
-          if (!prefs) return;
-          const maOptionsPrefs = { ...(prefs.maOptionsPrefs || {}), positionsSelectedTickers: tickers };
-          return fetch("/api/user/preferences", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ maOptionsPrefs }),
-          });
-        })
-        .catch(() => {});
-    }, 600);
-    return () => clearTimeout(timeoutId);
-  }, [selectedTickers]);
+    updatePrefs({
+      maOptionsPrefs: { positionsSelectedTickers: tickers },
+    });
+  }, [selectedTickers, updatePrefs]);
 
-  // Persist manual tickers when they change (only after we've loaded prefs so we don't overwrite)
+  // Persist manual tickers via context (no more read-modify-write race)
   useEffect(() => {
     if (!manualTickersLoadedRef.current) return;
-    fetch("/api/user/preferences", { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((prefs) => {
-        if (!prefs) return;
-        const maOptionsPrefs = { ...(prefs.maOptionsPrefs || {}), positionsManualTickers: manualTickers };
-        return fetch("/api/user/preferences", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ maOptionsPrefs }),
-        });
-      })
-      .catch(() => {});
-  }, [manualTickers]);
+    updatePrefs({
+      maOptionsPrefs: { positionsManualTickers: manualTickers },
+    });
+  }, [manualTickers, updatePrefs]);
 
   const selectedGroups = groups.filter((g) => selectedTickers.has(g.key));
   const manualTickerNames = useMemo(

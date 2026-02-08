@@ -59,6 +59,89 @@
 }
 
 /* ============================================
+   Density System — Compact / Comfort
+   ============================================
+   Compact values derived from KRJ/Monitoring tables.
+   Comfort values derived from IBPositionsTab (44px targets, text-base).
+   Toggle via data-density attribute on <html>.
+   Default (no attribute) = compact.
+   ============================================ */
+
+:root {
+  /* ── Table cells ── */
+  --d-table-py: 0.125rem;      /* py-0.5 */
+  --d-table-px: 0.25rem;       /* px-1 */
+  --d-table-font: 1rem;        /* 16px (matches KRJ text-[16px]) */
+  --d-header-font: 0.875rem;   /* 14px (matches KRJ text-[14px]) */
+  --d-row-min-h: 1.5rem;       /* 24px */
+  /* ── Buttons (small / utility) ── */
+  --d-btn-py: 0.25rem;
+  --d-btn-px: 0.5rem;
+  --d-btn-font: 0.75rem;       /* text-xs */
+  --d-btn-min-h: 1.5rem;       /* h-6, 24px */
+  /* ── Action buttons (primary CTA) ── */
+  --d-action-btn-min-h: 2rem;  /* 32px */
+  --d-action-btn-py: 0.375rem;
+  --d-action-btn-px: 0.75rem;
+  --d-action-btn-font: 0.875rem; /* text-sm */
+  /* ── Layout ── */
+  --d-section-gap: 0.75rem;    /* space-y-3 */
+  --d-card-px: 0.75rem;
+  --d-card-py: 0.5rem;
+}
+
+[data-density="comfort"] {
+  /* ── Table cells ── */
+  --d-table-py: 0.5rem;
+  --d-table-px: 0.75rem;
+  --d-table-font: 1.125rem;    /* ~18px */
+  --d-header-font: 1rem;       /* text-base */
+  --d-row-min-h: 2.75rem;      /* 44px */
+  /* ── Buttons (small / utility) ── */
+  --d-btn-py: 0.5rem;
+  --d-btn-px: 0.75rem;
+  --d-btn-font: 0.875rem;      /* text-sm */
+  --d-btn-min-h: 2.75rem;      /* 44px */
+  /* ── Action buttons (primary CTA) ── */
+  --d-action-btn-min-h: 2.75rem; /* 44px */
+  --d-action-btn-py: 0.625rem;
+  --d-action-btn-px: 1rem;
+  --d-action-btn-font: 1rem;   /* text-base */
+  /* ── Layout ── */
+  --d-section-gap: 1.5rem;     /* space-y-6 */
+  --d-card-px: 1rem;
+  --d-card-py: 0.75rem;
+}
+
+/* ── Comfort-mode fluid table ──
+   Used by tables that opt in with .d-table-wrap > .d-table.
+   Container queries let font/padding scale with available width. */
+
+.d-table-wrap {
+  container-type: inline-size;
+}
+
+[data-density="comfort"] .d-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+[data-density="comfort"] .d-table th,
+[data-density="comfort"] .d-table td {
+  font-size: clamp(0.875rem, calc(100cqi / var(--visible-cols, 15) / 6), 1.375rem);
+  padding-top: clamp(0.25rem, calc(100cqi / var(--visible-cols, 15) / 20), 0.75rem);
+  padding-bottom: clamp(0.25rem, calc(100cqi / var(--visible-cols, 15) / 20), 0.75rem);
+  padding-left: clamp(0.25rem, calc(100cqi / var(--visible-cols, 15) / 16), 0.75rem);
+  padding-right: clamp(0.25rem, calc(100cqi / var(--visible-cols, 15) / 16), 0.75rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-density="comfort"] .d-table th {
+  font-size: clamp(0.75rem, calc(100cqi / var(--visible-cols, 15) / 7), 1.125rem);
+}
+
+/* ============================================
    KRJ Print Styles
    ============================================ */
 
