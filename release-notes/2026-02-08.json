@@ -1,0 +1,51 @@
+{
+  "date": "2026-02-08",
+  "title": "Week of Feb 8, 2026",
+  "summary": "New index groups for KRJ signals, market cap data, and position risk improvements.",
+  "features": [
+    {
+      "id": "ndx100-group",
+      "title": "NDX 100 Index Group",
+      "summary": "New signal group tracking all Nasdaq 100 components",
+      "description": "The KRJ signals page now includes a dedicated NDX 100 group. This lets you see momentum signals for all 100 components of the Nasdaq 100 index in one view — filter by Long/Short/Neutral, sort by any column, and quickly identify which large-cap tech names are showing directional momentum.\n\nAccess it from the group selector dropdown on the Signals tab.",
+      "category": "signals",
+      "image": "/changelog/2026-02-08/ndx100-group.png",
+      "screenshot": {
+        "path": "/krj",
+        "actions": [
+          { "type": "wait", "ms": 2000 }
+        ],
+        "viewport": { "width": 1400, "height": 900 },
+        "annotations": [
+          {
+            "type": "circle",
+            "selector": "[data-group='ndx100']",
+            "label": "NDX 100 group"
+          }
+        ]
+      }
+    },
+    {
+      "id": "market-cap-column",
+      "title": "Market Cap Column",
+      "summary": "See market capitalization directly in the signals table",
+      "description": "Every signal row now displays market capitalization alongside the existing volume and volatility metrics. Values are shown in compact notation ($1.2T, $450B, etc.) so you can instantly gauge the size of each name without leaving the page.\n\nThe column is sortable — click the header to rank by market cap.",
+      "category": "signals",
+      "image": "/changelog/2026-02-08/market-cap-column.png",
+      "screenshot": {
+        "path": "/krj",
+        "actions": [
+          { "type": "wait", "ms": 2000 }
+        ],
+        "viewport": { "width": 1400, "height": 900 },
+        "annotations": [
+          {
+            "type": "arrow",
+            "selector": "th[data-col='market_cap_b']",
+            "label": "Market Cap"
+          }
+        ]
+      }
+    }
+  ]
+}

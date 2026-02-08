@@ -1,0 +1,3 @@
+# Screenshot tool dependencies (dev only — not needed in production)
+playwright>=1.40.0
+Pillow>=10.0.0

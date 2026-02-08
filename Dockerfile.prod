@@ -58,6 +58,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 # Use: docker compose build --no-cache web && docker compose up -d --force-recreate web
 COPY --from=builder --chown=nextjs:nodejs /app/python-service/standalone_agent ./python-service/standalone_agent
 
+# Copy release notes for the changelog page
+COPY --from=builder --chown=nextjs:nodejs /app/release-notes ./release-notes
+
 # Create data directory for volume mount
 RUN mkdir -p /app/data/krj && chown nextjs:nodejs /app/data/krj
 
