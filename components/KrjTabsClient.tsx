@@ -152,6 +152,14 @@ function formatBillions(x: string | number | undefined): string {
   return num.toFixed(2) + "B";
 }
 
+function formatMarketCap(x: string | number | undefined): string {
+  if (x === undefined || x === null || x === "") return "";
+  const num = Number(x);
+  if (Number.isNaN(num)) return String(x);
+  if (num >= 1000) return (num / 1000).toFixed(2) + "T";
+  return num.toFixed(1) + "B";
+}
+
 function formatDecimal(x: string | number | undefined, decimals: number): string {
   if (x === undefined || x === null || x === "") return "";
   const str = String(x);
@@ -763,7 +771,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           // Strip c: prefix from currency pairs for cleaner display
                           value = isCurrencyPair(value) ? value.substring(2) : value;
                         } else if (col.key === "market_cap_b") {
-                          value = formatBillions(value);
+                          value = formatMarketCap(value);
                         } else if (col.key === "c" || col.key === "weekly_low" || col.key === "25DMA" || col.key === "25DMA_shifted") {
                           value = formatPrice(value);
                         } else if (col.key === "long_signal_value" || col.key === "short_signal_value") {

@@ -57,7 +57,7 @@ export default async function KrjPage() {
     { key: "signal_status_prior_week", label: "Last Week Signal", description: "Signal status from the prior week" },
     { key: "25DMA_range_bps", label: "Avg Daily Range (25 DMA)", description: "25-day average of daily high-low range in basis points" },
     { key: "vol_ratio", label: "Vol Ratio (to SP500)", description: "Stock's average daily range divided by SPY's daily range; measures relative volatility" },
-    { key: "market_cap_b", label: "Mkt Cap ($B)", description: "Market capitalization in billions of dollars (updated weekly)" },
+    { key: "market_cap_b", label: "Mkt Cap", description: "Market capitalization (updated weekly)" },
     { key: "25D_ADV_Shares_MM", label: "ADV (25 DMA - MM Shares)", description: "25-day average daily volume in millions of shares" },
     { key: "25D_ADV_nortional_B", label: "ADV (25 DMA - $B)", description: "25-day average daily notional volume in billions of dollars" },
     { key: "avg_trade_size", label: "Average Trade Size", description: "Average number of shares per trade (volume / number of trades)" },
