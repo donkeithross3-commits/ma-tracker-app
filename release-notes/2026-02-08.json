@@ -18,7 +18,7 @@
       "summary": "Redesigned order entry with large controls, auto-filled prices, and delta-based quantity buttons",
       "description": "The trade ticket has been completely rebuilt for speed and accessibility. It now opens full-screen with a horizontal 3-column layout:\n\n- **Left column**: Instrument details and current position\n- **Center column**: Order type (Market/Limit/Stop), side (Buy/Sell), and quantity with +/- delta buttons\n- **Right column**: Price fields, auto-populated from the live quote when the ticket opens\n\nThe limit price auto-fills from the current bid/ask. Stop price pre-fills from the spot quote. Quantity buttons use delta increments (+1, +5, +10, etc.) with a toggle for +/- direction. Everything is sized for quick, confident order entry.",
       "category": "positions",
-      "image": "/changelog/2026-02-08/trade-ticket.png",
+      "image": "",
       "screenshot": null
     },
     {
@@ -27,7 +27,7 @@
       "summary": "View, modify, and cancel working orders \u2014 globally and per-position",
       "description": "Full order lifecycle management is now built in. You can see all working orders in a global view, or collapsed under each position block with a toggle.\n\nFor each working order you can:\n- **Modify** the price or quantity inline\n- **Cancel** with a single click\n- See real-time order status updates from IB\n\nOrder binding has been hardened so orders placed through the dashboard always show up correctly, even across sessions. The live order book persists across reconnections.",
       "category": "positions",
-      "image": "/changelog/2026-02-08/working-orders.png",
+      "image": "",
       "screenshot": null
     },
     {
@@ -60,12 +60,7 @@
         "annotations": [
           {
             "type": "circle",
-            "bbox": [
-              437,
-              47,
-              110,
-              22
-            ],
+            "selector": "button:has-text('NDX100')",
             "label": "New NDX 100 group"
           }
         ]
@@ -93,16 +88,11 @@
         "annotations": [
           {
             "type": "arrow",
-            "bbox": [
-              760,
-              100,
-              50,
-              20
-            ],
+            "selector": "th:has-text('Mkt Cap')",
             "label": "Mkt Cap",
-            "from": [
-              720,
-              50
+            "from_offset": [
+              -60,
+              -50
             ]
           }
         ]
@@ -114,7 +104,7 @@
       "summary": "Add, remove, and reorder tickers in your signal groups with on-demand signals",
       "description": "The Edit Tickers modal has been rebuilt. You can now:\n\n- **Add tickers** with SEC EDGAR autocomplete validation \u2014 type a few letters, pick from the dropdown\n- **Remove tickers** with immediate group tab refresh\n- **Reorder** your lists by dragging tickers into your preferred sequence (order is preserved, no more alphabetical sort)\n- **Restore** the default ETFs/FX or DRC list to its original state with one click\n\nWhen you add a new ticker, an on-demand signal is calculated immediately using live Polygon data \u2014 no need to wait for the weekly batch. The signal includes all metrics: 25 DMA, vol ratio (vs SPY), ADV, and Long/Short/Neutral classification.\n\nTicker lists are also auto-exported to JSON so the weekly batch job picks up your changes automatically.",
       "category": "signals",
-      "image": "/changelog/2026-02-08/ticker-management.png",
+      "image": "",
       "screenshot": null
     },
     {
@@ -123,7 +113,7 @@
       "summary": "One-click option scan showing near-the-money calls and puts for any position",
       "description": "From any position block on the Account tab, click Sell Scan to instantly see the nearest-term calls and puts available for that underlying. The scan targets options expiring within 0\u201315 business days and groups them by expiration.\n\nResults show bid/ask, volume, open interest, and repeated-strike highlighting so you can quickly compare the same strike across expirations. The scan runs through your IB agent using the new batch market data path for significantly faster results.",
       "category": "options",
-      "image": "/changelog/2026-02-08/sell-scan.png",
+      "image": "",
       "screenshot": null
     },
     {
@@ -148,12 +138,7 @@
         "annotations": [
           {
             "type": "circle",
-            "bbox": [
-              383,
-              218,
-              112,
-              16
-            ],
+            "selector": "td:has-text('V 0 OI 11')",
             "label": "Volume & Open Interest"
           }
         ]
@@ -181,12 +166,7 @@
         "annotations": [
           {
             "type": "circle",
-            "bbox": [
-              325,
-              88,
-              100,
-              26
-            ],
+            "selector": "button:has-text('All Spreads')",
             "label": "Spread list filter"
           }
         ]
@@ -198,7 +178,7 @@
       "summary": "One-click print for Long/Short signals, sorted by group with proper page breaks",
       "description": "The print dialog now lets you select which groups to include and offers a \"Print all Long/Short\" shortcut that prints only actionable signals (Long and Short) across all groups, sorted and with each group starting on a new page.\n\nGroup names repeat in the table header on every printed page so you always know which list you're looking at.",
       "category": "signals",
-      "image": "/changelog/2026-02-08/krj-printing.png",
+      "image": "",
       "screenshot": null
     },
     {
