@@ -37,6 +37,7 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, TYPE_CHECKING
@@ -85,6 +86,8 @@ class StrategyState:
     last_eval_time: float = 0.0
     eval_count: int = 0
     orders_placed: int = 0
+    orders_submitted: int = 0  # total submitted (including in-flight)
+    inflight_orders: int = 0   # currently awaiting TWS acknowledgment
     errors: List[str] = field(default_factory=list)
 
 
@@ -151,15 +154,19 @@ class ExecutionStrategy(ABC):
 class ExecutionEngine:
     """Runs strategy evaluation loops and manages order lifecycle.
     
-    Thread model:
-    - The evaluation loop runs in its own daemon thread.
-    - Quote reads are from the streaming cache (lock-free).
-    - Order placement calls scanner.place_order_sync() which blocks
-      until IB acknowledges (runs in the same eval thread -- acceptable
-      because merger arb strategies rarely fire more than 1 order per eval).
+    Thread model (3 threads):
+    - **exec-engine**: Evaluation loop -- reads quotes, calls strategy.evaluate(),
+      submits order actions.  Never blocks on IB.
+    - **order-exec**: Dedicated single-worker thread for placing orders via
+      scanner.place_order_sync().  Decoupled from eval loop so a slow TWS
+      acknowledgment doesn't stall evaluations.
+    - **IB EReader**: Delivers tick callbacks to the streaming cache and
+      order status callbacks (not owned by the engine).
     """
 
     DEFAULT_EVAL_INTERVAL = 0.1  # 100ms between evaluation ticks
+    MAX_INFLIGHT_ORDERS = 10     # global cap -- drop actions if this many are pending
+    ORDER_TIMEOUT_SEC = 10.0     # per-order TWS acknowledgment timeout
 
     def __init__(
         self,
@@ -177,6 +184,12 @@ class ExecutionEngine:
         self._lock = threading.Lock()
         # Order tracking: order_id -> strategy_id (for routing fills)
         self._order_strategy_map: Dict[int, str] = {}
+        # Non-blocking order placement: single-worker executor + inflight counter
+        self._order_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="order-exec",
+        )
+        self._inflight_order_count = 0
+        self._inflight_lock = threading.Lock()
 
     # ── Lifecycle ──
 
@@ -194,22 +207,44 @@ class ExecutionEngine:
                      self._eval_interval, len(self._strategies))
 
     def stop(self):
-        """Stop the evaluation loop and unsubscribe all streaming quotes."""
+        """Stop the evaluation loop, drain in-flight orders, then clean up.
+
+        Shutdown sequence:
+        1. Signal eval loop to stop (self._running = False)
+        2. Wait for eval thread to exit
+        3. Drain the order executor -- let in-flight orders complete
+        4. Notify strategies of shutdown
+        5. Unsubscribe streaming quotes and clear state
+        """
         if not self._running:
             return
         self._running = False
+
+        # 1. Wait for eval loop to finish its current iteration
         if self._thread is not None:
             self._thread.join(timeout=5.0)
             self._thread = None
 
-        # Notify all strategies of shutdown
+        # 2. Drain order executor -- wait for in-flight orders to complete.
+        #    New submissions won't happen because the eval loop has stopped.
+        inflight = self._inflight_order_count
+        if inflight > 0:
+            logger.info("Waiting for %d in-flight orders to complete...", inflight)
+        self._order_executor.shutdown(wait=True)
+        # Re-create the executor so the engine can be started again
+        self._order_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="order-exec",
+        )
+        self._inflight_order_count = 0
+
+        # 3. Notify all strategies of shutdown
         for state in self._strategies.values():
             try:
                 state.strategy.on_stop(state.config)
             except Exception as e:
                 logger.error("Error in strategy %s on_stop: %s", state.strategy_id, e)
 
-        # Unsubscribe all streaming quotes
+        # 4. Unsubscribe all streaming quotes and clear state
         self._cache.unsubscribe_all(self._scanner)
         self._strategies.clear()
         self._order_strategy_map.clear()
@@ -381,12 +416,32 @@ class ExecutionEngine:
                     state.errors = state.errors[-50:]
 
     def _process_order_action(self, state: StrategyState, action: OrderAction):
-        """Execute an OrderAction by placing an order through the scanner."""
+        """Submit an OrderAction to the order executor (non-blocking).
+
+        The eval thread returns immediately; the order is placed on the
+        dedicated order-exec thread.  If the global in-flight cap is
+        reached, the action is dropped with a warning.
+        """
+        with self._inflight_lock:
+            if self._inflight_order_count >= self.MAX_INFLIGHT_ORDERS:
+                logger.warning(
+                    "Dropping order action for strategy %s: %d orders already in-flight",
+                    state.strategy_id, self._inflight_order_count,
+                )
+                state.errors.append(
+                    f"Order dropped: {self._inflight_order_count} in-flight (cap={self.MAX_INFLIGHT_ORDERS})"
+                )
+                return
+            self._inflight_order_count += 1
+            state.inflight_orders += 1
+            state.orders_submitted += 1
+
         logger.info(
-            "Strategy %s order: %s %d x %s @ %s (%s)",
+            "Strategy %s queuing order: %s %d x %s @ %s (%s) [inflight=%d]",
             action.strategy_id, action.side.value, action.quantity,
             action.contract_dict.get("symbol", "?"),
             action.limit_price or "MKT", action.reason,
+            self._inflight_order_count,
         )
 
         order_dict = {
@@ -398,24 +453,59 @@ class ExecutionEngine:
         if action.limit_price is not None and action.order_type == OrderType.LIMIT:
             order_dict["lmtPrice"] = action.limit_price
 
+        future = self._order_executor.submit(
+            self._place_order_worker,
+            state.strategy_id, action.contract_dict, order_dict,
+        )
+        future.add_done_callback(
+            lambda f: self._on_order_complete(f, state.strategy_id)
+        )
+
+    def _place_order_worker(
+        self, strategy_id: str, contract_dict: dict, order_dict: dict,
+    ) -> dict:
+        """Run on the order-exec thread.  Places order and blocks until TWS ack."""
+        return self._scanner.place_order_sync(
+            contract_dict, order_dict, timeout_sec=self.ORDER_TIMEOUT_SEC,
+        )
+
+    def _on_order_complete(self, future: Future, strategy_id: str):
+        """Callback when order placement finishes (runs on order-exec thread).
+
+        Decrements in-flight counters, logs results, and routes fills to
+        the strategy.
+        """
+        # Decrement counters
+        with self._inflight_lock:
+            self._inflight_order_count = max(0, self._inflight_order_count - 1)
+            state = self._strategies.get(strategy_id)
+            if state:
+                state.inflight_orders = max(0, state.inflight_orders - 1)
+
+        # Handle result
         try:
-            result = self._scanner.place_order_sync(action.contract_dict, order_dict)
+            result = future.result()  # won't block -- future is already done
+        except Exception as e:
+            logger.error("Exception placing order for strategy %s: %s", strategy_id, e)
+            if state:
+                state.errors.append(f"Order exception: {e}")
+            return
+
+        if state:
             state.orders_placed += 1
 
-            if result.get("error"):
-                logger.error("Order failed for strategy %s: %s", state.strategy_id, result["error"])
+        if result.get("error"):
+            logger.error("Order failed for strategy %s: %s", strategy_id, result["error"])
+            if state:
                 state.errors.append(f"Order error: {result['error']}")
-            else:
-                order_id = result.get("orderId")
-                if order_id:
-                    self._order_strategy_map[order_id] = state.strategy_id
-                logger.info(
-                    "Order placed for strategy %s: orderId=%s status=%s",
-                    state.strategy_id, order_id, result.get("status"),
-                )
-        except Exception as e:
-            logger.error("Exception placing order for strategy %s: %s", state.strategy_id, e)
-            state.errors.append(f"Order exception: {e}")
+        else:
+            order_id = result.get("orderId")
+            if order_id:
+                self._order_strategy_map[order_id] = strategy_id
+            logger.info(
+                "Order placed for strategy %s: orderId=%s status=%s",
+                strategy_id, order_id, result.get("status"),
+            )
 
     # ── Status / telemetry ──
 
@@ -428,7 +518,9 @@ class ExecutionEngine:
                 "is_active": state.is_active,
                 "subscriptions": state.subscriptions,
                 "eval_count": state.eval_count,
+                "orders_submitted": state.orders_submitted,
                 "orders_placed": state.orders_placed,
+                "inflight_orders": state.inflight_orders,
                 "last_eval_time": state.last_eval_time,
                 "recent_errors": state.errors[-5:] if state.errors else [],
                 "config": state.config,
@@ -439,6 +531,8 @@ class ExecutionEngine:
             "eval_interval": self._eval_interval,
             "strategy_count": len(self._strategies),
             "strategies": strategies,
+            "inflight_orders_total": self._inflight_order_count,
+            "max_inflight_orders": self.MAX_INFLIGHT_ORDERS,
             "lines_held": self._resource_manager.execution_lines_held,
             "available_scan_lines": self._resource_manager.available_for_scan,
             "quote_snapshot": self._cache.get_all_serialized(),
@@ -455,10 +549,13 @@ class ExecutionEngine:
                     "strategy_id": s.strategy_id,
                     "is_active": s.is_active,
                     "eval_count": s.eval_count,
+                    "orders_submitted": s.orders_submitted,
                     "orders_placed": s.orders_placed,
+                    "inflight_orders": s.inflight_orders,
                 }
                 for s in self._strategies.values()
             ],
+            "inflight_orders_total": self._inflight_order_count,
             "lines_held": self._resource_manager.execution_lines_held,
             "quote_snapshot": self._cache.get_all_serialized(),
         }

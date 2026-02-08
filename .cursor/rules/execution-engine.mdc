@@ -12,7 +12,7 @@ alwaysApply: false
 |------|------|--------|
 | `resource_manager.py` | IB market data line accounting (100 lines shared) | Any (thread-safe) |
 | `quote_cache.py` | Persistent streaming subscriptions via `reqMktData(snapshot=False)` | IB msg thread writes, exec thread reads |
-| `execution_engine.py` | Strategy eval loop (100ms), order placement | Own daemon thread (`exec-engine`) |
+| `execution_engine.py` | Strategy eval loop (100ms) + async order placement | `exec-engine` (eval), `order-exec` (orders) |
 | `ib_scanner.py` | Scan requests (batch request-sleep-cancel) + streaming tick routing | IB msg thread for callbacks |
 | `ib_data_agent.py` | Orchestrator: creates all components, dispatches requests, sends telemetry | Async event loop |
 | `ws_relay.py` | Server-side: priority tiers, per-provider scan semaphore, telemetry storage | FastAPI async |
@@ -23,9 +23,23 @@ alwaysApply: false
 The execution loop runs entirely local -- no network in the critical path:
 ```
 IB TWS -> tickPrice callback -> quote_cache.update_price -> Quote object (in-memory)
-exec-engine thread -> quote_cache.get -> strategy.evaluate -> scanner.place_order_sync -> IB TWS
+exec-engine thread -> quote_cache.get -> strategy.evaluate -> OrderAction
+                                                                  ↓ (non-blocking submit)
+order-exec thread -> scanner.place_order_sync -> IB TWS
 ```
-Total latency: sub-millisecond (Python processing only). Never add network calls here.
+The eval loop NEVER blocks on IB order acknowledgment.  Order placement runs on a
+dedicated single-worker `order-exec` thread via `ThreadPoolExecutor(max_workers=1)`.
+
+Latency budget (DEFAULT_EVAL_INTERVAL=100ms):
+- Quote-to-eval: 0-100ms (uniform, dominated by sleep interval; median ~50ms)
+- Eval-to-order-submit: <0.1ms (non-blocking queue submission)
+- Order-submit-to-TWS-ack: ~5-50ms (on order-exec thread, does NOT stall eval)
+
+Safety caps:
+- `MAX_INFLIGHT_ORDERS = 10` -- if exceeded, order actions are dropped
+- `ORDER_TIMEOUT_SEC = 10.0` -- per-order TWS acknowledgment timeout
+
+Never add network calls or blocking I/O to the eval loop.
 
 ## Resource Management Rules
 
@@ -51,6 +65,10 @@ Total latency: sub-millisecond (Python processing only). Never add network calls
 3. Register in `_create_strategy()` in `ib_data_agent.py`
 4. Strategy receives quotes as `Dict[cache_key, Quote]` -- all subscribed instruments
 5. Return `List[OrderAction]` from `evaluate()` -- empty list = do nothing
+6. **Duplicate prevention**: Order placement is async (non-blocking). A strategy returning
+   the same OrderAction on consecutive evals will queue duplicate orders. Strategies must
+   track their own order state (e.g., "order pending for AAPL") and suppress duplicates.
+   Check `StrategyState.inflight_orders` to see how many are in the pipeline.
 
 ## Tick Routing in ib_scanner.py
 
