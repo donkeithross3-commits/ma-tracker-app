@@ -1093,10 +1093,21 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   }, []);
 
 
+  // Fetch positions + orders when connection becomes available (or on mount if already connected)
+  const hasFetchedRef = useRef(false);
   useEffect(() => {
-    fetchPositions();
-    fetchOpenOrders();
-  }, [fetchPositions, fetchOpenOrders]);
+    if (!isConnected) {
+      hasFetchedRef.current = false;
+      // Clear stale error when disconnected so reconnection gets a fresh start
+      setError(null);
+      return;
+    }
+    if (!hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchPositions();
+      fetchOpenOrders();
+    }
+  }, [isConnected, fetchPositions, fetchOpenOrders]);
 
   useEffect(() => {
     if (!autoRefresh || !isConnected) return;
