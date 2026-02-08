@@ -478,6 +478,110 @@ The IB Data Agent architecture means the backend no longer needs direct IB TWS a
 
 ---
 
+## Changelog & Release Notes System
+
+### Overview
+
+Weekly release notes live at `/changelog` (summary) and `/changelog/[date]` (detail with large images and accessible fonts). Screenshots are generated programmatically from production using Playwright + Pillow.
+
+### Architecture
+
+- **Release data**: `release-notes/YYYY-MM-DD.json` — one JSON file per release
+- **Screenshots**: `public/changelog/YYYY-MM-DD/*.png` — generated annotated images
+- **Data reader**: `lib/changelog.ts` — server-side utility (reads from filesystem)
+- **Pages**: `app/changelog/page.tsx` (summary), `app/changelog/[date]/page.tsx` (detail)
+- **Screenshot tool**: `python-service/tools/release_screenshots.py`
+- **Tool deps**: `python-service/tools/requirements.txt` (playwright, Pillow — dev only)
+- **Docker**: `Dockerfile.prod` copies `release-notes/` into the runner stage
+
+### Weekly Release Note Workflow
+
+1. Create `release-notes/YYYY-MM-DD.json` describing the week's features
+2. Run the screenshot tool to generate annotated images:
+   ```bash
+   cd python-service
+   source .venv/bin/activate
+   python tools/release_screenshots.py \
+     --config ../release-notes/YYYY-MM-DD.json \
+     --email "don.keith.ross3@gmail.com" --password "limitless2025"
+   ```
+3. Commit everything (JSON + PNGs) and deploy — the changelog page picks it up automatically
+
+### Screenshot Tool Usage
+
+```bash
+# Against production (default)
+python tools/release_screenshots.py --config ../release-notes/2026-02-08.json --email EMAIL --password PASS
+
+# Against local dev
+python tools/release_screenshots.py --config ../release-notes/2026-02-08.json --base-url http://localhost:3000 --email EMAIL --password PASS
+
+# Debug mode (visible browser)
+python tools/release_screenshots.py --config ../release-notes/2026-02-08.json --headed --email EMAIL --password PASS
+
+# Prerequisites (one-time)
+pip install playwright Pillow
+playwright install chromium
+```
+
+### Annotation Best Practices (Lessons Learned)
+
+1. **Always use element selectors over manual bbox coordinates.** Selectors like `button:has-text('NDX100')` or `th:has-text('Mkt Cap')` resolve to real DOM elements at runtime. Manual pixel coordinates are fragile and break when layout shifts.
+
+2. **The Annotator handles DPR scaling automatically.** It compares actual image dimensions to the CSS viewport to detect the device pixel ratio. All coordinates passed to annotations should be in CSS pixels — scaling is internal.
+
+3. **Use `from_offset` for arrow annotations.** Instead of absolute `from` coordinates, use `"from_offset": [-60, -50]` to position the arrow start relative to the target element. This keeps arrows anchored even if the target moves.
+
+4. **Headless Chromium on macOS defaults to DPR=1**, but the tool is DPR-aware as a safety net. Font sizes, stroke widths, and padding all scale proportionally.
+
+5. **The DR3_dev account (`don.keith.ross3@gmail.com`) is used for screenshots** because it has the default password. Features requiring IB connectivity (Account tab, trade ticket, working orders) cannot be captured with this account — leave those as `"screenshot": null` and the detail page shows a "screenshot pending" placeholder.
+
+6. **Category badges**: signals (blue), positions (emerald), intel (purple), portfolio (amber), options (cyan), general (gray). Defined in `lib/changelog.ts` `getCategoryStyle()`.
+
+### Release Note JSON Format
+
+```json
+{
+  "date": "2026-02-08",
+  "title": "Week of Feb 2–8, 2026",
+  "summary": "One-line release summary.",
+  "features": [
+    {
+      "id": "feature-slug",
+      "title": "Feature Title",
+      "summary": "One-liner for the summary page",
+      "description": "Detailed description with \\n\\n for paragraphs",
+      "category": "signals|positions|options|intel|portfolio|general",
+      "image": "/changelog/2026-02-08/feature-slug.png",
+      "screenshot": {
+        "path": "/krj",
+        "actions": [
+          { "type": "wait", "ms": 2000 },
+          { "type": "click", "selector": "text=NDX100" },
+          { "type": "wait", "ms": 2000 }
+        ],
+        "viewport": { "width": 1400, "height": 900 },
+        "annotations": [
+          {
+            "type": "circle",
+            "selector": "button:has-text('NDX100')",
+            "label": "Annotation label"
+          },
+          {
+            "type": "arrow",
+            "selector": "th:has-text('Mkt Cap')",
+            "label": "Arrow label",
+            "from_offset": [-60, -50]
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+---
+
 ## Documentation References
 
 - `DEVELOPMENT.md`: Comprehensive development guide

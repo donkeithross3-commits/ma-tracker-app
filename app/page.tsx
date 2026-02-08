@@ -59,7 +59,25 @@ export default async function Home() {
           </div>
         </main>
 
-        <footer className="text-center mt-16 text-slate-500 text-sm">
+        <div className="max-w-2xl mx-auto mt-6">
+          <Link
+            href="/changelog"
+            className="block px-6 py-4 bg-slate-800/60 border border-slate-700/50 rounded-xl hover:border-slate-500 hover:bg-slate-700/60 transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-slate-400 text-lg">📋</span>
+                <div>
+                  <h3 className="text-base font-medium text-slate-300">What&apos;s Changed</h3>
+                  <p className="text-sm text-slate-500">Release notes &amp; feature updates</p>
+                </div>
+              </div>
+              <span className="text-xs text-slate-500">→</span>
+            </div>
+          </Link>
+        </div>
+
+        <footer className="text-center mt-12 text-slate-500 text-sm">
           <p>DR3 Trading Tools</p>
         </footer>
       </div>
