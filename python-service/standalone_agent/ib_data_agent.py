@@ -263,13 +263,16 @@ class IBDataAgent:
         timeout = float(payload.get("timeout_sec", 10.0))
         force = bool(payload.get("force_refresh", False))
         try:
+            # Detect whether the call will hit TWS (force, or first-sync fallback)
+            synced = getattr(self.scanner, "_live_orders_synced", True)
+            will_refresh = force or (not synced and self.scanner.isConnected())
             orders = self.scanner.get_open_orders_snapshot(
                 timeout_sec=timeout, force_refresh=force,
             )
             return {
                 "orders": orders,
                 "live_order_count": self.scanner.get_live_order_count(),
-                "source": "tws_refresh" if force else "live_book",
+                "source": "tws_refresh" if will_refresh else "live_book",
             }
         except Exception as e:
             logger.error(f"Error fetching open orders: {e}")

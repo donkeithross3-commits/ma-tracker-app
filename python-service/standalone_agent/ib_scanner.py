@@ -162,6 +162,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Thread-safe via _live_orders_lock.
         self._live_orders: Dict[int, dict] = {}
         self._live_orders_lock = Lock()
+        # True once openOrderEnd has been received at least once (distinguishes
+        # "no orders exist" from "haven't synced yet").
+        self._live_orders_synced = False
         # permId -> orderId mapping (unique across the account, survives rebinds)
         self._perm_id_to_order_id: Dict[int, int] = {}
         # Terminal statuses that mean the order is no longer active
@@ -222,7 +225,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         continuously by openOrder / orderStatus callbacks).  This is fast and
         doesn't require a round-trip to TWS.
 
-        If *force_refresh* is True (or the live book is empty and we're connected),
+        If *force_refresh* is True (or the live book hasn't been synced yet),
         issues reqOpenOrders() to TWS and waits for the full response.  This also
         re-binds any manual TWS orders that weren't yet bound.
 
@@ -230,7 +233,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         """
         need_refresh = force_refresh
         with self._live_orders_lock:
-            if not self._live_orders and self.isConnected():
+            if not self._live_orders_synced and self.isConnected():
                 need_refresh = True
             if not need_refresh:
                 return list(self._live_orders.values())
@@ -251,13 +254,14 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def get_live_orders(self) -> List[dict]:
         """Return current live order book without issuing any TWS request.
-        Fast, lock-free read suitable for frequent polling."""
+        Fast read suitable for frequent polling (no TWS round-trip)."""
         with self._live_orders_lock:
             return list(self._live_orders.values())
 
     def get_live_order_count(self) -> int:
         """Number of orders currently tracked in the live book."""
-        return len(self._live_orders)
+        with self._live_orders_lock:
+            return len(self._live_orders)
 
     def get_order_by_perm_id(self, perm_id: int) -> dict | None:
         """Look up a live order by its permId (account-unique, survives rebinds).
@@ -417,7 +421,11 @@ class IBMergerArbScanner(EWrapper, EClient):
             self._order_results.pop(order_id, None)
 
     def cancel_order_sync(self, order_id: int) -> dict:
-        """Cancel order by id."""
+        """Cancel order by id.  Rejects orderId==0 (unbound manual TWS orders)."""
+        if order_id == 0:
+            return {"error": "Cannot cancel order: orderId is 0 (unbound). "
+                    "Fetch open orders first to bind it, then retry.",
+                    "orderId": order_id}
         try:
             self.cancelOrder(order_id)
             return {"ok": True, "orderId": order_id}
@@ -598,6 +606,17 @@ class IBMergerArbScanner(EWrapper, EClient):
             if status in self._TERMINAL_STATUSES:
                 self._live_orders.pop(orderId, None)
             else:
+                # If a prior orderStatus created a _statusOnly placeholder,
+                # preserve its status when the openOrder status is empty/missing
+                # (IB sometimes sends openOrder before the definitive orderStatus).
+                existing = self._live_orders.get(orderId)
+                if (existing
+                        and existing.get("_statusOnly")
+                        and not status
+                        and existing.get("orderState", {}).get("status")):
+                    order_entry["orderState"]["status"] = existing["orderState"]["status"]
+                    # Carry over the full status snapshot for downstream consumers
+                    order_entry["_lastStatus"] = existing.get("_lastStatus")
                 self._live_orders[orderId] = order_entry
             # Track permId -> orderId (permId is account-unique and survives rebinds)
             if perm_id:
@@ -621,6 +640,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         if self._open_orders_active:
             self._open_orders_done.set()
         with self._live_orders_lock:
+            self._live_orders_synced = True
             count = len(self._live_orders)
         self.logger.info("openOrderEnd: live order book has %d active orders", count)
 
