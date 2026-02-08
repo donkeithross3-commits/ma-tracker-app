@@ -134,10 +134,23 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // If relay check failed with a specific error, surface it for debugging
+    // The relay returned connected=false.  It may have included a useful
+    // message (e.g. "agent connected but belongs to a different account").
+    // Preserve that for the UI.
     const relayError = relayStatus.relayError;
+    const relayMessage = relayStatus.message; // may explain *why* not connected
 
-    // 2. Test local IB TWS connection
+    // If the relay gave a specific user-facing reason (account mismatch etc.),
+    // skip the slow local-TWS probe and return immediately.
+    if (relayMessage && !relayError) {
+      return NextResponse.json({
+        connected: false,
+        source: "relay",
+        message: relayMessage,
+      });
+    }
+
+    // 2. Test local IB TWS connection (only when relay had no useful info)
     const ibConnected = await testIBConnection();
     
     if (ibConnected) {
