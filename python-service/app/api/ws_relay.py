@@ -38,6 +38,24 @@ API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:3000")
 REQUEST_TIMEOUT_SECONDS = 120  # Option chain fetches can take 60+ seconds
 HEARTBEAT_INTERVAL_SECONDS = 30  # Longer interval to avoid timeout during long requests
 
+# ── Request priority classification ──
+# Priority 1: Account-specific, never delayed, never routed to a foreign agent
+ACCOUNT_REQUESTS = frozenset({
+    "get_positions", "get_open_orders", "place_order", "modify_order", "cancel_order",
+})
+# Priority 2: Scan requests that consume IB market data lines (throttled when borrowing)
+SCAN_REQUESTS = frozenset({
+    "fetch_chain", "fetch_prices", "sell_scan", "fetch_underlying", "test_futures",
+})
+# Priority 3: Lightweight status checks, no market-data-line impact
+STATUS_REQUESTS = frozenset({
+    "ib_status", "check_availability",
+})
+# Execution control requests: only routed to the user's own agent
+EXECUTION_REQUESTS = frozenset({
+    "execution_start", "execution_stop", "execution_status", "execution_config",
+})
+
 
 async def validate_api_key(api_key: str) -> Optional[str]:
     """
@@ -92,6 +110,19 @@ class DataProvider:
     connected_at: float = field(default_factory=time.time)
     last_heartbeat: float = field(default_factory=time.time)
     is_active: bool = True
+    # Execution engine state (updated by agent_state messages; safe defaults for old agents)
+    execution_active: bool = False
+    execution_lines_held: int = 0
+    available_scan_lines: int = 90  # conservative default (100 - 10 buffer)
+    accept_external_scans: bool = True
+    # Latest execution telemetry snapshot from the agent (updated periodically)
+    execution_telemetry: Optional[dict] = field(default=None, repr=False)
+    # Per-provider semaphore: limits concurrent external scan requests to 1
+    # when execution is active. Initialized post-creation (dataclass can't hold asyncio objects).
+    _external_scan_semaphore: Optional[asyncio.Semaphore] = field(default=None, repr=False)
+
+    def __post_init__(self):
+        self._external_scan_semaphore = asyncio.Semaphore(1)
 
 
 class ProviderRegistry:
@@ -216,7 +247,11 @@ class ProviderRegistry:
                     "ib_accounts": p.ib_accounts,
                     "connected_at": datetime.fromtimestamp(p.connected_at).isoformat(),
                     "last_heartbeat": datetime.fromtimestamp(p.last_heartbeat).isoformat(),
-                    "is_active": p.is_active
+                    "is_active": p.is_active,
+                    "execution_active": p.execution_active,
+                    "execution_lines_held": p.execution_lines_held,
+                    "available_scan_lines": p.available_scan_lines,
+                    "accept_external_scans": p.accept_external_scans,
                 }
                 for p in self.providers.values()
             ]
@@ -336,6 +371,30 @@ async def data_provider_websocket(websocket: WebSocket):
                     provider.ib_accounts = accounts
                     logger.info(f"Provider {provider_id} reported IB accounts: {accounts}")
                 
+                elif msg_type == "agent_state":
+                    # Agent reports execution engine resource state
+                    provider.execution_active = bool(msg.get("execution_active", False))
+                    provider.execution_lines_held = int(msg.get("execution_lines_held", 0))
+                    provider.available_scan_lines = int(msg.get("available_scan_lines", 90))
+                    provider.accept_external_scans = bool(msg.get("accept_external_scans", True))
+                    logger.debug(
+                        f"Provider {provider_id} state: exec={provider.execution_active}, "
+                        f"lines_held={provider.execution_lines_held}, "
+                        f"scan_avail={provider.available_scan_lines}"
+                    )
+                
+                elif msg_type == "execution_telemetry":
+                    # Store latest execution telemetry for dashboard queries
+                    provider.execution_telemetry = {
+                        k: v for k, v in msg.items() if k != "type"
+                    }
+                    provider.execution_telemetry["received_at"] = time.time()
+                    logger.debug(
+                        f"Provider {provider_id} execution telemetry: "
+                        f"strategies={msg.get('strategy_count', 0)}, "
+                        f"lines={msg.get('lines_held', 0)}"
+                    )
+                
                 else:
                     logger.warning(f"Unknown message type from provider: {msg_type}")
                     
@@ -395,57 +454,91 @@ async def send_request_to_provider(
             status_code=503,
             detail="No IB data provider connected. Please start the local agent."
         )
-    
-    request_id = str(uuid.uuid4())
-    future = asyncio.get_event_loop().create_future()
-    
-    pending = PendingRequest(
-        request_id=request_id,
-        request_type=request_type,
-        payload=payload,
-        future=future
-    )
-    
-    await registry.add_pending_request(pending)
-    
-    try:
-        # Send request to provider
-        payload_bytes = len(json.dumps(payload).encode())
-        await provider.websocket.send_json({
-            "type": "request",
-            "request_id": request_id,
-            "request_type": request_type,
-            "payload": payload
-        })
-        timer.stage("ws_send")
-        
-        # Wait for response
-        result = await asyncio.wait_for(future, timeout=timeout)
-        response_bytes = len(json.dumps(result).encode()) if result else 0
-        timer.stage("response_wait")
-        timer.finish(extra={
-            "timeout": timeout,
-            "payload_bytes": payload_bytes,
-            "response_bytes": response_bytes,
-        })
-        return result
-        
-    except asyncio.TimeoutError:
-        timer.stage("timeout")
-        timer.finish(extra={"timeout": timeout, "status": "timeout"})
-        await registry.fail_request(request_id, "Request timeout")
-        raise HTTPException(
-            status_code=504,
-            detail=f"Request to IB data provider timed out after {timeout}s"
+
+    # ── Priority-aware throttling for scan requests on execution-active agents ──
+    is_scan = request_type in SCAN_REQUESTS
+    is_borrowing = user_id is not None and provider.user_id != user_id
+    use_semaphore = False
+
+    if is_scan and is_borrowing and provider.execution_active:
+        # External user borrowing an execution-active agent
+        if not provider.accept_external_scans:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "The connected IB agent is running an execution algorithm and is not "
+                    "accepting external scan requests. Please try again later or start "
+                    "your own local agent."
+                ),
+            )
+        # Annotate payload so the agent can throttle batch size
+        payload = {**payload, "_priority": "external", "_max_batch_size": provider.available_scan_lines}
+        use_semaphore = True
+    elif is_scan and provider.execution_active:
+        # Own user's scan while execution is active -- annotate but don't gate
+        payload = {**payload, "_priority": "owner", "_max_batch_size": provider.available_scan_lines}
+
+    async def _do_send() -> dict:
+        """Inner send logic (may be wrapped with semaphore)."""
+        request_id = str(uuid.uuid4())
+        future = asyncio.get_event_loop().create_future()
+
+        pending = PendingRequest(
+            request_id=request_id,
+            request_type=request_type,
+            payload=payload,
+            future=future
         )
-    except Exception as e:
-        timer.stage("error")
-        timer.finish(extra={"timeout": timeout, "status": "error"})
-        await registry.fail_request(request_id, str(e))
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error communicating with IB data provider: {str(e)}"
-        )
+
+        await registry.add_pending_request(pending)
+
+        try:
+            # Send request to provider
+            payload_bytes = len(json.dumps(payload).encode())
+            await provider.websocket.send_json({
+                "type": "request",
+                "request_id": request_id,
+                "request_type": request_type,
+                "payload": payload
+            })
+            timer.stage("ws_send")
+
+            # Wait for response
+            result = await asyncio.wait_for(future, timeout=timeout)
+            response_bytes = len(json.dumps(result).encode()) if result else 0
+            timer.stage("response_wait")
+            timer.finish(extra={
+                "timeout": timeout,
+                "payload_bytes": payload_bytes,
+                "response_bytes": response_bytes,
+                "borrowing": is_borrowing,
+                "execution_active": provider.execution_active,
+            })
+            return result
+
+        except asyncio.TimeoutError:
+            timer.stage("timeout")
+            timer.finish(extra={"timeout": timeout, "status": "timeout"})
+            await registry.fail_request(request_id, "Request timeout")
+            raise HTTPException(
+                status_code=504,
+                detail=f"Request to IB data provider timed out after {timeout}s"
+            )
+        except Exception as e:
+            timer.stage("error")
+            timer.finish(extra={"timeout": timeout, "status": "error"})
+            await registry.fail_request(request_id, str(e))
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error communicating with IB data provider: {str(e)}"
+            )
+
+    if use_semaphore and provider._external_scan_semaphore is not None:
+        # Serialize external scan requests: one at a time per execution-active provider
+        async with provider._external_scan_semaphore:
+            return await _do_send()
+    else:
+        return await _do_send()
 
 
 @router.get("/provider-status")

@@ -975,6 +975,37 @@ async def relay_registry():
         return {"providers_connected": 0, "providers": [], "error": str(e)}
 
 
+@router.get("/relay/agent-state")
+async def relay_agent_state():
+    """
+    Return the execution/resource state of all connected agents.
+    
+    The dashboard uses this to:
+    - Show a warning icon when borrowing from an execution-active agent
+    - Display available scan capacity
+    - Inform users why a scan might be slower or rejected
+    """
+    try:
+        registry = get_registry()
+        status = registry.get_status()
+        return {
+            "providers": [
+                {
+                    "provider_id": p["id"],
+                    "user_id": p["user_id"],
+                    "execution_active": p.get("execution_active", False),
+                    "execution_lines_held": p.get("execution_lines_held", 0),
+                    "available_scan_lines": p.get("available_scan_lines", 90),
+                    "accept_external_scans": p.get("accept_external_scans", True),
+                }
+                for p in status["providers"]
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Agent state error: {e}")
+        return {"providers": [], "error": str(e)}
+
+
 @router.get("/relay/ib-status")
 async def relay_ib_status():
     """
@@ -1296,5 +1327,126 @@ async def relay_sell_scan(request: SellScanRequest):
         raise
     except Exception as e:
         logger.error(f"Relay sell-scan error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Execution Engine Relay Endpoints ──
+# All execution endpoints require the user's own agent (no fallback).
+
+class ExecutionStartRequest(BaseModel):
+    userId: str
+    strategies: list  # list of {strategy_id, strategy_type, config}
+
+
+class ExecutionStopRequest(BaseModel):
+    userId: str
+
+
+class ExecutionConfigRequest(BaseModel):
+    userId: str
+    strategy_id: str
+    config: dict
+
+
+@router.post("/relay/execution/start")
+async def relay_execution_start(request: ExecutionStartRequest):
+    """Start execution engine on the user's own agent with strategy configuration."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_start",
+            payload={"strategies": request.strategies},
+            timeout=30.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/start error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/relay/execution/stop")
+async def relay_execution_stop(request: ExecutionStopRequest):
+    """Stop execution engine on the user's own agent."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_stop",
+            payload={},
+            timeout=15.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/stop error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/relay/execution/status")
+async def relay_execution_status(user_id: str = ""):
+    """Get execution engine status, preferring stored telemetry for low latency.
+    
+    Returns the latest telemetry snapshot from the agent if available,
+    otherwise queries the agent directly.
+    """
+    try:
+        # First try to return cached telemetry from the relay (no round-trip)
+        registry = get_registry()
+        provider = await registry.get_active_provider(
+            user_id=user_id or None,
+            allow_fallback_to_any=False,
+        )
+        if provider and provider.execution_telemetry:
+            return {
+                "source": "cached_telemetry",
+                **provider.execution_telemetry,
+            }
+
+        # Fall back to querying the agent directly
+        if not user_id:
+            return {"running": False, "error": "user_id required"}
+        response_data = await send_request_to_provider(
+            request_type="execution_status",
+            payload={},
+            timeout=10.0,
+            user_id=user_id,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return {"source": "direct_query", **response_data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/relay/execution/config")
+async def relay_execution_config(request: ExecutionConfigRequest):
+    """Update strategy configuration on the user's agent without restart."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_config",
+            payload={"strategy_id": request.strategy_id, "config": request.config},
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/config error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

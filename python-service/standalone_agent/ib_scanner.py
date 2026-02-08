@@ -134,6 +134,12 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Error 200 on underlying request (no security definition) - trigger delayed retry
         self._underlying_200_req_id = None
 
+        # Resource manager: optional, provides dynamic batch sizing when execution engine is active
+        self.resource_manager = None  # set by IBDataAgent after construction
+
+        # Streaming quote cache: optional, routes persistent subscription ticks to the cache
+        self.streaming_cache = None  # set by IBDataAgent when execution engine initializes
+
         # Positions: for get_positions request (lock prevents concurrent snapshot corruption)
         self._positions_list: List[dict] = []
         self._positions_done = Event()
@@ -658,7 +664,12 @@ class IBMergerArbScanner(EWrapper, EClient):
         }
 
     def tickPrice(self, reqId: TickerId, tickType: int, price: float, attrib: TickAttrib):
-        """Handle price updates"""
+        """Handle price updates -- routes to streaming cache or scan data as appropriate."""
+        # Fast path: if this reqId belongs to the streaming cache, update there and return
+        if self.streaming_cache is not None and self.streaming_cache.is_streaming_req_id(reqId):
+            self.streaming_cache.update_price(reqId, tickType, price)
+            return
+        # Existing scan path (unchanged)
         if reqId in self.req_id_map:
             if "underlying" in self.req_id_map[reqId]:
                 if tickType == 4:  # Last
@@ -676,7 +687,12 @@ class IBMergerArbScanner(EWrapper, EClient):
                     self.option_chain[reqId]['last'] = price
 
     def tickSize(self, reqId: TickerId, tickType: int, size: int):
-        """Handle size updates"""
+        """Handle size updates -- routes to streaming cache or scan data as appropriate."""
+        # Fast path: streaming cache
+        if self.streaming_cache is not None and self.streaming_cache.is_streaming_req_id(reqId):
+            self.streaming_cache.update_size(reqId, tickType, size)
+            return
+        # Existing scan path (unchanged)
         if reqId in self.option_chain:
             if tickType == 0:  # Bid size
                 self.option_chain[reqId]['bid_size'] = size
@@ -691,7 +707,12 @@ class IBMergerArbScanner(EWrapper, EClient):
                               impliedVol: float, delta: float, optPrice: float,
                               pvDividend: float, gamma: float, vega: float,
                               theta: float, undPrice: float):
-        """Handle option Greeks"""
+        """Handle option Greeks -- routes to streaming cache or scan data as appropriate."""
+        # Fast path: streaming cache
+        if self.streaming_cache is not None and self.streaming_cache.is_streaming_req_id(reqId):
+            self.streaming_cache.update_greeks(reqId, impliedVol, delta, gamma, vega, theta)
+            return
+        # Existing scan path (unchanged)
         if reqId in self.option_chain:
             if impliedVol and impliedVol > 0:
                 self.option_chain[reqId]['implied_vol'] = impliedVol
@@ -944,20 +965,28 @@ class IBMergerArbScanner(EWrapper, EClient):
             return OptionData(**data)
         return None
 
-    BATCH_CHUNK_SIZE = 50
+    BATCH_CHUNK_SIZE = 50  # default; overridden by resource_manager.scan_batch_size when available
     BATCH_WAIT_SEC = 2.5
+
+    @property
+    def _effective_batch_size(self) -> int:
+        """Dynamic batch size: uses resource_manager when available, else the class default."""
+        if self.resource_manager is not None:
+            return self.resource_manager.scan_batch_size
+        return self.BATCH_CHUNK_SIZE
 
     def get_option_data_batch(
         self, ticker: str, contracts: List[Tuple[str, float, str]]
     ) -> List[Optional[OptionData]]:
         """Get data for many option contracts at once (batch reqMktData, single wait, then cancel).
-        Processes in chunks of BATCH_CHUNK_SIZE to stay under IB concurrent limits.
+        Processes in chunks sized by _effective_batch_size to stay under IB concurrent limits.
         Returns list in same order as contracts; missing/empty data is None."""
         if not contracts:
             return []
+        chunk_size = self._effective_batch_size
         results: List[Optional[OptionData]] = []
-        for start in range(0, len(contracts), self.BATCH_CHUNK_SIZE):
-            chunk = contracts[start : start + self.BATCH_CHUNK_SIZE]
+        for start in range(0, len(contracts), chunk_size):
+            chunk = contracts[start : start + chunk_size]
             req_ids: List[int] = []
             for expiry, strike, right in chunk:
                 contract = Contract()

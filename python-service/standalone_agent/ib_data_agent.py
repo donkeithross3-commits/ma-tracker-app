@@ -29,12 +29,16 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-# Import from local ib_scanner.py (bundled in same directory)
+# Import from local modules (bundled in same directory)
 from ib_scanner import IBMergerArbScanner, DealInput
+from resource_manager import ResourceManager
+from quote_cache import StreamingQuoteCache
+from execution_engine import ExecutionEngine, ExecutionStrategy
 
 # Configure logging
 logging.basicConfig(
@@ -95,6 +99,9 @@ class IBDataAgent:
         self.running = False
         self.provider_id = None
         self.option_chain_cache = OptionChainCache(ttl_seconds=CACHE_TTL_SECONDS)
+        self.resource_manager = ResourceManager()
+        self.quote_cache: Optional[StreamingQuoteCache] = None  # created after scanner is ready
+        self.execution_engine: Optional[ExecutionEngine] = None  # created after scanner is ready
         
     def connect_to_ib(self) -> bool:
         """Connect to IB TWS"""
@@ -107,6 +114,7 @@ class IBDataAgent:
         client_id = 0
         
         self.scanner = IBMergerArbScanner()
+        self.scanner.resource_manager = self.resource_manager
         connected = self.scanner.connect_to_ib(
             host=IB_HOST,
             port=IB_PORT,
@@ -115,13 +123,23 @@ class IBDataAgent:
         
         if connected:
             logger.info("Successfully connected to IB TWS")
+            # Initialize execution infrastructure (quote cache + engine)
+            self.quote_cache = StreamingQuoteCache(self.resource_manager)
+            self.scanner.streaming_cache = self.quote_cache
+            self.execution_engine = ExecutionEngine(
+                self.scanner, self.quote_cache, self.resource_manager
+            )
+            logger.info("Execution infrastructure initialized (quote cache + engine ready)")
         else:
             logger.error("Failed to connect to IB TWS")
             
         return connected
     
     def disconnect_from_ib(self):
-        """Disconnect from IB TWS"""
+        """Disconnect from IB TWS, stopping execution engine first."""
+        if self.execution_engine and self.execution_engine.is_running:
+            logger.info("Stopping execution engine before IB disconnect...")
+            self.execution_engine.stop()
         if self.scanner and self.scanner.isConnected():
             logger.info("Disconnecting from IB TWS...")
             self.scanner.disconnect()
@@ -158,6 +176,15 @@ class IBDataAgent:
                 return await self._run_in_thread(self._handle_fetch_prices_sync, payload)
             elif request_type == "sell_scan":
                 return await self._run_in_thread(self._handle_sell_scan_sync, payload)
+            # Execution engine control
+            elif request_type == "execution_start":
+                return await self._handle_execution_start(payload)
+            elif request_type == "execution_stop":
+                return await self._handle_execution_stop(payload)
+            elif request_type == "execution_status":
+                return await self._handle_execution_status(payload)
+            elif request_type == "execution_config":
+                return await self._handle_execution_config(payload)
             else:
                 return {"error": f"Unknown request type: {request_type}"}
         except Exception as e:
@@ -643,11 +670,114 @@ class IBDataAgent:
             logger.exception(f"sell_scan failed for {ticker} {right}")
             return {"error": str(e)}
 
+    # ── Execution engine request handlers ──
+
+    async def _handle_execution_start(self, payload: dict) -> dict:
+        """Start execution engine with strategy configuration."""
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized (IB not connected?)"}
+        if self.execution_engine.is_running:
+            return {"error": "Execution engine is already running"}
+
+        strategies_config = payload.get("strategies", [])
+        if not strategies_config:
+            return {"error": "No strategies specified in payload"}
+
+        results = []
+        for strat_cfg in strategies_config:
+            strategy_id = strat_cfg.get("strategy_id", "")
+            strategy_type = strat_cfg.get("strategy_type", "")
+            config = strat_cfg.get("config", {})
+
+            if not strategy_id:
+                results.append({"error": "strategy_id is required"})
+                continue
+
+            # Create strategy instance based on type
+            strategy = self._create_strategy(strategy_type)
+            if strategy is None:
+                results.append({"error": f"Unknown strategy_type: {strategy_type}"})
+                continue
+
+            result = self.execution_engine.load_strategy(strategy_id, strategy, config)
+            results.append(result)
+
+        # Start the evaluation loop
+        self.execution_engine.start()
+
+        return {
+            "running": self.execution_engine.is_running,
+            "strategies_loaded": results,
+            "lines_held": self.resource_manager.execution_lines_held,
+        }
+
+    async def _handle_execution_stop(self, payload: dict) -> dict:
+        """Stop execution engine and free all streaming subscriptions."""
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+        if not self.execution_engine.is_running:
+            return {"error": "Execution engine is not running"}
+
+        self.execution_engine.stop()
+        return {
+            "running": False,
+            "lines_held": self.resource_manager.execution_lines_held,
+        }
+
+    async def _handle_execution_status(self, payload: dict) -> dict:
+        """Return current execution engine status."""
+        if not self.execution_engine:
+            return {"running": False, "error": "Execution engine not initialized"}
+        return self.execution_engine.get_status()
+
+    async def _handle_execution_config(self, payload: dict) -> dict:
+        """Update strategy configuration without restart."""
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+
+        strategy_id = payload.get("strategy_id", "")
+        new_config = payload.get("config", {})
+        if not strategy_id:
+            return {"error": "strategy_id is required"}
+        return self.execution_engine.update_strategy_config(strategy_id, new_config)
+
+    def _create_strategy(self, strategy_type: str) -> Optional[ExecutionStrategy]:
+        """Factory for creating strategy instances by type name.
+        
+        This is the extension point for adding new strategy implementations.
+        Currently returns None for all types (strategies will be added as
+        separate modules when specific algo requirements are defined).
+        """
+        # Future: import and instantiate concrete strategy classes here
+        # e.g. if strategy_type == "spread_entry":
+        #          return SpreadEntryStrategy()
+        logger.warning("No strategy implementation for type: %s", strategy_type)
+        return None
+
     async def send_heartbeat(self):
-        """Send periodic heartbeats"""
+        """Send periodic heartbeats with agent state and execution telemetry."""
+        telemetry_counter = 0  # send telemetry every 2nd heartbeat (~20s)
         while self.running and self.websocket:
             try:
                 await self.websocket.send(json.dumps({"type": "heartbeat"}))
+                # Piggyback agent resource state on every heartbeat cycle
+                state = self.resource_manager.get_state_report()
+                await self.websocket.send(json.dumps({
+                    "type": "agent_state",
+                    **state
+                }))
+                # Send execution telemetry when engine is running (every ~20s)
+                telemetry_counter += 1
+                if (
+                    telemetry_counter % 2 == 0
+                    and self.execution_engine is not None
+                    and self.execution_engine.is_running
+                ):
+                    telemetry = self.execution_engine.get_telemetry()
+                    await self.websocket.send(json.dumps({
+                        "type": "execution_telemetry",
+                        **telemetry
+                    }))
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")
