@@ -721,20 +721,9 @@ async def relay_positions(user_id: Optional[str] = Query(None)):
         if not user_id or not user_id.strip():
             raise HTTPException(status_code=400, detail="user_id query param required for positions")
         target_user_id = user_id.strip()
-        registry = get_registry()
-        status = registry.get_status()
-        if status["providers_connected"] == 0:
-            raise HTTPException(
-                status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
-            )
-        provider = await registry.get_active_provider(user_id=target_user_id)
-        if not provider:
-            raise HTTPException(
-                status_code=503,
-                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
-            )
         timer.stage("registry_check")
+        # send_request_to_provider handles provider lookup and gives clear error
+        # messages distinguishing "no agent" from "agent for a different account".
         response_data = await send_request_to_provider(
             request_type="get_positions",
             payload={"timeout_sec": 15.0},
@@ -774,19 +763,6 @@ async def relay_place_order(
         if not user_id or not user_id.strip():
             raise HTTPException(status_code=400, detail="user_id query param required")
         target_user_id = user_id.strip()
-        registry = get_registry()
-        status = registry.get_status()
-        if status["providers_connected"] == 0:
-            raise HTTPException(
-                status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
-            )
-        provider = await registry.get_active_provider(user_id=target_user_id)
-        if not provider:
-            raise HTTPException(
-                status_code=503,
-                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
-            )
         payload = {
             "contract": (body or PlaceOrderBody()).contract,
             "order": (body or PlaceOrderBody()).order,
@@ -828,19 +804,6 @@ async def relay_cancel_order(
         if not body or body.orderId is None:
             raise HTTPException(status_code=400, detail="orderId required in body")
         target_user_id = user_id.strip()
-        registry = get_registry()
-        status = registry.get_status()
-        if status["providers_connected"] == 0:
-            raise HTTPException(
-                status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
-            )
-        provider = await registry.get_active_provider(user_id=target_user_id)
-        if not provider:
-            raise HTTPException(
-                status_code=503,
-                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
-            )
         response_data = await send_request_to_provider(
             request_type="cancel_order",
             payload={"orderId": body.orderId},
@@ -879,19 +842,6 @@ async def relay_modify_order(
         if not body or body.orderId is None:
             raise HTTPException(status_code=400, detail="orderId required in body")
         target_user_id = user_id.strip()
-        registry = get_registry()
-        status = registry.get_status()
-        if status["providers_connected"] == 0:
-            raise HTTPException(
-                status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
-            )
-        provider = await registry.get_active_provider(user_id=target_user_id)
-        if not provider:
-            raise HTTPException(
-                status_code=503,
-                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
-            )
         payload = {
             "orderId": body.orderId,
             "contract": body.contract,
@@ -926,19 +876,6 @@ async def relay_open_orders(
         if not user_id or not user_id.strip():
             raise HTTPException(status_code=400, detail="user_id query param required")
         target_user_id = user_id.strip()
-        registry = get_registry()
-        status = registry.get_status()
-        if status["providers_connected"] == 0:
-            raise HTTPException(
-                status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
-            )
-        provider = await registry.get_active_provider(user_id=target_user_id)
-        if not provider:
-            raise HTTPException(
-                status_code=503,
-                detail="Your agent is not connected. Start the local agent and ensure TWS is running."
-            )
         response_data = await send_request_to_provider(
             request_type="get_open_orders",
             payload={"timeout_sec": 10.0},
