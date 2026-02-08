@@ -253,13 +253,24 @@ class IBDataAgent:
             return {"error": str(e)}
 
     def _handle_get_open_orders_sync(self, payload: dict) -> dict:
-        """Fetch all open/working orders from IB (reqAllOpenOrders -> openOrder/openOrderEnd)."""
+        """Fetch all open/working orders.
+
+        By default returns from the in-memory live order book (no TWS round-trip).
+        Pass force_refresh=true to re-query TWS and re-bind any manual orders.
+        """
         if not self.scanner or not self.scanner.isConnected():
             return {"error": "IB not connected"}
         timeout = float(payload.get("timeout_sec", 10.0))
+        force = bool(payload.get("force_refresh", False))
         try:
-            orders = self.scanner.get_open_orders_snapshot(timeout_sec=timeout)
-            return {"orders": orders}
+            orders = self.scanner.get_open_orders_snapshot(
+                timeout_sec=timeout, force_refresh=force,
+            )
+            return {
+                "orders": orders,
+                "live_order_count": self.scanner.get_live_order_count(),
+                "source": "tws_refresh" if force else "live_book",
+            }
         except Exception as e:
             logger.error(f"Error fetching open orders: {e}")
             return {"error": str(e)}

@@ -156,6 +156,19 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._open_orders_lock = Lock()
         self._open_orders_active = False  # True when snapshot is in progress
 
+        # ── Live Order Book ──────────────────────────────────────────────
+        # Continuously updated by openOrder / orderStatus callbacks.
+        # Keyed by orderId.  Entries are removed when status becomes terminal.
+        # Thread-safe via _live_orders_lock.
+        self._live_orders: Dict[int, dict] = {}
+        self._live_orders_lock = Lock()
+        # permId -> orderId mapping (unique across the account, survives rebinds)
+        self._perm_id_to_order_id: Dict[int, int] = {}
+        # Terminal statuses that mean the order is no longer active
+        self._TERMINAL_STATUSES = frozenset({
+            "Filled", "Cancelled", "ApiCancelled", "Inactive",
+        })
+
     def managedAccounts(self, accountsList: str):
         """Store comma-separated account ids from TWS on connect."""
         self._managed_accounts = [a.strip() for a in (accountsList or "").split(",") if a.strip()]
@@ -202,11 +215,27 @@ class IBMergerArbScanner(EWrapper, EClient):
             self.cancelPositions()
             return list(self._positions_list)
 
-    def get_open_orders_snapshot(self, timeout_sec: float = 10.0) -> List[dict]:
-        """Request open orders for this client, wait for openOrderEnd(), return list.
-        Uses reqOpenOrders() (not reqAllOpenOrders) so that returned orders have
-        valid orderIds the current client can use for modify/cancel.
-        Thread-safe: only one snapshot at a time (concurrent callers block)."""
+    def get_open_orders_snapshot(self, timeout_sec: float = 10.0, force_refresh: bool = False) -> List[dict]:
+        """Return all known live orders.
+
+        By default, returns orders from the in-memory live order book (populated
+        continuously by openOrder / orderStatus callbacks).  This is fast and
+        doesn't require a round-trip to TWS.
+
+        If *force_refresh* is True (or the live book is empty and we're connected),
+        issues reqOpenOrders() to TWS and waits for the full response.  This also
+        re-binds any manual TWS orders that weren't yet bound.
+
+        Thread-safe: only one refresh at a time (concurrent callers block).
+        """
+        need_refresh = force_refresh
+        with self._live_orders_lock:
+            if not self._live_orders and self.isConnected():
+                need_refresh = True
+            if not need_refresh:
+                return list(self._live_orders.values())
+
+        # Full refresh from TWS
         with self._open_orders_lock:
             self._open_orders_list = []
             self._open_orders_done.clear()
@@ -215,7 +244,29 @@ class IBMergerArbScanner(EWrapper, EClient):
             if not self._open_orders_done.wait(timeout=timeout_sec):
                 self.logger.warning("get_open_orders_snapshot: timeout waiting for openOrderEnd")
             self._open_orders_active = False
-            return list(self._open_orders_list)
+            # The openOrder callback already updated _live_orders for each order,
+            # so return from the live book (it's the most authoritative view).
+            with self._live_orders_lock:
+                return list(self._live_orders.values())
+
+    def get_live_orders(self) -> List[dict]:
+        """Return current live order book without issuing any TWS request.
+        Fast, lock-free read suitable for frequent polling."""
+        with self._live_orders_lock:
+            return list(self._live_orders.values())
+
+    def get_live_order_count(self) -> int:
+        """Number of orders currently tracked in the live book."""
+        return len(self._live_orders)
+
+    def get_order_by_perm_id(self, perm_id: int) -> dict | None:
+        """Look up a live order by its permId (account-unique, survives rebinds).
+        Returns the order entry or None."""
+        with self._live_orders_lock:
+            order_id = self._perm_id_to_order_id.get(perm_id)
+            if order_id is not None:
+                return self._live_orders.get(order_id)
+        return None
 
     def _contract_from_dict(self, d: dict) -> Contract:
         """Build Contract from payload dict (symbol, secType, exchange, currency, etc.)."""
@@ -318,10 +369,17 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def modify_order_sync(self, order_id: int, contract_d: dict, order_d: dict, timeout_sec: float = 30.0) -> dict:
         """Modify an existing order by re-sending placeOrder with the same orderId.
-        IB treats placeOrder with an existing orderId as a modification."""
-        if order_id <= 0:
-            return {"error": f"Cannot modify order: invalid orderId ({order_id}). "
-                    "This order may belong to a different session. Try cancelling and re-placing it."}
+        IB treats placeOrder with an existing orderId as a modification.
+
+        Accepts negative orderIds (IB assigns negative IDs to manually-placed
+        TWS orders that were bound via reqAutoOpenOrders / reqOpenOrders when
+        the TWS setting "Use negative numbers to bind automatic orders" is on).
+        Only orderId == 0 is invalid (means the order was never bound).
+        """
+        if order_id == 0:
+            return {"error": "Cannot modify order: orderId is 0 (unbound). "
+                    "The order may have been placed manually and not yet bound. "
+                    "Try fetching open orders first, then retry with the assigned orderId."}
         ok, err = self.validate_contract_for_order(contract_d)
         if not ok:
             return {"error": err}
@@ -390,12 +448,17 @@ class IBMergerArbScanner(EWrapper, EClient):
                 # so we can cancel them. Without this, cancelOrder only works for orders
                 # placed by this specific client_id.
                 self.reqAutoOpenOrders(True)
-                print(f"✅ Connected to IB successfully (took {i+1}s)")
+                # Immediately request all open orders to populate the live order book.
+                # This binds any manual TWS orders (assigning them API-usable orderIds)
+                # and delivers orders from previous agent sessions.  The openOrder
+                # callback will add each one to _live_orders automatically.
+                self.reqOpenOrders()
+                print(f"Connected to IB successfully (took {i+1}s)")
                 return True
             if i < 4:
                 print(f"  Waiting... ({i+1}/5)")
 
-        print("❌ ERROR: Failed to connect to IB after 5 seconds")
+        print("ERROR: Failed to connect to IB after 5 seconds")
         return False
 
     def nextValidId(self, orderId: int):
@@ -407,7 +470,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.last_heartbeat = time.time()
         if self.connection_start_time is None:
             self.connection_start_time = time.time()
-        print(f"✅ Connection healthy - ready with next order ID: {orderId}")
+        print(f"Connection healthy - ready with next order ID: {orderId}")
 
     def connectionClosed(self):
         """Callback when connection is closed"""
@@ -447,50 +510,104 @@ class IBMergerArbScanner(EWrapper, EClient):
     def orderStatus(self, orderId: int, status: str, filled: float, remaining: float,
                    avgFillPrice: float, permId: int, parentId: int, lastFillPrice: float,
                    clientId: int, whyHeld: str, mktCapPrice: float):
-        """Order status update; signal pending place_order wait."""
+        """Order status update.
+
+        Always updates the live order book.  Also signals any pending
+        place_order_sync / modify_order_sync wait.
+        """
         self.logger.info(f"orderStatus orderId={orderId} status={status} filled={filled} remaining={remaining}")
+
+        status_update = {
+            "status": status,
+            "filled": filled,
+            "remaining": remaining,
+            "avgFillPrice": avgFillPrice,
+            "permId": permId,
+            "parentId": parentId,
+            "lastFillPrice": lastFillPrice,
+            "clientId": clientId,
+            "whyHeld": whyHeld or "",
+            "mktCapPrice": mktCapPrice,
+        }
+
+        # ── Always update live order book ────────────────────────────────
+        with self._live_orders_lock:
+            if status in self._TERMINAL_STATUSES:
+                self._live_orders.pop(orderId, None)
+            elif orderId in self._live_orders:
+                # Merge status into existing entry
+                self._live_orders[orderId]["orderState"]["status"] = status
+                self._live_orders[orderId]["_lastStatus"] = status_update
+            else:
+                # Status-only entry (we may not have seen the openOrder yet,
+                # e.g. right after reconnect before reqOpenOrders completes)
+                self._live_orders[orderId] = {
+                    "orderId": orderId,
+                    "permId": permId,
+                    "clientId": clientId,
+                    "contract": {},
+                    "order": {},
+                    "orderState": {"status": status},
+                    "_lastStatus": status_update,
+                    "_statusOnly": True,  # flag: contract/order details pending
+                }
+            if permId:
+                self._perm_id_to_order_id[permId] = orderId
+
+        # ── Place-order / modify-order wait ──────────────────────────────
         if orderId in self._order_events:
             self._order_results[orderId] = self._order_results.get(orderId) or {}
-            self._order_results[orderId].update({
-                "status": status,
-                "filled": filled,
-                "remaining": remaining,
-                "avgFillPrice": avgFillPrice,
-                "permId": permId,
-                "parentId": parentId,
-                "lastFillPrice": lastFillPrice,
-                "clientId": clientId,
-                "whyHeld": whyHeld or "",
-                "mktCapPrice": mktCapPrice,
-            })
+            self._order_results[orderId].update(status_update)
             self._order_events[orderId].set()
 
     def openOrder(self, orderId: int, contract: Contract, order: Order, orderState):
-        """Open order / what-if; may include warningText (e.g. price capping)."""
-        # Snapshot collection when get_open_orders_snapshot is active
+        """Open order / what-if; may include warningText (e.g. price capping).
+
+        Always updates the live order book so that every active order is known
+        to the agent — regardless of whether a snapshot is in progress, whether
+        the order was placed by this session, or whether it was manually placed
+        in TWS and subsequently bound via reqAutoOpenOrders.
+        """
+        perm_id = getattr(order, "permId", 0)
+        status = getattr(orderState, "status", "") or ""
+        order_entry = {
+            "orderId": orderId,
+            "permId": perm_id,
+            "clientId": getattr(order, "clientId", -1),
+            "contract": self._contract_to_dict(contract),
+            "order": {
+                "action": getattr(order, "action", ""),
+                "totalQuantity": float(getattr(order, "totalQuantity", 0)),
+                "orderType": getattr(order, "orderType", ""),
+                "lmtPrice": float(getattr(order, "lmtPrice", 0)) if getattr(order, "lmtPrice", None) is not None else None,
+                "auxPrice": float(getattr(order, "auxPrice", 0)) if getattr(order, "auxPrice", None) is not None else None,
+                "tif": getattr(order, "tif", ""),
+                "account": getattr(order, "account", ""),
+                "parentId": getattr(order, "parentId", 0),
+                "ocaGroup": getattr(order, "ocaGroup", ""),
+            },
+            "orderState": {
+                "status": status,
+                "warningText": getattr(orderState, "warningText", "") or "",
+                "commission": float(getattr(orderState, "commission", 0)) if getattr(orderState, "commission", None) is not None else None,
+            },
+        }
+
+        # ── Always update live order book ────────────────────────────────
+        with self._live_orders_lock:
+            if status in self._TERMINAL_STATUSES:
+                self._live_orders.pop(orderId, None)
+            else:
+                self._live_orders[orderId] = order_entry
+            # Track permId -> orderId (permId is account-unique and survives rebinds)
+            if perm_id:
+                self._perm_id_to_order_id[perm_id] = orderId
+
+        # ── Snapshot collection (legacy path) ────────────────────────────
         if self._open_orders_active:
-            self._open_orders_list.append({
-                "orderId": orderId,
-                "permId": getattr(order, "permId", 0),
-                "contract": self._contract_to_dict(contract),
-                "order": {
-                    "action": getattr(order, "action", ""),
-                    "totalQuantity": float(getattr(order, "totalQuantity", 0)),
-                    "orderType": getattr(order, "orderType", ""),
-                    "lmtPrice": float(getattr(order, "lmtPrice", 0)) if getattr(order, "lmtPrice", None) is not None else None,
-                    "auxPrice": float(getattr(order, "auxPrice", 0)) if getattr(order, "auxPrice", None) is not None else None,
-                    "tif": getattr(order, "tif", ""),
-                    "account": getattr(order, "account", ""),
-                    "parentId": getattr(order, "parentId", 0),
-                    "ocaGroup": getattr(order, "ocaGroup", ""),
-                },
-                "orderState": {
-                    "status": getattr(orderState, "status", ""),
-                    "warningText": getattr(orderState, "warningText", "") or "",
-                    "commission": float(getattr(orderState, "commission", 0)) if getattr(orderState, "commission", None) is not None else None,
-                },
-            })
-        # Place-order tracking
+            self._open_orders_list.append(order_entry)
+
+        # ── Place-order tracking (for place_order_sync / modify_order_sync waits) ──
         if orderId in self._order_events:
             self._order_results[orderId] = self._order_results.get(orderId) or {}
             if getattr(orderState, "warningText", None):
@@ -503,6 +620,20 @@ class IBMergerArbScanner(EWrapper, EClient):
         """End of open orders list."""
         if self._open_orders_active:
             self._open_orders_done.set()
+        with self._live_orders_lock:
+            count = len(self._live_orders)
+        self.logger.info("openOrderEnd: live order book has %d active orders", count)
+
+    def orderBound(self, orderId: int, apiClientId: int, apiOrderId: int):
+        """Called when a manual TWS order is bound to an API client.
+        Maps the permId (orderId param here is actually reqId/permId) to
+        the assigned apiOrderId for the given apiClientId."""
+        self.logger.info(
+            "orderBound permId=%d apiClientId=%d apiOrderId=%d",
+            orderId, apiClientId, apiOrderId,
+        )
+        with self._live_orders_lock:
+            self._perm_id_to_order_id[orderId] = apiOrderId
 
     def execDetails(self, reqId: int, contract: Contract, execution):
         """Fill notification; optional for place_order (orderStatus is primary)."""
