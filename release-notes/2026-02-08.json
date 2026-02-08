@@ -1,30 +1,16 @@
 {
   "date": "2026-02-08",
-  "title": "Week of Feb 2–8, 2026",
+  "title": "Week of Feb 2\u20138, 2026",
   "summary": "Major week: live account positions and order management, full trade ticket redesign, NDX 100 signals, market cap data, KRJ ticker management, and option scanning improvements.",
   "features": [
     {
       "id": "account-tab",
       "title": "Live Account Positions",
       "summary": "New Account tab shows your IB positions grouped by underlying with live P&L",
-      "description": "The M&A Options page now has a dedicated Account tab that pulls your live positions directly from Interactive Brokers. Positions are grouped by underlying ticker in colored block cards, showing:\n\n- Every leg (stock + options) with real-time quotes and P&L\n- Aggregated exposure and cost basis per underlying\n- Account-level filtering — view one IB account, the other, or both\n- A left-side ticker list to select which names appear in the main view\n\nEach position block also includes a Buy/Sell button that opens the trade ticket, a Sell Scan shortcut for options, and a Request KRJ Signal button so you can check momentum without leaving the page.",
+      "description": "The M&A Options page now has a dedicated Account tab that pulls your live positions directly from Interactive Brokers. Positions are grouped by underlying ticker in colored block cards, showing:\n\n- Every leg (stock + options) with real-time quotes and P&L\n- Aggregated exposure and cost basis per underlying\n- Account-level filtering \u2014 view one IB account, the other, or both\n- A left-side ticker list to select which names appear in the main view\n\nEach position block also includes a Buy/Sell button that opens the trade ticket, a Sell Scan shortcut for options, and a Request KRJ Signal button so you can check momentum without leaving the page.",
       "category": "positions",
-      "image": "/changelog/2026-02-08/account-tab.png",
-      "screenshot": {
-        "path": "/ma-options",
-        "actions": [
-          { "type": "click", "selector": "[data-tab='accounts']" },
-          { "type": "wait", "ms": 3000 }
-        ],
-        "viewport": { "width": 1400, "height": 900 },
-        "annotations": [
-          {
-            "type": "circle",
-            "selector": "[data-tab='accounts']",
-            "label": "Account tab"
-          }
-        ]
-      }
+      "image": "",
+      "screenshot": null
     },
     {
       "id": "trade-ticket",
@@ -33,51 +19,54 @@
       "description": "The trade ticket has been completely rebuilt for speed and accessibility. It now opens full-screen with a horizontal 3-column layout:\n\n- **Left column**: Instrument details and current position\n- **Center column**: Order type (Market/Limit/Stop), side (Buy/Sell), and quantity with +/- delta buttons\n- **Right column**: Price fields, auto-populated from the live quote when the ticket opens\n\nThe limit price auto-fills from the current bid/ask. Stop price pre-fills from the spot quote. Quantity buttons use delta increments (+1, +5, +10, etc.) with a toggle for +/- direction. Everything is sized for quick, confident order entry.",
       "category": "positions",
       "image": "/changelog/2026-02-08/trade-ticket.png",
-      "screenshot": {
-        "path": "/ma-options",
-        "actions": [
-          { "type": "click", "selector": "[data-tab='accounts']" },
-          { "type": "wait", "ms": 2000 }
-        ],
-        "viewport": { "width": 1400, "height": 900 },
-        "annotations": []
-      }
+      "screenshot": null
     },
     {
       "id": "working-orders",
       "title": "Working Orders & Order Management",
-      "summary": "View, modify, and cancel working orders — globally and per-position",
+      "summary": "View, modify, and cancel working orders \u2014 globally and per-position",
       "description": "Full order lifecycle management is now built in. You can see all working orders in a global view, or collapsed under each position block with a toggle.\n\nFor each working order you can:\n- **Modify** the price or quantity inline\n- **Cancel** with a single click\n- See real-time order status updates from IB\n\nOrder binding has been hardened so orders placed through the dashboard always show up correctly, even across sessions. The live order book persists across reconnections.",
       "category": "positions",
       "image": "/changelog/2026-02-08/working-orders.png",
-      "screenshot": {
-        "path": "/ma-options",
-        "actions": [
-          { "type": "click", "selector": "[data-tab='accounts']" },
-          { "type": "wait", "ms": 2000 }
-        ],
-        "viewport": { "width": 1400, "height": 900 },
-        "annotations": []
-      }
+      "screenshot": null
     },
     {
       "id": "ndx100-group",
       "title": "NDX 100 Index Group",
       "summary": "New signal group tracking all 100 Nasdaq 100 components",
-      "description": "The KRJ signals page now includes a dedicated NDX 100 group. This lets you see momentum signals for all 100 components of the Nasdaq 100 index in one view — filter by Long/Short/Neutral, sort by any column, and quickly identify which large-cap names are showing directional momentum.\n\nThe group is automatically synchronized with the current NDX 100 constituents. Access it from the group selector dropdown on the Signals tab.",
+      "description": "The KRJ signals page now includes a dedicated NDX 100 group. This lets you see momentum signals for all 100 components of the Nasdaq 100 index in one view \u2014 filter by Long/Short/Neutral, sort by any column, and quickly identify which large-cap names are showing directional momentum.\n\nThe group is automatically synchronized with the current NDX 100 constituents. Access it from the group selector dropdown on the Signals tab.",
       "category": "signals",
       "image": "/changelog/2026-02-08/ndx100-group.png",
       "screenshot": {
         "path": "/krj",
         "actions": [
-          { "type": "wait", "ms": 2000 }
+          {
+            "type": "wait",
+            "ms": 2000
+          },
+          {
+            "type": "click",
+            "selector": "text=NDX100"
+          },
+          {
+            "type": "wait",
+            "ms": 2000
+          }
         ],
-        "viewport": { "width": 1400, "height": 900 },
+        "viewport": {
+          "width": 1400,
+          "height": 900
+        },
         "annotations": [
           {
             "type": "circle",
-            "selector": "[data-group='ndx100']",
-            "label": "NDX 100 group"
+            "bbox": [
+              437,
+              47,
+              110,
+              22
+            ],
+            "label": "New NDX 100 group"
           }
         ]
       }
@@ -86,20 +75,35 @@
       "id": "market-cap-column",
       "title": "Market Cap Column",
       "summary": "Market capitalization now visible directly in the signals table",
-      "description": "Every signal row now displays market capitalization alongside the existing volume and volatility metrics. Values are shown in compact notation ($1.2T, $450B, $12.3B) so you can instantly gauge the size of each name without leaving the page.\n\nThe column sits between Vol Ratio and ADV, and is fully sortable — click the header to rank by market cap.",
+      "description": "Every signal row now displays market capitalization alongside the existing volume and volatility metrics. Values are shown in compact notation ($1.2T, $450B, $12.3B) so you can instantly gauge the size of each name without leaving the page.\n\nThe column sits between Vol Ratio and ADV, and is fully sortable \u2014 click the header to rank by market cap.",
       "category": "signals",
       "image": "/changelog/2026-02-08/market-cap-column.png",
       "screenshot": {
         "path": "/krj",
         "actions": [
-          { "type": "wait", "ms": 2000 }
+          {
+            "type": "wait",
+            "ms": 3000
+          }
         ],
-        "viewport": { "width": 1400, "height": 900 },
+        "viewport": {
+          "width": 1400,
+          "height": 900
+        },
         "annotations": [
           {
             "type": "arrow",
-            "selector": "th[data-col='market_cap_b']",
-            "label": "Market Cap"
+            "bbox": [
+              760,
+              100,
+              50,
+              20
+            ],
+            "label": "Mkt Cap",
+            "from": [
+              720,
+              50
+            ]
           }
         ]
       }
@@ -108,65 +112,84 @@
       "id": "ticker-management",
       "title": "KRJ Ticker List Management",
       "summary": "Add, remove, and reorder tickers in your signal groups with on-demand signals",
-      "description": "The Edit Tickers modal has been rebuilt. You can now:\n\n- **Add tickers** with SEC EDGAR autocomplete validation — type a few letters, pick from the dropdown\n- **Remove tickers** with immediate group tab refresh\n- **Reorder** your lists by dragging tickers into your preferred sequence (order is preserved, no more alphabetical sort)\n- **Restore** the default ETFs/FX or DRC list to its original state with one click\n\nWhen you add a new ticker, an on-demand signal is calculated immediately using live Polygon data — no need to wait for the weekly batch. The signal includes all metrics: 25 DMA, vol ratio (vs SPY), ADV, and Long/Short/Neutral classification.\n\nTicker lists are also auto-exported to JSON so the weekly batch job picks up your changes automatically.",
+      "description": "The Edit Tickers modal has been rebuilt. You can now:\n\n- **Add tickers** with SEC EDGAR autocomplete validation \u2014 type a few letters, pick from the dropdown\n- **Remove tickers** with immediate group tab refresh\n- **Reorder** your lists by dragging tickers into your preferred sequence (order is preserved, no more alphabetical sort)\n- **Restore** the default ETFs/FX or DRC list to its original state with one click\n\nWhen you add a new ticker, an on-demand signal is calculated immediately using live Polygon data \u2014 no need to wait for the weekly batch. The signal includes all metrics: 25 DMA, vol ratio (vs SPY), ADV, and Long/Short/Neutral classification.\n\nTicker lists are also auto-exported to JSON so the weekly batch job picks up your changes automatically.",
       "category": "signals",
       "image": "/changelog/2026-02-08/ticker-management.png",
-      "screenshot": {
-        "path": "/krj",
-        "actions": [
-          { "type": "wait", "ms": 2000 }
-        ],
-        "viewport": { "width": 1400, "height": 900 },
-        "annotations": []
-      }
+      "screenshot": null
     },
     {
       "id": "sell-scan",
       "title": "Sell Scan from Positions",
       "summary": "One-click option scan showing near-the-money calls and puts for any position",
-      "description": "From any position block on the Account tab, click Sell Scan to instantly see the nearest-term calls and puts available for that underlying. The scan targets options expiring within 0–15 business days and groups them by expiration.\n\nResults show bid/ask, volume, open interest, and repeated-strike highlighting so you can quickly compare the same strike across expirations. The scan runs through your IB agent using the new batch market data path for significantly faster results.",
+      "description": "From any position block on the Account tab, click Sell Scan to instantly see the nearest-term calls and puts available for that underlying. The scan targets options expiring within 0\u201315 business days and groups them by expiration.\n\nResults show bid/ask, volume, open interest, and repeated-strike highlighting so you can quickly compare the same strike across expirations. The scan runs through your IB agent using the new batch market data path for significantly faster results.",
       "category": "options",
       "image": "/changelog/2026-02-08/sell-scan.png",
-      "screenshot": {
-        "path": "/ma-options",
-        "actions": [
-          { "type": "click", "selector": "[data-tab='accounts']" },
-          { "type": "wait", "ms": 2000 }
-        ],
-        "viewport": { "width": 1400, "height": 900 },
-        "annotations": []
-      }
+      "screenshot": null
     },
     {
       "id": "vol-oi-display",
       "title": "Volume & Open Interest on All Option Legs",
       "summary": "Vol/OI now displayed in bid/ask grids, option chains, and analysis modals",
-      "description": "Volume and open interest are now shown everywhere option pricing appears — in the bid/ask market data boxes, the full option chain view, and the strategy analysis modal. Values use compact notation (1.2K, 450, etc.) to stay readable without taking up too much space.",
+      "description": "Volume and open interest are now shown everywhere option pricing appears \u2014 in the bid/ask market data boxes, the full option chain view, and the strategy analysis modal. Values use compact notation (1.2K, 450, etc.) to stay readable without taking up too much space.",
       "category": "options",
       "image": "/changelog/2026-02-08/vol-oi-display.png",
       "screenshot": {
         "path": "/ma-options",
         "actions": [
-          { "type": "wait", "ms": 2000 }
+          {
+            "type": "wait",
+            "ms": 3000
+          }
         ],
-        "viewport": { "width": 1400, "height": 900 },
-        "annotations": []
+        "viewport": {
+          "width": 1400,
+          "height": 900
+        },
+        "annotations": [
+          {
+            "type": "circle",
+            "bbox": [
+              383,
+              218,
+              112,
+              16
+            ],
+            "label": "Volume & Open Interest"
+          }
+        ]
       }
     },
     {
       "id": "watch-lists",
       "title": "Personal Spread Watch Lists",
       "summary": "Save option spreads to named personal lists for monitoring",
-      "description": "When watching a spread, you now see a list selection modal where you can choose which personal list to save it to (or create a new one). Lists have been merged into the Monitor tab with a dropdown filter so everything lives in one place.\n\nThis replaces the old separate \"My Lists\" tab — all your watched spreads are now accessible from Monitor with a single dropdown toggle.",
+      "description": "When watching a spread, you now see a list selection modal where you can choose which personal list to save it to (or create a new one). Lists have been merged into the Monitor tab with a dropdown filter so everything lives in one place.\n\nThis replaces the old separate \"My Lists\" tab \u2014 all your watched spreads are now accessible from Monitor with a single dropdown toggle.",
       "category": "options",
       "image": "/changelog/2026-02-08/watch-lists.png",
       "screenshot": {
         "path": "/ma-options",
         "actions": [
-          { "type": "wait", "ms": 2000 }
+          {
+            "type": "wait",
+            "ms": 3000
+          }
         ],
-        "viewport": { "width": 1400, "height": 900 },
-        "annotations": []
+        "viewport": {
+          "width": 1400,
+          "height": 900
+        },
+        "annotations": [
+          {
+            "type": "circle",
+            "bbox": [
+              325,
+              88,
+              100,
+              26
+            ],
+            "label": "Spread list filter"
+          }
+        ]
       }
     },
     {
@@ -176,20 +199,13 @@
       "description": "The print dialog now lets you select which groups to include and offers a \"Print all Long/Short\" shortcut that prints only actionable signals (Long and Short) across all groups, sorted and with each group starting on a new page.\n\nGroup names repeat in the table header on every printed page so you always know which list you're looking at.",
       "category": "signals",
       "image": "/changelog/2026-02-08/krj-printing.png",
-      "screenshot": {
-        "path": "/krj",
-        "actions": [
-          { "type": "wait", "ms": 2000 }
-        ],
-        "viewport": { "width": 1400, "height": 900 },
-        "annotations": []
-      }
+      "screenshot": null
     },
     {
       "id": "ib-agent-stability",
       "title": "IB Agent: Auto-Update & Stability",
       "summary": "Agent now auto-updates on startup, auto-restarts after updates, and handles multiple sessions",
-      "description": "The IB Data Agent (the local app that connects your TWS to the dashboard) received major reliability improvements:\n\n- **Auto-update**: On startup, the agent checks for new versions and updates itself automatically — no prompts, just a restart\n- **Auto-restart**: After applying an update, the agent restarts itself cleanly\n- **Version negotiation**: The server routes data requests to the best available agent when multiple are connected\n- **Account mapping**: Your IB account is now securely tied to your dashboard user — no more cross-user data leaks\n- **Mac/Unix support**: Positions and orders now work correctly on non-Windows systems\n\nAgent is now at version 1.0.17.",
+      "description": "The IB Data Agent (the local app that connects your TWS to the dashboard) received major reliability improvements:\n\n- **Auto-update**: On startup, the agent checks for new versions and updates itself automatically \u2014 no prompts, just a restart\n- **Auto-restart**: After applying an update, the agent restarts itself cleanly\n- **Version negotiation**: The server routes data requests to the best available agent when multiple are connected\n- **Account mapping**: Your IB account is now securely tied to your dashboard user \u2014 no more cross-user data leaks\n- **Mac/Unix support**: Positions and orders now work correctly on non-Windows systems\n\nAgent is now at version 1.0.17.",
       "category": "general",
       "image": "",
       "screenshot": null

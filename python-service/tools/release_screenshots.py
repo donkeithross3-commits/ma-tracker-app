@@ -223,9 +223,43 @@ async def capture_feature(page: Page, base_url: str, feature: dict, output_path:
 
 
 # ---------------------------------------------------------------------------
+# Login
+# ---------------------------------------------------------------------------
+async def login_via_form(page: Page, base_url: str, email: str, password: str):
+    """Log in by filling the /login form with Playwright."""
+    login_url = base_url.rstrip("/") + "/login"
+    print(f"  Logging in as {email} via {login_url} ...")
+    await page.goto(login_url, wait_until="networkidle", timeout=20_000)
+
+    # Fill the login form
+    await page.fill('input[name="email"]', email)
+    await page.fill('input[name="password"]', password)
+    await page.click('button[type="submit"]')
+
+    # Wait for redirect away from /login
+    try:
+        await page.wait_for_url(lambda url: "/login" not in url, timeout=15_000)
+        print(f"  Logged in successfully (redirected to {page.url})")
+    except Exception:
+        # Check for error message on the login page
+        error_el = await page.query_selector('.bg-red-50')
+        if error_el:
+            error_text = await error_el.inner_text()
+            raise RuntimeError(f"Login failed: {error_text}")
+        raise RuntimeError(f"Login timed out. Current URL: {page.url}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-async def process_release(config_path: str, base_url: str, auth_cookie: str, headed: bool):
+async def process_release(
+    config_path: str,
+    base_url: str,
+    auth_cookie: str,
+    email: str,
+    password: str,
+    headed: bool,
+):
     with open(config_path) as f:
         release = json.load(f)
 
@@ -247,7 +281,7 @@ async def process_release(config_path: str, base_url: str, auth_cookie: str, hea
         browser = await p.chromium.launch(headless=not headed)
         context = await browser.new_context()
 
-        # Auth
+        # Auth — prefer form login, fall back to cookie
         if auth_cookie:
             domain = base_url.replace("https://", "").replace("http://", "").split(":")[0]
             is_secure = base_url.startswith("https")
@@ -262,6 +296,10 @@ async def process_release(config_path: str, base_url: str, auth_cookie: str, hea
             }])
 
         page = await context.new_page()
+
+        # Login via form if credentials provided
+        if email and password:
+            await login_via_form(page, base_url, email, password)
 
         for feature in features_with_screenshots:
             fid = feature["id"]
@@ -301,12 +339,23 @@ def main():
         help="Session cookie value for authentication"
     )
     parser.add_argument(
+        "--email", default="",
+        help="Login email (alternative to --auth-cookie)"
+    )
+    parser.add_argument(
+        "--password", default="",
+        help="Login password (alternative to --auth-cookie)"
+    )
+    parser.add_argument(
         "--headed", action="store_true",
         help="Run with visible browser (for debugging)"
     )
     args = parser.parse_args()
 
-    asyncio.run(process_release(args.config, args.base_url, args.auth_cookie, args.headed))
+    asyncio.run(process_release(
+        args.config, args.base_url, args.auth_cookie,
+        args.email, args.password, args.headed,
+    ))
 
 
 if __name__ == "__main__":
