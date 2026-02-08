@@ -107,6 +107,31 @@ Tables opt in by:
 The `--visible-cols` CSS variable is set by React from the length of the visible columns
 array, enabling font/padding to scale proportionally as columns are added/removed.
 
+**Global interactive element scaling (comfort mode):**
+
+In addition to tables, comfort mode automatically scales ALL interactive elements
+across the app using broad CSS selectors based on element types and ARIA roles:
+
+| Selector | Compact | Comfort |
+|----------|---------|---------|
+| `button` | native | 44px min-height, larger font |
+| `button > svg` | h-3.5 to h-4 | 20px (1.25rem) !important |
+| `input`, `textarea`, `select` | native | 44px min-height, 1rem font |
+| `[role="checkbox"]` | 16px (h-4 w-4) | 24px (1.5rem) !important |
+| `[role="menuitem"]` etc. | native | 44px rows, 1rem font |
+| `[role="tab"]` | native | 44px, 1.125rem, 0.625rem padding |
+| `[role="dialog"]` | p-6 | 1.5rem padding, 1.375rem titles |
+| `.cursor-grab > svg` | h-4 w-4 | 24px (1.5rem) !important |
+| `.divide-y > div/li` | native | 44px min-height, flex center |
+| `.text-xs` | 0.75rem | promoted to 0.875rem !important |
+
+These rules live in `@layer components` so they have correct specificity. Elements
+inside `.d-table` are excluded to avoid double-scaling with the fluid table system.
+
+**Escape hatches:**
+- `.no-density` class on any element opts it out of all comfort scaling
+- `.d-table button` / `.d-table input` are excluded from global button/input rules
+
 ### 5. ColumnChooser Component
 
 **File:** `components/ui/ColumnChooser.tsx`
@@ -225,6 +250,21 @@ to keep printed output readable at any column count.
 When adding print support to other tables, follow the same pattern: pass the
 visible column set to the print component and filter accordingly.
 
+## Components with Targeted Comfort Mode Logic
+
+These components have specific `isComfort` branching beyond what the global CSS provides:
+
+- **TickerEditorModal** (`components/krj/TickerEditorModal.tsx`): Uses `isComfort` from
+  `useUIPreferences()` to switch up/down arrow buttons from stacked vertical (`flex-col`)
+  to horizontal (`flex-row`) layout, increase icon sizes, add padding/hover backgrounds,
+  enlarge drag handles, and scale autocomplete suggestion row padding. The `.no-density`
+  class is used on the arrow/delete buttons to prevent the global CSS from adding
+  `min-height: 44px` (which would distort the stacked layout in compact mode).
+
+- **Trade Ticket** (`components/ma-options/IBPositionsTab.tsx`): Already designed with
+  44px+ touch targets from the start (min-h-[52px] to min-h-[72px], text-xl to text-4xl).
+  No comfort mode branching needed — it's inherently accessible.
+
 ## Gotchas and Lessons Learned
 
 1. **The `ColumnChooser` is a named export**, not a default export.
@@ -249,7 +289,17 @@ visible column set to the print component and filter accordingly.
    Don't add fixed `text-xs` or `text-sm` classes to cells inside a `d-table` — they
    override the fluid values. Use them only in compact mode or on non-table elements.
 
-7. **Position box persistence uses `updatePrefs` directly**, not `setVisibleColumns`.
+7. **The global comfort CSS uses `!important` on SVG sizes and checkboxes.** This is
+   necessary because Tailwind utility classes (`h-3.5`, `w-4`) have single-class
+   specificity that beats `[data-density="comfort"] button > svg`. If a component needs
+   to override, use the `.no-density` escape hatch and manage sizing with `isComfort`.
+
+8. **Elements inside `.d-table` are excluded from global scaling.** The fluid table
+   system handles its own font/padding via container queries. Adding global button/input
+   scaling inside tables would cause double-scaling. If a table needs larger controls
+   (like in-cell edit inputs), handle it with component-level `isComfort` checks.
+
+9. **Position box persistence uses `updatePrefs` directly**, not `setVisibleColumns`.
    The IBPositionsTab's selected ticker boxes are stored in `maOptionsPrefs.selectedTickers`,
    not in `columnVisibility`. The column chooser is a separate concern from position
    box selection.
