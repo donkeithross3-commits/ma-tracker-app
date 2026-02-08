@@ -1448,3 +1448,29 @@ async def relay_execution_config(request: ExecutionConfigRequest):
         logger.error(f"Relay execution/config error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class ExecutionBudgetRequest(BaseModel):
+    userId: str
+    budget: int  # -1 = unlimited, 0 = halt, N>0 = exactly N orders
+
+
+@router.post("/relay/execution/budget")
+async def relay_execution_budget(request: ExecutionBudgetRequest):
+    """Set the order budget (lifeguard on duty) on the user's agent."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_budget",
+            payload={"budget": request.budget},
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/budget error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

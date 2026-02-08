@@ -5,6 +5,8 @@ import { useSession } from "next-auth/react";
 import { useIBConnection } from "./IBConnectionContext";
 import { useUIPreferences } from "@/lib/ui-preferences";
 import { ColumnChooser, type ColumnDef } from "@/components/ui/ColumnChooser";
+import { RiskManagerModal } from "./RiskManagerModal";
+import { OrderBudgetControl } from "./OrderBudgetControl";
 
 /* ─── Column definitions for Position Details table ─── */
 const POSITIONS_COLUMNS: ColumnDef[] = [
@@ -381,6 +383,88 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [legPrices, setLegPrices] = useState<Record<string, LegPrice>>({});
   const [legPricesLoading, setLegPricesLoading] = useState<Record<string, boolean>>({});
   const autoFetchedLegPricesRef = useRef<Set<string>>(new Set());
+
+  // ---- Risk Manager / Execution Engine ----
+  const [riskModalPosition, setRiskModalPosition] = useState<{
+    symbol: string; secType: string; position: number; avgCost: number;
+    lastPrice?: number; contract?: Record<string, unknown>;
+  } | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [executionStatus, setExecutionStatus] = useState<any>(null);
+  const executionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll execution status when modal is open or engine is running
+  const pollExecutionStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/ma-options/execution/status", { credentials: "include" });
+      if (res.ok) {
+        const json = await res.json();
+        setExecutionStatus(json);
+      }
+    } catch {
+      // silently fail
+    }
+  }, []);
+
+  useEffect(() => {
+    if (riskModalPosition || executionStatus?.running) {
+      pollExecutionStatus();
+      executionPollRef.current = setInterval(pollExecutionStatus, 3000);
+      return () => { if (executionPollRef.current) clearInterval(executionPollRef.current); };
+    }
+    return () => { if (executionPollRef.current) clearInterval(executionPollRef.current); };
+  }, [riskModalPosition, executionStatus?.running, pollExecutionStatus]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleRiskStart = useCallback(async (config: any) => {
+    const symbol = riskModalPosition?.symbol || "?";
+    const stratId = `risk_${symbol}_${Math.abs(riskModalPosition?.position || 0)}`;
+    const res = await fetch("/api/ma-options/execution/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        strategies: [{
+          strategy_id: stratId,
+          strategy_type: "risk_manager",
+          config,
+        }],
+      }),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error || `Start failed: ${res.status}`);
+    }
+    setTimeout(pollExecutionStatus, 500);
+  }, [riskModalPosition, pollExecutionStatus]);
+
+  const handleRiskStop = useCallback(async () => {
+    const res = await fetch("/api/ma-options/execution/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error || `Stop failed: ${res.status}`);
+    }
+    setTimeout(pollExecutionStatus, 500);
+  }, [pollExecutionStatus]);
+
+  const handleSetBudget = useCallback(async (budget: number) => {
+    const res = await fetch("/api/ma-options/execution/budget", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ budget }),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error || `Budget update failed: ${res.status}`);
+    }
+    setTimeout(pollExecutionStatus, 300);
+  }, [pollExecutionStatus]);
 
   const fetchOpenOrders = useCallback(async () => {
     setOpenOrdersLoading(true);
@@ -1940,13 +2024,34 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     )}
                                     {posVisibleSet.has("trade") && (
                                       <td className="py-1.5 px-1 text-center whitespace-nowrap">
-                                        <button
-                                          type="button"
-                                          onClick={() => openTradeTicket(group.key, group, row)}
-                                          className="min-h-[44px] min-w-[44px] px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-700 hover:bg-indigo-600 text-white whitespace-nowrap"
-                                        >
-                                          Trade
-                                        </button>
+                                        <div className="flex items-center justify-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => openTradeTicket(group.key, group, row)}
+                                            className="min-h-[44px] min-w-[44px] px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-700 hover:bg-indigo-600 text-white whitespace-nowrap"
+                                          >
+                                            Trade
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const c = row.contract;
+                                              const last = legPrices[`${c.symbol || ""}:${c.secType}:${c.strike || ""}:${c.lastTradeDateOrContractMonth || ""}:${c.right || ""}`]?.last;
+                                              setRiskModalPosition({
+                                                symbol: c.symbol || c.localSymbol || "?",
+                                                secType: c.secType || "STK",
+                                                position: row.position,
+                                                avgCost: row.avgCost,
+                                                lastPrice: last || undefined,
+                                                contract: c as unknown as Record<string, unknown>,
+                                              });
+                                            }}
+                                            className="min-h-[44px] min-w-[44px] px-2 py-2 rounded-lg text-sm font-semibold bg-yellow-700 hover:bg-yellow-600 text-white whitespace-nowrap"
+                                            title="Risk Manager"
+                                          >
+                                            &#9881;
+                                          </button>
+                                        </div>
                                       </td>
                                     )}
                                   </tr>
@@ -2739,6 +2844,29 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         </div>
       )}
 
+      {/* ── Order Budget Control (visible when connected) ── */}
+      {isConnected && (
+        <div className="mt-2">
+          <OrderBudgetControl
+            orderBudget={executionStatus?.order_budget ?? 0}
+            totalAlgoOrders={executionStatus?.total_algo_orders ?? 0}
+            isRunning={executionStatus?.running ?? false}
+            onSetBudget={handleSetBudget}
+          />
+        </div>
+      )}
+
+      {/* ── Risk Manager Modal ── */}
+      {riskModalPosition && (
+        <RiskManagerModal
+          isOpen={true}
+          onClose={() => setRiskModalPosition(null)}
+          position={riskModalPosition}
+          executionStatus={executionStatus}
+          onStart={handleRiskStart}
+          onStop={handleRiskStop}
+        />
+      )}
     </div>
   );
 }

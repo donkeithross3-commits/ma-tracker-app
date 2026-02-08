@@ -97,6 +97,12 @@ export async function GET() {
       }
     }
 
+    // Add strategies directory
+    const strategiesDir = path.join(agentDir, "strategies");
+    if (fs.existsSync(strategiesDir)) {
+      archive.directory(strategiesDir, "strategies");
+    }
+
     // Add standalone executable if it exists (for Windows users without Python)
     const exePath = path.join(agentDir, "dist", "ib_data_agent.exe");
     if (fs.existsSync(exePath)) {

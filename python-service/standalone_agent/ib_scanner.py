@@ -115,6 +115,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.req_id_map = {}
         self.next_req_id = 1000
         self.next_order_id = 1000  # Synced from nextValidId; used only for placeOrder
+        self._order_id_lock = Lock()  # Protects get_next_order_id()
         self.data_ready = Event()
         # Wait for all option-parameter callbacks (IB sends multiple + End)
         self.sec_def_opt_params_done = Event()
@@ -149,6 +150,14 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Orders: for place_order / cancel_order (order_id -> Event, order_id -> result dict)
         self._order_events: Dict[int, Event] = {}
         self._order_results: Dict[int, dict] = {}
+
+        # ── Order status listeners (for ExecutionEngine fill routing) ──
+        # Callbacks: fn(order_id: int, status_data: dict)
+        self._order_status_listeners: List = []
+        # Callbacks: fn(order_id: int, exec_data: dict)
+        self._exec_details_listeners: List = []
+        # Dedup: track last-seen (filled, status) per orderId to skip duplicate callbacks
+        self._last_order_status: Dict[int, tuple] = {}  # orderId -> (filled, status)
 
         # Open orders: for get_open_orders snapshot
         self._open_orders_list: List[dict] = []
@@ -271,6 +280,51 @@ class IBMergerArbScanner(EWrapper, EClient):
             if order_id is not None:
                 return self._live_orders.get(order_id)
         return None
+
+    # ── Order status listener management ──────────────────────────────
+
+    def add_order_status_listener(self, listener):
+        """Register a callback: fn(order_id: int, status_data: dict).
+        Called on IB message thread for every orderStatus callback."""
+        if listener not in self._order_status_listeners:
+            self._order_status_listeners.append(listener)
+
+    def remove_order_status_listener(self, listener):
+        """Unregister a previously registered order status listener."""
+        try:
+            self._order_status_listeners.remove(listener)
+        except ValueError:
+            pass
+
+    def add_exec_details_listener(self, listener):
+        """Register a callback: fn(order_id: int, exec_data: dict).
+        Called on IB message thread for every execDetails callback."""
+        if listener not in self._exec_details_listeners:
+            self._exec_details_listeners.append(listener)
+
+    def remove_exec_details_listener(self, listener):
+        """Unregister a previously registered exec details listener."""
+        try:
+            self._exec_details_listeners.remove(listener)
+        except ValueError:
+            pass
+
+    def _notify_order_status_listeners(self, order_id: int, status_data: dict):
+        """Fire all registered order status listeners. Runs on IB message thread.
+        Each listener should be fast (enqueue, not process)."""
+        for listener in self._order_status_listeners:
+            try:
+                listener(order_id, status_data)
+            except Exception as e:
+                self.logger.error("Order status listener error: %s", e)
+
+    def _notify_exec_details_listeners(self, order_id: int, exec_data: dict):
+        """Fire all registered exec details listeners."""
+        for listener in self._exec_details_listeners:
+            try:
+                listener(order_id, exec_data)
+            except Exception as e:
+                self.logger.error("Exec details listener error: %s", e)
 
     def _contract_from_dict(self, d: dict) -> Contract:
         """Build Contract from payload dict (symbol, secType, exchange, currency, etc.)."""
@@ -420,18 +474,43 @@ class IBMergerArbScanner(EWrapper, EClient):
             self._order_events.pop(order_id, None)
             self._order_results.pop(order_id, None)
 
-    def cancel_order_sync(self, order_id: int) -> dict:
-        """Cancel order by id.  Rejects orderId==0 (unbound manual TWS orders)."""
+    def cancel_order_sync(self, order_id: int, timeout_sec: float = 5.0) -> dict:
+        """Cancel order by id with confirmation wait.
+
+        Waits up to timeout_sec for orderStatus callback confirming
+        Cancelled/ApiCancelled/Filled status. Returns result dict.
+        Rejects orderId==0 (unbound manual TWS orders).
+        """
         if order_id == 0:
             return {"error": "Cannot cancel order: orderId is 0 (unbound). "
                     "Fetch open orders first to bind it, then retry.",
                     "orderId": order_id}
+        # Set up event to wait for cancel confirmation
+        self._order_events[order_id] = Event()
+        self._order_results[order_id] = {}
         try:
             self.cancelOrder(order_id)
-            return {"ok": True, "orderId": order_id}
+            if not self._order_events[order_id].wait(timeout=timeout_sec):
+                self.logger.warning("cancel_order_sync: timeout waiting for cancel confirmation (orderId=%d)", order_id)
+                return {"ok": True, "orderId": order_id, "warning": "Cancel sent but no confirmation within timeout. Order may still be active."}
+            res = self._order_results.get(order_id) or {}
+            status = res.get("status", "")
+            if res.get("errorCode") is not None:
+                code = res.get("errorCode")
+                text = res.get("errorString") or ""
+                return {"error": f"Cancel failed: IB error {code}: {text}", "orderId": order_id, "errorCode": code}
+            if status in ("Cancelled", "ApiCancelled"):
+                return {"ok": True, "orderId": order_id, "status": status}
+            if status == "Filled":
+                return {"ok": False, "orderId": order_id, "status": "Filled",
+                        "warning": "Order was already filled before cancel could take effect"}
+            return {"ok": True, "orderId": order_id, "status": status}
         except Exception as e:
             self.logger.error("cancel_order_sync: %s", e)
             return {"error": str(e), "orderId": order_id}
+        finally:
+            self._order_events.pop(order_id, None)
+            self._order_results.pop(order_id, None)
 
     def connect_to_ib(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1):
         """Connect to IB Gateway or TWS"""
@@ -494,9 +573,16 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self.logger.warning(f"Connection lost: {errorString}")
                 self.connection_lost = True
             elif errorCode in [1101, 1102]:
-                self.logger.info(f"Connection restored: {errorString}")
+                self.logger.info(f"Connection restored (code {errorCode}): {errorString}")
                 self.connection_lost = False
                 self.last_heartbeat = time.time()
+                # Re-sync order ID sequence and live order book after reconnect
+                try:
+                    self.reqIds(-1)  # Refresh nextValidId
+                    self.reqOpenOrders()  # Refresh live order book
+                    self.logger.info("Reconnect sync: requested fresh nextValidId + open orders")
+                except Exception as e:
+                    self.logger.error(f"Reconnect sync failed: {e}")
         elif errorCode in [2104, 2106, 2158]:
             # Informational messages
             pass
@@ -521,9 +607,20 @@ class IBMergerArbScanner(EWrapper, EClient):
         """Order status update.
 
         Always updates the live order book.  Also signals any pending
-        place_order_sync / modify_order_sync wait.
+        place_order_sync / modify_order_sync wait.  Notifies registered
+        order status listeners (for execution engine fill routing).
+        Deduplicates callbacks where filled and status haven't changed.
         """
-        self.logger.info(f"orderStatus orderId={orderId} status={status} filled={filled} remaining={remaining}")
+        # ── Dedup: skip if filled and status are unchanged ────────────────
+        last = self._last_order_status.get(orderId)
+        is_dup = (last is not None and last[0] == filled and last[1] == status)
+        self._last_order_status[orderId] = (filled, status)
+        # Clean up dedup tracking for terminal statuses
+        if status in self._TERMINAL_STATUSES:
+            self._last_order_status.pop(orderId, None)
+
+        if not is_dup:
+            self.logger.info(f"orderStatus orderId={orderId} status={status} filled={filled} remaining={remaining}")
 
         status_update = {
             "status": status,
@@ -567,6 +664,10 @@ class IBMergerArbScanner(EWrapper, EClient):
             self._order_results[orderId] = self._order_results.get(orderId) or {}
             self._order_results[orderId].update(status_update)
             self._order_events[orderId].set()
+
+        # ── Notify execution engine listeners (non-dup events only) ──────
+        if not is_dup:
+            self._notify_order_status_listeners(orderId, status_update)
 
     def openOrder(self, orderId: int, contract: Contract, order: Order, orderState):
         """Open order / what-if; may include warningText (e.g. price capping).
@@ -656,8 +757,29 @@ class IBMergerArbScanner(EWrapper, EClient):
             self._perm_id_to_order_id[orderId] = apiOrderId
 
     def execDetails(self, reqId: int, contract: Contract, execution):
-        """Fill notification; optional for place_order (orderStatus is primary)."""
-        self.logger.info("execDetails reqId=%s execId=%s", reqId, getattr(execution, "execId", ""))
+        """Fill notification. Notifies registered exec details listeners.
+
+        Provides per-fill data (exact fill price and quantity) that
+        orderStatus doesn't give us. Primary fill trigger is still
+        orderStatus; execDetails enriches it.
+        """
+        order_id = getattr(execution, "orderId", 0)
+        exec_data = {
+            "execId": getattr(execution, "execId", ""),
+            "orderId": order_id,
+            "time": getattr(execution, "time", ""),
+            "side": getattr(execution, "side", ""),
+            "shares": float(getattr(execution, "shares", 0)),
+            "price": float(getattr(execution, "price", 0)),
+            "cumQty": float(getattr(execution, "cumQty", 0)),
+            "avgPrice": float(getattr(execution, "avgPrice", 0)),
+        }
+        self.logger.info("execDetails orderId=%s execId=%s shares=%s price=%s",
+                         order_id, exec_data["execId"], exec_data["shares"], exec_data["price"])
+
+        # Notify execution engine listeners
+        if order_id:
+            self._notify_exec_details_listeners(order_id, exec_data)
 
     def execDetailsEnd(self, reqId: int):
         """End of executions for request."""
@@ -670,9 +792,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         return req_id
 
     def get_next_order_id(self) -> int:
-        """For placeOrder only. Keeps order id sequence separate from request ids."""
-        oid = self.next_order_id
-        self.next_order_id += 1
+        """For placeOrder only. Thread-safe. Keeps order id sequence separate from request ids."""
+        with self._order_id_lock:
+            oid = self.next_order_id
+            self.next_order_id += 1
         return oid
 
     @staticmethod

@@ -185,6 +185,8 @@ class IBDataAgent:
                 return await self._handle_execution_status(payload)
             elif request_type == "execution_config":
                 return await self._handle_execution_config(payload)
+            elif request_type == "execution_budget":
+                return await self._handle_execution_budget(payload)
             else:
                 return {"error": f"Unknown request type: {request_type}"}
         except Exception as e:
@@ -755,16 +757,18 @@ class IBDataAgent:
             return {"error": "strategy_id is required"}
         return self.execution_engine.update_strategy_config(strategy_id, new_config)
 
+    async def _handle_execution_budget(self, payload: dict) -> dict:
+        """Set the order budget (lifeguard on duty)."""
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+        budget = int(payload.get("budget", 0))
+        return self.execution_engine.set_order_budget(budget)
+
     def _create_strategy(self, strategy_type: str) -> Optional[ExecutionStrategy]:
-        """Factory for creating strategy instances by type name.
-        
-        This is the extension point for adding new strategy implementations.
-        Currently returns None for all types (strategies will be added as
-        separate modules when specific algo requirements are defined).
-        """
-        # Future: import and instantiate concrete strategy classes here
-        # e.g. if strategy_type == "spread_entry":
-        #          return SpreadEntryStrategy()
+        """Factory for creating strategy instances by type name."""
+        if strategy_type == "risk_manager":
+            from strategies.risk_manager import RiskManagerStrategy
+            return RiskManagerStrategy()
         logger.warning("No strategy implementation for type: %s", strategy_type)
         return None
 

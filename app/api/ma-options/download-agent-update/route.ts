@@ -106,6 +106,12 @@ export async function GET(request: NextRequest) {
       archive.directory(ibapiDir, "ibapi");
     }
 
+    // Add strategies directory
+    const strategiesDir = path.join(agentDir, "strategies");
+    if (fs.existsSync(strategiesDir)) {
+      archive.directory(strategiesDir, "strategies");
+    }
+
     // Finalize the archive
     await archive.finalize();
 
