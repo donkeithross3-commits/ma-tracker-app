@@ -1,0 +1,52 @@
+# IB TWS API Settings — Required Configuration
+
+When working on the IB Data Agent or any code that connects to IB TWS via the API,
+these three TWS settings (under File → Global Configuration → API → Settings) must be
+correctly configured.  Reference this when debugging agent connectivity or onboarding users.
+
+## 1. Enable ActiveX and Socket Clients  ✅ Must be CHECKED
+
+The master API switch.  When off (the TWS default), TWS refuses all incoming socket
+connections.  Our agent's `EClient.connect()` will fail.  Nothing works without this.
+
+- TWS default: **OFF**
+- IB Gateway default: **ON**
+
+## 2. Read-Only API  ❌ Must be UNCHECKED
+
+When checked (the IB default), TWS blocks:
+- Order placement: `placeOrder`, `cancelOrder`
+- Order information: `reqOpenOrders`, `reqAutoOpenOrders`, `openOrder`/`orderStatus` callbacks
+
+When checked, these still work normally:
+- Market data: `reqMktData`, `reqMarketDataType`
+- Contract lookups: `reqContractDetails`, `reqSecDefOptParams`
+- Positions: `reqPositions`
+- Account data: `reqAccountUpdates`
+
+Our agent calls `reqAutoOpenOrders(True)` and `reqOpenOrders()` on connect
+(`ib_scanner.py` `connect_to_ib`).  With Read-Only enabled these silently return
+nothing — the live order book stays empty and `placeOrder` is rejected.
+
+**Key debugging insight**: If a user reports "agent is connected, market data works,
+but orders fail / order book is empty", the first thing to check is Read-Only API.
+
+## 3. Socket Port
+
+| Application | Live | Paper |
+|-------------|------|-------|
+| TWS         | 7496 | 7497  |
+| IB Gateway  | 4001 | 4002  |
+
+Our agent defaults to port 7497 (paper) via `config.env`.  The code is not sensitive
+to paper vs live — all API calls work identically on both.  The port just determines
+which TWS session receives the connection.
+
+Users must ensure:
+1. The port in `config.env` matches the port shown in TWS API Settings
+2. If running both paper and live TWS, they connect to the intended one
+
+## Optional but Recommended
+
+- **Trusted IP Addresses**: Add `127.0.0.1` to avoid the TWS confirmation popup on each connect.
+- **Master Client ID**: Leave unset (our agent uses clientId=0 for `reqAutoOpenOrders` compatibility).

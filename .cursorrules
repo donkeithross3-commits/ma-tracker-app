@@ -112,8 +112,17 @@ Defined in `auth.config.ts` under `isInternalAPI`:
 - `/api/ma-options/agent-version` - Called by agent for update checks
 - `/api/ma-options/download-agent-update` - Called by agent for updates (uses API key param)
 
+### TWS API Settings (Required for Agent)
+Three settings in TWS Global Configuration → API → Settings must be correct:
+1. **Enable ActiveX and Socket Clients** — MUST be checked (TWS default: OFF). Master switch; nothing works without it.
+2. **Read-Only API** — MUST be unchecked (TWS default: ON). When checked, blocks order placement AND hides order info from the API (`reqOpenOrders`, `reqAutoOpenOrders` return nothing). Market data, positions, and contract lookups still work — so the agent appears healthy but orders silently fail and the live order book is empty.
+3. **Socket Port** — Must match `IB_PORT` in config.env. TWS: 7496 (live) / 7497 (paper). Gateway: 4001 (live) / 4002 (paper). Our code is not sensitive to paper vs live.
+
+See `.cursor/rules/ib-tws-api-settings.mdc` for full details.
+
 ### Troubleshooting
 - **Agent shows connected but dashboard says disconnected**: (1) Call `GET /api/ib-connection/relay-registry` (or `GET /options/relay/registry` on Python). If `providers_connected` is 0, the agent is not registered (wrong RELAY_URL or auth failed). If > 0, call `GET /options/relay/ib-status` and check `provider_statuses` for timeout/error. (2) Python relay must run with a single uvicorn worker (in-memory registry is per-process). (3) Hover the red status dot for the last error (e.g. relay timeout).
+- **Agent connected, market data works, but orders fail / order book empty**: Read-Only API is checked in TWS. Uncheck it, Apply, restart agent.
 - **Update downloads but extraction fails**: Check ZIP is valid (not HTML error page), file size > 1KB
 - **Version always shows update available**: Check for whitespace in version.txt (use printf, not echo)
 

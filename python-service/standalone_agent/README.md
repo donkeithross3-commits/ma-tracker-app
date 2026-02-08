@@ -8,11 +8,31 @@ Local agent that connects your Interactive Brokers account to the MA Tracker web
 
 ### 1. Set Up IB TWS or Gateway
 
-1. Open Interactive Brokers TWS or IB Gateway
-2. Go to **File → Global Configuration → API → Settings**
-3. Check **"Enable ActiveX and Socket Clients"**
-4. Set **Socket Port** to `7497` (paper) or `7496` (live)
-5. Click **Apply** and **OK**
+Open Interactive Brokers TWS or IB Gateway, then navigate to
+**File → Global Configuration → API → Settings** (or **Edit → Global Configuration** on some versions).
+
+Configure these three settings:
+
+| # | Setting | Required Value | Why |
+|---|---------|---------------|-----|
+| 1 | **Enable ActiveX and Socket Clients** | ✅ Checked | Master switch — nothing works without this. TWS has it OFF by default. |
+| 2 | **Read-Only API** | ❌ Unchecked | When checked (the IB default), order placement and order info are blocked. Market data still works, but our agent needs order access. |
+| 3 | **Socket Port** | `7497` (paper) or `7496` (live) | Must match the `IB_PORT` in your `config.env`. Use 7497 for paper trading, 7496 for live. |
+
+**Recommended** (optional but avoids popups):
+- Add `127.0.0.1` to **Trusted IP Addresses** so TWS doesn't prompt you every time the agent connects.
+
+Click **Apply** and **OK** when done.
+
+> **IB Gateway users:** IB Gateway has "Enable ActiveX and Socket Clients" ON by default and uses ports 4002 (paper) / 4001 (live) instead of 7497/7496.
+
+#### What each setting controls
+
+- **Enable ActiveX and Socket Clients** — The master API switch. When off, TWS refuses all socket connections. No market data, no positions, no orders — the agent simply cannot connect.
+
+- **Read-Only API** — Blocks order placement (`placeOrder`, `cancelOrder`) and hides order information (`reqOpenOrders`, `reqAutoOpenOrders`) from the API. Does NOT block market data (`reqMktData`), positions (`reqPositions`), contract lookups (`reqContractDetails`), or option parameters (`reqSecDefOptParams`). IB enables this by default as a safety measure.
+
+- **Socket Port** — Determines which TWS session the agent connects to. If you run both paper and live TWS on the same machine, each listens on a different port. Our agent code is not sensitive to paper vs live — all API calls work identically on both. Just make sure the port in `config.env` matches the port shown in TWS.
 
 ### 2. Run the Agent
 
@@ -93,10 +113,17 @@ Your `config.env` file is pre-configured with your API key. You only need to edi
 
 ### "Failed to connect to IB TWS"
 
-1. Make sure IB TWS or Gateway is running
-2. Check API is enabled (see Step 1 above)
-3. Verify the port number matches (7497 for paper, 7496 for live)
-4. Try restarting TWS
+1. Make sure IB TWS or Gateway is running and logged in
+2. Check **Enable ActiveX and Socket Clients** is checked (see Step 1 above)
+3. Verify the port number in `config.env` matches TWS (7497 for paper, 7496 for live; or 4002/4001 for IB Gateway)
+4. Try restarting TWS — API setting changes sometimes require a restart to take effect
+
+### Agent connects but orders don't work / order book is empty
+
+1. Check that **Read-Only API** is **unchecked** in TWS API Settings
+2. IB enables Read-Only by default — this blocks order placement and order info
+3. Market data and positions will still work with Read-Only on, so the agent may appear healthy
+4. Uncheck it, click Apply, and restart the agent
 
 ### "Authentication failed"
 
