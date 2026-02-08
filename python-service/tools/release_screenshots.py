@@ -5,21 +5,32 @@ Release Screenshot Tool
 Captures annotated screenshots from production for the changelog.
 
 Usage:
-    # Capture all screenshots for a release
-    python release_screenshots.py --config ../../release-notes/2026-02-08.json
+    # Capture all screenshots for a release (typical workflow)
+    python release_screenshots.py --config ../../release-notes/2026-02-08.json \
+        --email "don.keith.ross3@gmail.com" --password "limitless2025"
 
     # Against local dev
-    python release_screenshots.py --config ../../release-notes/2026-02-08.json --base-url http://localhost:3000
+    python release_screenshots.py --config ../../release-notes/2026-02-08.json \
+        --base-url http://localhost:3000 --email EMAIL --password PASS
 
     # With visible browser for debugging
-    python release_screenshots.py --config ../../release-notes/2026-02-08.json --headed
-
-    # With auth cookie (grab from browser devtools)
-    python release_screenshots.py --config ../../release-notes/2026-02-08.json --auth-cookie "eyJhbGci..."
+    python release_screenshots.py --config ../../release-notes/2026-02-08.json --headed \
+        --email EMAIL --password PASS
 
 Prerequisites:
     pip install -r requirements.txt
     playwright install chromium
+
+Key design notes:
+    - All annotation coordinates are in CSS pixels; the Annotator class detects DPR
+      and scales internally. Headless Chromium on macOS uses DPR=1.
+    - Prefer element selectors (e.g. "button:has-text('NDX100')") over manual bbox
+      coordinates — selectors survive layout changes.
+    - Output is deterministic: same page state + selectors = byte-identical PNGs.
+      If git shows no diff after re-running, the images were already correct.
+    - The changelog detail page (app/changelog/[date]/page.tsx) uses mtime-based
+      cache-busting (?v=TIMESTAMP) on image URLs, so deploying regenerated PNGs
+      automatically invalidates browser caches. No user hard-refresh needed.
 """
 
 import asyncio

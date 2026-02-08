@@ -30,6 +30,12 @@ ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && kill $(lsof -t 
   Docker image at build time. The `/api/ma-options/agent-version` endpoint reads
   `version.txt` from inside the running container, NOT from disk. So a `git pull` alone
   does nothing — the image must be rebuilt and the container recreated.
+- **Static assets (images, PNGs) in `public/` are baked into the Docker image.**
+  After regenerating screenshots or other assets, you MUST rebuild + recreate the container.
+  Even then, **browsers cache images aggressively** — if the URL doesn't change, users see
+  stale content. The changelog system handles this with mtime-based `?v=` cache-busting
+  (see `app/changelog/[date]/page.tsx`). Apply the same pattern for any other static assets
+  that change after initial deployment.
 
 ## IB Data Agent Architecture
 

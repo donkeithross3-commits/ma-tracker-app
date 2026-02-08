@@ -493,6 +493,7 @@ Weekly release notes live at `/changelog` (summary) and `/changelog/[date]` (det
 - **Screenshot tool**: `python-service/tools/release_screenshots.py`
 - **Tool deps**: `python-service/tools/requirements.txt` (playwright, Pillow — dev only)
 - **Docker**: `Dockerfile.prod` copies `release-notes/` into the runner stage
+- **Cache-busting**: Detail page uses `unoptimized` Image + mtime-based `?v=` query params (see lesson #7 below)
 
 ### Weekly Release Note Workflow
 
@@ -537,6 +538,15 @@ playwright install chromium
 5. **The DR3_dev account (`don.keith.ross3@gmail.com`) is used for screenshots** because it has the default password. Features requiring IB connectivity (Account tab, trade ticket, working orders) cannot be captured with this account — leave those as `"screenshot": null` and the detail page shows a "screenshot pending" placeholder.
 
 6. **Category badges**: signals (blue), positions (emerald), intel (purple), portfolio (amber), options (cyan), general (gray). Defined in `lib/changelog.ts` `getCategoryStyle()`.
+
+7. **Image caching will bite you.** Next.js `<Image>` serves optimized images through `/_next/image` which browsers cache aggressively. If you regenerate screenshots but keep the same URL, users see stale images. The fix has two parts:
+   - The `<Image>` component uses `unoptimized` to bypass the `/_next/image` proxy entirely
+   - `imageSrcWithCacheBust()` in `app/changelog/[date]/page.tsx` appends `?v={mtime}` to every image URL based on the file's modification timestamp — so when PNGs change on disk, the URL changes and browsers fetch fresh copies
+   - **This is why regenerating screenshots and redeploying "just works"** — no need to ask users to hard-refresh
+
+8. **Always verify screenshots from the actual served URL, not just locally.** When debugging annotation positioning, fetch the image directly from production (`curl -o /tmp/test.png https://dr3-dashboard.com/changelog/...`) AND from the `/_next/image` proxy URL. Compare both to rule out server-side vs browser-side caching.
+
+9. **The screenshot tool produces deterministic output.** Given the same page state and selectors, the tool generates byte-identical PNGs. If `git diff` shows no changes to PNGs after re-running the tool, the annotations were already correct — the issue is elsewhere (usually caching).
 
 ### Release Note JSON Format
 
