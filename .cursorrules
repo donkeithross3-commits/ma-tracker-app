@@ -191,6 +191,24 @@ for the full architecture reference.
 - **Lightweight persistence** — one JSONB column (`ui_prefs`) on `user_preferences`,
   no new tables or migrations for new column sets.
 
+### Comfort Mode — Two-Layer Architecture
+Comfort mode operates at two layers. Most components need zero code changes:
+
+1. **Global CSS layer** (`globals.css`, `@layer components`): Broad selectors keyed on
+   `[data-density="comfort"]` automatically scale ALL buttons (44px min), inputs (44px min),
+   checkboxes (24px), dropdown items, tabs, dialogs, drag handles, list rows, and SVG icons.
+   Also promotes `text-xs` → `text-sm` globally. Uses `!important` where needed to override
+   Tailwind utilities. Elements inside `.d-table` are excluded (tables have their own fluid
+   system). Any element can opt out with `.no-density`.
+
+2. **Component-specific layer**: Only needed when the global CSS causes layout issues
+   (e.g., stacked arrow buttons that shouldn't each be 44px tall). These components use
+   `isComfort` from `useUIPreferences()` for targeted layout changes plus `.no-density`
+   on elements that need different sizing. Currently: `TickerEditorModal`.
+
+**When building new UI**: Don't add comfort-mode logic by default — the global CSS handles
+it. Only add `isComfort` branching if testing reveals layout breakage in comfort mode.
+
 ### Adding a Column Chooser to a New Table (Quick Reference)
 1. Define `const MY_COLUMNS: ColumnDef[] = [{ key: "col1", label: "Col 1" }, ...]`
 2. Define `const MY_DEFAULTS = MY_COLUMNS.map(c => c.key)` (or a subset)

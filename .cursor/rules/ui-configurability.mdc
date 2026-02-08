@@ -303,3 +303,27 @@ These components have specific `isComfort` branching beyond what the global CSS 
    The IBPositionsTab's selected ticker boxes are stored in `maOptionsPrefs.selectedTickers`,
    not in `columnVisibility`. The column chooser is a separate concern from position
    box selection.
+
+10. **Prefer global CSS over per-component comfort logic.** The broad CSS selectors in
+    `globals.css` handle ~90% of interactive elements automatically. Only add `isComfort`
+    branching in a component if the global CSS causes layout breakage (e.g., stacked
+    icon buttons that need a layout change, not just a size change). This keeps the
+    codebase lightweight and prevents comfort-mode boilerplate from spreading.
+
+11. **Use `.no-density` with `isComfort` together.** When a component needs custom
+    comfort logic, add `.no-density` to the element to suppress the global CSS rules,
+    then use `isComfort` to apply the right classes. Example: the TickerEditorModal
+    arrow buttons use `.no-density` to prevent 44px min-height (which breaks the
+    stacked layout), then conditionally apply `p-1.5 rounded hover:bg-gray-700` and
+    larger icon sizes when `isComfort` is true.
+
+12. **ARIA roles power the global selectors.** The comfort CSS targets `[role="tab"]`,
+    `[role="checkbox"]`, `[role="menuitem"]`, `[role="dialog"]`, etc. Components using
+    Radix UI primitives get these roles automatically. Custom components that don't use
+    Radix may need explicit `role` attributes to benefit from global scaling.
+
+13. **The trade ticket was designed accessible-first.** Unlike other screens where compact
+    is the default, the IBPositionsTab trade ticket uses 52–72px buttons and text-xl to
+    text-4xl fonts. This is the gold standard for what comfort mode should feel like.
+    When designing new interactive overlays (order entry, risk dialogs), use the trade
+    ticket sizing as the reference, not the compact KRJ table sizing.
