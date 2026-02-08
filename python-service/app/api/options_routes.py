@@ -944,12 +944,13 @@ async def relay_agent_state():
 
 
 @router.get("/relay/ib-status")
-async def relay_ib_status():
+async def relay_ib_status(user_id: Optional[str] = Query(None)):
     """
     Check IB connection status through WebSocket relay.
     
-    Queries ALL connected providers and returns connected=true if ANY
-    provider has IB TWS connected.
+    If user_id is provided, returns connected=true only if that user's own
+    agent has IB connected.  If user_id is omitted (legacy / admin), returns
+    connected=true if ANY provider has IB connected.
     """
     try:
         registry = get_registry()
@@ -963,17 +964,37 @@ async def relay_ib_status():
                 "message": "No IB data provider connected"
             }
         
-        logger.info(f"relay_ib_status: querying {status['providers_connected']} provider(s)")
+        # Decide which providers to query
+        target_user_id = user_id.strip() if user_id else None
+        providers_to_query = status["providers"]
+        if target_user_id:
+            # Only check the requesting user's own provider(s)
+            providers_to_query = [
+                p for p in providers_to_query
+                if p.get("user_id") == target_user_id
+            ]
+            if not providers_to_query:
+                logger.info(f"relay_ib_status: no provider for user {target_user_id}, {status['providers_connected']} other(s) connected")
+                return {
+                    "connected": False,
+                    "source": "relay",
+                    "message": (
+                        "An IB agent is connected, but it belongs to a different account. "
+                        "Log in with the account that generated the agent API key, "
+                        "or re-download the agent from this account."
+                    ),
+                }
         
-        # Query ALL providers for their IB status
-        # Return connected=true if ANY provider has IB connected
+        logger.info(f"relay_ib_status: querying {len(providers_to_query)} provider(s) (user_filter={target_user_id})")
+        
+        # Query selected providers for their IB status
         connected_provider = None
         all_responses = []
         loop = asyncio.get_running_loop()
         
-        for provider_info in status["providers"]:
+        for provider_info in providers_to_query:
             provider_id = provider_info["id"]
-            user_id = provider_info.get("user_id")
+            prov_user_id = provider_info.get("user_id")
             
             try:
                 # Get the actual provider object
@@ -1010,20 +1031,20 @@ async def relay_ib_status():
                     is_connected = response_data.get("connected", False)
                     all_responses.append({
                         "provider_id": provider_id,
-                        "user_id": user_id,
+                        "user_id": prov_user_id,
                         "connected": is_connected
                     })
                     if is_connected:
                         connected_provider = provider_id
-                    logger.info(f"relay_ib_status: provider {provider_id} (user={user_id}) -> connected={is_connected}")
+                    logger.info(f"relay_ib_status: provider {provider_id} (user={prov_user_id}) -> connected={is_connected}")
                 except asyncio.TimeoutError:
                     all_responses.append({
                         "provider_id": provider_id,
-                        "user_id": user_id,
+                        "user_id": prov_user_id,
                         "connected": False,
                         "error": "timeout"
                     })
-                    logger.warning(f"relay_ib_status: provider {provider_id} (user={user_id}) -> timeout")
+                    logger.warning(f"relay_ib_status: provider {provider_id} (user={prov_user_id}) -> timeout")
                 finally:
                     await registry.remove_pending_request(request_id)
                     
@@ -1031,7 +1052,7 @@ async def relay_ib_status():
                 logger.error(f"Error querying provider {provider_id}: {e}")
                 all_responses.append({
                     "provider_id": provider_id,
-                    "user_id": user_id,
+                    "user_id": prov_user_id,
                     "connected": False,
                     "error": str(e)
                 })

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth-api";
 import { prisma } from "@/lib/db";
 import { spawn } from "child_process";
 import path from "path";
@@ -11,9 +12,11 @@ const PYTHON_SERVICE_URL =
 const RELAY_STATUS_TIMEOUT_MS = 15000; // 15s (relay may query multiple providers, 5s each)
 
 /**
- * Check WebSocket relay provider status
+ * Check WebSocket relay provider status.
+ * When userId is provided, only checks providers belonging to that user
+ * so the dashboard shows "connected" only when YOUR agent is connected.
  */
-async function checkRelayProviderStatus(): Promise<{
+async function checkRelayProviderStatus(userId?: string): Promise<{
   connected: boolean;
   providers?: any[];
   message?: string;
@@ -22,8 +25,10 @@ async function checkRelayProviderStatus(): Promise<{
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), RELAY_STATUS_TIMEOUT_MS);
   try {
+    const url = new URL(`${PYTHON_SERVICE_URL}/options/relay/ib-status`);
+    if (userId) url.searchParams.set("user_id", userId);
     const response = await fetch(
-      `${PYTHON_SERVICE_URL}/options/relay/ib-status`,
+      url.toString(),
       {
         method: "GET",
         headers: { "Content-Type": "application/json" },
@@ -112,9 +117,13 @@ except Exception as e:
 export async function GET(request: NextRequest) {
   const pyUrl = process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
   try {
+    // Get the logged-in user so the status check is user-specific.
+    const user = await getCurrentUser();
+    const userId = user?.id ?? undefined;
+
     // 1. Check WebSocket relay provider first (preferred for remote setups)
-    const relayStatus = await checkRelayProviderStatus();
-    console.log("[ib-connection/status] PYTHON_SERVICE_URL=", pyUrl, "relayConnected=", relayStatus.connected, "relayError=", relayStatus.relayError ?? "none");
+    const relayStatus = await checkRelayProviderStatus(userId);
+    console.log("[ib-connection/status] PYTHON_SERVICE_URL=", pyUrl, "userId=", userId ?? "anon", "relayConnected=", relayStatus.connected, "relayError=", relayStatus.relayError ?? "none");
     
     if (relayStatus.connected) {
       return NextResponse.json({
