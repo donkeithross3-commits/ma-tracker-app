@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useUIPreferences } from "@/lib/ui-preferences";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ export function TickerEditorModal({
   onTickerAdded,
 }: TickerEditorModalProps) {
   const router = useRouter();
+  const { isComfort } = useUIPreferences();
   const [isOpen, setIsOpen] = useState(false);
   const [localTickers, setLocalTickers] = useState<string[]>([]);
   const [newTicker, setNewTicker] = useState("");
@@ -443,11 +445,11 @@ export function TickerEditorModal({
                         key={match.ticker}
                         type="button"
                         onClick={() => handleSelectSuggestion(match)}
-                        className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-700 flex items-center gap-2 ${
+                        className={`w-full px-3 ${isComfort ? "py-3 text-base" : "py-2 text-sm"} text-left hover:bg-gray-700 flex items-center gap-2 no-density ${
                           index === selectedIndex ? "bg-gray-700" : ""
                         }`}
                       >
-                        <span className="font-mono text-blue-400 font-medium min-w-[60px]">
+                        <span className={`font-mono text-blue-400 font-medium ${isComfort ? "min-w-[80px]" : "min-w-[60px]"}`}>
                           {match.ticker}
                         </span>
                         <span className="text-gray-300 truncate">{match.name}</span>
@@ -562,46 +564,46 @@ export function TickerEditorModal({
                       onDragStart={() => handleDragStart(idx)}
                       onDragOver={(e) => handleDragOver(e, idx)}
                       onDragEnd={handleDragEnd}
-                      className={`flex items-center gap-1 px-2 py-1.5 hover:bg-gray-800 transition-colors ${
+                      className={`flex items-center ${isComfort ? "gap-2 px-3 py-2" : "gap-1 px-2 py-1.5"} hover:bg-gray-800 transition-colors ${
                         dragIdx === idx ? "opacity-50 bg-gray-800" : ""
                       } ${dragOverIdx === idx && dragIdx !== idx ? "border-t-2 border-blue-500" : ""}`}
                     >
                       {/* Drag handle */}
-                      <GripVertical className="h-4 w-4 text-gray-600 cursor-grab flex-shrink-0" />
+                      <GripVertical className={`${isComfort ? "h-6 w-6" : "h-4 w-4"} text-gray-600 cursor-grab flex-shrink-0`} />
                       {/* Position number */}
-                      <span className="text-xs text-gray-500 w-5 text-right flex-shrink-0">{idx + 1}</span>
+                      <span className={`${isComfort ? "text-sm w-6" : "text-xs w-5"} text-gray-500 text-right flex-shrink-0`}>{idx + 1}</span>
                       {/* Ticker */}
-                      <span className="font-mono text-sm flex-1 ml-1">{ticker}</span>
+                      <span className={`font-mono ${isComfort ? "text-base" : "text-sm"} flex-1 ml-1`}>{ticker}</span>
                       {/* Up/Down arrows */}
-                      <div className="flex flex-col flex-shrink-0">
+                      <div className={`flex ${isComfort ? "flex-row gap-1" : "flex-col"} flex-shrink-0`}>
                         <button
                           onClick={() => handleMoveTicker(idx, "up")}
                           disabled={idx === 0}
-                          className="text-gray-500 hover:text-gray-200 disabled:opacity-20 p-0 leading-none"
+                          className={`text-gray-500 hover:text-gray-200 disabled:opacity-20 no-density ${isComfort ? "p-1.5 rounded hover:bg-gray-700" : "p-0 leading-none"}`}
                           title="Move up"
                         >
-                          <ChevronUp className="h-3.5 w-3.5" />
+                          <ChevronUp className={isComfort ? "h-5 w-5" : "h-3.5 w-3.5"} />
                         </button>
                         <button
                           onClick={() => handleMoveTicker(idx, "down")}
                           disabled={idx === localTickers.length - 1}
-                          className="text-gray-500 hover:text-gray-200 disabled:opacity-20 p-0 leading-none"
+                          className={`text-gray-500 hover:text-gray-200 disabled:opacity-20 no-density ${isComfort ? "p-1.5 rounded hover:bg-gray-700" : "p-0 leading-none"}`}
                           title="Move down"
                         >
-                          <ChevronDown className="h-3.5 w-3.5" />
+                          <ChevronDown className={isComfort ? "h-5 w-5" : "h-3.5 w-3.5"} />
                         </button>
                       </div>
                       {/* Remove button */}
                       <button
                         onClick={() => handleRemoveTicker(ticker)}
                         disabled={isRemoving === ticker}
-                        className="text-gray-500 hover:text-red-400 disabled:opacity-50 flex-shrink-0 ml-1"
+                        className={`text-gray-500 hover:text-red-400 disabled:opacity-50 flex-shrink-0 ml-1 no-density ${isComfort ? "p-1.5 rounded hover:bg-gray-700" : ""}`}
                         title="Remove ticker"
                       >
                         {isRemoving === ticker ? (
-                          <span className="text-xs">...</span>
+                          <span className={isComfort ? "text-sm" : "text-xs"}>...</span>
                         ) : (
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className={isComfort ? "h-5 w-5" : "h-4 w-4"} />
                         )}
                       </button>
                     </div>
