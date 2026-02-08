@@ -722,7 +722,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
               <thead className="bg-gray-800 sticky top-0 z-10">
                 <tr>
                   {columns.map((col) => {
-                    const numericCols = ['c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size'];
+                    const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size'];
                     const isNumeric = numericCols.includes(col.key);
                     const isSorted = sortConfig.column === col.key;
                     return (
@@ -749,7 +749,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
               </thead>
               <tbody>
                 {sortedRows.map((row, idx) => {
-                  const numericCols = ['c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size'];
+                  const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size'];
                   return (
                     <tr
                       key={(row["ticker"] || "") + "-" + idx}
@@ -762,6 +762,8 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                         if (col.key === "ticker") {
                           // Strip c: prefix from currency pairs for cleaner display
                           value = isCurrencyPair(value) ? value.substring(2) : value;
+                        } else if (col.key === "market_cap_b") {
+                          value = formatBillions(value);
                         } else if (col.key === "c" || col.key === "weekly_low" || col.key === "25DMA" || col.key === "25DMA_shifted") {
                           value = formatPrice(value);
                         } else if (col.key === "long_signal_value" || col.key === "short_signal_value") {

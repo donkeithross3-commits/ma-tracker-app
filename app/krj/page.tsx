@@ -47,6 +47,7 @@ export default async function KrjPage() {
 
   const columns: { key: string; label: string; description: string }[] = [
     { key: "ticker", label: "Ticker", description: "Stock or ETF symbol" },
+    { key: "market_cap_b", label: "Mkt Cap ($B)", description: "Market capitalization in billions of dollars (updated weekly)" },
     { key: "c", label: "Friday Close", description: `Closing price on last trading day of the week ending ${signalDate}` },
     { key: "weekly_low", label: "Last Week Low", description: `Lowest trade price during the week ending ${signalDate}` },
     { key: "25DMA", label: "25 DMA", description: "25-day simple moving average of closing prices" },

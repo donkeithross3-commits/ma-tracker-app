@@ -149,6 +149,7 @@ const KRJ_CSV_COLUMNS = [
   "ticker", "c", "weekly_low", "25DMA", "25DMA_shifted",
   "long_signal_value", "short_signal_value", "signal", "signal_status_prior_week",
   "vol_ratio", "25DMA_range_bps", "25D_ADV_Shares_MM", "25D_ADV_nortional_B", "avg_trade_size",
+  "market_cap_b",
 ] as const;
 
 /** Path to on-demand (single-ticker) signals merged into list data */
