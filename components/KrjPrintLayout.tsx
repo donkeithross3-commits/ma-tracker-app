@@ -77,6 +77,14 @@ function formatDecimal(x: string | undefined, decimals: number): string {
   return num.toFixed(decimals);
 }
 
+function formatMarketCap(x: string | undefined): string {
+  if (!x) return "";
+  const num = Number(x);
+  if (Number.isNaN(num)) return x;
+  if (num >= 1000) return (num / 1000).toFixed(2) + "T";
+  return num.toFixed(1) + "B";
+}
+
 function isCurrencyPair(ticker: string): boolean {
   return ticker.startsWith("c:");
 }
@@ -89,6 +97,8 @@ function getAbbreviatedLabel(label: string): string {
     "ADV (25 DMA - $B)": "ADV ($B)",
     "Current Week Signal": "Signal",
     "Last Week Signal": "Last Signal",
+    "Optimized Signal": "Opt Signal",
+    "Last Week Opt Signal": "Last Opt",
     "Vol Ratio (to SP500)": "Vol Ratio",
     "Avg Daily Range (25 DMA)": "Avg Range",
     "Average Trade Size": "Avg Trade",
@@ -103,7 +113,7 @@ export default function KrjPrintLayout({ groups, columns, filterDescription }: K
   const numericCols = [
     'c', 'weekly_low', '25DMA', '25DMA_shifted', 
     'long_signal_value', 'short_signal_value', 
-    'vol_ratio', '25DMA_range_bps', 
+    'vol_ratio', '25DMA_range_bps', 'market_cap_b',
     '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 
     'avg_trade_size'
   ];
@@ -182,6 +192,8 @@ export default function KrjPrintLayout({ groups, columns, filterDescription }: K
                     if (col.key === "ticker") {
                       // Strip c: prefix from currency pairs for cleaner display
                       value = isCurrencyPair(value) ? value.substring(2) : value;
+                    } else if (col.key === "market_cap_b") {
+                      value = formatMarketCap(value);
                     } else if (col.key === "c" || col.key === "weekly_low" || col.key === "25DMA" || col.key === "25DMA_shifted") {
                       value = formatPrice(value);
                     } else if (col.key === "long_signal_value" || col.key === "short_signal_value") {

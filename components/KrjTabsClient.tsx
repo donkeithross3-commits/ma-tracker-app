@@ -556,7 +556,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
       {printMode && (
         <KrjPrintLayout
           groups={getGroupsForPrint}
-          columns={columns}
+          columns={visibleColumns}
           filterDescription={longShortOnlyForPrint ? "Current Week: Long, Short" : undefined}
         />
       )}
