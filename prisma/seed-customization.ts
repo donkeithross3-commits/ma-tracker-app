@@ -50,7 +50,7 @@ const KRJ_LISTS = [
   {
     name: "SP500",
     slug: "sp500",
-    description: "S&P 500 index constituents (auto-updated from SPY holdings)",
+    description: "S&P 500 index constituents (auto-updated from Wikipedia)",
     ownerAlias: "DR3_dev",
     isSystem: true,
     isEditable: false,
@@ -61,7 +61,7 @@ const KRJ_LISTS = [
   {
     name: "SP100",
     slug: "sp100",
-    description: "S&P 100 index constituents (auto-updated from OEF holdings)",
+    description: "S&P 100 index constituents (auto-updated from Wikipedia)",
     ownerAlias: "DR3_dev",
     isSystem: true,
     isEditable: false,
@@ -72,7 +72,7 @@ const KRJ_LISTS = [
   {
     name: "NDX100",
     slug: "ndx100",
-    description: "NASDAQ 100 index constituents (auto-updated from QQQ holdings)",
+    description: "NASDAQ 100 index constituents (auto-updated from Wikipedia)",
     ownerAlias: "DR3_dev",
     isSystem: true,
     isEditable: false,
