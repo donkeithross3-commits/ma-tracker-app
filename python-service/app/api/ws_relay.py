@@ -457,7 +457,9 @@ async def send_request_to_provider(
 
     # ── Priority-aware throttling for scan requests on execution-active agents ──
     is_scan = request_type in SCAN_REQUESTS
-    is_borrowing = user_id is not None and provider.user_id != user_id
+    # Treat requests as "borrowing" when the requesting user is different from
+    # the provider's owner, OR when no user_id was provided (anonymous/legacy).
+    is_borrowing = (user_id is None) or (provider.user_id != user_id)
     use_semaphore = False
 
     if is_scan and is_borrowing and provider.execution_active:

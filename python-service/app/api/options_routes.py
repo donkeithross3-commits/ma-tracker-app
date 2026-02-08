@@ -1395,13 +1395,15 @@ async def relay_execution_status(user_id: str = ""):
     """Get execution engine status, preferring stored telemetry for low latency.
     
     Returns the latest telemetry snapshot from the agent if available,
-    otherwise queries the agent directly.
+    otherwise queries the agent directly. Requires user_id.
     """
+    if not user_id:
+        return {"running": False, "error": "user_id required"}
     try:
         # First try to return cached telemetry from the relay (no round-trip)
         registry = get_registry()
         provider = await registry.get_active_provider(
-            user_id=user_id or None,
+            user_id=user_id,
             allow_fallback_to_any=False,
         )
         if provider and provider.execution_telemetry:
@@ -1409,10 +1411,6 @@ async def relay_execution_status(user_id: str = ""):
                 "source": "cached_telemetry",
                 **provider.execution_telemetry,
             }
-
-        # Fall back to querying the agent directly
-        if not user_id:
-            return {"running": False, "error": "user_id required"}
         response_data = await send_request_to_provider(
             request_type="execution_status",
             payload={},

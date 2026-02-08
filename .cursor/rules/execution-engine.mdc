@@ -1,0 +1,75 @@
+---
+description: Execution engine architecture, streaming quotes, and resource management for the IB local agent
+globs: python-service/standalone_agent/**/*.py, python-service/app/api/ws_relay.py, python-service/app/api/options_routes.py
+alwaysApply: false
+---
+
+# Execution Engine Architecture
+
+## Component Map
+
+| File | Role | Thread |
+|------|------|--------|
+| `resource_manager.py` | IB market data line accounting (100 lines shared) | Any (thread-safe) |
+| `quote_cache.py` | Persistent streaming subscriptions via `reqMktData(snapshot=False)` | IB msg thread writes, exec thread reads |
+| `execution_engine.py` | Strategy eval loop (100ms), order placement | Own daemon thread (`exec-engine`) |
+| `ib_scanner.py` | Scan requests (batch request-sleep-cancel) + streaming tick routing | IB msg thread for callbacks |
+| `ib_data_agent.py` | Orchestrator: creates all components, dispatches requests, sends telemetry | Async event loop |
+| `ws_relay.py` | Server-side: priority tiers, per-provider scan semaphore, telemetry storage | FastAPI async |
+| `options_routes.py` | HTTP endpoints: `/relay/execution/*` and `/relay/agent-state` | FastAPI async |
+
+## Critical Path (Latency-Sensitive)
+
+The execution loop runs entirely local -- no network in the critical path:
+```
+IB TWS -> tickPrice callback -> quote_cache.update_price -> Quote object (in-memory)
+exec-engine thread -> quote_cache.get -> strategy.evaluate -> scanner.place_order_sync -> IB TWS
+```
+Total latency: sub-millisecond (Python processing only). Never add network calls here.
+
+## Resource Management Rules
+
+- Standard IB account: 100 simultaneous market data lines, shared across TWS + all API clients
+- `ResourceManager` tracks execution streaming lines vs scan lines
+- Scanner reads `resource_manager.scan_batch_size` (dynamic, max 50) for chunk sizing
+- When execution holds N lines, scans get `100 - N - 10(buffer)` lines
+- `accept_external_scans` is `False` when available lines < 10
+
+## Priority Tiers (ws_relay.py)
+
+| Tier | Request Types | Throttling |
+|------|--------------|------------|
+| 1 (account) | `get_positions`, `place_order`, `modify_order`, `cancel_order`, `get_open_orders` | Never delayed, never fallback |
+| 2 (scan) | `fetch_chain`, `fetch_prices`, `sell_scan`, `fetch_underlying`, `test_futures` | Semaphore(1) for external borrowers on exec-active agents |
+| 3 (status) | `ib_status`, `check_availability` | No throttling |
+| 4 (execution) | `execution_start`, `execution_stop`, `execution_status`, `execution_config` | Own agent only |
+
+## Adding a New Strategy
+
+1. Create a class extending `ExecutionStrategy` in a new file (e.g., `strategies/spread_entry.py`)
+2. Implement `get_subscriptions(config)`, `evaluate(quotes, config)`, `on_fill(order_id, fill_data, config)`
+3. Register in `_create_strategy()` in `ib_data_agent.py`
+4. Strategy receives quotes as `Dict[cache_key, Quote]` -- all subscribed instruments
+5. Return `List[OrderAction]` from `evaluate()` -- empty list = do nothing
+
+## Tick Routing in ib_scanner.py
+
+Every `tickPrice`/`tickSize`/`tickOptionComputation` callback checks streaming cache first:
+```python
+if self.streaming_cache is not None and self.streaming_cache.is_streaming_req_id(reqId):
+    self.streaming_cache.update_price(reqId, tickType, price)
+    return  # <-- fast path, skip scan logic
+# ... existing scan logic unchanged ...
+```
+The two paths are distinguished by which dict the reqId appears in. Never mix them.
+
+## Agent State Protocol
+
+Agent sends `agent_state` with every heartbeat (~10s) and `execution_telemetry` every ~20s when engine is running. Server stores latest values on `DataProvider` for low-latency dashboard queries.
+
+## Version Bumping
+
+Any change to agent files requires bumping `version.txt` (use `printf`, not `echo`):
+- PATCH for bug fixes: `printf "1.1.1" > version.txt`
+- MINOR for new features: `printf "1.2.0" > version.txt`
+- New .py files must be added to BOTH download routes (`download-agent/route.ts` and `download-agent-update/route.ts`)
