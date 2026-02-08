@@ -170,7 +170,42 @@ See `.cursor/rules/ib-tws-api-settings.mdc` for full details.
 - **Right-aligned numeric columns** with limited decimals and compact units
 - **Allow header labels to wrap** rather than adding horizontal scroll
 - **Place summary elements above/below tables**, not at the side
+- **User-controlled column visibility on every data table** — see UI Configurability below
 
 - /app/krj/page.tsx is a trader-facing report. Follow docs/krj_ui_style.md.
 - Do not change CSV loading or data logic without explicit request.
 - Styling changes should be implemented via Tailwind classes and small formatting helpers only.
+
+## UI Configurability Architecture
+
+The app supports per-user UI configurability via a lightweight system that avoids backend
+or frontend bloat. Two core features: **Column Chooser** (per-table column visibility) and
+**Comfort Mode** (density toggle for accessibility). See `.cursor/rules/ui-configurability.mdc`
+for the full architecture reference.
+
+### Key Principles
+- **Every data table** gets a column chooser. No exceptions for new tables.
+- **Never auto-hide columns.** Let the user decide what to show/hide.
+- **Comfort mode scales intelligently** — fluid font/padding via CSS container queries,
+  not fixed breakpoints. The number of visible columns drives the scaling.
+- **Lightweight persistence** — one JSONB column (`ui_prefs`) on `user_preferences`,
+  no new tables or migrations for new column sets.
+
+### Adding a Column Chooser to a New Table (Quick Reference)
+1. Define `const MY_COLUMNS: ColumnDef[] = [{ key: "col1", label: "Col 1" }, ...]`
+2. Define `const MY_DEFAULTS = MY_COLUMNS.map(c => c.key)` (or a subset)
+3. Define `const MY_LOCKED = ["essential_col"]` (columns that can't be hidden)
+4. In the component: `const { getVisibleColumns, setVisibleColumns } = useUIPreferences()`
+5. Derive `visibleKeys`, `visibleSet`, and `handleChange` via `useMemo`/`useCallback`
+6. Render `<ColumnChooser columns={MY_COLUMNS} visible={visibleKeys} defaults={MY_DEFAULTS} onChange={handleChange} locked={MY_LOCKED} />`
+7. Wrap table in `<div className="d-table-wrap" style={{ "--visible-cols": count }}>`, add `d-table` class to `<table>`
+8. Guard every `<th>` and `<td>` with `{visibleSet.has("key") && <th>...</th>}`
+
+### Current Table Keys (stored in `uiPrefs.columnVisibility`)
+- `krj` — KRJ signals dashboard
+- `watchedSpreads` — Monitor tab (WatchedSpreadsTable)
+- `candidateStrategies` — Curator tab (CandidateStrategiesTable)
+- `optionChain` — Curator tab (OptionChainViewer)
+- `dealSelector` — Curator tab (ScannerDealSelector)
+- `ibPositions` — Account tab positions table (IBPositionsTab)
+- `ibOrders` — Account tab working orders table (IBPositionsTab)
