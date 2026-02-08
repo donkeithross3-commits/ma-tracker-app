@@ -105,11 +105,12 @@ export default async function ReleaseDetailPage({ params }: Props) {
                 {hasImage && (
                   <div className="mb-6 rounded-xl overflow-hidden border border-gray-800 shadow-2xl shadow-black/40">
                     <Image
-                      src={feature.image!}
+                      src={imageSrcWithCacheBust(feature.image!)}
                       alt={`Screenshot: ${feature.title}`}
                       width={1400}
                       height={900}
                       className="w-full h-auto"
+                      unoptimized
                       priority
                     />
                   </div>
@@ -162,4 +163,16 @@ export default async function ReleaseDetailPage({ params }: Props) {
 function imageExists(imagePath: string): boolean {
   const fullPath = path.join(process.cwd(), "public", imagePath);
   return fs.existsSync(fullPath);
+}
+
+/** Get image src with cache-busting query param based on file mtime */
+function imageSrcWithCacheBust(imagePath: string): string {
+  const fullPath = path.join(process.cwd(), "public", imagePath);
+  try {
+    const stat = fs.statSync(fullPath);
+    const mtime = Math.floor(stat.mtimeMs / 1000);
+    return `${imagePath}?v=${mtime}`;
+  } catch {
+    return imagePath;
+  }
 }

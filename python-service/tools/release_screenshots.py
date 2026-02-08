@@ -248,17 +248,22 @@ async def capture_feature(page: Page, base_url: str, feature: dict, output_path:
                 if box:
                     # Playwright returns CSS pixels — perfect, annotator handles scaling
                     bbox = (box["x"], box["y"], box["width"], box["height"])
+                    print(f"    Selector '{ann['selector']}' -> bbox CSS: x={box['x']:.0f} y={box['y']:.0f} w={box['width']:.0f} h={box['height']:.0f}")
                 else:
                     print(f"    Warning: no bounding box for {ann['selector']}")
             else:
                 print(f"    Warning: selector not found: {ann['selector']}")
         elif "bbox" in ann:
             bbox = tuple(ann["bbox"])  # Expected in CSS pixels
+            print(f"    Manual bbox CSS: {bbox}")
 
         atype = ann["type"]
         label = ann.get("label", "")
 
         if atype == "circle" and bbox:
+            cx_css = bbox[0] + bbox[2] / 2
+            cy_css = bbox[1] + bbox[3] / 2
+            print(f"    Drawing CIRCLE at CSS center ({cx_css:.0f}, {cy_css:.0f}), size {bbox[2]:.0f}x{bbox[3]:.0f}")
             annotator.circle(bbox, label=label)
         elif atype == "arrow" and bbox:
             # Arrow end = center of the target element
@@ -271,6 +276,7 @@ async def capture_feature(page: Page, base_url: str, feature: dict, output_path:
                 start = (end[0] + off[0], end[1] + off[1])
             else:
                 start = (bbox[0] - 80, bbox[1] - 60)
+            print(f"    Drawing ARROW from CSS ({start[0]:.0f}, {start[1]:.0f}) to ({end[0]:.0f}, {end[1]:.0f})")
             annotator.arrow(start, end, label=label)
         elif atype == "badge":
             pos = ann.get("position") or (
