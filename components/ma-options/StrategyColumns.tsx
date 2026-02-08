@@ -7,6 +7,16 @@ import { formatCompactVolOi } from "@/lib/utils";
  * Used by both CandidateStrategiesTable (Curator) and WatchedSpreadsTable (Monitor)
  */
 
+/** Column keys used by strategy metric tables. */
+export const STRATEGY_COL_KEYS = [
+  "strikes", "legPrices", "market", "midEntry", "farEntry",
+] as const;
+
+/** Check whether a column is visible. If visibleCols is undefined, all cols are visible (backward-compat). */
+function isVis(visibleCols: Set<string> | undefined, key: string): boolean {
+  return !visibleCols || visibleCols.has(key);
+}
+
 export interface StrategyLeg {
   symbol: string;
   strike: number;
@@ -216,55 +226,42 @@ export function BidAskGrids({ legs }: { legs: StrategyLeg[] }) {
 export function DebitStrategyTableHeader({
   onSort,
   sortKey,
+  visibleCols,
 }: {
   onSort: (key: string) => void;
   sortKey?: string;
+  visibleCols?: Set<string>;
 }) {
+  const showStrikes = isVis(visibleCols, "strikes");
+  const showLegPrices = isVis(visibleCols, "legPrices");
+  const showMarket = isVis(visibleCols, "market");
+  const showMid = isVis(visibleCols, "midEntry");
+  const showFar = isVis(visibleCols, "farEntry");
+
   return (
     <>
       <tr className="border-b border-gray-700">
-        <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>
-          Strikes
-        </th>
-        <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>
-          Leg Prices
-        </th>
-        <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>
-          Market Data
-        </th>
-        <th
-          className="text-center py-1 px-2 text-gray-400 border-b border-gray-700"
-          colSpan={3}
-        >
-          Midpoint Entry
-        </th>
-        <th
-          className="text-center py-1 px-2 text-gray-400 border-b border-gray-700"
-          colSpan={3}
-        >
-          Far Touch Entry
-        </th>
+        {showStrikes && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Strikes</th>}
+        {showLegPrices && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Leg Prices</th>}
+        {showMarket && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Market Data</th>}
+        {showMid && <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>Midpoint Entry</th>}
+        {showFar && <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>Far Touch Entry</th>}
       </tr>
       <tr className="border-b border-gray-700">
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">
-          Cost
-        </th>
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">
-          Profit
-        </th>
-        <th
-          className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200"
-          onClick={() => onSort("annualizedYield")}
-        >
-          IRR
-        </th>
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">
-          Cost
-        </th>
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">
-          Profit
-        </th>
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
+        {showMid && (
+          <>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200" onClick={() => onSort("annualizedYield")}>IRR</th>
+          </>
+        )}
+        {showFar && (
+          <>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
+          </>
+        )}
       </tr>
     </>
   );
@@ -276,55 +273,42 @@ export function DebitStrategyTableHeader({
 export function CreditStrategyTableHeader({
   onSort,
   sortKey,
+  visibleCols,
 }: {
   onSort: (key: string) => void;
   sortKey?: string;
+  visibleCols?: Set<string>;
 }) {
+  const showStrikes = isVis(visibleCols, "strikes");
+  const showLegPrices = isVis(visibleCols, "legPrices");
+  const showMarket = isVis(visibleCols, "market");
+  const showMid = isVis(visibleCols, "midEntry");
+  const showFar = isVis(visibleCols, "farEntry");
+
   return (
     <>
       <tr className="border-b border-gray-700">
-        <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>
-          Strikes
-        </th>
-        <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>
-          Leg Prices
-        </th>
-        <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>
-          Market Data
-        </th>
-        <th
-          className="text-center py-1 px-2 text-gray-400 border-b border-gray-700"
-          colSpan={3}
-        >
-          Midpoint Entry
-        </th>
-        <th
-          className="text-center py-1 px-2 text-gray-400 border-b border-gray-700"
-          colSpan={3}
-        >
-          Far Touch Entry
-        </th>
+        {showStrikes && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Strikes</th>}
+        {showLegPrices && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Leg Prices</th>}
+        {showMarket && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Market Data</th>}
+        {showMid && <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>Midpoint Entry</th>}
+        {showFar && <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>Far Touch Entry</th>}
       </tr>
       <tr className="border-b border-gray-700">
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">
-          Credit
-        </th>
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">
-          Max Loss
-        </th>
-        <th
-          className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200"
-          onClick={() => onSort("annualizedYield")}
-        >
-          IRR
-        </th>
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">
-          Credit
-        </th>
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">
-          Max Loss
-        </th>
-        <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
+        {showMid && (
+          <>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Credit</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Max Loss</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200" onClick={() => onSort("annualizedYield")}>IRR</th>
+          </>
+        )}
+        {showFar && (
+          <>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Credit</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Max Loss</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
+          </>
+        )}
       </tr>
     </>
   );
@@ -338,21 +322,23 @@ export function StrategyTableHeader({
   onSort,
   sortKey,
   strategyType,
+  visibleCols,
 }: {
   onSort: (key: string) => void;
   sortKey?: string;
   strategyType?: StrategyType;
+  visibleCols?: Set<string>;
 }) {
   if (strategyType === "put_spread") {
-    return <CreditStrategyTableHeader onSort={onSort} sortKey={sortKey} />;
+    return <CreditStrategyTableHeader onSort={onSort} sortKey={sortKey} visibleCols={visibleCols} />;
   }
-  return <DebitStrategyTableHeader onSort={onSort} sortKey={sortKey} />;
+  return <DebitStrategyTableHeader onSort={onSort} sortKey={sortKey} visibleCols={visibleCols} />;
 }
 
 /**
  * Table row cells for debit spreads (call spreads, long calls)
  */
-export function DebitStrategyMetricsCells({ metrics }: { metrics: StrategyMetrics }) {
+export function DebitStrategyMetricsCells({ metrics, visibleCols }: { metrics: StrategyMetrics; visibleCols?: Set<string> }) {
   const strikes = renderStrikes(metrics.legs);
   const legPricesMid = renderLegPricesMid(metrics.legs);
   const legPricesFar = renderLegPricesFar(metrics.legs);
@@ -362,57 +348,56 @@ export function DebitStrategyMetricsCells({ metrics }: { metrics: StrategyMetric
 
   return (
     <>
-      {/* Strikes */}
-      <td className="py-1 px-2 text-gray-100 font-mono text-sm">
-        {strikes}
-      </td>
+      {isVis(visibleCols, "strikes") && (
+        <td className="py-1 px-2 text-gray-100 font-mono text-sm">{strikes}</td>
+      )}
 
-      {/* Leg Prices */}
-      <td className="py-1 px-2 text-gray-300 text-xs">
-        <div className="flex items-center gap-1" title={`Midpoint: ${legPricesMid}`}>
-          <span className="text-gray-500 text-[10px]">Mid:</span>
-          <span>{legPricesMid}</span>
-        </div>
-        <div className="flex items-center gap-1 text-gray-500" title={`Far Touch: ${legPricesFar}`}>
-          <span className="text-[10px]">Far:</span>
-          <span>{legPricesFar}</span>
-        </div>
-      </td>
+      {isVis(visibleCols, "legPrices") && (
+        <td className="py-1 px-2 text-gray-300 text-xs">
+          <div className="flex items-center gap-1" title={`Midpoint: ${legPricesMid}`}>
+            <span className="text-gray-500 text-[10px]">Mid:</span>
+            <span>{legPricesMid}</span>
+          </div>
+          <div className="flex items-center gap-1 text-gray-500" title={`Far Touch: ${legPricesFar}`}>
+            <span className="text-[10px]">Far:</span>
+            <span>{legPricesFar}</span>
+          </div>
+        </td>
+      )}
 
-      {/* Market Data - Bid/Ask Grids */}
-      <td className="py-1 px-2">
-        <BidAskGrids legs={metrics.legs} />
-      </td>
+      {isVis(visibleCols, "market") && (
+        <td className="py-1 px-2">
+          <BidAskGrids legs={metrics.legs} />
+        </td>
+      )}
 
-      {/* Midpoint Entry - Cost */}
-      <td className="py-1 px-2 text-right text-gray-100 font-mono text-sm">
-        ${midMetrics.cost.toFixed(2)}
-      </td>
+      {isVis(visibleCols, "midEntry") && (
+        <>
+          <td className="py-1 px-2 text-right text-gray-100 font-mono text-sm">
+            ${midMetrics.cost.toFixed(2)}
+          </td>
+          <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(midMetrics.profit)}`}>
+            ${midMetrics.profit.toFixed(2)}
+          </td>
+          <td className={`py-1 px-2 text-right font-mono text-sm font-semibold ${getProfitColorClass(midMetrics.irr)}`}>
+            {(midMetrics.irr * 100).toFixed(1)}%
+          </td>
+        </>
+      )}
 
-      {/* Midpoint Entry - Profit */}
-      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(midMetrics.profit)}`}>
-        ${midMetrics.profit.toFixed(2)}
-      </td>
-
-      {/* Midpoint Entry - IRR */}
-      <td className={`py-1 px-2 text-right font-mono text-sm font-semibold ${getProfitColorClass(midMetrics.irr)}`}>
-        {(midMetrics.irr * 100).toFixed(1)}%
-      </td>
-
-      {/* Far Touch Entry - Cost */}
-      <td className="py-1 px-2 text-right text-gray-100 font-mono text-sm">
-        ${farMetrics.cost.toFixed(2)}
-      </td>
-
-      {/* Far Touch Entry - Profit */}
-      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.profit)}`}>
-        ${farMetrics.profit.toFixed(2)}
-      </td>
-
-      {/* Far Touch Entry - IRR */}
-      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.irr)}`}>
-        {(farMetrics.irr * 100).toFixed(1)}%
-      </td>
+      {isVis(visibleCols, "farEntry") && (
+        <>
+          <td className="py-1 px-2 text-right text-gray-100 font-mono text-sm">
+            ${farMetrics.cost.toFixed(2)}
+          </td>
+          <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.profit)}`}>
+            ${farMetrics.profit.toFixed(2)}
+          </td>
+          <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.irr)}`}>
+            {(farMetrics.irr * 100).toFixed(1)}%
+          </td>
+        </>
+      )}
     </>
   );
 }
@@ -420,7 +405,7 @@ export function DebitStrategyMetricsCells({ metrics }: { metrics: StrategyMetric
 /**
  * Table row cells for credit spreads (put spreads)
  */
-export function CreditStrategyMetricsCells({ metrics }: { metrics: StrategyMetrics }) {
+export function CreditStrategyMetricsCells({ metrics, visibleCols }: { metrics: StrategyMetrics; visibleCols?: Set<string> }) {
   const strikes = renderStrikes(metrics.legs);
   const legPricesMid = renderLegPricesMid(metrics.legs);
   const legPricesFar = renderLegPricesFar(metrics.legs);
@@ -430,57 +415,56 @@ export function CreditStrategyMetricsCells({ metrics }: { metrics: StrategyMetri
 
   return (
     <>
-      {/* Strikes */}
-      <td className="py-1 px-2 text-gray-100 font-mono text-sm">
-        {strikes}
-      </td>
+      {isVis(visibleCols, "strikes") && (
+        <td className="py-1 px-2 text-gray-100 font-mono text-sm">{strikes}</td>
+      )}
 
-      {/* Leg Prices */}
-      <td className="py-1 px-2 text-gray-300 text-xs">
-        <div className="flex items-center gap-1" title={`Midpoint: ${legPricesMid}`}>
-          <span className="text-gray-500 text-[10px]">Mid:</span>
-          <span>{legPricesMid}</span>
-        </div>
-        <div className="flex items-center gap-1 text-gray-500" title={`Far Touch: ${legPricesFar}`}>
-          <span className="text-[10px]">Far:</span>
-          <span>{legPricesFar}</span>
-        </div>
-      </td>
+      {isVis(visibleCols, "legPrices") && (
+        <td className="py-1 px-2 text-gray-300 text-xs">
+          <div className="flex items-center gap-1" title={`Midpoint: ${legPricesMid}`}>
+            <span className="text-gray-500 text-[10px]">Mid:</span>
+            <span>{legPricesMid}</span>
+          </div>
+          <div className="flex items-center gap-1 text-gray-500" title={`Far Touch: ${legPricesFar}`}>
+            <span className="text-[10px]">Far:</span>
+            <span>{legPricesFar}</span>
+          </div>
+        </td>
+      )}
 
-      {/* Market Data - Bid/Ask Grids */}
-      <td className="py-1 px-2">
-        <BidAskGrids legs={metrics.legs} />
-      </td>
+      {isVis(visibleCols, "market") && (
+        <td className="py-1 px-2">
+          <BidAskGrids legs={metrics.legs} />
+        </td>
+      )}
 
-      {/* Midpoint Entry - Credit (max gain) */}
-      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(midMetrics.credit)}`}>
-        ${midMetrics.credit.toFixed(2)}
-      </td>
+      {isVis(visibleCols, "midEntry") && (
+        <>
+          <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(midMetrics.credit)}`}>
+            ${midMetrics.credit.toFixed(2)}
+          </td>
+          <td className="py-1 px-2 text-right text-red-400 font-mono text-sm">
+            ${midMetrics.maxLoss.toFixed(2)}
+          </td>
+          <td className={`py-1 px-2 text-right font-mono text-sm font-semibold ${getProfitColorClass(midMetrics.irr)}`}>
+            {(midMetrics.irr * 100).toFixed(1)}%
+          </td>
+        </>
+      )}
 
-      {/* Midpoint Entry - Max Loss */}
-      <td className="py-1 px-2 text-right text-red-400 font-mono text-sm">
-        ${midMetrics.maxLoss.toFixed(2)}
-      </td>
-
-      {/* Midpoint Entry - IRR */}
-      <td className={`py-1 px-2 text-right font-mono text-sm font-semibold ${getProfitColorClass(midMetrics.irr)}`}>
-        {(midMetrics.irr * 100).toFixed(1)}%
-      </td>
-
-      {/* Far Touch Entry - Credit (max gain) */}
-      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.credit)}`}>
-        ${farMetrics.credit.toFixed(2)}
-      </td>
-
-      {/* Far Touch Entry - Max Loss */}
-      <td className="py-1 px-2 text-right text-red-400 font-mono text-sm">
-        ${farMetrics.maxLoss.toFixed(2)}
-      </td>
-
-      {/* Far Touch Entry - IRR */}
-      <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.irr)}`}>
-        {(farMetrics.irr * 100).toFixed(1)}%
-      </td>
+      {isVis(visibleCols, "farEntry") && (
+        <>
+          <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.credit)}`}>
+            ${farMetrics.credit.toFixed(2)}
+          </td>
+          <td className="py-1 px-2 text-right text-red-400 font-mono text-sm">
+            ${farMetrics.maxLoss.toFixed(2)}
+          </td>
+          <td className={`py-1 px-2 text-right font-mono text-sm ${getProfitColorClass(farMetrics.irr)}`}>
+            {(farMetrics.irr * 100).toFixed(1)}%
+          </td>
+        </>
+      )}
     </>
   );
 }
@@ -491,13 +475,15 @@ export function CreditStrategyMetricsCells({ metrics }: { metrics: StrategyMetri
  */
 export function StrategyMetricsCells({ 
   metrics, 
-  strategyType 
+  strategyType,
+  visibleCols,
 }: { 
   metrics: StrategyMetrics;
   strategyType?: StrategyType;
+  visibleCols?: Set<string>;
 }) {
   if (strategyType === "put_spread") {
-    return <CreditStrategyMetricsCells metrics={metrics} />;
+    return <CreditStrategyMetricsCells metrics={metrics} visibleCols={visibleCols} />;
   }
-  return <DebitStrategyMetricsCells metrics={metrics} />;
+  return <DebitStrategyMetricsCells metrics={metrics} visibleCols={visibleCols} />;
 }

@@ -1,9 +1,27 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { WatchedSpreadDTO, SpreadUpdateFailure } from "@/types/ma-options";
-import { StrategyMetricsCells, type StrategyMetrics } from "./StrategyColumns";
+import { StrategyMetricsCells, STRATEGY_COL_KEYS, type StrategyMetrics } from "./StrategyColumns";
 import SpreadAnalysisModal from "./SpreadAnalysisModal";
+import { ColumnChooser, type ColumnDef } from "@/components/ui/ColumnChooser";
+import { useUIPreferences } from "@/lib/ui-preferences";
+
+const WATCHED_SPREADS_COLUMNS: ColumnDef[] = [
+  { key: "ticker", label: "Ticker" },
+  { key: "exp", label: "Expiration" },
+  { key: "type", label: "Type" },
+  { key: "strikes", label: "Strikes" },
+  { key: "legPrices", label: "Leg Prices" },
+  { key: "market", label: "Market Data" },
+  { key: "midEntry", label: "Midpoint Entry" },
+  { key: "farEntry", label: "Far Touch Entry" },
+  { key: "quote", label: "Quote Time" },
+  { key: "by", label: "Curator" },
+  { key: "action", label: "Actions" },
+];
+const WATCHED_SPREADS_DEFAULTS = ["ticker","exp","type","strikes","legPrices","market","midEntry","farEntry","quote","by","action"];
+const WATCHED_SPREADS_LOCKED = ["ticker", "action"];
 
 /**
  * Format timestamp for display in Eastern Time
@@ -106,6 +124,27 @@ export default function WatchedSpreadsTable({
   const [sortKey, setSortKey] = useState<string>("annualizedYield");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [analyzingSpread, setAnalyzingSpread] = useState<WatchedSpreadDTO | null>(null);
+
+  // Column visibility
+  const { getVisibleColumns, setVisibleColumns } = useUIPreferences();
+  const savedCols = getVisibleColumns("watchedSpreads");
+  const visibleColKeys = useMemo(() => savedCols ?? WATCHED_SPREADS_DEFAULTS, [savedCols]);
+  const visibleSet = useMemo(() => new Set(visibleColKeys), [visibleColKeys]);
+  const handleColumnsChange = useCallback(
+    (keys: string[]) => setVisibleColumns("watchedSpreads", keys),
+    [setVisibleColumns],
+  );
+  const stratVisibleSet = useMemo(
+    () => new Set(STRATEGY_COL_KEYS.filter((k) => visibleSet.has(k))),
+    [visibleSet],
+  );
+  const visibleColCount = useMemo(() => {
+    let count = 0;
+    for (const k of visibleColKeys) {
+      count += (k === "midEntry" || k === "farEntry") ? 3 : 1;
+    }
+    return count;
+  }, [visibleColKeys]);
 
   // Group and sort spreads by ticker, then by expiration, then by sort key
   const groupedSpreads = useMemo(() => {
@@ -252,6 +291,13 @@ export default function WatchedSpreadsTable({
               {refreshStatus}
             </div>
           )}
+          <ColumnChooser
+            columns={WATCHED_SPREADS_COLUMNS}
+            visible={visibleColKeys}
+            defaults={WATCHED_SPREADS_DEFAULTS}
+            onChange={handleColumnsChange}
+            locked={WATCHED_SPREADS_LOCKED}
+          />
           <button
             onClick={onRefresh}
             disabled={isRefreshing}
@@ -266,38 +312,39 @@ export default function WatchedSpreadsTable({
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs border-collapse">
+      <div className="overflow-x-auto d-table-wrap" style={{ "--visible-cols": visibleColCount } as React.CSSProperties}>
+        <table className="w-full text-xs border-collapse d-table">
           <thead className="sticky top-0 bg-gray-900">
             <tr className="border-b border-gray-700">
-              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Ticker</th>
-              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Exp</th>
-              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Type</th>
-              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Strikes</th>
-              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Leg Prices</th>
-              <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Market</th>
-              <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>
-                Midpoint Entry
-              </th>
-              <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>
-                Far Touch Entry
-              </th>
-              <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>Quote</th>
-              <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>By</th>
-              <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>Action</th>
+              {visibleSet.has("ticker") && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Ticker</th>}
+              {visibleSet.has("exp") && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Exp</th>}
+              {visibleSet.has("type") && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Type</th>}
+              {visibleSet.has("strikes") && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Strikes</th>}
+              {visibleSet.has("legPrices") && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Leg Prices</th>}
+              {visibleSet.has("market") && <th className="text-left py-2 px-2 text-gray-400" rowSpan={2}>Market</th>}
+              {visibleSet.has("midEntry") && <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>Midpoint Entry</th>}
+              {visibleSet.has("farEntry") && <th className="text-center py-1 px-2 text-gray-400 border-b border-gray-700" colSpan={3}>Far Touch Entry</th>}
+              {visibleSet.has("quote") && <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>Quote</th>}
+              {visibleSet.has("by") && <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>By</th>}
+              {visibleSet.has("action") && <th className="text-center py-2 px-2 text-gray-400" rowSpan={2}>Action</th>}
             </tr>
             <tr className="border-b border-gray-700">
-              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
-              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
-              <th
-                className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200"
-                onClick={() => handleSort("annualizedYield")}
-              >
-                IRR {sortKey === "annualizedYield" && (sortDir === "desc" ? "↓" : "↑")}
-              </th>
-              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
-              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
-              <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
+              {visibleSet.has("midEntry") && (
+                <>
+                  <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
+                  <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
+                  <th className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200" onClick={() => handleSort("annualizedYield")}>
+                    IRR {sortKey === "annualizedYield" && (sortDir === "desc" ? "↓" : "↑")}
+                  </th>
+                </>
+              )}
+              {visibleSet.has("farEntry") && (
+                <>
+                  <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
+                  <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
+                  <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -317,7 +364,7 @@ export default function WatchedSpreadsTable({
                   `}
                 >
                   {/* Ticker - only show on first row of ticker group */}
-                  {spread.tickerRowSpan > 0 ? (
+                  {visibleSet.has("ticker") && spread.tickerRowSpan > 0 ? (
                     <td 
                       className="py-1 px-2 text-gray-100 font-mono font-bold text-sm border-l border-l-gray-500 bg-gray-800/50"
                       rowSpan={spread.tickerRowSpan}
@@ -328,37 +375,44 @@ export default function WatchedSpreadsTable({
                         <span>{formatDealCloseDate(spread.dealExpectedCloseDate)}</span>
                       </div>
                     </td>
-                  ) : null}
+                  ) : visibleSet.has("ticker") ? null : null}
 
                   {/* Expiration - only show on first row of expiration group */}
-                  {spread.expirationRowSpan > 0 ? (
+                  {visibleSet.has("exp") && spread.expirationRowSpan > 0 ? (
                     <td 
                       className="py-1 px-2 text-gray-300 text-sm border-l border-l-gray-700"
                       rowSpan={spread.expirationRowSpan}
                     >
                       {formatExpiration(expStr)}
                     </td>
-                  ) : null}
+                  ) : visibleSet.has("exp") ? null : null}
 
                   {/* Strategy Type */}
-                  <td className="py-1 px-2 text-gray-300 text-sm">
-                    {formatStrategyType(spread)}
-                  </td>
+                  {visibleSet.has("type") && (
+                    <td className="py-1 px-2 text-gray-300 text-sm">
+                      {formatStrategyType(spread)}
+                    </td>
+                  )}
 
                   {/* Strategy metrics columns */}
-                  <StrategyMetricsCells metrics={metrics} />
+                  <StrategyMetricsCells metrics={metrics} visibleCols={stratVisibleSet} />
 
                   {/* Quote Timestamp */}
-                  <td className="py-1 px-2 text-center text-[10px] text-gray-500 whitespace-nowrap">
-                    {formatTimestampCompact(spread.lastUpdated)}
-                  </td>
+                  {visibleSet.has("quote") && (
+                    <td className="py-1 px-2 text-center text-[10px] text-gray-500 whitespace-nowrap">
+                      {formatTimestampCompact(spread.lastUpdated)}
+                    </td>
+                  )}
 
                   {/* Curator */}
-                  <td className="py-1 px-2 text-center text-[10px] text-gray-400 whitespace-nowrap">
-                    {spread.curatedByAlias || "—"}
-                  </td>
+                  {visibleSet.has("by") && (
+                    <td className="py-1 px-2 text-center text-[10px] text-gray-400 whitespace-nowrap">
+                      {spread.curatedByAlias || "—"}
+                    </td>
+                  )}
 
                   {/* Actions */}
+                  {visibleSet.has("action") && (
                   <td className="py-1 px-2 text-center border-r border-r-gray-500">
                     <div className="flex gap-1 justify-center items-center">
                       <div className="relative">
@@ -406,6 +460,7 @@ export default function WatchedSpreadsTable({
                       )}
                     </div>
                   </td>
+                  )}
                 </tr>
               );
             })}

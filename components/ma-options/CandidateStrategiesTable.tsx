@@ -2,7 +2,20 @@
 
 import { useState, useMemo, useCallback } from "react";
 import type { CandidateStrategy } from "@/types/ma-options";
-import { StrategyTableHeader, StrategyMetricsCells, type StrategyMetrics, type StrategyType } from "./StrategyColumns";
+import { StrategyTableHeader, StrategyMetricsCells, STRATEGY_COL_KEYS, type StrategyMetrics, type StrategyType } from "./StrategyColumns";
+import { ColumnChooser, type ColumnDef } from "@/components/ui/ColumnChooser";
+import { useUIPreferences } from "@/lib/ui-preferences";
+
+const CANDIDATE_COLUMNS: ColumnDef[] = [
+  { key: "strikes", label: "Strikes" },
+  { key: "legPrices", label: "Leg Prices" },
+  { key: "market", label: "Market Data" },
+  { key: "midEntry", label: "Midpoint Entry" },
+  { key: "farEntry", label: "Far Touch Entry" },
+  { key: "action", label: "Actions" },
+];
+const CANDIDATE_DEFAULTS = ["strikes","legPrices","market","midEntry","farEntry","action"];
+const CANDIDATE_LOCKED = ["action"];
 
 interface CandidateStrategiesTableProps {
   candidates: CandidateStrategy[];
@@ -33,6 +46,27 @@ export default function CandidateStrategiesTable({
   const [sortKey, setSortKey] = useState<string>("annualizedYield");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  // Column visibility
+  const { getVisibleColumns, setVisibleColumns } = useUIPreferences();
+  const savedCols = getVisibleColumns("candidateStrategies");
+  const visibleColKeys = useMemo(() => savedCols ?? CANDIDATE_DEFAULTS, [savedCols]);
+  const visibleSet = useMemo(() => new Set(visibleColKeys), [visibleColKeys]);
+  const handleColumnsChange = useCallback(
+    (keys: string[]) => setVisibleColumns("candidateStrategies", keys),
+    [setVisibleColumns],
+  );
+  const stratVisibleSet = useMemo(
+    () => new Set(STRATEGY_COL_KEYS.filter((k) => visibleSet.has(k))),
+    [visibleSet],
+  );
+  const visibleColCount = useMemo(() => {
+    let count = 0;
+    for (const k of visibleColKeys) {
+      count += (k === "midEntry" || k === "farEntry") ? 3 : 1;
+    }
+    return count;
+  }, [visibleColKeys]);
 
   /**
    * Recalculate metrics for a strategy based on the current deal price
@@ -223,9 +257,18 @@ export default function CandidateStrategiesTable({
 
   return (
     <div className="bg-gray-900 border border-gray-700 rounded p-4">
-      <h3 className="text-lg font-semibold text-gray-100 mb-3">
-        Candidate Strategies ({candidates.length})
-      </h3>
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="text-lg font-semibold text-gray-100">
+          Candidate Strategies ({candidates.length})
+        </h3>
+        <ColumnChooser
+          columns={CANDIDATE_COLUMNS}
+          visible={visibleColKeys}
+          defaults={CANDIDATE_DEFAULTS}
+          onChange={handleColumnsChange}
+          locked={CANDIDATE_LOCKED}
+        />
+      </div>
 
       <div className="space-y-4">
         {sortedExpirations.map((expiration) => {
@@ -279,17 +322,20 @@ export default function CandidateStrategiesTable({
 
                     {/* Strategy Table (Collapsible) */}
                     {isExpanded && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
+                      <div className="overflow-x-auto d-table-wrap" style={{ "--visible-cols": visibleColCount } as React.CSSProperties}>
+                        <table className="w-full text-xs d-table">
                           <thead className="bg-gray-900">
                             <StrategyTableHeader 
                               onSort={handleSort} 
                               sortKey={sortKey} 
                               strategyType={strategyType as StrategyType}
+                              visibleCols={stratVisibleSet}
                             />
-                            <tr className="border-b border-gray-700">
-                              <th className="text-center py-2 px-2 text-gray-400">Action</th>
-                            </tr>
+                            {visibleSet.has("action") && (
+                              <tr className="border-b border-gray-700">
+                                <th className="text-center py-2 px-2 text-gray-400">Action</th>
+                              </tr>
+                            )}
                           </thead>
                           <tbody>
                             {strategies.map((candidate) => {
@@ -317,17 +363,20 @@ export default function CandidateStrategiesTable({
                                   <StrategyMetricsCells 
                                     metrics={metrics} 
                                     strategyType={strategyType as StrategyType}
+                                    visibleCols={stratVisibleSet}
                                   />
 
                                   {/* Action button */}
-                                  <td className="py-2 px-2 text-center">
-                                    <button
-                                      onClick={() => onWatch(candidate)}
-                                      className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded"
-                                    >
-                                      Watch
-                                    </button>
-                                  </td>
+                                  {visibleSet.has("action") && (
+                                    <td className="py-2 px-2 text-center">
+                                      <button
+                                        onClick={() => onWatch(candidate)}
+                                        className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded"
+                                      >
+                                        Watch
+                                      </button>
+                                    </td>
+                                  )}
                                 </tr>
                               );
                             })}

@@ -4,6 +4,37 @@ import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "rea
 import { useSession } from "next-auth/react";
 import { useIBConnection } from "./IBConnectionContext";
 import { useUIPreferences } from "@/lib/ui-preferences";
+import { ColumnChooser, type ColumnDef } from "@/components/ui/ColumnChooser";
+
+/* ─── Column definitions for Position Details table ─── */
+const POSITIONS_COLUMNS: ColumnDef[] = [
+  { key: "account", label: "Account" },
+  { key: "symbol", label: "Symbol" },
+  { key: "type", label: "Type" },
+  { key: "pos", label: "Pos" },
+  { key: "avgCost", label: "Avg Cost" },
+  { key: "last", label: "Last" },
+  { key: "mktVal", label: "Mkt Val" },
+  { key: "pnl", label: "P&L" },
+  { key: "trade", label: "Trade" },
+];
+const POSITIONS_DEFAULTS = POSITIONS_COLUMNS.map((c) => c.key);
+const POSITIONS_LOCKED = ["symbol", "trade"];
+
+/* ─── Column definitions for Working Orders table ─── */
+const ORDERS_COLUMNS: ColumnDef[] = [
+  { key: "account", label: "Account" },
+  { key: "symbol", label: "Symbol" },
+  { key: "type", label: "Type" },
+  { key: "side", label: "Side" },
+  { key: "qty", label: "Qty" },
+  { key: "price", label: "Price" },
+  { key: "tif", label: "TIF" },
+  { key: "status", label: "Status" },
+  { key: "action", label: "Action" },
+];
+const ORDERS_DEFAULTS = ORDERS_COLUMNS.map((c) => c.key);
+const ORDERS_LOCKED = ["symbol", "action"];
 
 /** Hardcoded account aliases for KRJ (display only; filtering still uses raw account id). */
 const KRJ_ACCOUNT_ALIASES: Record<string, string> = {
@@ -302,7 +333,20 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const { data: session } = useSession();
   const userAlias = session?.user?.alias ?? null;
   const { isConnected } = useIBConnection();
-  const { prefs, loaded: prefsLoaded, updatePrefs } = useUIPreferences();
+  const { prefs, loaded: prefsLoaded, updatePrefs, getVisibleColumns, setVisibleColumns } = useUIPreferences();
+
+  /* ── Column visibility: positions table ── */
+  const savedPosCols = getVisibleColumns("ibPositions");
+  const posVisibleKeys = useMemo(() => savedPosCols ?? POSITIONS_DEFAULTS, [savedPosCols]);
+  const posVisibleSet = useMemo(() => new Set(posVisibleKeys), [posVisibleKeys]);
+  const handlePosColsChange = useCallback((keys: string[]) => setVisibleColumns("ibPositions", keys), [setVisibleColumns]);
+
+  /* ── Column visibility: working orders table ── */
+  const savedOrdCols = getVisibleColumns("ibOrders");
+  const ordVisibleKeys = useMemo(() => savedOrdCols ?? ORDERS_DEFAULTS, [savedOrdCols]);
+  const ordVisibleSet = useMemo(() => new Set(ordVisibleKeys), [ordVisibleKeys]);
+  const handleOrdColsChange = useCallback((keys: string[]) => setVisibleColumns("ibOrders", keys), [setVisibleColumns]);
+
   const [data, setData] = useState<IBPositionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1305,35 +1349,38 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
             <span className={`transition-transform ${showAllOrders ? "rotate-90" : ""}`}>&#9654;</span>
             Working Orders ({openOrders.length})
           </button>
-          <button
-            type="button"
-            onClick={fetchOpenOrders}
-            disabled={openOrdersLoading}
-            className="min-h-[32px] px-3 py-1 rounded text-xs font-medium bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-white"
-          >
-            {openOrdersLoading ? "Loading…" : "Refresh"}
-          </button>
+          <div className="flex items-center gap-2">
+            <ColumnChooser columns={ORDERS_COLUMNS} visible={ordVisibleKeys} defaults={ORDERS_DEFAULTS} onChange={handleOrdColsChange} locked={ORDERS_LOCKED} />
+            <button
+              type="button"
+              onClick={fetchOpenOrders}
+              disabled={openOrdersLoading}
+              className="min-h-[32px] px-3 py-1 rounded text-xs font-medium bg-gray-600 hover:bg-gray-500 disabled:opacity-50 text-white"
+            >
+              {openOrdersLoading ? "Loading…" : "Refresh"}
+            </button>
+          </div>
         </div>
         {showAllOrders && (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto d-table-wrap" style={{ "--visible-cols": ordVisibleKeys.length } as React.CSSProperties}>
             {openOrdersError && (
               <div className="px-3 py-2 text-sm text-red-400">{openOrdersError}</div>
             )}
             {openOrders.length === 0 ? (
               <div className="px-3 py-3 text-sm text-gray-400">No working orders.</div>
             ) : (
-              <table className="w-full text-sm">
+              <table className="w-full text-sm d-table">
                 <thead>
                   <tr className="bg-gray-700/50 text-gray-300 border-b border-gray-600">
-                    <th className="text-left py-1.5 px-3">Account</th>
-                    <th className="text-left py-1.5 px-3">Symbol</th>
-                    <th className="text-left py-1.5 px-3">Type</th>
-                    <th className="text-left py-1.5 px-3">Side</th>
-                    <th className="text-right py-1.5 px-3">Qty</th>
-                    <th className="text-left py-1.5 px-3">Price</th>
-                    <th className="text-left py-1.5 px-3">TIF</th>
-                    <th className="text-left py-1.5 px-3">Status</th>
-                    <th className="text-center py-1.5 px-3">Action</th>
+                    {ordVisibleSet.has("account") && <th className="text-left py-1.5 px-3">Account</th>}
+                    {ordVisibleSet.has("symbol") && <th className="text-left py-1.5 px-3">Symbol</th>}
+                    {ordVisibleSet.has("type") && <th className="text-left py-1.5 px-3">Type</th>}
+                    {ordVisibleSet.has("side") && <th className="text-left py-1.5 px-3">Side</th>}
+                    {ordVisibleSet.has("qty") && <th className="text-right py-1.5 px-3">Qty</th>}
+                    {ordVisibleSet.has("price") && <th className="text-left py-1.5 px-3">Price</th>}
+                    {ordVisibleSet.has("tif") && <th className="text-left py-1.5 px-3">TIF</th>}
+                    {ordVisibleSet.has("status") && <th className="text-left py-1.5 px-3">Status</th>}
+                    {ordVisibleSet.has("action") && <th className="text-center py-1.5 px-3">Action</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1344,58 +1391,66 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                         key={`order-${oIdx}-${o.orderId}`}
                         className={`border-b border-gray-700/50 ${isEditing ? "bg-indigo-900/20" : "hover:bg-gray-700/30"}`}
                       >
-                        <td className="py-1.5 px-3 text-gray-300">{getAccountLabel(o.order.account, userAlias)}</td>
-                        <td className="py-1.5 px-3 text-gray-100 font-medium whitespace-nowrap">{displayOrderSymbol(o)}</td>
-                        <td className="py-1.5 px-3 text-gray-400">{o.contract.secType}</td>
-                        <td className={`py-1.5 px-3 font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
-                          {o.order.action}
-                        </td>
-                        <td className="py-1.5 px-3 text-right tabular-nums text-gray-100">
-                          {isEditing ? (
-                            <input
-                              type="number"
-                              min="1"
-                              step="1"
-                              value={editQty}
-                              onChange={(e) => setEditQty(e.target.value)}
-                              className="w-16 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
-                            />
-                          ) : (
-                            o.order.totalQuantity
-                          )}
-                        </td>
-                        <td className="py-1.5 px-3 text-gray-200 tabular-nums whitespace-nowrap">
-                          {isEditing && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT") ? (
-                            <div className="flex items-center gap-1">
-                              <span className="text-gray-400 text-xs">{o.order.orderType === "STP LMT" ? "STP LMT" : "LMT"}</span>
+                        {ordVisibleSet.has("account") && <td className="py-1.5 px-3 text-gray-300">{getAccountLabel(o.order.account, userAlias)}</td>}
+                        {ordVisibleSet.has("symbol") && <td className="py-1.5 px-3 text-gray-100 font-medium whitespace-nowrap">{displayOrderSymbol(o)}</td>}
+                        {ordVisibleSet.has("type") && <td className="py-1.5 px-3 text-gray-400">{o.contract.secType}</td>}
+                        {ordVisibleSet.has("side") && (
+                          <td className={`py-1.5 px-3 font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
+                            {o.order.action}
+                          </td>
+                        )}
+                        {ordVisibleSet.has("qty") && (
+                          <td className="py-1.5 px-3 text-right tabular-nums text-gray-100">
+                            {isEditing ? (
                               <input
                                 type="number"
-                                min="0"
-                                step="0.01"
-                                value={editLmtPrice}
-                                onChange={(e) => setEditLmtPrice(e.target.value)}
-                                className="w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                                min="1"
+                                step="1"
+                                value={editQty}
+                                onChange={(e) => setEditQty(e.target.value)}
+                                className="w-16 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
                               />
-                            </div>
-                          ) : (
-                            formatOrderPrice(o)
-                          )}
-                        </td>
-                        <td className="py-1.5 px-3 text-gray-400">{o.order.tif}</td>
-                        <td className="py-1.5 px-3">
-                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-                            o.orderState.status === "Submitted" || o.orderState.status === "PreSubmitted"
-                              ? "bg-blue-900/60 text-blue-300"
-                              : o.orderState.status === "Filled"
-                                ? "bg-green-900/60 text-green-300"
-                                : o.orderState.status === "Cancelled"
-                                  ? "bg-gray-600/60 text-gray-300"
-                                  : "bg-yellow-900/60 text-yellow-300"
-                          }`}>
-                            {o.orderState.status || "Unknown"}
-                          </span>
-                        </td>
-                        <td className="py-1.5 px-3 text-center">
+                            ) : (
+                              o.order.totalQuantity
+                            )}
+                          </td>
+                        )}
+                        {ordVisibleSet.has("price") && (
+                          <td className="py-1.5 px-3 text-gray-200 tabular-nums whitespace-nowrap">
+                            {isEditing && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT") ? (
+                              <div className="flex items-center gap-1">
+                                <span className="text-gray-400 text-xs">{o.order.orderType === "STP LMT" ? "STP LMT" : "LMT"}</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={editLmtPrice}
+                                  onChange={(e) => setEditLmtPrice(e.target.value)}
+                                  className="w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                                />
+                              </div>
+                            ) : (
+                              formatOrderPrice(o)
+                            )}
+                          </td>
+                        )}
+                        {ordVisibleSet.has("tif") && <td className="py-1.5 px-3 text-gray-400">{o.order.tif}</td>}
+                        {ordVisibleSet.has("status") && (
+                          <td className="py-1.5 px-3">
+                            <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                              o.orderState.status === "Submitted" || o.orderState.status === "PreSubmitted"
+                                ? "bg-blue-900/60 text-blue-300"
+                                : o.orderState.status === "Filled"
+                                  ? "bg-green-900/60 text-green-300"
+                                  : o.orderState.status === "Cancelled"
+                                    ? "bg-gray-600/60 text-gray-300"
+                                    : "bg-yellow-900/60 text-yellow-300"
+                            }`}>
+                              {o.orderState.status || "Unknown"}
+                            </span>
+                          </td>
+                        )}
+                        {ordVisibleSet.has("action") && <td className="py-1.5 px-3 text-center">
                           <div className="flex items-center justify-center gap-1">
                             {isEditing ? (
                               <>
@@ -1439,7 +1494,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                           {isEditing && editError && (
                             <div className="text-xs text-red-400 mt-1">{editError}</div>
                           )}
-                        </td>
+                        </td>}
                       </tr>
                     );
                   })}
@@ -1511,6 +1566,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
             {/* Right: two columns of detail boxes for selected tickers only */}
             <div className="flex-1 min-w-0 flex flex-col">
+              <div className="flex justify-end mb-1">
+                <ColumnChooser columns={POSITIONS_COLUMNS} visible={posVisibleKeys} defaults={POSITIONS_DEFAULTS} onChange={handlePosColsChange} locked={POSITIONS_LOCKED} />
+              </div>
               {Object.keys(requestSignalError).length > 0 && (
                 <div className="mb-2 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-2 py-1 space-y-0.5">
                   {Object.entries(requestSignalError).map(([ticker, msg]) => (
@@ -1796,30 +1854,30 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             );
                           })()}
                         </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm table-fixed" style={{ minWidth: 860 }}>
+                        <div className="overflow-x-auto d-table-wrap" style={{ "--visible-cols": posVisibleKeys.length } as React.CSSProperties}>
+                          <table className="w-full text-sm table-fixed d-table" style={{ minWidth: posVisibleKeys.length >= 8 ? 860 : posVisibleKeys.length * 100 }}>
                             <colgroup>
-                              <col className="w-[90px]" />   {/* Account – truncate ok */}
-                              <col />                         {/* Symbol – flex remaining */}
-                              <col className="w-[52px]" />    {/* Type */}
-                              <col className="w-[100px]" />   {/* Pos – handles ±999,999 */}
-                              <col className="w-[110px]" />   {/* Avg cost – $99,999.99 */}
-                              <col className="w-[90px]" />    {/* Last */}
-                              <col className="w-[135px]" />   {/* Mkt val – ±$9,999,999 */}
-                              <col className="w-[145px]" />   {/* P&L – ±$9,999,999.99 */}
-                              <col className="w-[84px]" />    {/* Trade – min 44px button */}
+                              {posVisibleSet.has("account") && <col className="w-[90px]" />}
+                              {posVisibleSet.has("symbol") && <col />}
+                              {posVisibleSet.has("type") && <col className="w-[52px]" />}
+                              {posVisibleSet.has("pos") && <col className="w-[100px]" />}
+                              {posVisibleSet.has("avgCost") && <col className="w-[110px]" />}
+                              {posVisibleSet.has("last") && <col className="w-[90px]" />}
+                              {posVisibleSet.has("mktVal") && <col className="w-[135px]" />}
+                              {posVisibleSet.has("pnl") && <col className="w-[145px]" />}
+                              {posVisibleSet.has("trade") && <col className="w-[84px]" />}
                             </colgroup>
                             <thead>
                               <tr className="bg-gray-700/50 text-gray-200 text-sm border-b border-gray-600">
-                                <th className="text-left py-2 px-2 whitespace-nowrap">Account</th>
-                                <th className="text-left py-2 px-2 whitespace-nowrap">Symbol</th>
-                                <th className="text-left py-2 px-2 whitespace-nowrap">Type</th>
-                                <th className="text-right py-2 px-2 whitespace-nowrap">Pos</th>
-                                <th className="text-right py-2 px-2 whitespace-nowrap">Avg cost</th>
-                                <th className="text-right py-2 px-2 whitespace-nowrap">Last</th>
-                                <th className="text-right py-2 px-2 whitespace-nowrap">Mkt val</th>
-                                <th className="text-right py-2 px-2 whitespace-nowrap">P&L</th>
-                                <th className="text-center py-2 px-1 whitespace-nowrap">Trade</th>
+                                {posVisibleSet.has("account") && <th className="text-left py-2 px-2 whitespace-nowrap">Account</th>}
+                                {posVisibleSet.has("symbol") && <th className="text-left py-2 px-2 whitespace-nowrap">Symbol</th>}
+                                {posVisibleSet.has("type") && <th className="text-left py-2 px-2 whitespace-nowrap">Type</th>}
+                                {posVisibleSet.has("pos") && <th className="text-right py-2 px-2 whitespace-nowrap">Pos</th>}
+                                {posVisibleSet.has("avgCost") && <th className="text-right py-2 px-2 whitespace-nowrap">Avg cost</th>}
+                                {posVisibleSet.has("last") && <th className="text-right py-2 px-2 whitespace-nowrap">Last</th>}
+                                {posVisibleSet.has("mktVal") && <th className="text-right py-2 px-2 whitespace-nowrap">Mkt val</th>}
+                                {posVisibleSet.has("pnl") && <th className="text-right py-2 px-2 whitespace-nowrap">P&L</th>}
+                                {posVisibleSet.has("trade") && <th className="text-center py-2 px-1 whitespace-nowrap">Trade</th>}
                               </tr>
                             </thead>
                             <tbody>
@@ -1834,45 +1892,63 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     key={`${row.account}-${row.contract?.conId ?? i}-${row.contract?.localSymbol ?? row.contract?.symbol}`}
                                     className="border-b border-gray-700/50 hover:bg-gray-700/30"
                                   >
-                                    <td className="py-2 px-2 text-gray-300 text-sm truncate whitespace-nowrap" title={getAccountLabel(row.account, userAlias)}>
-                                      {getAccountLabel(row.account, userAlias)}
-                                    </td>
-                                    <td className="py-2 px-2 text-gray-100 text-sm font-medium truncate whitespace-nowrap" title={displaySymbol(row)}>
-                                      {displaySymbol(row)}
-                                    </td>
-                                    <td className="py-2 px-2 text-gray-400 text-sm whitespace-nowrap">
-                                      {row.contract?.secType ?? "—"}
-                                    </td>
-                                    <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm font-medium whitespace-nowrap">
-                                      {formatPosition(row.position)}
-                                    </td>
-                                    <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm whitespace-nowrap">
-                                      {formatAvgCost(row.avgCost)}
-                                    </td>
-                                    <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-200 whitespace-nowrap">
-                                      {isLegLoading ? "…" : rowPrice != null ? rowPrice.toFixed(2) : "—"}
-                                    </td>
-                                    <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-100 whitespace-nowrap" title={rowMktVal != null ? formatCostBasis(rowMktVal) : undefined}>
-                                      {rowMktVal != null ? formatCostBasis(rowMktVal) : "—"}
-                                    </td>
-                                    <td className={`py-2 px-2 text-right tabular-nums text-sm font-medium whitespace-nowrap ${
-                                      rowPnl != null && rowPnl > 0
-                                        ? "text-green-400"
-                                        : rowPnl != null && rowPnl < 0
-                                          ? "text-red-400"
-                                          : "text-gray-400"
-                                    }`} title={rowPnl != null ? formatPnl(rowPnl) : undefined}>
-                                      {rowPnl != null ? formatPnl(rowPnl) : "—"}
-                                    </td>
-                                    <td className="py-1.5 px-1 text-center whitespace-nowrap">
-                                      <button
-                                        type="button"
-                                        onClick={() => openTradeTicket(group.key, group, row)}
-                                        className="min-h-[44px] min-w-[44px] px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-700 hover:bg-indigo-600 text-white whitespace-nowrap"
-                                      >
-                                        Trade
-                                      </button>
-                                    </td>
+                                    {posVisibleSet.has("account") && (
+                                      <td className="py-2 px-2 text-gray-300 text-sm truncate whitespace-nowrap" title={getAccountLabel(row.account, userAlias)}>
+                                        {getAccountLabel(row.account, userAlias)}
+                                      </td>
+                                    )}
+                                    {posVisibleSet.has("symbol") && (
+                                      <td className="py-2 px-2 text-gray-100 text-sm font-medium truncate whitespace-nowrap" title={displaySymbol(row)}>
+                                        {displaySymbol(row)}
+                                      </td>
+                                    )}
+                                    {posVisibleSet.has("type") && (
+                                      <td className="py-2 px-2 text-gray-400 text-sm whitespace-nowrap">
+                                        {row.contract?.secType ?? "—"}
+                                      </td>
+                                    )}
+                                    {posVisibleSet.has("pos") && (
+                                      <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm font-medium whitespace-nowrap">
+                                        {formatPosition(row.position)}
+                                      </td>
+                                    )}
+                                    {posVisibleSet.has("avgCost") && (
+                                      <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm whitespace-nowrap">
+                                        {formatAvgCost(row.avgCost)}
+                                      </td>
+                                    )}
+                                    {posVisibleSet.has("last") && (
+                                      <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-200 whitespace-nowrap">
+                                        {isLegLoading ? "…" : rowPrice != null ? rowPrice.toFixed(2) : "—"}
+                                      </td>
+                                    )}
+                                    {posVisibleSet.has("mktVal") && (
+                                      <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-100 whitespace-nowrap" title={rowMktVal != null ? formatCostBasis(rowMktVal) : undefined}>
+                                        {rowMktVal != null ? formatCostBasis(rowMktVal) : "—"}
+                                      </td>
+                                    )}
+                                    {posVisibleSet.has("pnl") && (
+                                      <td className={`py-2 px-2 text-right tabular-nums text-sm font-medium whitespace-nowrap ${
+                                        rowPnl != null && rowPnl > 0
+                                          ? "text-green-400"
+                                          : rowPnl != null && rowPnl < 0
+                                            ? "text-red-400"
+                                            : "text-gray-400"
+                                      }`} title={rowPnl != null ? formatPnl(rowPnl) : undefined}>
+                                        {rowPnl != null ? formatPnl(rowPnl) : "—"}
+                                      </td>
+                                    )}
+                                    {posVisibleSet.has("trade") && (
+                                      <td className="py-1.5 px-1 text-center whitespace-nowrap">
+                                        <button
+                                          type="button"
+                                          onClick={() => openTradeTicket(group.key, group, row)}
+                                          className="min-h-[44px] min-w-[44px] px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-700 hover:bg-indigo-600 text-white whitespace-nowrap"
+                                        >
+                                          Trade
+                                        </button>
+                                      </td>
+                                    )}
                                   </tr>
                                 );
                               })}
@@ -1880,17 +1956,21 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             {groupHasAnyPrice && (
                               <tfoot>
                                 <tr className="bg-gray-700/30 border-t border-gray-500 font-semibold text-sm">
-                                  <td colSpan={5} className="py-2 px-2 text-right text-gray-300 whitespace-nowrap">Totals</td>
-                                  <td className="py-2 px-2"></td>
-                                  <td className="py-2 px-2 text-right tabular-nums text-white whitespace-nowrap">
-                                    {formatCostBasis(groupMktVal)}
-                                  </td>
-                                  <td className={`py-2 px-2 text-right tabular-nums font-bold whitespace-nowrap ${
-                                    groupPnl != null && groupPnl >= 0 ? "text-green-400" : "text-red-400"
-                                  }`}>
-                                    {groupPnl != null ? formatPnl(groupPnl) : "—"}
-                                  </td>
-                                  <td className="py-2 px-1"></td>
+                                  <td colSpan={["account","symbol","type","pos","avgCost"].filter(k => posVisibleSet.has(k)).length || 1} className="py-2 px-2 text-right text-gray-300 whitespace-nowrap">Totals</td>
+                                  {posVisibleSet.has("last") && <td className="py-2 px-2"></td>}
+                                  {posVisibleSet.has("mktVal") && (
+                                    <td className="py-2 px-2 text-right tabular-nums text-white whitespace-nowrap">
+                                      {formatCostBasis(groupMktVal)}
+                                    </td>
+                                  )}
+                                  {posVisibleSet.has("pnl") && (
+                                    <td className={`py-2 px-2 text-right tabular-nums font-bold whitespace-nowrap ${
+                                      groupPnl != null && groupPnl >= 0 ? "text-green-400" : "text-red-400"
+                                    }`}>
+                                      {groupPnl != null ? formatPnl(groupPnl) : "—"}
+                                    </td>
+                                  )}
+                                  {posVisibleSet.has("trade") && <td className="py-2 px-1"></td>}
                                 </tr>
                               </tfoot>
                             )}
