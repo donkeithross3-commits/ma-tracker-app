@@ -28,7 +28,7 @@ from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
 from ibapi.order import Order
-from ibapi.common import TickerId, TickAttrib, SetOfString, SetOfFloat
+from ibapi.common import TickerId, TickAttrib, SetOfString, SetOfFloat, UNSET_DOUBLE
 from threading import Thread, Event, Lock
 import queue
 from concurrent.futures import ThreadPoolExecutor
@@ -231,6 +231,17 @@ class IBMergerArbScanner(EWrapper, EClient):
             "localSymbol": getattr(contract, "localSymbol", "") or "",
             "tradingClass": getattr(contract, "tradingClass", "") or "",
         }
+
+    @staticmethod
+    def _order_price_if_set(order: Order, attr: str):
+        """Return order attribute as float for JSON, or None if unset (UNSET_DOUBLE)."""
+        val = getattr(order, attr, None)
+        if val is None or val == UNSET_DOUBLE:
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
 
     def get_positions_snapshot(self, timeout_sec: float = 15.0) -> List[dict]:
         """Request positions, wait for positionEnd(), return list and cancel subscription.
@@ -857,6 +868,9 @@ class IBMergerArbScanner(EWrapper, EClient):
                 "account": getattr(order, "account", ""),
                 "parentId": getattr(order, "parentId", 0),
                 "ocaGroup": getattr(order, "ocaGroup", ""),
+                # TRAIL LIMIT: IB updates these as the market moves; include when set
+                "trailStopPrice": self._order_price_if_set(order, "trailStopPrice"),
+                "trailingPercent": self._order_price_if_set(order, "trailingPercent"),
             },
             "orderState": {
                 "status": status,

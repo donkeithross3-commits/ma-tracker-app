@@ -94,6 +94,10 @@ interface IBOpenOrder {
     account: string;
     parentId?: number;
     ocaGroup?: string;
+    /** TRAIL LIMIT: current stop price (IB updates as market moves) */
+    trailStopPrice?: number | null;
+    /** TRAIL LIMIT: trailing percent when used */
+    trailingPercent?: number | null;
   };
   orderState: {
     status: string;
@@ -265,12 +269,20 @@ function displayOrderSymbol(o: IBOpenOrder): string {
 }
 
 function formatOrderPrice(o: IBOpenOrder): string {
-  const { orderType, lmtPrice, auxPrice } = o.order;
+  const { orderType, lmtPrice, auxPrice, trailStopPrice, trailingPercent } = o.order;
   if (orderType === "MKT" || orderType === "MOC") return orderType;
   if (orderType === "LMT" && lmtPrice != null) return `LMT ${lmtPrice.toFixed(2)}`;
   if (orderType === "STP LMT" && lmtPrice != null && auxPrice != null)
     return `STP ${auxPrice.toFixed(2)} LMT ${lmtPrice.toFixed(2)}`;
   if (orderType === "STP" && auxPrice != null) return `STP ${auxPrice.toFixed(2)}`;
+  // TRAIL LIMIT: show current stop and limit (IB updates trailStopPrice as market moves)
+  if ((orderType === "TRAIL LIMIT" || orderType === "TRAILLIMIT") && (trailStopPrice != null || lmtPrice != null)) {
+    const parts: string[] = [];
+    if (trailStopPrice != null) parts.push(`Trail ${trailStopPrice.toFixed(2)}`);
+    if (lmtPrice != null) parts.push(`LMT ${lmtPrice.toFixed(2)}`);
+    if (trailingPercent != null) parts.push(`${trailingPercent.toFixed(1)}%`);
+    return parts.join(" ");
+  }
   return orderType;
 }
 
