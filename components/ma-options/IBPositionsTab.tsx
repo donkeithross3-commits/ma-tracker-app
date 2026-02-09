@@ -339,7 +339,16 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   /* ── Column visibility: positions table ── */
   const savedPosCols = getVisibleColumns("ibPositions");
-  const posVisibleKeys = useMemo(() => savedPosCols ?? POSITIONS_DEFAULTS, [savedPosCols]);
+  const posVisibleKeys = useMemo(() => {
+    const base = savedPosCols ?? POSITIONS_DEFAULTS;
+    // Always include locked columns even if saved prefs predate them
+    const missing = POSITIONS_LOCKED.filter((k) => !base.includes(k));
+    if (missing.length === 0) return base;
+    const masterOrder = POSITIONS_COLUMNS.map((c) => c.key);
+    return [...base, ...missing].sort(
+      (a, b) => masterOrder.indexOf(a) - masterOrder.indexOf(b),
+    );
+  }, [savedPosCols]);
   const posVisibleSet = useMemo(() => new Set(posVisibleKeys), [posVisibleKeys]);
   const handlePosColsChange = useCallback((keys: string[]) => setVisibleColumns("ibPositions", keys), [setVisibleColumns]);
 
