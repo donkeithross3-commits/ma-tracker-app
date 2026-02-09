@@ -130,7 +130,13 @@ inside `.d-table` are excluded to avoid double-scaling with the fluid table syst
 
 **Escape hatches:**
 - `.no-density` class on any element opts it out of all comfort scaling
-- `.d-table button` / `.d-table input` are excluded from global button/input rules
+- `.inline-edit` class on inputs opts them out of comfort min-height/font scaling.
+  Use on compact inline editing inputs (e.g. order qty/price fields in tables).
+  Unlike `.no-density` which suppresses ALL comfort rules, `.inline-edit` targets
+  only the input sizing rules that break tight inline layouts.
+- `.d-table input` elements are automatically excluded via a CSS override rule
+  (higher specificity beats the global input rule). This works reliably across
+  browsers, unlike the previous `:not(.d-table input)` complex selector in `:not()`.
 
 ### 5. ColumnChooser Component
 

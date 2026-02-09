@@ -168,11 +168,21 @@
   }
 
   /* ─── Text inputs, textareas, native selects ─── */
-  [data-density="comfort"] input:not([type="checkbox"]):not([type="radio"]):not(.no-density):not(.d-table input),
+  [data-density="comfort"] input:not([type="checkbox"]):not([type="radio"]):not(.no-density),
   [data-density="comfort"] textarea:not(.no-density),
   [data-density="comfort"] select:not(.no-density) {
     min-height: 2.75rem;   /* 44px */
     font-size: 1rem;
+  }
+  /* Override: inputs inside d-table or marked .inline-edit stay compact.
+     The previous :not(.d-table input) complex selector inside :not() is
+     unreliable across browsers — descendant combinators in :not() require
+     CSS Selectors Level 4 which isn't universally supported.  Use a
+     higher-specificity override instead. */
+  [data-density="comfort"] .d-table input,
+  [data-density="comfort"] .inline-edit {
+    min-height: revert;
+    font-size: revert;
   }
 
   /* ─── Checkboxes: 24px (up from 16px) ─── */

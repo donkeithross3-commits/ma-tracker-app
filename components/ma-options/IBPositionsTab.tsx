@@ -1641,7 +1641,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                 step="1"
                                 value={editQty}
                                 onChange={(e) => setEditQty(e.target.value)}
-                                className="w-16 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                                className="inline-edit w-16 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
                               />
                             ) : (
                               o.order.totalQuantity
@@ -1651,7 +1651,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                         {ordVisibleSet.has("price") && (
                           <td className="py-1.5 px-3 text-gray-200 tabular-nums whitespace-nowrap">
                             {isEditing && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT" || o.order.orderType === "STP") ? (
-                              <div className="flex items-center gap-1">
+                              <div className="flex flex-wrap items-center gap-1">
                                 {(o.order.orderType === "STP LMT" || o.order.orderType === "STP") && (
                                   <>
                                     <span className="text-gray-400 text-xs">STP</span>
@@ -1661,7 +1661,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       step="0.01"
                                       value={editStopPrice}
                                       onChange={(e) => setEditStopPrice(e.target.value)}
-                                      className="w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                                      className="inline-edit w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-sm text-right tabular-nums focus:outline-none"
                                     />
                                   </>
                                 )}
@@ -1674,7 +1674,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       step="0.01"
                                       value={editLmtPrice}
                                       onChange={(e) => setEditLmtPrice(e.target.value)}
-                                      className="w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                                      className="inline-edit w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
                                     />
                                   </>
                                 )}
@@ -2050,7 +2050,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                         step="1"
                                         value={editQty}
                                         onChange={(e) => setEditQty(e.target.value)}
-                                        className="w-14 px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
+                                        className="inline-edit w-14 px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
                                       />
                                     ) : (
                                       <span className="tabular-nums text-gray-100">{o.order.totalQuantity}</span>
@@ -2059,7 +2059,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       {o.contract.secType === "STK" ? "STK" : displayOrderSymbol(o)}
                                     </span>
                                     {isEd && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT" || o.order.orderType === "STP") ? (
-                                      <div className="flex items-center gap-1">
+                                      <div className="flex flex-wrap items-center gap-1">
                                         {(o.order.orderType === "STP LMT" || o.order.orderType === "STP") && (
                                           <>
                                             <span className="text-gray-400 text-[10px]">STP</span>
@@ -2069,7 +2069,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                               step="0.01"
                                               value={editStopPrice}
                                               onChange={(e) => setEditStopPrice(e.target.value)}
-                                              className="w-16 px-1 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-xs text-right tabular-nums focus:outline-none"
+                                              className="inline-edit w-16 px-1 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-xs text-right tabular-nums focus:outline-none"
                                             />
                                           </>
                                         )}
@@ -2082,7 +2082,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                               step="0.01"
                                               value={editLmtPrice}
                                               onChange={(e) => setEditLmtPrice(e.target.value)}
-                                              className="w-16 px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
+                                              className="inline-edit w-16 px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
                                             />
                                           </>
                                         )}
