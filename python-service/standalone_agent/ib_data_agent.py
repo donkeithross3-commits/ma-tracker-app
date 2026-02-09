@@ -325,7 +325,13 @@ class IBDataAgent:
             return {"error": str(e)}
 
     async def _handle_test_futures(self, payload: dict) -> dict:
-        """Fetch ES futures quote as a connectivity test"""
+        """Fetch ES futures quote as a connectivity test.
+
+        Tries three market-data modes in order:
+        1. REALTIME (type 1) -- live ticks (tickTypes 1/2/4)
+        2. DELAYED  (type 3) -- 15-20 min delayed (tickTypes 66/67/68)
+        3. DELAYED_FROZEN (type 4) -- last snapshot when market is closed
+        """
         if not self.scanner or not self.scanner.isConnected():
             return {"error": "IB not connected"}
         
@@ -363,87 +369,102 @@ class IBDataAgent:
             contract.currency = "USD"
             contract.lastTradeDateOrContractMonth = contract_month
             
-            req_id = self.scanner.get_next_req_id()
-            self.scanner.last_mkt_data_error = None  # clear so we only see errors for this request
-            futures_data = {"bid": None, "ask": None, "last": None}
-            data_received = False
-            
             original_tickPrice = self.scanner.tickPrice
             
-            def handle_tick(reqId, tickType, price, attrib):
-                nonlocal futures_data, data_received
-                if reqId == req_id:
-                    if tickType == 1:
-                        futures_data["bid"] = price
-                    elif tickType == 2:
-                        futures_data["ask"] = price
-                    elif tickType == 4:
-                        futures_data["last"] = price
-                        data_received = True
-            
-            self.scanner.tickPrice = handle_tick
-            self.scanner.reqMktData(req_id, contract, "", True, False, [])
+            # ── Helper: attempt a snapshot with the given market data type ──
+            def _try_snapshot(mkt_data_type: int, label: str):
+                """Request snapshot, return (futures_data dict, bool has_any)."""
+                rid = self.scanner.get_next_req_id()
+                self.scanner.last_mkt_data_error = None
+                fdata = {"bid": None, "ask": None, "last": None}
+                got_data = [False]   # mutable so closure can write
+                ticks_seen = []      # for diagnostics
 
-            def wait_for_ticks(timeout_sec=10):
-                nonlocal data_received, futures_data
-                for _ in range(int(timeout_sec * 10)):
+                def _handle(reqId, tickType, price, attrib):
+                    if reqId != rid:
+                        return
+                    ticks_seen.append(tickType)
+                    # Real-time tick types
+                    if tickType == 1:       # BID
+                        fdata["bid"] = price
+                    elif tickType == 2:     # ASK
+                        fdata["ask"] = price
+                    elif tickType == 4:     # LAST
+                        fdata["last"] = price
+                        got_data[0] = True
+                    # Delayed tick types (sent when reqMarketDataType >= 3)
+                    elif tickType == 66:    # DELAYED_BID
+                        fdata["bid"] = price
+                    elif tickType == 67:    # DELAYED_ASK
+                        fdata["ask"] = price
+                    elif tickType == 68:    # DELAYED_LAST
+                        fdata["last"] = price
+                        got_data[0] = True
+
+                if mkt_data_type != 1:
+                    self.scanner.reqMarketDataType(mkt_data_type)
+                    time.sleep(0.3)
+
+                self.scanner.tickPrice = _handle
+                self.scanner.reqMktData(rid, contract, "", True, False, [])
+
+                # Wait up to 8 seconds for any price tick
+                for _ in range(80):
                     time.sleep(0.1)
-                    if data_received or futures_data["bid"] or futures_data["ask"] or futures_data["last"]:
-                        return True
-                return False
+                    if got_data[0] or fdata["bid"] or fdata["ask"] or fdata["last"]:
+                        break
 
-            wait_for_ticks(10)
-            self.scanner.cancelMktData(req_id)
+                self.scanner.cancelMktData(rid)
 
-            has_any = (
-                futures_data["bid"] is not None
-                or futures_data["ask"] is not None
-                or futures_data["last"] is not None
-            )
+                if mkt_data_type != 1:
+                    self.scanner.reqMarketDataType(1)  # restore REALTIME
+
+                has = (fdata["bid"] is not None
+                       or fdata["ask"] is not None
+                       or fdata["last"] is not None)
+                logger.info(f"test_futures {label}: has_any={has}, ticks_seen={ticks_seen}, "
+                            f"data={fdata}, err={getattr(self.scanner, 'last_mkt_data_error', None)}")
+                return fdata, has, rid
+
+            # ── Attempt 1: REALTIME ─────────────────────────────────────────
+            futures_data, has_any, last_rid = _try_snapshot(1, "REALTIME")
             use_delayed = False
+
+            # ── Attempt 2: DELAYED (15-20 min) ─────────────────────────────
             if not has_any:
                 err = getattr(self.scanner, "last_mkt_data_error", None)
-                # 354 = real-time not subscribed; IB says delayed is available
-                if err and len(err) >= 3 and err[0] == req_id and (err[1] == 354 or "delayed" in (err[2] or "").lower()):
-                    logger.info("Real-time ES not subscribed, retrying with delayed market data (reqMarketDataType=3)")
-                    self.scanner.reqMarketDataType(3)  # 3 = DELAYED
-                    time.sleep(0.5)
-                    # Reset and retry with a new req_id so we don't mix with old callbacks
-                    req_id2 = self.scanner.get_next_req_id()
-                    self.scanner.last_mkt_data_error = None
-                    futures_data = {"bid": None, "ask": None, "last": None}
-                    data_received = False
-
-                    def handle_tick2(reqId, tickType, price, attrib):
-                        nonlocal futures_data, data_received
-                        if reqId == req_id2:
-                            if tickType == 1:
-                                futures_data["bid"] = price
-                            elif tickType == 2:
-                                futures_data["ask"] = price
-                            elif tickType == 4:
-                                futures_data["last"] = price
-                                data_received = True
-
-                    self.scanner.tickPrice = handle_tick2
-                    self.scanner.reqMktData(req_id2, contract, "", True, False, [])
-                    wait_for_ticks(10)
-                    self.scanner.cancelMktData(req_id2)
-                    self.scanner.reqMarketDataType(1)  # restore real-time (1 = REALTIME)
+                err_code = err[1] if err and len(err) >= 3 else 0
+                err_str = (err[2] or "") if err and len(err) >= 3 else ""
+                should_try_delayed = (
+                    err_code in (354, 10090, 10167, 10168, 10189)
+                    or "not subscribed" in err_str.lower()
+                    or "delayed" in err_str.lower()
+                    or err is None  # no error but no data either (market closed)
+                )
+                if should_try_delayed:
+                    logger.info("Real-time ES returned no data, retrying with DELAYED (type 3)")
+                    futures_data, has_any, last_rid = _try_snapshot(3, "DELAYED")
                     use_delayed = True
-                    has_any = (
-                        futures_data["bid"] is not None
-                        or futures_data["ask"] is not None
-                        or futures_data["last"] is not None
-                    )
+
+            # ── Attempt 3: DELAYED_FROZEN (market closed snapshot) ─────────
+            if not has_any:
+                logger.info("DELAYED returned no data, retrying with DELAYED_FROZEN (type 4)")
+                futures_data, has_any, last_rid = _try_snapshot(4, "DELAYED_FROZEN")
+                use_delayed = True
 
             self.scanner.tickPrice = original_tickPrice
 
             if not has_any:
                 err = getattr(self.scanner, "last_mkt_data_error", None)
-                if err and len(err) >= 3 and (err[0] == req_id or err[1] == 354):
-                    return {"error": "ES futures market data is not subscribed in TWS. In TWS: Account → Management → Market Data Subscriptions; add CME if needed. Delayed data may be available."}
-                return {"error": "No futures data received - market may be closed or check TWS market data permissions for CME"}
+                if err and len(err) >= 3:
+                    err_code = err[1]
+                    if err_code in (354, 10090, 10167, 10168):
+                        return {"error": f"ES futures market data not subscribed (IB error {err_code}). "
+                                         f"In TWS: Account > Settings > Market Data Subscriptions; "
+                                         f"add CME Real-Time if needed."}
+                return {"error": "No futures data received after trying real-time, delayed, and "
+                                 "delayed-frozen modes. Market may be closed (ES trades Sun 6pm - "
+                                 "Fri 5pm ET) or check TWS market data permissions for CME."}
             
             month_codes = {3: 'H', 6: 'M', 9: 'U', 12: 'Z'}
             year_digit = contract_month[3]

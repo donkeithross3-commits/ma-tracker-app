@@ -588,8 +588,14 @@ class IBMergerArbScanner(EWrapper, EClient):
             pass
         else:
             self.logger.error(f"IB Error {reqId}/{errorCode}: {errorString}")
-            # 354 = market data not subscribed; surface for test_futures
-            if errorCode == 354 or "not subscribed" in (errorString or "").lower():
+            # Market data subscription errors -- surface for test_futures / scan retries
+            # 354   = "Requested market data is not subscribed"
+            # 10090 = "Part of requested market data is not subscribed"
+            # 10167 = "Requested market data is not subscribed. Displaying delayed market data"
+            # 10168 = "Requested market data requires additional subscription"
+            # 10189 = "Part of requested market data requires additional subscription"
+            _mkt_err_codes = (354, 10090, 10167, 10168, 10189)
+            if errorCode in _mkt_err_codes or "not subscribed" in (errorString or "").lower():
                 self.last_mkt_data_error = (reqId, errorCode, errorString)
             # 200 = no security definition; for underlying requests we may retry with delayed
             if errorCode == 200 and reqId in self.req_id_map and "underlying" in self.req_id_map.get(reqId, ""):
