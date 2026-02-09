@@ -511,6 +511,7 @@ class RiskManagerStrategy(ExecutionStrategy):
             contract_dict=self.contract_dict,
             limit_price=limit_price,
             tif="DAY",
+            outside_rth=bool(exec_cfg.get("outside_rth", False)),
             reason=reason,
         )
 

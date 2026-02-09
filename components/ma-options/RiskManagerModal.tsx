@@ -49,6 +49,7 @@ interface RiskManagerConfig {
     stop_order_type: string;
     profit_order_type: string;
     limit_offset_ticks: number;
+    outside_rth: boolean;
   };
 }
 
@@ -121,7 +122,7 @@ const PRESETS: Record<string, { label: string; description: string; config: Part
         ],
         trailing_stop: { enabled: true, activation_pct: 50, trail_pct: 25 },
       },
-      execution: { stop_order_type: "MKT", profit_order_type: "MKT", limit_offset_ticks: 0 },
+      execution: { stop_order_type: "MKT", profit_order_type: "MKT", limit_offset_ticks: 0, outside_rth: false },
     },
   },
   stock_swing: {
@@ -134,7 +135,7 @@ const PRESETS: Record<string, { label: string; description: string; config: Part
         targets: [{ trigger_pct: 10, exit_pct: 50 }],
         trailing_stop: { enabled: true, activation_pct: 5, trail_pct: 3 },
       },
-      execution: { stop_order_type: "MKT", profit_order_type: "LMT", limit_offset_ticks: 1 },
+      execution: { stop_order_type: "MKT", profit_order_type: "LMT", limit_offset_ticks: 1, outside_rth: false },
     },
   },
   conservative: {
@@ -157,7 +158,7 @@ const PRESETS: Record<string, { label: string; description: string; config: Part
         ],
         trailing_stop: { enabled: false, activation_pct: 0, trail_pct: 0 },
       },
-      execution: { stop_order_type: "MKT", profit_order_type: "LMT", limit_offset_ticks: 1 },
+      execution: { stop_order_type: "MKT", profit_order_type: "LMT", limit_offset_ticks: 1, outside_rth: false },
     },
   },
   futures_tight: {
@@ -170,7 +171,7 @@ const PRESETS: Record<string, { label: string; description: string; config: Part
         targets: [{ trigger_pct: 3, exit_pct: 100 }],
         trailing_stop: { enabled: true, activation_pct: 1.5, trail_pct: 1 },
       },
-      execution: { stop_order_type: "MKT", profit_order_type: "MKT", limit_offset_ticks: 0 },
+      execution: { stop_order_type: "MKT", profit_order_type: "MKT", limit_offset_ticks: 0, outside_rth: true },
     },
   },
   futures_swing: {
@@ -186,7 +187,7 @@ const PRESETS: Record<string, { label: string; description: string; config: Part
         ],
         trailing_stop: { enabled: true, activation_pct: 3, trail_pct: 2 },
       },
-      execution: { stop_order_type: "MKT", profit_order_type: "MKT", limit_offset_ticks: 0 },
+      execution: { stop_order_type: "MKT", profit_order_type: "MKT", limit_offset_ticks: 0, outside_rth: true },
     },
   },
 };
@@ -220,7 +221,7 @@ function defaultConfig(pos: PositionInfo): RiskManagerConfig {
       targets: [{ trigger_pct: 10, exit_pct: 50 }],
       trailing_stop: { enabled: false, activation_pct: 0, trail_pct: 0 },
     },
-    execution: defaultPreset?.config.execution || { stop_order_type: "MKT", profit_order_type: "LMT", limit_offset_ticks: 1 },
+    execution: defaultPreset?.config.execution || { stop_order_type: "MKT", profit_order_type: "LMT", limit_offset_ticks: 1, outside_rth: false },
   };
 }
 
@@ -679,6 +680,34 @@ export function RiskManagerModal({
                 )}
               </div>
             </>
+          )}
+
+          {/* ── Outside RTH toggle ── */}
+          {!isRunning && (
+            <div className="flex items-center gap-2 py-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setConfig((c) => ({
+                    ...c,
+                    execution: { ...c.execution, outside_rth: !c.execution.outside_rth },
+                  }))
+                }
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  config.execution.outside_rth ? "bg-amber-500" : "bg-gray-600"
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    config.execution.outside_rth ? "translate-x-4" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+              <span className="text-sm text-gray-300">
+                Fill outside RTH
+                <span className="text-xs text-gray-500 ml-1">(pre/post market)</span>
+              </span>
+            </div>
           )}
 
           {/* ── Error ── */}

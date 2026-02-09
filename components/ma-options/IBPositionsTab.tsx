@@ -89,6 +89,7 @@ interface IBOpenOrder {
     lmtPrice?: number | null;
     auxPrice?: number | null;
     tif: string;
+    outsideRth?: boolean;
     account: string;
     parentId?: number;
     ocaGroup?: string;
@@ -582,6 +583,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         totalQuantity: newQty,
         orderType: o.order.orderType,
         tif: o.order.tif || "DAY",
+        outsideRth: o.order.outsideRth ?? false,
         transmit: true,
       };
       if (o.order.account) order.account = o.order.account;
@@ -767,6 +769,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [stockOrderQty, setStockOrderQty] = useState("");
   const [stockOrderLmtPrice, setStockOrderLmtPrice] = useState("");
   const [stockOrderStopPrice, setStockOrderStopPrice] = useState("");
+  const [stockOrderOutsideRth, setStockOrderOutsideRth] = useState(false);
   const [stockOrderAccount, setStockOrderAccount] = useState("");
   const [stockOrderSubmitting, setStockOrderSubmitting] = useState(false);
   const [stockOrderResult, setStockOrderResult] = useState<{ orderId?: number; status?: string; error?: string } | null>(null);
@@ -814,6 +817,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setStockOrderAction(exitAction);
     setStockOrderType("LMT");
     setStockOrderTif("DAY");
+    setStockOrderOutsideRth(false);
     setStockOrderQty(absPos > 0 ? String(absPos) : "");
     setStockOrderLmtPrice(initPrice);
     setStockOrderStopPrice(initPrice);
@@ -857,6 +861,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setStockOrderAction(action);
     setStockOrderType("LMT");
     setStockOrderTif("DAY");
+    setStockOrderOutsideRth(false);
     setStockOrderQty("");
     setStockOrderLmtPrice(initPrice);
     setStockOrderStopPrice(initPrice);
@@ -927,6 +932,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         totalQuantity: qty,
         orderType: stockOrderType,
         tif: stockOrderTif,
+        outsideRth: stockOrderOutsideRth,
         transmit: true,
       };
       if (stockOrderAccount) order.account = stockOrderAccount;
@@ -1620,7 +1626,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             )}
                           </td>
                         )}
-                        {ordVisibleSet.has("tif") && <td className="py-1.5 px-3 text-gray-400">{o.order.tif}</td>}
+                        {ordVisibleSet.has("tif") && <td className="py-1.5 px-3 text-gray-400">{o.order.tif}{o.order.outsideRth && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-amber-800/60 text-amber-300 font-semibold">RTH</span>}</td>}
                         {ordVisibleSet.has("status") && (
                           <td className="py-1.5 px-3">
                             <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
@@ -2006,7 +2012,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     ) : (
                                       <span className="tabular-nums text-gray-200">{formatOrderPrice(o)}</span>
                                     )}
-                                    <span className="text-gray-500">{o.order.tif}</span>
+                                    <span className="text-gray-500">{o.order.tif}{o.order.outsideRth ? " +RTH" : ""}</span>
                                     <span className={`px-1 py-0.5 rounded text-xs ${
                                       o.orderState.status === "Submitted" || o.orderState.status === "PreSubmitted"
                                         ? "bg-blue-900/40 text-blue-300"
@@ -2627,6 +2633,19 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                       </button>
                     ))}
                   </div>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setStockOrderOutsideRth((v) => !v)}
+                    className={`w-full min-h-[48px] rounded-xl text-base font-bold transition-colors mt-2 ${
+                      stockOrderOutsideRth
+                        ? "bg-amber-600 text-white ring-2 ring-amber-400"
+                        : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
+                    }`}
+                  >
+                    {stockOrderOutsideRth ? "Outside RTH: ON" : "Outside RTH: OFF"}
+                  </button>
                 </div>
               </div>
 

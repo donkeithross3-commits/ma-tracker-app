@@ -385,6 +385,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         o.tif = (d.get("tif") or "DAY").strip().upper()
         o.transmit = bool(d.get("transmit", True))
         o.whatIf = bool(d.get("whatIf", False))
+        # Allow orders to fill outside Regular Trading Hours (pre/post market)
+        o.outsideRth = bool(d.get("outsideRth", False))
         # Newer TWS versions reject these deprecated attributes (error 10268)
         o.eTradeOnly = False
         o.firmQuoteOnly = False
@@ -842,6 +844,7 @@ class IBMergerArbScanner(EWrapper, EClient):
                 "lmtPrice": float(getattr(order, "lmtPrice", 0)) if getattr(order, "lmtPrice", None) is not None else None,
                 "auxPrice": float(getattr(order, "auxPrice", 0)) if getattr(order, "auxPrice", None) is not None else None,
                 "tif": getattr(order, "tif", ""),
+                "outsideRth": bool(getattr(order, "outsideRth", False)),
                 "account": getattr(order, "account", ""),
                 "parentId": getattr(order, "parentId", 0),
                 "ocaGroup": getattr(order, "ocaGroup", ""),

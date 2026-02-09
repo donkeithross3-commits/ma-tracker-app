@@ -88,6 +88,7 @@ class OrderAction:
     limit_price: Optional[float] = None  # required if order_type is LIMIT
     aux_price: Optional[float] = None    # stop price for STP/STP LMT/TRAIL
     tif: str = "DAY"  # DAY, GTC, IOC, etc.
+    outside_rth: bool = False  # fill outside regular trading hours (pre/post market)
     reason: str = ""  # human-readable explanation for logging/audit
 
 
@@ -823,6 +824,7 @@ class ExecutionEngine:
             "totalQuantity": action.quantity,
             "orderType": action.order_type.value,
             "tif": action.tif or "DAY",
+            "outsideRth": action.outside_rth,
         }
         if action.limit_price is not None and action.order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT):
             order_dict["lmtPrice"] = action.limit_price
