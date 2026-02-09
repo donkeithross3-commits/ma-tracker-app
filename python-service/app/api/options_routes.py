@@ -1178,6 +1178,11 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
 class StockQuoteRequest(BaseModel):
     ticker: str
     userId: Optional[str] = None  # For routing to user's own IB agent
+    # Optional contract metadata for non-stock instruments (e.g. futures)
+    secType: Optional[str] = None  # "FUT", "OPT", etc.  None → default STK
+    exchange: Optional[str] = None
+    lastTradeDateOrContractMonth: Optional[str] = None
+    multiplier: Optional[str] = None
 
     @field_validator("ticker")
     @classmethod
@@ -1224,9 +1229,20 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
         
         # Send request through WebSocket relay
         # Pass userId so requests are routed to the user's own agent when available
+        payload: dict = {"ticker": request.ticker.upper()}
+        # Forward optional contract metadata for futures/non-stock instruments
+        if request.secType:
+            payload["secType"] = request.secType
+        if request.exchange:
+            payload["exchange"] = request.exchange
+        if request.lastTradeDateOrContractMonth:
+            payload["lastTradeDateOrContractMonth"] = request.lastTradeDateOrContractMonth
+        if request.multiplier:
+            payload["multiplier"] = request.multiplier
+        
         response_data = await send_request_to_provider(
             request_type="fetch_underlying",
-            payload={"ticker": request.ticker.upper()},
+            payload=payload,
             timeout=15.0,  # Stock quote should be quick
             user_id=request.userId
         )

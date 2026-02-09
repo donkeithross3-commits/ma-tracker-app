@@ -15,7 +15,7 @@ export interface StockQuoteResponse {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { ticker } = body;
+    const { ticker, secType, exchange, lastTradeDateOrContractMonth, multiplier } = body;
 
     if (!ticker) {
       return NextResponse.json(
@@ -27,15 +27,22 @@ export async function POST(request: NextRequest) {
     // Get current user for agent routing (optional)
     const user = await getCurrentUser();
 
-    // Fetch stock quote through the Python service relay
+    // Build payload — include optional contract metadata for futures/non-stock
+    const payload: Record<string, string | undefined> = {
+      ticker: ticker.toUpperCase(),
+      userId: user?.id || undefined,
+    };
+    if (secType) payload.secType = secType;
+    if (exchange) payload.exchange = exchange;
+    if (lastTradeDateOrContractMonth) payload.lastTradeDateOrContractMonth = lastTradeDateOrContractMonth;
+    if (multiplier) payload.multiplier = multiplier;
+
+    // Fetch stock/futures quote through the Python service relay
     // Include userId so requests are routed to the user's own agent when available
     const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/stock-quote`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        ticker: ticker.toUpperCase(),
-        userId: user?.id || undefined,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {

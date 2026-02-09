@@ -227,13 +227,35 @@ class IBDataAgent:
         }
     
     async def _handle_fetch_underlying(self, payload: dict) -> dict:
-        """Fetch underlying stock data"""
+        """Fetch underlying stock/futures data.
+        
+        For futures, pass secType="FUT" plus exchange, lastTradeDateOrContractMonth,
+        and optionally multiplier in the payload.
+        """
         ticker = payload.get("ticker", "").upper()
         
         if not self.scanner or not self.scanner.isConnected():
             return {"error": "IB not connected"}
         
-        data = self.scanner.fetch_underlying_data(ticker)
+        # Build a resolved contract if the caller provided contract metadata
+        resolved = None
+        sec_type = payload.get("secType", "STK")
+        if sec_type and sec_type != "STK":
+            from ibapi.contract import Contract
+            resolved = Contract()
+            resolved.symbol = ticker
+            resolved.secType = sec_type
+            resolved.exchange = payload.get("exchange", "SMART")
+            resolved.currency = payload.get("currency", "USD")
+            if payload.get("lastTradeDateOrContractMonth"):
+                resolved.lastTradeDateOrContractMonth = payload["lastTradeDateOrContractMonth"]
+            if payload.get("multiplier"):
+                resolved.multiplier = payload["multiplier"]
+            logger.info(f"fetch_underlying: using {sec_type} contract for {ticker} "
+                        f"expiry={resolved.lastTradeDateOrContractMonth} "
+                        f"exchange={resolved.exchange}")
+        
+        data = self.scanner.fetch_underlying_data(ticker, resolved_contract=resolved)
         return {
             "ticker": ticker,
             "price": data.get("price"),

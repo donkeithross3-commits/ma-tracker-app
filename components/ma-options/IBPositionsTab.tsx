@@ -624,14 +624,25 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [quotes, setQuotes] = useState<Record<string, { price: number; timestamp: string } | { error: string } | null>>({});
   const [quoteLoading, setQuoteLoading] = useState<Record<string, boolean>>({});
 
-  const fetchQuote = useCallback(async (ticker: string) => {
+  const fetchQuote = useCallback(async (ticker: string, contractMeta?: {
+    secType?: string;
+    exchange?: string;
+    lastTradeDateOrContractMonth?: string;
+    multiplier?: string;
+  }) => {
     const key = ticker.toUpperCase();
     setQuoteLoading((prev) => ({ ...prev, [key]: true }));
     try {
+      const payload: Record<string, string> = { ticker: key };
+      if (contractMeta?.secType) payload.secType = contractMeta.secType;
+      if (contractMeta?.exchange) payload.exchange = contractMeta.exchange;
+      if (contractMeta?.lastTradeDateOrContractMonth) payload.lastTradeDateOrContractMonth = contractMeta.lastTradeDateOrContractMonth;
+      if (contractMeta?.multiplier) payload.multiplier = contractMeta.multiplier;
+
       const res = await fetch("/api/ma-options/stock-quote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker: key }),
+        body: JSON.stringify(payload),
         credentials: "include",
       });
       // Guard against non-JSON responses (e.g. auth redirect returning HTML)
@@ -656,13 +667,24 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
   }, []);
 
-  /** Fetch live quotes for all legs (options + stock) in a position group. */
+  /** Fetch live quotes for all legs (options + stock + futures) in a position group. */
   const fetchGroupPrices = useCallback(async (groupKey: string, rows: IBPositionRow[]) => {
     setLegPricesLoading((prev) => ({ ...prev, [groupKey]: true }));
     const ticker = groupKey.split(" ")[0]?.toUpperCase() ?? groupKey;
 
-    // Refresh stock quote (for STK legs and header Last trade display)
-    fetchQuote(ticker);
+    // Detect if this group has a FUT position — if so, pass contract metadata
+    const futRow = rows.find((r) => r.contract?.secType === "FUT");
+    if (futRow) {
+      fetchQuote(ticker, {
+        secType: "FUT",
+        exchange: futRow.contract.exchange || "SMART",
+        lastTradeDateOrContractMonth: futRow.contract.lastTradeDateOrContractMonth || "",
+        multiplier: futRow.contract.multiplier || "",
+      });
+    } else {
+      // Refresh stock quote (for STK legs and header Last trade display)
+      fetchQuote(ticker);
+    }
 
     // Batch-fetch option leg prices
     const optRows = rows.filter(
@@ -1251,14 +1273,26 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     [selectedTickers]
   );
 
-  // Fetch stock quote for each selected group's underlying ticker when first shown (page load or new box)
+  // Fetch stock/futures quote for each selected group's underlying ticker when first shown (page load or new box)
   useEffect(() => {
     if (selectedGroups.length === 0) return;
-    const tickers = [...new Set(selectedGroups.map((g) => underlyingTickerForGroupKey(g.key)).filter(Boolean))];
-    for (const ticker of tickers) {
-      if (quotes[ticker] === undefined) fetchQuote(ticker);
+    for (const group of selectedGroups) {
+      const ticker = underlyingTickerForGroupKey(group.key);
+      if (!ticker || quotes[ticker] !== undefined) continue;
+      // Detect FUT group and pass contract metadata
+      const futRow = group.rows.find((r) => r.contract?.secType === "FUT");
+      if (futRow) {
+        fetchQuote(ticker, {
+          secType: "FUT",
+          exchange: futRow.contract.exchange || "SMART",
+          lastTradeDateOrContractMonth: futRow.contract.lastTradeDateOrContractMonth || "",
+          multiplier: futRow.contract.multiplier || "",
+        });
+      } else {
+        fetchQuote(ticker);
+      }
     }
-  }, [selectedGroupKeysSig, quotes, fetchQuote, underlyingTickerForGroupKey]);
+  }, [selectedGroupKeysSig, selectedGroups, quotes, fetchQuote, underlyingTickerForGroupKey]);
 
   // Auto-fetch leg prices when a position box is first shown
   useEffect(() => {
@@ -1701,7 +1735,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
                     // Per-row live price lookup
                     const getRowLastPrice = (row: IBPositionRow): number | null => {
-                      if (row.contract?.secType === "STK") {
+                      if (row.contract?.secType === "STK" || row.contract?.secType === "FUT") {
                         return quote && "price" in quote ? quote.price : null;
                       }
                       const lp = legPrices[legKey(row)];
