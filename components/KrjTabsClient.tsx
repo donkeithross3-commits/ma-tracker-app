@@ -86,6 +86,9 @@ type EnrichedRegime = {
   all_probabilities?: Record<string, number>;
   description?: string;
   is_transition?: boolean;
+  entropy?: number;
+  runner_up_regime?: string;
+  runner_up_probability?: number;
   confidence?: {
     score: number;
     label: string;
@@ -798,88 +801,68 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
           </button>
           {regimeBannerExpanded && (
             <div className="mt-1 rounded bg-gray-800/40 border border-gray-700/30 px-3 py-2 text-xs text-gray-400">
-              {/* Macro dimensions (dynamic: any factor keys from backend) */}
-              {dims && Object.keys(dims).length > 0 && (() => {
-                const factorLabels: Record<string, string> = {
-                  risk_appetite_4w: "Risk Appetite (4w)",
-                  risk_appetite_1w: "Risk Appetite (1w)",
-                  safety_flow_4w: "Safety Flow (4w)",
-                  safety_flow_1w: "Safety Flow (1w)",
-                  inflation_pressure_4w: "Inflation (4w)",
-                  inflation_pressure_1w: "Inflation (1w)",
-                  credit_stress_4w: "Credit Stress (4w)",
-                  credit_stress_1w: "Credit Stress (1w)",
-                  curve_slope_4w: "Curve Slope (4w)",
-                  curve_slope_1w: "Curve Slope (1w)",
-                  vol_panic: "Vol / Panic",
-                  speculative_liquidity_4w: "Speculative Liq (4w)",
-                  risk_appetite: "Risk Appetite",
-                  safety_flow: "Safety Flow",
-                  inflation_pressure: "Inflation Pressure",
-                };
+              {/* Regime probabilities (primary): always show every regime with label + percentage */}
+              {(() => {
+                const regimeList = [
+                  { key: "steady_growth", label: "Steady Growth", color: "bg-blue-600", textColor: "text-blue-400" },
+                  { key: "goldilocks", label: "Goldilocks", color: "bg-sky-500", textColor: "text-sky-400" },
+                  { key: "reflation_rally", label: "Reflation Rally", color: "bg-emerald-500", textColor: "text-emerald-400" },
+                  { key: "defensive_rotation", label: "Defensive Rotation", color: "bg-yellow-500", textColor: "text-yellow-400" },
+                  { key: "safe_haven_rotation", label: "Safe Haven Rotation", color: "bg-yellow-600", textColor: "text-yellow-500" },
+                  { key: "stagflation", label: "Stagflation", color: "bg-orange-500", textColor: "text-orange-400" },
+                  { key: "liquidity_shock", label: "Liquidity Shock", color: "bg-red-500", textColor: "text-red-400" },
+                  { key: "crisis", label: "Crisis", color: "bg-red-600", textColor: "text-red-500" },
+                ];
                 return (
-                  <div className="flex flex-wrap gap-4 mb-2">
-                    {Object.entries(dims).map(([key, value]) => (
-                      <DimGauge
-                        key={key}
-                        label={factorLabels[key] ?? key}
-                        value={typeof value === "number" ? value : 0}
-                        tooltip={`Factor: ${key}. Scaled value; positive/negative indicate direction.`}
-                      />
-                    ))}
+                  <div className="mb-2">
+                    <div className="text-[10px] text-gray-500 mb-1">Regime Probabilities</div>
+                    <div className="flex h-2.5 rounded-sm overflow-hidden gap-px">
+                      {(() => {
+                        const minP = 0.005;
+                        const total = regimeList.reduce((s, { key }) => s + Math.max(allProbs?.[key] ?? 0, minP), 0);
+                        return regimeList.map(({ key, label, color }) => {
+                          const p = allProbs?.[key] ?? 0;
+                          const pct = (Math.max(p, minP) / total) * 100;
+                          return (
+                            <div
+                              key={key}
+                              style={{ width: `${pct}%` }}
+                              className={`${color} relative group cursor-default min-w-0`}
+                              title={`${label}: ${(p * 100).toFixed(1)}%`}
+                            />
+                          );
+                        });
+                      })()}
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px]">
+                      {regimeList.map(({ key, label, textColor }) => {
+                        const p = allProbs?.[key] ?? 0;
+                        return (
+                          <span key={key} className={textColor}>
+                            {label}: {(p * 100).toFixed(0)}%
+                          </span>
+                        );
+                      })}
+                    </div>
+                    {/* Uncertainty / runner-up line when backend provides it */}
+                    {(typeof regime.entropy === "number" || (regime.runner_up_regime && typeof regime.runner_up_probability === "number")) && (
+                      <div className="text-[10px] text-gray-500 mt-1">
+                        {typeof regime.entropy === "number" && (
+                          <span title="Higher entropy = more uncertainty in regime assignment">
+                            Uncertainty: {regime.entropy < 0.5 ? "low" : regime.entropy < 1.2 ? "moderate" : "high"} (entropy {regime.entropy.toFixed(2)})
+                          </span>
+                        )}
+                        {regime.runner_up_regime && typeof regime.runner_up_probability === "number" && (
+                          <span className={typeof regime.entropy === "number" ? " ml-2" : ""}>
+                            Runner-up: {regime.runner_up_regime} {(regime.runner_up_probability * 100).toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
-              {/* Regime probability breakdown (V2: 6-7 regimes) */}
-              {allProbs && (
-                <div className="mb-2">
-                  <div className="text-[10px] text-gray-500 mb-1">Regime Probabilities</div>
-                  <div className="flex h-2.5 rounded-sm overflow-hidden gap-px">
-                    {[
-                      { key: "steady_growth", label: "Steady Growth", color: "bg-blue-600" },
-                      { key: "goldilocks", label: "Goldilocks", color: "bg-sky-500" },
-                      { key: "reflation_rally", label: "Reflation", color: "bg-emerald-500" },
-                      { key: "defensive_rotation", label: "Defensive", color: "bg-yellow-500" },
-                      { key: "safe_haven_rotation", label: "Safe Haven", color: "bg-yellow-600" },
-                      { key: "stagflation", label: "Stagflation", color: "bg-orange-500" },
-                      { key: "liquidity_shock", label: "Liq Shock", color: "bg-red-500" },
-                      { key: "crisis", label: "Crisis", color: "bg-red-600" },
-                    ].map(({ key, label, color }) => {
-                      const p = allProbs[key] ?? 0;
-                      if (p < 0.01) return null;
-                      return (
-                        <div
-                          key={key}
-                          style={{ width: `${Math.max(p * 100, 2)}%` }}
-                          className={`${color} relative group cursor-default`}
-                          title={`${label}: ${(p * 100).toFixed(1)}%`}
-                        />
-                      );
-                    })}
-                  </div>
-                  <div className="flex gap-3 mt-1 text-[10px] flex-wrap">
-                    {[
-                      { key: "steady_growth", label: "Steady", color: "text-blue-400" },
-                      { key: "goldilocks", label: "Goldilocks", color: "text-sky-400" },
-                      { key: "reflation_rally", label: "Reflation", color: "text-emerald-400" },
-                      { key: "defensive_rotation", label: "Defensive", color: "text-yellow-400" },
-                      { key: "safe_haven_rotation", label: "Safe Haven", color: "text-yellow-500" },
-                      { key: "stagflation", label: "Stagflation", color: "text-orange-400" },
-                      { key: "liquidity_shock", label: "Liq Shock", color: "text-red-400" },
-                      { key: "crisis", label: "Crisis", color: "text-red-500" },
-                    ].map(({ key, label, color }) => {
-                      const p = allProbs[key] ?? 0;
-                      if (p < 0.01) return null;
-                      return (
-                        <span key={key} className={color}>
-                          {label} {(p * 100).toFixed(0)}%
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              {/* Confidence detail */}
+              {/* Signal confidence in current regime */}
               {conf && (
                 <div className="text-[10px] text-gray-500 border-t border-gray-700/30 pt-1">
                   Signal confidence in <span className="text-gray-300">{regimeName}</span> regime:
