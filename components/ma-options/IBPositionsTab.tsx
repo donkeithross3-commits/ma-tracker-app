@@ -27,8 +27,9 @@ const POSITIONS_LOCKED = ["symbol", "trade"];
 const ORDERS_COLUMNS: ColumnDef[] = [
   { key: "account", label: "Account" },
   { key: "symbol", label: "Symbol" },
-  { key: "type", label: "Type" },
+  { key: "type", label: "Product Type" },
   { key: "side", label: "Side" },
+  { key: "orderType", label: "Order Type" },
   { key: "qty", label: "Qty" },
   { key: "price", label: "Price" },
   { key: "tif", label: "TIF" },
@@ -363,7 +364,16 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
   /* ── Column visibility: working orders table ── */
   const savedOrdCols = getVisibleColumns("ibOrders");
-  const ordVisibleKeys = useMemo(() => savedOrdCols ?? ORDERS_DEFAULTS, [savedOrdCols]);
+  const ordVisibleKeys = useMemo(() => {
+    const saved = savedOrdCols ?? ORDERS_DEFAULTS;
+    if (!saved || saved.length === 0) return ORDERS_DEFAULTS;
+    // Merge in any default columns missing from saved (e.g. newly added "orderType") so existing users see new columns
+    const merged = saved.filter((k) => ORDERS_DEFAULTS.includes(k));
+    for (const k of ORDERS_DEFAULTS) {
+      if (!merged.includes(k)) merged.push(k);
+    }
+    return merged;
+  }, [savedOrdCols]);
   const ordVisibleSet = useMemo(() => new Set(ordVisibleKeys), [ordVisibleKeys]);
   const handleOrdColsChange = useCallback((keys: string[]) => setVisibleColumns("ibOrders", keys), [setVisibleColumns]);
 
@@ -1607,8 +1617,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   <tr className="bg-gray-700/50 text-gray-300 border-b border-gray-600">
                     {ordVisibleSet.has("account") && <th className="text-left py-1.5 px-3">Account</th>}
                     {ordVisibleSet.has("symbol") && <th className="text-left py-1.5 px-3">Symbol</th>}
-                    {ordVisibleSet.has("type") && <th className="text-left py-1.5 px-3">Type</th>}
+                    {ordVisibleSet.has("type") && <th className="text-left py-1.5 px-3">Product Type</th>}
                     {ordVisibleSet.has("side") && <th className="text-left py-1.5 px-3">Side</th>}
+                    {ordVisibleSet.has("orderType") && <th className="text-left py-1.5 px-3">Order Type</th>}
                     {ordVisibleSet.has("qty") && <th className="text-right py-1.5 px-3">Qty</th>}
                     {ordVisibleSet.has("price") && <th className="text-left py-1.5 px-3">Price</th>}
                     {ordVisibleSet.has("tif") && <th className="text-left py-1.5 px-3">TIF</th>}
@@ -1631,6 +1642,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                           <td className={`py-1.5 px-3 font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
                             {o.order.action}
                           </td>
+                        )}
+                        {ordVisibleSet.has("orderType") && (
+                          <td className="py-1.5 px-3 text-gray-300">{o.order.orderType ?? "—"}</td>
                         )}
                         {ordVisibleSet.has("qty") && (
                           <td className="py-1.5 px-3 text-right tabular-nums text-gray-100">
