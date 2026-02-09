@@ -393,6 +393,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   // ---- Order modification state ----
   const [editingOrderIdx, setEditingOrderIdx] = useState<number | null>(null);
   const [editLmtPrice, setEditLmtPrice] = useState("");
+  const [editStopPrice, setEditStopPrice] = useState("");
   const [editQty, setEditQty] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -539,6 +540,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setEditLmtPrice(
       o.order.lmtPrice != null ? o.order.lmtPrice.toFixed(2) : ""
     );
+    setEditStopPrice(
+      o.order.auxPrice != null ? o.order.auxPrice.toFixed(2) : ""
+    );
     setEditQty(String(o.order.totalQuantity));
     setEditError(null);
   }, []);
@@ -556,8 +560,23 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       return;
     }
     const newLmt = parseFloat(editLmtPrice);
+    const newStop = parseFloat(editStopPrice);
     if (o.order.orderType === "LMT" && (!newLmt || newLmt <= 0)) {
       setEditError("Enter a valid limit price");
+      return;
+    }
+    if (o.order.orderType === "STP LMT") {
+      if (!newLmt || newLmt <= 0) {
+        setEditError("Enter a valid limit price");
+        return;
+      }
+      if (!newStop || newStop <= 0) {
+        setEditError("Enter a valid stop price");
+        return;
+      }
+    }
+    if (o.order.orderType === "STP" && (!newStop || newStop <= 0)) {
+      setEditError("Enter a valid stop price");
       return;
     }
     setEditSubmitting(true);
@@ -590,8 +609,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       if (o.order.orderType === "LMT" || o.order.orderType === "STP LMT") {
         order.lmtPrice = newLmt;
       }
-      if (o.order.orderType === "STP LMT" && o.order.auxPrice != null) {
-        order.auxPrice = o.order.auxPrice;
+      if (o.order.orderType === "STP LMT" || o.order.orderType === "STP") {
+        order.auxPrice = newStop;
       }
 
       const res = await fetch("/api/ib-connection/modify-order", {
@@ -617,7 +636,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     } finally {
       setEditSubmitting(false);
     }
-  }, [editQty, editLmtPrice, fetchOpenOrders]);
+  }, [editQty, editLmtPrice, editStopPrice, fetchOpenOrders]);
 
   /** Get open orders for a specific underlying symbol */
   const ordersForTicker = useCallback((ticker: string) => {
@@ -1631,17 +1650,34 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                         )}
                         {ordVisibleSet.has("price") && (
                           <td className="py-1.5 px-3 text-gray-200 tabular-nums whitespace-nowrap">
-                            {isEditing && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT") ? (
+                            {isEditing && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT" || o.order.orderType === "STP") ? (
                               <div className="flex items-center gap-1">
-                                <span className="text-gray-400 text-xs">{o.order.orderType === "STP LMT" ? "STP LMT" : "LMT"}</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={editLmtPrice}
-                                  onChange={(e) => setEditLmtPrice(e.target.value)}
-                                  className="w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
-                                />
+                                {(o.order.orderType === "STP LMT" || o.order.orderType === "STP") && (
+                                  <>
+                                    <span className="text-gray-400 text-xs">STP</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={editStopPrice}
+                                      onChange={(e) => setEditStopPrice(e.target.value)}
+                                      className="w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                                    />
+                                  </>
+                                )}
+                                {(o.order.orderType === "LMT" || o.order.orderType === "STP LMT") && (
+                                  <>
+                                    <span className="text-gray-400 text-xs">LMT</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={editLmtPrice}
+                                      onChange={(e) => setEditLmtPrice(e.target.value)}
+                                      className="w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                                    />
+                                  </>
+                                )}
                               </div>
                             ) : (
                               formatOrderPrice(o)
@@ -2022,15 +2058,35 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     <span className="text-gray-300 truncate max-w-[120px]" title={displayOrderSymbol(o)}>
                                       {o.contract.secType === "STK" ? "STK" : displayOrderSymbol(o)}
                                     </span>
-                                    {isEd && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT") ? (
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={editLmtPrice}
-                                        onChange={(e) => setEditLmtPrice(e.target.value)}
-                                        className="w-16 px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
-                                      />
+                                    {isEd && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT" || o.order.orderType === "STP") ? (
+                                      <div className="flex items-center gap-1">
+                                        {(o.order.orderType === "STP LMT" || o.order.orderType === "STP") && (
+                                          <>
+                                            <span className="text-gray-400 text-[10px]">STP</span>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              step="0.01"
+                                              value={editStopPrice}
+                                              onChange={(e) => setEditStopPrice(e.target.value)}
+                                              className="w-16 px-1 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-xs text-right tabular-nums focus:outline-none"
+                                            />
+                                          </>
+                                        )}
+                                        {(o.order.orderType === "LMT" || o.order.orderType === "STP LMT") && (
+                                          <>
+                                            <span className="text-gray-400 text-[10px]">LMT</span>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              step="0.01"
+                                              value={editLmtPrice}
+                                              onChange={(e) => setEditLmtPrice(e.target.value)}
+                                              className="w-16 px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
+                                            />
+                                          </>
+                                        )}
+                                      </div>
                                     ) : (
                                       <span className="tabular-nums text-gray-200">{formatOrderPrice(o)}</span>
                                     )}
