@@ -714,7 +714,10 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
         const regimeProb = regime.probability ?? 0;
         const dims = regime.dimensions;
         const allProbs = regime.all_probabilities;
-        const conf = regime.confidence;
+        // confidence can be a number (old format) or an object (new format)
+        const conf = typeof regime.confidence === "object" && regime.confidence !== null
+          ? regime.confidence
+          : null;
         const desc = regime.description ?? "";
 
         // Color by regime name
@@ -1056,7 +1059,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           const p = enrichedRow.regime_adjusted * 100;
                           const cls = p > 0 ? "text-emerald-400" : p < 0 ? "text-red-400" : "text-gray-400";
                           return (
-                            <td key={col.key} title={`Regime-adjusted prediction for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. Calculated as Raw Prediction (${(enrichedRow.raw_prediction * 100).toFixed(2)}%) scaled by signal confidence derived from the current macro regime (${regime?.name ?? "?"}, hist. hit rate: ${regime?.confidence ? (regime.confidence.regime_historical_hit_rate * 100).toFixed(0) + "%" : "?"}). This is the actionable signal — it reflects both the model's stock-level view and its trust in current conditions.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                            <td key={col.key} title={`Regime-adjusted prediction for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. Calculated as Raw Prediction (${(enrichedRow.raw_prediction * 100).toFixed(2)}%) scaled by signal confidence derived from the current macro regime (${regime?.name ?? regime?.label ?? "?"}). This is the actionable signal — it reflects both the model's stock-level view and its trust in current conditions.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
                               {p > 0 ? "+" : ""}{p.toFixed(2)}%
                             </td>
                           );
