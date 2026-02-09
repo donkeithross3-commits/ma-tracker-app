@@ -239,9 +239,11 @@ class IBDataAgent:
         
         # Futures exchange lookup — IB requires exchange even with conId
         _FUTURES_EXCHANGE = {
-            # Metals (COMEX, reported as NYMEX by IB)
-            "SI": "NYMEX", "GC": "NYMEX", "HG": "NYMEX", "PL": "NYMEX", "PA": "NYMEX",
-            "SIL": "NYMEX", "MGC": "NYMEX",
+            # Metals — COMEX (IB uses "COMEX" exchange, not "NYMEX")
+            "SI": "COMEX", "GC": "COMEX", "HG": "COMEX",
+            "SIL": "COMEX", "MGC": "COMEX",
+            # Metals — NYMEX (platinum, palladium)
+            "PL": "NYMEX", "PA": "NYMEX",
             # Energy
             "CL": "NYMEX", "NG": "NYMEX", "RB": "NYMEX", "HO": "NYMEX",
             "MCL": "NYMEX",

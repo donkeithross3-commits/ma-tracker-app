@@ -950,9 +950,10 @@ class IBMergerArbScanner(EWrapper, EClient):
             contract.exchange = "SMART"
             contract.currency = "USD"
         else:
-            # Ensure symbol set for req_id_map logging
-            if not getattr(contract, "symbol", ""):
-                contract.symbol = ticker
+            # When a conId is set, do NOT add symbol/secType/etc. to the contract.
+            # IB validates ALL fields together — any mismatch → error 200.
+            # The req_id_map already stores the ticker for logging purposes.
+            pass
 
         req_id = self.get_next_req_id()
         self.req_id_map[req_id] = f"underlying_{ticker}"
