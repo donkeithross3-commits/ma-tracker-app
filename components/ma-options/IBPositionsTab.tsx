@@ -1649,11 +1649,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                           </td>
                         )}
                         {ordVisibleSet.has("price") && (
-                          <td className="py-1.5 px-3 text-gray-200 tabular-nums whitespace-nowrap">
+                          <td className="py-1.5 px-3 text-gray-200 tabular-nums">
                             {isEditing && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT" || o.order.orderType === "STP") ? (
-                              <div className="flex flex-wrap items-center gap-1">
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 {(o.order.orderType === "STP LMT" || o.order.orderType === "STP") && (
-                                  <>
+                                  <span className="inline-flex items-center gap-1">
                                     <span className="text-gray-400 text-xs">STP</span>
                                     <input
                                       type="number"
@@ -1661,12 +1661,12 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       step="0.01"
                                       value={editStopPrice}
                                       onChange={(e) => setEditStopPrice(e.target.value)}
-                                      className="inline-edit w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                                      className="inline-edit w-[76px] px-1.5 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-sm text-right tabular-nums focus:outline-none"
                                     />
-                                  </>
+                                  </span>
                                 )}
                                 {(o.order.orderType === "LMT" || o.order.orderType === "STP LMT") && (
-                                  <>
+                                  <span className="inline-flex items-center gap-1">
                                     <span className="text-gray-400 text-xs">LMT</span>
                                     <input
                                       type="number"
@@ -1674,9 +1674,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       step="0.01"
                                       value={editLmtPrice}
                                       onChange={(e) => setEditLmtPrice(e.target.value)}
-                                      className="inline-edit w-20 px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
+                                      className="inline-edit w-[76px] px-1.5 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-sm text-right tabular-nums focus:outline-none"
                                     />
-                                  </>
+                                  </span>
                                 )}
                               </div>
                             ) : (
@@ -2059,9 +2059,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       {o.contract.secType === "STK" ? "STK" : displayOrderSymbol(o)}
                                     </span>
                                     {isEd && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT" || o.order.orderType === "STP") ? (
-                                      <div className="flex flex-wrap items-center gap-1">
+                                      <div className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                                         {(o.order.orderType === "STP LMT" || o.order.orderType === "STP") && (
-                                          <>
+                                          <span className="inline-flex items-center gap-0.5">
                                             <span className="text-gray-400 text-[10px]">STP</span>
                                             <input
                                               type="number"
@@ -2069,12 +2069,12 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                               step="0.01"
                                               value={editStopPrice}
                                               onChange={(e) => setEditStopPrice(e.target.value)}
-                                              className="inline-edit w-16 px-1 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-xs text-right tabular-nums focus:outline-none"
+                                              className="inline-edit w-[60px] px-1 py-0.5 rounded bg-gray-800 border border-amber-500 text-white text-xs text-right tabular-nums focus:outline-none"
                                             />
-                                          </>
+                                          </span>
                                         )}
                                         {(o.order.orderType === "LMT" || o.order.orderType === "STP LMT") && (
-                                          <>
+                                          <span className="inline-flex items-center gap-0.5">
                                             <span className="text-gray-400 text-[10px]">LMT</span>
                                             <input
                                               type="number"
@@ -2082,9 +2082,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                               step="0.01"
                                               value={editLmtPrice}
                                               onChange={(e) => setEditLmtPrice(e.target.value)}
-                                              className="inline-edit w-16 px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
+                                              className="inline-edit w-[60px] px-1 py-0.5 rounded bg-gray-800 border border-indigo-500 text-white text-xs text-right tabular-nums focus:outline-none"
                                             />
-                                          </>
+                                          </span>
                                         )}
                                       </div>
                                     ) : (
