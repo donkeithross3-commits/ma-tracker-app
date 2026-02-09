@@ -1163,6 +1163,32 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     return () => clearInterval(interval);
   }, [autoRefresh, isConnected, fetchPositions, fetchOpenOrders]);
 
+  // Near-real-time account event polling (order fills, cancels, status changes)
+  // Polls lightweight endpoint every 3s; triggers full refresh only when events detected
+  const lastEventCheckRef = useRef<number>(Date.now() / 1000);
+  useEffect(() => {
+    if (!isConnected) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `/api/ib-connection/account-events?since=${lastEventCheckRef.current}`,
+          { credentials: "include", cache: "no-store" }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.events?.length > 0) {
+          lastEventCheckRef.current = Date.now() / 1000;
+          // Trigger full position + order refresh
+          fetchPositions();
+          fetchOpenOrders();
+        }
+      } catch {
+        // Silently ignore — this is best-effort polling
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [isConnected, fetchPositions, fetchOpenOrders]);
+
   // Load manual tickers from context preferences (replaces old per-component fetch)
   useEffect(() => {
     if (!prefsLoaded) return;

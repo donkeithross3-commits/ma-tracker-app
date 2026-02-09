@@ -132,6 +132,28 @@ class ProviderRegistry:
         self.providers: Dict[str, DataProvider] = {}
         self.pending_requests: Dict[str, PendingRequest] = {}
         self._lock = asyncio.Lock()
+        # Per-user account event queues for near-real-time UI updates
+        # Events are pushed by agents on order fills, cancels, etc.
+        from collections import deque
+        self._account_events: Dict[str, deque] = {}  # user_id -> deque of events
+        self._account_events_lock = asyncio.Lock()
+
+    async def push_account_event(self, user_id: str, event: dict):
+        """Store an account event for a user (called when agent pushes events)."""
+        from collections import deque
+        async with self._account_events_lock:
+            if user_id not in self._account_events:
+                self._account_events[user_id] = deque(maxlen=200)
+            event["received_at"] = time.time()
+            self._account_events[user_id].append(event)
+
+    async def get_account_events(self, user_id: str, since: float = 0) -> list:
+        """Return account events for a user since a given timestamp."""
+        async with self._account_events_lock:
+            events = self._account_events.get(user_id)
+            if not events:
+                return []
+            return [e for e in events if e.get("received_at", 0) > since]
     
     async def register_provider(self, provider_id: str, websocket: WebSocket, user_id: str, agent_version: str = "0.0.0") -> DataProvider:
         """Register a new data provider"""
@@ -393,6 +415,15 @@ async def data_provider_websocket(websocket: WebSocket):
                         f"Provider {provider_id} execution telemetry: "
                         f"strategies={msg.get('strategy_count', 0)}, "
                         f"lines={msg.get('lines_held', 0)}"
+                    )
+                
+                elif msg_type == "account_event":
+                    # Agent pushes order fill/status events for near-real-time UI
+                    event = msg.get("event", {})
+                    await registry.push_account_event(user_id, event)
+                    logger.info(
+                        f"Provider {provider_id} account event: "
+                        f"{event.get('event')} orderId={event.get('orderId')}"
                     )
                 
                 else:

@@ -912,6 +912,27 @@ async def relay_registry():
         return {"providers_connected": 0, "providers": [], "error": str(e)}
 
 
+@router.get("/relay/account-events")
+async def relay_account_events(
+    user_id: Optional[str] = Query(None),
+    since: float = Query(0),
+):
+    """Return account events (order fills, status changes) since a given timestamp.
+
+    Designed for lightweight 3-second polling by the frontend to achieve
+    near-real-time position/order updates without full position refreshes.
+    """
+    if not user_id:
+        return {"events": []}
+    try:
+        registry = get_registry()
+        events = await registry.get_account_events(user_id, since)
+        return {"events": events}
+    except Exception as e:
+        logger.error(f"Account events error: {e}")
+        return {"events": [], "error": str(e)}
+
+
 @router.get("/relay/agent-state")
 async def relay_agent_state():
     """

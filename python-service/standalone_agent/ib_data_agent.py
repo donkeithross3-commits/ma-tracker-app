@@ -916,6 +916,28 @@ class IBDataAgent:
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")
                 break
+
+    async def _account_event_push_loop(self):
+        """Check scanner for account events (fills, status changes) and push to relay.
+
+        Runs every 1 second so events reach the frontend within ~2-4 seconds
+        (1s poll here + up to 3s frontend poll).
+        """
+        while self.running and self.websocket:
+            try:
+                if self.scanner:
+                    events = self.scanner.drain_account_events()
+                    for event in events:
+                        await self.websocket.send(json.dumps({
+                            "type": "account_event",
+                            "event": event,
+                        }))
+                        logger.info("Pushed account event: %s (orderId=%s)",
+                                    event.get("event"), event.get("orderId"))
+                await asyncio.sleep(1.0)
+            except Exception as e:
+                logger.error(f"Account event push error: {e}")
+                break
     
     async def _process_request(self, request_id: str, data: dict):
         """Process a request and send response"""
@@ -1063,12 +1085,13 @@ class IBDataAgent:
 
                 heartbeat_task = asyncio.create_task(self.send_heartbeat())
                 handler_task = asyncio.create_task(self.message_handler())
+                event_push_task = asyncio.create_task(self._account_event_push_loop())
                 
                 logger.info("Agent running - ready to handle requests")
                 logger.info("Press Ctrl+C to stop")
                 
                 done, pending = await asyncio.wait(
-                    [heartbeat_task, handler_task],
+                    [heartbeat_task, handler_task, event_push_task],
                     return_when=asyncio.FIRST_COMPLETED
                 )
                 

@@ -15,6 +15,7 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
+from collections import deque
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -184,6 +185,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._TERMINAL_STATUSES = frozenset({
             "Filled", "Cancelled", "ApiCancelled", "Inactive",
         })
+        # Account events queue — pushed to relay for near-real-time UI updates
+        self._account_events: deque = deque(maxlen=200)
+        self._account_events_lock = Lock()
 
     def managedAccounts(self, accountsList: str):
         """Store comma-separated account ids from TWS on connect."""
@@ -706,6 +710,17 @@ class IBMergerArbScanner(EWrapper, EClient):
         # ── Notify execution engine listeners (non-dup events only) ──────
         if not is_dup:
             self._notify_order_status_listeners(orderId, status_update)
+            # ── Push account event for real-time UI updates ──────────────
+            with self._account_events_lock:
+                self._account_events.append({
+                    "event": "order_status",
+                    "orderId": orderId,
+                    "status": status,
+                    "filled": filled,
+                    "remaining": remaining,
+                    "avgFillPrice": avgFillPrice,
+                    "ts": time.time(),
+                })
 
     def openOrder(self, orderId: int, contract: Contract, order: Order, orderState):
         """Open order / what-if; may include warningText (e.g. price capping).
@@ -830,10 +845,29 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Notify execution engine listeners
         if order_id:
             self._notify_exec_details_listeners(order_id, exec_data)
+        # Push account event for real-time UI updates
+        with self._account_events_lock:
+            self._account_events.append({
+                "event": "execution",
+                "orderId": order_id,
+                "symbol": getattr(contract, "symbol", ""),
+                "side": exec_data["side"],
+                "shares": exec_data["shares"],
+                "price": exec_data["price"],
+                "ts": time.time(),
+            })
 
     def execDetailsEnd(self, reqId: int):
         """End of executions for request."""
         pass
+
+    def drain_account_events(self) -> list:
+        """Drain and return all pending account events (thread-safe)."""
+        events = []
+        with self._account_events_lock:
+            while self._account_events:
+                events.append(self._account_events.popleft())
+        return events
 
     def get_next_req_id(self) -> int:
         """For data requests only (market data, contract details, etc.). Do not use for placeOrder."""
