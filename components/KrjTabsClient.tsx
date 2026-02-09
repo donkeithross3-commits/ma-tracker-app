@@ -59,6 +59,7 @@ type EnrichedTickerData = {
     krj: number;
     stock_specific: number;
     market_regime: number;
+    peer_market: number;
     cross_sectional: number;
   };
   legacy_signal: string;
@@ -959,17 +960,20 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                         // Signal source mini bar
                         if (col.key === "signal_source" && enrichedRow) {
                           const d = enrichedRow.decomposition;
-                          const total = Math.abs(d.krj) + Math.abs(d.stock_specific) + Math.abs(d.market_regime) + Math.abs(d.cross_sectional);
-                          const pctKrj = total > 0 ? Math.abs(d.krj) / total * 100 : 25;
-                          const pctStock = total > 0 ? Math.abs(d.stock_specific) / total * 100 : 25;
-                          const pctMarket = total > 0 ? Math.abs(d.market_regime) / total * 100 : 25;
-                          const pctCross = total > 0 ? Math.abs(d.cross_sectional) / total * 100 : 25;
+                          const peerMkt = d.peer_market ?? 0;
+                          const total = Math.abs(d.krj) + Math.abs(d.stock_specific) + Math.abs(d.market_regime) + Math.abs(peerMkt) + Math.abs(d.cross_sectional);
+                          const pctKrj = total > 0 ? Math.abs(d.krj) / total * 100 : 20;
+                          const pctStock = total > 0 ? Math.abs(d.stock_specific) / total * 100 : 20;
+                          const pctMarket = total > 0 ? Math.abs(d.market_regime) / total * 100 : 20;
+                          const pctPeer = total > 0 ? Math.abs(peerMkt) / total * 100 : 20;
+                          const pctCross = total > 0 ? Math.abs(d.cross_sectional) / total * 100 : 20;
                           return (
                             <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap">
-                              <div className="flex h-3 w-20 rounded-sm overflow-hidden" title={`SHAP signal decomposition for ${tickerUpper} — how much each category contributes to the prediction:\n\nBlue = KRJ Signal (${(d.krj*100).toFixed(2)}%): price action vs moving average (dip/strength)\nPurple = Stock Specific (${(d.stock_specific*100).toFixed(2)}%): vol ratio, SPX correlation, market cap, 52-week high proximity, return autocorrelation\nGreen = Market Regime (${(d.market_regime*100).toFixed(2)}%): breadth, dispersion, SPY momentum, market dip, vol regime\nAmber = Cross-Sectional (${(d.cross_sectional*100).toFixed(2)}%): z-scores vs peers, percentile rank, interaction terms\n\nBright = positive (bullish) contribution, Dark = negative (bearish) contribution\nBar width = proportion of total explanation from that category\nClick row to expand full decomposition view.`}>
+                              <div className="flex h-3 w-20 rounded-sm overflow-hidden" title={`SHAP signal decomposition for ${tickerUpper} — how much each category contributes to the prediction:\n\nBlue = KRJ Signal (${(d.krj*100).toFixed(2)}%): price action vs moving average (dip/strength)\nPurple = Stock Specific (${(d.stock_specific*100).toFixed(2)}%): vol ratio, SPX correlation, market cap, 52-week high proximity, return autocorrelation\nGreen = Market Regime (${(d.market_regime*100).toFixed(2)}%): breadth, dispersion, SPY momentum, market dip, vol regime\nTeal = Peer Market (${(peerMkt*100).toFixed(2)}%): adaptive per-ticker peer signal — dynamically selected correlated tickers weighted by predictive IC\nAmber = Cross-Sectional (${(d.cross_sectional*100).toFixed(2)}%): z-scores vs peers, percentile rank, interaction terms\n\nBright = positive (bullish) contribution, Dark = negative (bearish) contribution\nBar width = proportion of total explanation from that category\nClick row to expand full decomposition view.`}>
                                 <div style={{ width: `${pctKrj}%` }} className={d.krj >= 0 ? "bg-blue-500" : "bg-blue-800"} />
                                 <div style={{ width: `${pctStock}%` }} className={d.stock_specific >= 0 ? "bg-purple-500" : "bg-purple-800"} />
                                 <div style={{ width: `${pctMarket}%` }} className={d.market_regime >= 0 ? "bg-emerald-500" : "bg-emerald-800"} />
+                                <div style={{ width: `${pctPeer}%` }} className={peerMkt >= 0 ? "bg-teal-500" : "bg-teal-800"} />
                                 <div style={{ width: `${pctCross}%` }} className={d.cross_sectional >= 0 ? "bg-amber-500" : "bg-amber-800"} />
                               </div>
                             </td>
@@ -1056,16 +1060,17 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                       <tr className="bg-gray-800/80">
                         <td colSpan={visibleColumns.length} className="px-3 py-2">
                           <div className="flex gap-6 items-start">
-                            {/* 4 SHAP group bars */}
+                            {/* 5 SHAP group bars */}
                             <div className="flex-1 space-y-1">
-                              <div className="text-xs text-gray-400 font-medium mb-1" title="SHAP (SHapley Additive exPlanations) decomposition of the LightGBM prediction into 4 interpretable signal categories. Each bar shows how much that category contributed to the total predicted return. Positive = bullish contribution, negative = bearish. The bars sum to the total raw prediction.">Signal Decomposition</div>
+                              <div className="text-xs text-gray-400 font-medium mb-1" title="SHAP (SHapley Additive exPlanations) decomposition of the LightGBM prediction into 5 interpretable signal categories. Each bar shows how much that category contributed to the total predicted return. Positive = bullish contribution, negative = bearish. The bars sum to the total raw prediction.">Signal Decomposition</div>
                               {([
                                 { key: "krj" as const, label: "KRJ Signal", barClass: "bg-blue-500/70", tip: "Legacy KRJ oscillator contribution: how far the stock's price dipped (long_sv) or rallied (short_sv, high_sv) relative to its reference moving average. Positive = price action is bullish, negative = bearish." },
                                 { key: "stock_specific" as const, label: "Stock Specific", barClass: "bg-purple-500/70", tip: "Stock-specific characteristics contribution: volatility ratio to SPY, rolling 60-day SPX correlation, log market cap, proximity to 52-week high, and 60-day return autocorrelation. Captures what kind of stock this is and how it tends to behave." },
                                 { key: "market_regime" as const, label: "Market Regime", barClass: "bg-emerald-500/70", tip: "Market-wide regime contribution: breadth (% of stocks above reference), dispersion (spread of signals), SPY momentum, SPY dip level, and vol regime. Same value for all tickers — captures whether the overall market environment is bullish or bearish." },
+                                { key: "peer_market" as const, label: "Peer Market", barClass: "bg-teal-500/70", tip: "Adaptive peer market contribution: dynamically selects other tickers that are correlated with AND predictive of this stock, weighted by Information Coefficient. Different for every ticker — a bank stock's peers include XLF/IEF, a tech stock's peers include QQQ/XLK. Captures sector, macro, and factor effects through the peer mechanism." },
                                 { key: "cross_sectional" as const, label: "Cross-Sectional", barClass: "bg-amber-500/70", tip: "Cross-sectional positioning contribution: how this stock's signals compare to the universe via z-scores, percentile rank, and interaction terms (dip x breadth, dip x dispersion). Captures relative strength or weakness versus peers." },
                               ]).map(({ key, label, barClass, tip }) => {
-                                const val = enrichedRow.decomposition[key];
+                                const val = enrichedRow.decomposition[key] ?? 0;
                                 const pct = val * 100;
                                 // Scale: map contribution to bar width (max ~50px per 1% contribution)
                                 const maxBarWidth = 120;
@@ -1100,7 +1105,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                                 );
                               })}
                               <div className="flex items-center gap-2 text-xs mt-1 pt-1 border-t border-gray-700/50">
-                                <span className="w-28 text-gray-300 text-right font-medium" title="Sum of all 4 SHAP contributions plus the model's base value. This equals the raw LightGBM prediction — the model's best estimate of this stock's 1-week forward return before regime adjustment.">Total (raw)</span>
+                                <span className="w-28 text-gray-300 text-right font-medium" title="Sum of all 5 SHAP contributions plus the model's base value. This equals the raw LightGBM prediction — the model's best estimate of this stock's 1-week forward return before regime adjustment.">Total (raw)</span>
                                 <div className="w-72" />
                                 <span className={`w-16 text-right font-mono font-medium ${enrichedRow.raw_prediction > 0 ? "text-emerald-300" : enrichedRow.raw_prediction < 0 ? "text-red-300" : "text-gray-400"}`}>
                                   {enrichedRow.raw_prediction > 0 ? "+" : ""}{(enrichedRow.raw_prediction * 100).toFixed(2)}%
