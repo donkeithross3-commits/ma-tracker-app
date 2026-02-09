@@ -15,7 +15,7 @@ export interface StockQuoteResponse {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { ticker, secType, exchange, lastTradeDateOrContractMonth, multiplier } = body;
+    const { ticker, secType, exchange, lastTradeDateOrContractMonth, multiplier, conId } = body;
 
     if (!ticker) {
       return NextResponse.json(
@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
     if (exchange) payload.exchange = exchange;
     if (lastTradeDateOrContractMonth) payload.lastTradeDateOrContractMonth = lastTradeDateOrContractMonth;
     if (multiplier) payload.multiplier = multiplier;
+    if (conId) payload.conId = String(conId);
 
     // Fetch stock/futures quote through the Python service relay
     // Include userId so requests are routed to the user's own agent when available

@@ -629,15 +629,17 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     exchange?: string;
     lastTradeDateOrContractMonth?: string;
     multiplier?: string;
+    conId?: number;
   }) => {
     const key = ticker.toUpperCase();
     setQuoteLoading((prev) => ({ ...prev, [key]: true }));
     try {
-      const payload: Record<string, string> = { ticker: key };
+      const payload: Record<string, string | number> = { ticker: key };
       if (contractMeta?.secType) payload.secType = contractMeta.secType;
       if (contractMeta?.exchange) payload.exchange = contractMeta.exchange;
       if (contractMeta?.lastTradeDateOrContractMonth) payload.lastTradeDateOrContractMonth = contractMeta.lastTradeDateOrContractMonth;
       if (contractMeta?.multiplier) payload.multiplier = contractMeta.multiplier;
+      if (contractMeta?.conId) payload.conId = contractMeta.conId;
 
       const res = await fetch("/api/ma-options/stock-quote", {
         method: "POST",
@@ -672,14 +674,15 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setLegPricesLoading((prev) => ({ ...prev, [groupKey]: true }));
     const ticker = groupKey.split(" ")[0]?.toUpperCase() ?? groupKey;
 
-    // Detect if this group has a FUT position — if so, pass contract metadata
+    // Detect if this group has a FUT position — if so, pass contract metadata including conId
     const futRow = rows.find((r) => r.contract?.secType === "FUT");
     if (futRow) {
       fetchQuote(ticker, {
         secType: "FUT",
-        exchange: futRow.contract.exchange || "SMART",
+        exchange: futRow.contract.exchange || "",
         lastTradeDateOrContractMonth: futRow.contract.lastTradeDateOrContractMonth || "",
         multiplier: futRow.contract.multiplier || "",
+        conId: futRow.contract.conId || undefined,
       });
     } else {
       // Refresh stock quote (for STK legs and header Last trade display)
@@ -1279,14 +1282,15 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     for (const group of selectedGroups) {
       const ticker = underlyingTickerForGroupKey(group.key);
       if (!ticker || quotes[ticker] !== undefined) continue;
-      // Detect FUT group and pass contract metadata
+      // Detect FUT group and pass contract metadata including conId
       const futRow = group.rows.find((r) => r.contract?.secType === "FUT");
       if (futRow) {
         fetchQuote(ticker, {
           secType: "FUT",
-          exchange: futRow.contract.exchange || "SMART",
+          exchange: futRow.contract.exchange || "",
           lastTradeDateOrContractMonth: futRow.contract.lastTradeDateOrContractMonth || "",
           multiplier: futRow.contract.multiplier || "",
+          conId: futRow.contract.conId || undefined,
         });
       } else {
         fetchQuote(ticker);

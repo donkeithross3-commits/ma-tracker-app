@@ -1183,6 +1183,7 @@ class StockQuoteRequest(BaseModel):
     exchange: Optional[str] = None
     lastTradeDateOrContractMonth: Optional[str] = None
     multiplier: Optional[str] = None
+    conId: Optional[str] = None  # IB contract ID — most reliable way to identify a contract
 
     @field_validator("ticker")
     @classmethod
@@ -1239,6 +1240,8 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
             payload["lastTradeDateOrContractMonth"] = request.lastTradeDateOrContractMonth
         if request.multiplier:
             payload["multiplier"] = request.multiplier
+        if request.conId:
+            payload["conId"] = request.conId
         
         response_data = await send_request_to_provider(
             request_type="fetch_underlying",

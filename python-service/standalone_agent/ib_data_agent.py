@@ -240,19 +240,26 @@ class IBDataAgent:
         # Build a resolved contract if the caller provided contract metadata
         resolved = None
         sec_type = payload.get("secType", "STK")
-        if sec_type and sec_type != "STK":
+        con_id = int(payload.get("conId", 0) or 0)
+        if con_id or (sec_type and sec_type != "STK"):
             from ibapi.contract import Contract
             resolved = Contract()
             resolved.symbol = ticker
-            resolved.secType = sec_type
-            resolved.exchange = payload.get("exchange", "SMART")
+            resolved.secType = sec_type or "STK"
             resolved.currency = payload.get("currency", "USD")
+            # conId is the most reliable identifier — IB resolves everything from it
+            if con_id:
+                resolved.conId = con_id
+                # When using conId, exchange must still be set but can be empty or specific
+                resolved.exchange = payload.get("exchange") or ""
+            else:
+                resolved.exchange = payload.get("exchange") or "SMART"
             if payload.get("lastTradeDateOrContractMonth"):
                 resolved.lastTradeDateOrContractMonth = payload["lastTradeDateOrContractMonth"]
             if payload.get("multiplier"):
                 resolved.multiplier = payload["multiplier"]
             logger.info(f"fetch_underlying: using {sec_type} contract for {ticker} "
-                        f"expiry={resolved.lastTradeDateOrContractMonth} "
+                        f"conId={con_id} expiry={resolved.lastTradeDateOrContractMonth} "
                         f"exchange={resolved.exchange}")
         
         data = self.scanner.fetch_underlying_data(ticker, resolved_contract=resolved)
