@@ -631,6 +631,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   // Stock quotes per group key (underlying ticker); null = not fetched, { price, timestamp } or { error }
   const [quotes, setQuotes] = useState<Record<string, { price: number; timestamp: string } | { error: string } | null>>({});
   const [quoteLoading, setQuoteLoading] = useState<Record<string, boolean>>({});
+  // In-flight dedup: prevent multiple concurrent fetches for the same ticker
+  const inFlightQuotesRef = useRef<Set<string>>(new Set());
 
   const fetchQuote = useCallback(async (ticker: string, contractMeta?: {
     secType?: string;
@@ -640,6 +642,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     conId?: number;
   }) => {
     const key = ticker.toUpperCase();
+    // Skip if a fetch for this exact ticker is already in flight
+    if (inFlightQuotesRef.current.has(key)) return;
+    inFlightQuotesRef.current.add(key);
     setQuoteLoading((prev) => ({ ...prev, [key]: true }));
     try {
       const payload: Record<string, string | number> = { ticker: key };
@@ -673,6 +678,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     } catch (e) {
       setQuotes((prev) => ({ ...prev, [key]: { error: e instanceof Error ? e.message : "Failed to fetch quote" } }));
     } finally {
+      inFlightQuotesRef.current.delete(key);
       setQuoteLoading((prev) => ({ ...prev, [key]: false }));
     }
   }, []);
