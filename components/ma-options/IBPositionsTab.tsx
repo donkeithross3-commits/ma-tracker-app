@@ -783,6 +783,14 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [ticketExpiry, setTicketExpiry] = useState("");
   const [ticketStrike, setTicketStrike] = useState<number>(0);
   const [ticketRight, setTicketRight] = useState<"C" | "P">("C");
+  // Contract metadata for the trade ticket ticker (needed for futures quote refresh)
+  const [ticketContractMeta, setTicketContractMeta] = useState<{
+    secType?: string;
+    exchange?: string;
+    lastTradeDateOrContractMonth?: string;
+    multiplier?: string;
+    conId?: number;
+  } | null>(null);
 
   // ---- Dev stress test toggle (positions table + ticket) ----
   const [devStressTest, setDevStressTest] = useState(false);
@@ -835,12 +843,23 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       setTicketRight("C");
     }
 
+    // Store contract metadata for futures (needed for quote refresh in trade ticket)
+    const futRow = group.rows.find((r) => r.contract?.secType === "FUT");
+    const meta = futRow ? {
+      secType: "FUT" as const,
+      exchange: futRow.contract.exchange || "",
+      lastTradeDateOrContractMonth: futRow.contract.lastTradeDateOrContractMonth || "",
+      multiplier: futRow.contract.multiplier || "",
+      conId: futRow.contract.conId || undefined,
+    } : null;
+    setTicketContractMeta(meta);
+
     // If no price yet, fetch a fresh quote
     if (initPrice) {
       stockOrderPriceInitRef.current = true;
     } else {
       stockOrderPriceInitRef.current = false;
-      fetchQuote(ticker);
+      fetchQuote(ticker, meta ?? undefined);
     }
     const acct = row?.account || group.rows[0]?.account || data?.accounts?.[0] || "";
     setStockOrderAccount(acct);
@@ -870,6 +889,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setTicketExpiry(c.expiry);
     setTicketStrike(c.strike);
     setTicketRight(c.right as "C" | "P");
+    setTicketContractMeta(null); // scan results are options, not futures
 
     if (initPrice) {
       stockOrderPriceInitRef.current = true;
@@ -886,6 +906,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const closeStockOrder = useCallback(() => {
     setStockOrderKey(null);
     setStockOrderResult(null);
+    setTicketContractMeta(null);
     stockOrderPriceInitRef.current = false;
   }, []);
 
@@ -2524,7 +2545,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   disabled={stockOrderQuoteRefreshing}
                   onClick={async () => {
                     setStockOrderQuoteRefreshing(true);
-                    await fetchQuote(tickerForQuote);
+                    await fetchQuote(tickerForQuote, ticketContractMeta ?? undefined);
                     setStockOrderQuoteRefreshing(false);
                   }}
                   className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-lg disabled:opacity-40"
