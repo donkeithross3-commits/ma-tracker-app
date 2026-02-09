@@ -1926,7 +1926,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               onClick={() => openTradeTicket(group.key, group)}
                               className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-bold bg-gray-600 hover:bg-gray-500 text-white"
                             >
-                              Trade stock
+                              Trade
                             </button>
                             {group.rows.length > 0 && (
                               <button
@@ -1935,12 +1935,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                   // Pick the primary row (first non-OPT, or first row)
                                   const row = group.rows.find((r) => r.contract?.secType !== "OPT") || group.rows[0];
                                   const c = row.contract;
+                                  const mult = getMultiplier(row);
                                   const last = legPrices[`${c.symbol || ""}:${c.secType}:${c.strike || ""}:${c.lastTradeDateOrContractMonth || ""}:${c.right || ""}`]?.last;
                                   setRiskModalPosition({
                                     symbol: c.symbol || c.localSymbol || "?",
                                     secType: c.secType || "STK",
                                     position: row.position,
-                                    avgCost: row.avgCost,
+                                    avgCost: row.avgCost / mult,
                                     lastPrice: last || (quote && "price" in quote ? quote.price : undefined),
                                     contract: c as unknown as Record<string, unknown>,
                                   });
@@ -2161,12 +2162,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                             type="button"
                                             onClick={() => {
                                               const c = row.contract;
+                                              const mult = getMultiplier(row);
                                               const last = legPrices[`${c.symbol || ""}:${c.secType}:${c.strike || ""}:${c.lastTradeDateOrContractMonth || ""}:${c.right || ""}`]?.last;
                                               setRiskModalPosition({
                                                 symbol: c.symbol || c.localSymbol || "?",
                                                 secType: c.secType || "STK",
                                                 position: row.position,
-                                                avgCost: row.avgCost,
+                                                avgCost: row.avgCost / mult,
                                                 lastPrice: last || undefined,
                                                 contract: c as unknown as Record<string, unknown>,
                                               });

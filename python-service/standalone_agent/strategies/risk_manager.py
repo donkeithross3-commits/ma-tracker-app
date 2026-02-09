@@ -26,6 +26,39 @@ from execution_engine import ExecutionStrategy, OrderAction, OrderSide, OrderTyp
 logger = logging.getLogger(__name__)
 
 
+# ── Tick sizes for common futures (used for limit order price rounding) ──
+# Stocks/options default to 0.01 if not found.
+TICK_SIZES: Dict[str, float] = {
+    # Metals (COMEX)
+    "SI": 0.005, "SIL": 0.005,
+    "GC": 0.10,  "MGC": 0.10,
+    "HG": 0.0005,
+    "PL": 0.10,  "PA": 0.10,
+    # Indices (CME)
+    "ES": 0.25,  "MES": 0.25,
+    "NQ": 0.25,  "MNQ": 0.25,
+    "YM": 1.0,   "MYM": 1.0,
+    "RTY": 0.10, "M2K": 0.10,
+    # Energy (NYMEX)
+    "CL": 0.01,  "MCL": 0.01,
+    "NG": 0.001,
+    "RB": 0.0001, "HO": 0.0001,
+    # Treasuries (CBOT)
+    "ZB": 1 / 32, "ZN": 1 / 64, "ZF": 1 / 128, "ZT": 1 / 128,
+    # Grains (CBOT)
+    "ZC": 0.25, "ZS": 0.25, "ZW": 0.25,
+    # FX (CME)
+    "6E": 0.00005, "6J": 0.0000005, "6B": 0.0001, "6A": 0.0001,
+}
+
+
+def _round_to_tick(price: float, tick_size: float) -> float:
+    """Round a price to the nearest valid tick increment."""
+    if tick_size <= 0:
+        return round(price, 2)
+    return round(round(price / tick_size) * tick_size, 10)
+
+
 # ── Level state machine ──
 
 class LevelState(Enum):
@@ -451,23 +484,21 @@ class RiskManagerStrategy(ExecutionStrategy):
                            quote, config: dict, reason: str) -> OrderAction:
         """Build an OrderAction with the right order type and limit offset."""
         exec_cfg = config.get("execution", {})
+        symbol = config.get("instrument", {}).get("symbol", "")
+        tick_size = TICK_SIZES.get(symbol, 0.01)
+
         if order_type_str == "LMT":
             ot = OrderType.LIMIT
             # Place limit slightly aggressive (near-side of spread)
             offset_ticks = exec_cfg.get("limit_offset_ticks", 1)
-            tick_size = 0.01  # default; could be refined per instrument
             if self.is_long:
                 # Selling: limit at bid + offset (slightly above bid)
-                limit_price = max(0.01, round(
-                    (quote.bid + offset_ticks * tick_size) if quote.bid > 0 else current_price,
-                    2
-                ))
+                raw = (quote.bid + offset_ticks * tick_size) if quote.bid > 0 else current_price
+                limit_price = max(tick_size, _round_to_tick(raw, tick_size))
             else:
                 # Buying to cover: limit at ask - offset
-                limit_price = max(0.01, round(
-                    (quote.ask - offset_ticks * tick_size) if quote.ask > 0 else current_price,
-                    2
-                ))
+                raw = (quote.ask - offset_ticks * tick_size) if quote.ask > 0 else current_price
+                limit_price = max(tick_size, _round_to_tick(raw, tick_size))
         else:
             ot = OrderType.MARKET
             limit_price = None

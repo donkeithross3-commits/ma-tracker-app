@@ -160,9 +160,47 @@ const PRESETS: Record<string, { label: string; description: string; config: Part
       execution: { stop_order_type: "MKT", profit_order_type: "LMT", limit_offset_ticks: 1 },
     },
   },
+  futures_tight: {
+    label: "Futures Tight",
+    description: "Tight -1.5% stop, +3% target, 1% trailing stop — intraday / short-term",
+    config: {
+      stop_loss: { enabled: true, type: "simple", trigger_pct: -1.5, ladders: [] },
+      profit_taking: {
+        enabled: true,
+        targets: [{ trigger_pct: 3, exit_pct: 100 }],
+        trailing_stop: { enabled: true, activation_pct: 1.5, trail_pct: 1 },
+      },
+      execution: { stop_order_type: "MKT", profit_order_type: "MKT", limit_offset_ticks: 0 },
+    },
+  },
+  futures_swing: {
+    label: "Futures Swing",
+    description: "-3% stop, take 50% at +5%, all out at +10%, 2% trailing stop",
+    config: {
+      stop_loss: { enabled: true, type: "simple", trigger_pct: -3, ladders: [] },
+      profit_taking: {
+        enabled: true,
+        targets: [
+          { trigger_pct: 5, exit_pct: 50 },
+          { trigger_pct: 10, exit_pct: 100 },
+        ],
+        trailing_stop: { enabled: true, activation_pct: 3, trail_pct: 2 },
+      },
+      execution: { stop_order_type: "MKT", profit_order_type: "MKT", limit_offset_ticks: 0 },
+    },
+  },
+};
+
+/** Presets suitable for each instrument type */
+const PRESET_ORDER: Record<string, string[]> = {
+  FUT: ["futures_tight", "futures_swing", "conservative"],
+  DEFAULT: ["zero_dte_lotto", "stock_swing", "conservative"],
 };
 
 function defaultConfig(pos: PositionInfo): RiskManagerConfig {
+  const isFut = pos.secType === "FUT";
+  // For futures, auto-apply the futures_swing preset as default
+  const defaultPreset = isFut ? PRESETS.futures_swing : null;
   return {
     instrument: {
       symbol: pos.symbol,
@@ -176,13 +214,13 @@ function defaultConfig(pos: PositionInfo): RiskManagerConfig {
       quantity: Math.abs(pos.position),
       entry_price: pos.avgCost || 0,
     },
-    stop_loss: { enabled: true, type: "simple", trigger_pct: -5, ladders: [] },
-    profit_taking: {
+    stop_loss: defaultPreset?.config.stop_loss || { enabled: true, type: "simple", trigger_pct: -5, ladders: [] },
+    profit_taking: defaultPreset?.config.profit_taking || {
       enabled: true,
       targets: [{ trigger_pct: 10, exit_pct: 50 }],
       trailing_stop: { enabled: false, activation_pct: 0, trail_pct: 0 },
     },
-    execution: { stop_order_type: "MKT", profit_order_type: "LMT", limit_offset_ticks: 1 },
+    execution: defaultPreset?.config.execution || { stop_order_type: "MKT", profit_order_type: "LMT", limit_offset_ticks: 1 },
   };
 }
 
@@ -197,7 +235,9 @@ export function RiskManagerModal({
   onStop,
 }: RiskManagerModalProps) {
   const [config, setConfig] = useState<RiskManagerConfig>(() => defaultConfig(position));
-  const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [activePreset, setActivePreset] = useState<string | null>(
+    position.secType === "FUT" ? "futures_swing" : null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -217,9 +257,9 @@ export function RiskManagerModal({
   useEffect(() => {
     if (!isRunning) {
       setConfig(defaultConfig(position));
-      setActivePreset(null);
+      setActivePreset(position.secType === "FUT" ? "futures_swing" : null);
     }
-  }, [position.symbol, position.position, isRunning]);
+  }, [position.symbol, position.position, position.secType, isRunning]);
 
   const applyPreset = useCallback((presetKey: string) => {
     const preset = PRESETS[presetKey];
@@ -341,20 +381,24 @@ export function RiskManagerModal({
             <>
               <div>
                 <label className="block text-xs text-gray-400 font-semibold mb-1.5">Presets</label>
-                <div className="flex gap-2">
-                  {Object.entries(PRESETS).map(([key, preset]) => (
-                    <button
-                      key={key}
-                      onClick={() => applyPreset(key)}
-                      className={`px-3 py-1.5 rounded text-sm font-medium border transition ${
-                        activePreset === key
-                          ? "border-blue-500 bg-blue-500/20 text-blue-300"
-                          : "border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700"
-                      }`}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap gap-2">
+                  {(PRESET_ORDER[position.secType] || PRESET_ORDER.DEFAULT).map((key) => {
+                    const preset = PRESETS[key];
+                    if (!preset) return null;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => applyPreset(key)}
+                        className={`px-3 py-1.5 rounded text-sm font-medium border transition ${
+                          activePreset === key
+                            ? "border-blue-500 bg-blue-500/20 text-blue-300"
+                            : "border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700"
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
                 </div>
                 {activePreset && PRESETS[activePreset] && (
                   <p className="text-xs text-gray-500 mt-1">{PRESETS[activePreset].description}</p>
