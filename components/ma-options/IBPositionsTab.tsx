@@ -805,7 +805,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
     const isOpt = row ? row.contract?.secType === "OPT" : false;
     const posQty = row ? row.position : (() => {
-      let s = 0; for (const r of group.rows) { if (r.contract?.secType === "STK") s += r.position; } return s;
+      // Sum non-option positions (STK + FUT)
+      let s = 0; for (const r of group.rows) { if (r.contract?.secType !== "OPT") s += r.position; } return s;
     })();
     // Exit direction: if long → SELL, if short → BUY, if flat → BUY
     const exitAction: "BUY" | "SELL" = posQty > 0 ? "SELL" : "BUY";
