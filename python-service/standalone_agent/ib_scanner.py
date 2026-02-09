@@ -134,6 +134,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.last_mkt_data_error = None
         # Error 200 on underlying request (no security definition) - trigger delayed retry
         self._underlying_200_req_id = None
+        # Diagnostic state for test_futures debugging
+        self._last_market_data_type = {}    # reqId -> marketDataType int
+        self._last_tick_req_params = {}     # reqId -> (minTick, bboExchange, snapshotPermissions)
+        self._snapshot_end_events = set()   # reqIds that received tickSnapshotEnd
 
         # Resource manager: optional, provides dynamic batch sizing when execution engine is active
         self.resource_manager = None  # set by IBDataAgent after construction
@@ -606,6 +610,25 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self._order_results[reqId]["errorCode"] = errorCode
                 self._order_results[reqId]["errorString"] = errorString or ""
                 self._order_events[reqId].set()
+
+    # ── Diagnostic callbacks for market data debugging ─────────────────────
+    def marketDataType(self, reqId, marketDataType):
+        """IB tells us what data mode it switched to for this reqId."""
+        self._last_market_data_type[reqId] = marketDataType
+        labels = {1: "REALTIME", 2: "FROZEN", 3: "DELAYED", 4: "DELAYED_FROZEN"}
+        self.logger.info(f"marketDataType reqId={reqId} type={marketDataType} "
+                         f"({labels.get(marketDataType, '?')})")
+
+    def tickReqParams(self, tickerId, minTick, bboExchange, snapshotPermissions):
+        """IB tells us snapshot permissions for this contract."""
+        self._last_tick_req_params[tickerId] = (minTick, bboExchange, snapshotPermissions)
+        self.logger.info(f"tickReqParams reqId={tickerId} minTick={minTick} "
+                         f"bbo={bboExchange} snapshotPerms={snapshotPermissions}")
+
+    def tickSnapshotEnd(self, reqId):
+        """IB signals that a snapshot request has completed."""
+        self._snapshot_end_events.add(reqId)
+        self.logger.info(f"tickSnapshotEnd reqId={reqId}")
 
     def orderStatus(self, orderId: int, status: str, filled: float, remaining: float,
                    avgFillPrice: float, permId: int, parentId: int, lastFillPrice: float,

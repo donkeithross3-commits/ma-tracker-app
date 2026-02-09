@@ -423,6 +423,13 @@ class IBDataAgent:
             logger.info(f"test_futures SNAPSHOT: has_any={has_any}, ticks_seen={ticks_seen}, "
                         f"data={futures_data}, err={getattr(self.scanner, 'last_mkt_data_error', None)}")
 
+            # ── Diagnostics: what did IB tell us about this request? ─────────
+            mdt = self.scanner._last_market_data_type.get(rid)
+            trp = self.scanner._last_tick_req_params.get(rid)
+            snap_ended = rid in self.scanner._snapshot_end_events
+            logger.info(f"test_futures DIAG: marketDataType={mdt}, tickReqParams={trp}, "
+                        f"snapshotEnd={snap_ended}")
+
             # ── Step 2: Historical fallback (market closed / weekend) ───────
             from_historical = False
             if not has_any:
