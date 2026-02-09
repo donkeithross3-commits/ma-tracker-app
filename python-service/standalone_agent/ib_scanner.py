@@ -656,7 +656,16 @@ class IBMergerArbScanner(EWrapper, EClient):
                     "_lastStatus": status_update,
                     "_statusOnly": True,  # flag: contract/order details pending
                 }
+            # ── permId-based deduplication (same logic as openOrder) ──────
             if permId:
+                old_order_id = self._perm_id_to_order_id.get(permId)
+                if old_order_id is not None and old_order_id != orderId:
+                    removed = self._live_orders.pop(old_order_id, None)
+                    if removed:
+                        self.logger.info(
+                            "orderStatus dedup: permId=%d rebound from orderId=%d to %d — removed stale entry",
+                            permId, old_order_id, orderId,
+                        )
                 self._perm_id_to_order_id[permId] = orderId
 
         # ── Place-order / modify-order wait ──────────────────────────────
@@ -719,8 +728,20 @@ class IBMergerArbScanner(EWrapper, EClient):
                     # Carry over the full status snapshot for downstream consumers
                     order_entry["_lastStatus"] = existing.get("_lastStatus")
                 self._live_orders[orderId] = order_entry
-            # Track permId -> orderId (permId is account-unique and survives rebinds)
+
+            # ── permId-based deduplication ────────────────────────────────
+            # IB can re-deliver the same physical order under a new orderId
+            # (e.g. manual TWS orders rebound via reqAutoOpenOrders).  Remove
+            # any stale entry that has the same permId but a different orderId.
             if perm_id:
+                old_order_id = self._perm_id_to_order_id.get(perm_id)
+                if old_order_id is not None and old_order_id != orderId:
+                    removed = self._live_orders.pop(old_order_id, None)
+                    if removed:
+                        self.logger.info(
+                            "openOrder dedup: permId=%d rebound from orderId=%d to %d — removed stale entry",
+                            perm_id, old_order_id, orderId,
+                        )
                 self._perm_id_to_order_id[perm_id] = orderId
 
         # ── Snapshot collection (legacy path) ────────────────────────────
