@@ -313,15 +313,23 @@ function formatPnl(n: number): string {
 
 /**
  * Contract multiplier for market value calculation.
- * IB market data returns option prices per-share, but avgCost from the
- * position callback is per-contract (already includes the multiplier).
- * So we must multiply lastPrice by the contract multiplier for options.
+ * IB market data returns prices per-share (options) or per-unit (futures),
+ * but avgCost from the position callback is per-contract (already includes
+ * the multiplier). So we must multiply lastPrice by the contract multiplier
+ * for options AND futures.
+ * - OPT/FOP: defaults to 100 if missing
+ * - FUT: uses the multiplier from position data (e.g. 5000 for full SI, 1000 for micro)
+ * - STK: always 1
  */
 function getMultiplier(row: IBPositionRow): number {
   const c = row.contract;
   if (c.secType === "OPT" || c.secType === "FOP") {
     const m = parseInt(c.multiplier || "100", 10);
     return isNaN(m) || m <= 0 ? 100 : m;
+  }
+  if (c.secType === "FUT") {
+    const m = parseInt(c.multiplier || "1", 10);
+    return isNaN(m) || m <= 0 ? 1 : m;
   }
   return 1;
 }
