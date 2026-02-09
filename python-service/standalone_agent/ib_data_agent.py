@@ -237,6 +237,26 @@ class IBDataAgent:
         if not self.scanner or not self.scanner.isConnected():
             return {"error": "IB not connected"}
         
+        # Futures exchange lookup — IB requires exchange even with conId
+        _FUTURES_EXCHANGE = {
+            # Metals (COMEX, reported as NYMEX by IB)
+            "SI": "NYMEX", "GC": "NYMEX", "HG": "NYMEX", "PL": "NYMEX", "PA": "NYMEX",
+            "SIL": "NYMEX", "MGC": "NYMEX",
+            # Energy
+            "CL": "NYMEX", "NG": "NYMEX", "RB": "NYMEX", "HO": "NYMEX",
+            "MCL": "NYMEX",
+            # Equity indices
+            "ES": "CME", "NQ": "CME", "RTY": "CME", "MES": "CME", "MNQ": "CME",
+            "M2K": "CME", "EMD": "CME",
+            "YM": "CBOT", "MYM": "CBOT",
+            # Treasuries
+            "ZB": "CBOT", "ZN": "CBOT", "ZF": "CBOT", "ZT": "CBOT",
+            # FX
+            "6E": "CME", "6J": "CME", "6A": "CME", "6B": "CME", "6C": "CME",
+            # Grains
+            "ZC": "CBOT", "ZS": "CBOT", "ZW": "CBOT", "ZM": "CBOT", "ZL": "CBOT",
+        }
+
         # Build a resolved contract if the caller provided contract metadata
         resolved = None
         sec_type = payload.get("secType", "STK")
@@ -247,13 +267,13 @@ class IBDataAgent:
             resolved.symbol = ticker
             resolved.secType = sec_type or "STK"
             resolved.currency = payload.get("currency", "USD")
-            # conId is the most reliable identifier — IB resolves everything from it
+            # Determine exchange: use provided, then lookup table, then CME default
+            exch = payload.get("exchange") or ""
+            if not exch and sec_type == "FUT":
+                exch = _FUTURES_EXCHANGE.get(ticker, "CME")
+            resolved.exchange = exch or "SMART"
             if con_id:
                 resolved.conId = con_id
-                # When using conId, exchange must still be set but can be empty or specific
-                resolved.exchange = payload.get("exchange") or ""
-            else:
-                resolved.exchange = payload.get("exchange") or "SMART"
             if payload.get("lastTradeDateOrContractMonth"):
                 resolved.lastTradeDateOrContractMonth = payload["lastTradeDateOrContractMonth"]
             if payload.get("multiplier"):
