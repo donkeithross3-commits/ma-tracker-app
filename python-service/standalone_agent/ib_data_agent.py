@@ -327,10 +327,12 @@ class IBDataAgent:
     async def _handle_test_futures(self, payload: dict) -> dict:
         """Fetch ES futures quote as a connectivity test.
 
-        Tries three market-data modes in order:
+        Uses streaming mode (snapshot=False) because snapshot=True returns
+        nothing when markets are closed.  Tries in order:
         1. REALTIME (type 1) -- live ticks (tickTypes 1/2/4)
         2. DELAYED  (type 3) -- 15-20 min delayed (tickTypes 66/67/68)
-        3. DELAYED_FROZEN (type 4) -- last snapshot when market is closed
+        3. DELAYED_FROZEN (type 4) -- last cached data when market closed
+        4. Historical data fallback -- reqHistoricalData for last 1-day bar
         """
         if not self.scanner or not self.scanner.isConnected():
             return {"error": "IB not connected"}
@@ -371,14 +373,19 @@ class IBDataAgent:
             
             original_tickPrice = self.scanner.tickPrice
             
-            # ── Helper: attempt a snapshot with the given market data type ──
-            def _try_snapshot(mkt_data_type: int, label: str):
-                """Request snapshot, return (futures_data dict, bool has_any)."""
+            # ── Helper: streaming request, wait for ticks, then cancel ──────
+            def _try_streaming(mkt_data_type: int, label: str, timeout_sec: float = 5.0):
+                """Open streaming subscription, collect ticks, cancel.
+                
+                Uses snapshot=False because snapshot=True silently returns
+                nothing when markets are closed (IB sends tickSnapshotEnd
+                immediately with no data).
+                """
                 rid = self.scanner.get_next_req_id()
                 self.scanner.last_mkt_data_error = None
                 fdata = {"bid": None, "ask": None, "last": None}
-                got_data = [False]   # mutable so closure can write
-                ticks_seen = []      # for diagnostics
+                got_data = [False]
+                ticks_seen = []
 
                 def _handle(reqId, tickType, price, attrib):
                     if reqId != rid:
@@ -406,12 +413,16 @@ class IBDataAgent:
                     time.sleep(0.3)
 
                 self.scanner.tickPrice = _handle
-                self.scanner.reqMktData(rid, contract, "", True, False, [])
+                # snapshot=False: open a streaming subscription
+                self.scanner.reqMktData(rid, contract, "", False, False, [])
 
-                # Wait up to 8 seconds for any price tick
-                for _ in range(80):
+                # Wait for data or timeout
+                iterations = int(timeout_sec * 10)
+                for _ in range(iterations):
                     time.sleep(0.1)
                     if got_data[0] or fdata["bid"] or fdata["ask"] or fdata["last"]:
+                        # Got at least one tick -- wait a tiny bit more for others
+                        time.sleep(0.3)
                         break
 
                 self.scanner.cancelMktData(rid)
@@ -426,11 +437,66 @@ class IBDataAgent:
                             f"data={fdata}, err={getattr(self.scanner, 'last_mkt_data_error', None)}")
                 return fdata, has, rid
 
-            # ── Attempt 1: REALTIME ─────────────────────────────────────────
-            futures_data, has_any, last_rid = _try_snapshot(1, "REALTIME")
+            # ── Helper: historical data fallback ────────────────────────────
+            def _try_historical(label: str = "HISTORICAL"):
+                """Use reqHistoricalData for last 1-day bar. Works even when
+                market is completely closed (weekends, holidays)."""
+                rid = self.scanner.get_next_req_id()
+                bar_data = [None]
+                hist_done = [False]
+
+                orig_historicalData = getattr(self.scanner, 'historicalData', None)
+                orig_historicalDataEnd = getattr(self.scanner, 'historicalDataEnd', None)
+
+                def _on_bar(reqId, bar):
+                    if reqId == rid:
+                        bar_data[0] = bar
+
+                def _on_end(reqId, start, end):
+                    if reqId == rid:
+                        hist_done[0] = True
+
+                self.scanner.historicalData = _on_bar
+                self.scanner.historicalDataEnd = _on_end
+
+                self.scanner.reqHistoricalData(
+                    rid, contract,
+                    "",             # endDateTime = now
+                    "2 D",          # duration = 2 days (covers weekend)
+                    "1 day",        # bar size
+                    "TRADES",       # whatToShow
+                    0,              # useRTH = 0 (include extended hours)
+                    1,              # formatDate = 1 (yyyymmdd format)
+                    False,          # keepUpToDate
+                    []              # chartOptions
+                )
+
+                for _ in range(50):  # 5s timeout
+                    time.sleep(0.1)
+                    if hist_done[0]:
+                        break
+
+                # Restore originals
+                if orig_historicalData is not None:
+                    self.scanner.historicalData = orig_historicalData
+                if orig_historicalDataEnd is not None:
+                    self.scanner.historicalDataEnd = orig_historicalDataEnd
+
+                if bar_data[0] is not None:
+                    bar = bar_data[0]
+                    last_price = getattr(bar, 'close', None)
+                    high = getattr(bar, 'high', None)
+                    low = getattr(bar, 'low', None)
+                    logger.info(f"test_futures {label}: close={last_price}, high={high}, low={low}")
+                    return last_price, high, low
+                logger.info(f"test_futures {label}: no bar data received")
+                return None, None, None
+
+            # ── Attempt 1: REALTIME (streaming) ─────────────────────────────
+            futures_data, has_any, last_rid = _try_streaming(1, "REALTIME")
             use_delayed = False
 
-            # ── Attempt 2: DELAYED (15-20 min) ─────────────────────────────
+            # ── Attempt 2: DELAYED (streaming, 15-20 min delayed) ───────────
             if not has_any:
                 err = getattr(self.scanner, "last_mkt_data_error", None)
                 err_code = err[1] if err and len(err) >= 3 else 0
@@ -443,16 +509,26 @@ class IBDataAgent:
                 )
                 if should_try_delayed:
                     logger.info("Real-time ES returned no data, retrying with DELAYED (type 3)")
-                    futures_data, has_any, last_rid = _try_snapshot(3, "DELAYED")
+                    futures_data, has_any, last_rid = _try_streaming(3, "DELAYED")
                     use_delayed = True
 
-            # ── Attempt 3: DELAYED_FROZEN (market closed snapshot) ─────────
+            # ── Attempt 3: DELAYED_FROZEN (streaming) ───────────────────────
             if not has_any:
                 logger.info("DELAYED returned no data, retrying with DELAYED_FROZEN (type 4)")
-                futures_data, has_any, last_rid = _try_snapshot(4, "DELAYED_FROZEN")
+                futures_data, has_any, last_rid = _try_streaming(4, "DELAYED_FROZEN")
                 use_delayed = True
 
             self.scanner.tickPrice = original_tickPrice
+
+            # ── Attempt 4: Historical data (always works, even weekends) ────
+            hist_close = None
+            if not has_any:
+                logger.info("All streaming modes failed, trying reqHistoricalData")
+                hist_close, hist_high, hist_low = _try_historical()
+                if hist_close is not None:
+                    futures_data = {"bid": None, "ask": None, "last": hist_close}
+                    has_any = True
+                    use_delayed = True
 
             if not has_any:
                 err = getattr(self.scanner, "last_mkt_data_error", None)
@@ -462,9 +538,9 @@ class IBDataAgent:
                         return {"error": f"ES futures market data not subscribed (IB error {err_code}). "
                                          f"In TWS: Account > Settings > Market Data Subscriptions; "
                                          f"add CME Real-Time if needed."}
-                return {"error": "No futures data received after trying real-time, delayed, and "
-                                 "delayed-frozen modes. Market may be closed (ES trades Sun 6pm - "
-                                 "Fri 5pm ET) or check TWS market data permissions for CME."}
+                return {"error": "No futures data received after trying real-time, delayed, "
+                                 "delayed-frozen, and historical modes. Check TWS market data "
+                                 "permissions for CME futures."}
             
             month_codes = {3: 'H', 6: 'M', 9: 'U', 12: 'Z'}
             year_digit = contract_month[3]
@@ -485,6 +561,7 @@ class IBDataAgent:
                 "last": last,
                 "mid": mid,
                 "delayed": use_delayed,
+                "historical": hist_close is not None,
                 "timestamp": datetime.now().isoformat()
             }
         except Exception as e:
