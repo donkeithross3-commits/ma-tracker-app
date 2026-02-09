@@ -188,6 +188,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Account events queue — pushed to relay for near-real-time UI updates
         self._account_events: deque = deque(maxlen=200)
         self._account_events_lock = Lock()
+        # Instant account event callback (set by agent for immediate WebSocket push)
+        self._account_event_callback = None
+        # Early-exit event for fetch_underlying_data (set when price tick arrives)
+        self._underlying_done: Optional[Event] = None
 
     def managedAccounts(self, accountsList: str):
         """Store comma-separated account ids from TWS on connect."""
@@ -288,6 +292,14 @@ class IBMergerArbScanner(EWrapper, EClient):
             if order_id is not None:
                 return self._live_orders.get(order_id)
         return None
+
+    # ── Account event callback (instant push to relay) ─────────────
+
+    def set_account_event_callback(self, callback):
+        """Register a callback: fn(event: dict). Called on IB message thread
+        whenever an account event fires (order status change, execution).
+        Used by the agent to push events to the relay instantly."""
+        self._account_event_callback = callback
 
     # ── Order status listener management ──────────────────────────────
 
@@ -711,16 +723,22 @@ class IBMergerArbScanner(EWrapper, EClient):
         if not is_dup:
             self._notify_order_status_listeners(orderId, status_update)
             # ── Push account event for real-time UI updates ──────────────
+            event = {
+                "event": "order_status",
+                "orderId": orderId,
+                "status": status,
+                "filled": filled,
+                "remaining": remaining,
+                "avgFillPrice": avgFillPrice,
+                "ts": time.time(),
+            }
             with self._account_events_lock:
-                self._account_events.append({
-                    "event": "order_status",
-                    "orderId": orderId,
-                    "status": status,
-                    "filled": filled,
-                    "remaining": remaining,
-                    "avgFillPrice": avgFillPrice,
-                    "ts": time.time(),
-                })
+                self._account_events.append(event)
+            if self._account_event_callback:
+                try:
+                    self._account_event_callback(event)
+                except Exception:
+                    pass  # never block the IB thread
 
     def openOrder(self, orderId: int, contract: Contract, order: Order, orderState):
         """Open order / what-if; may include warningText (e.g. price capping).
@@ -846,16 +864,22 @@ class IBMergerArbScanner(EWrapper, EClient):
         if order_id:
             self._notify_exec_details_listeners(order_id, exec_data)
         # Push account event for real-time UI updates
+        event = {
+            "event": "execution",
+            "orderId": order_id,
+            "symbol": getattr(contract, "symbol", ""),
+            "side": exec_data["side"],
+            "shares": exec_data["shares"],
+            "price": exec_data["price"],
+            "ts": time.time(),
+        }
         with self._account_events_lock:
-            self._account_events.append({
-                "event": "execution",
-                "orderId": order_id,
-                "symbol": getattr(contract, "symbol", ""),
-                "side": exec_data["side"],
-                "shares": exec_data["shares"],
-                "price": exec_data["price"],
-                "ts": time.time(),
-            })
+            self._account_events.append(event)
+        if self._account_event_callback:
+            try:
+                self._account_event_callback(event)
+            except Exception:
+                pass  # never block the IB thread
 
     def execDetailsEnd(self, reqId: int):
         """End of executions for request."""
@@ -992,8 +1016,11 @@ class IBMergerArbScanner(EWrapper, EClient):
         req_id = self.get_next_req_id()
         self.req_id_map[req_id] = f"underlying_{ticker}"
 
+        # Use Event for early exit: tickPrice sets the event as soon as a price arrives
+        self._underlying_done = Event()
         self.reqMktData(req_id, contract, "", False, False, [])
-        time.sleep(3.0)  # 3s for slow symbols (e.g. EA)
+        self._underlying_done.wait(timeout=3.0)  # exits immediately when price tick arrives
+        self._underlying_done = None
         self.cancelMktData(req_id)
 
         # If IB returned 200 (no security definition) and we have no price, retry with delayed data
@@ -1003,8 +1030,10 @@ class IBMergerArbScanner(EWrapper, EClient):
             self.reqMarketDataType(3)  # DELAYED
             req_id2 = self.get_next_req_id()
             self.req_id_map[req_id2] = f"underlying_{ticker}"
+            self._underlying_done = Event()
             self.reqMktData(req_id2, contract, "", False, False, [])
-            time.sleep(3.0)
+            self._underlying_done.wait(timeout=3.0)  # early exit on price tick
+            self._underlying_done = None
             self.cancelMktData(req_id2)
             self.reqMarketDataType(1)  # restore REALTIME
             if self.underlying_price is not None:
@@ -1033,6 +1062,9 @@ class IBMergerArbScanner(EWrapper, EClient):
             if "underlying" in self.req_id_map[reqId]:
                 if tickType == 4:  # Last
                     self.underlying_price = price
+                    # Signal early exit — we have the price we need
+                    if self._underlying_done is not None:
+                        self._underlying_done.set()
                 elif tickType == 1:  # Bid
                     self.underlying_bid = price
                 elif tickType == 2:  # Ask

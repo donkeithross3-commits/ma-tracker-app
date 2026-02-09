@@ -918,10 +918,11 @@ class IBDataAgent:
                 break
 
     async def _account_event_push_loop(self):
-        """Check scanner for account events (fills, status changes) and push to relay.
+        """Fallback: drain any events that the instant callback may have missed.
 
-        Runs every 1 second so events reach the frontend within ~2-4 seconds
-        (1s poll here + up to 3s frontend poll).
+        The primary path is the instant callback registered via
+        scanner.set_account_event_callback() — it pushes events within
+        milliseconds.  This loop is a safety net running every 10 seconds.
         """
         while self.running and self.websocket:
             try:
@@ -932,9 +933,9 @@ class IBDataAgent:
                             "type": "account_event",
                             "event": event,
                         }))
-                        logger.info("Pushed account event: %s (orderId=%s)",
+                        logger.info("Fallback push: %s (orderId=%s)",
                                     event.get("event"), event.get("orderId"))
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(10.0)
             except Exception as e:
                 logger.error(f"Account event push error: {e}")
                 break
@@ -1059,6 +1060,30 @@ class IBDataAgent:
             logger.error(f"Failed to connect to relay: {e}")
             return False
     
+    def _make_account_event_callback(self, loop):
+        """Create a callback for the scanner that pushes account events
+        to the WebSocket relay instantly via call_soon_threadsafe.
+        This bridges the IB message thread → asyncio event loop."""
+        def on_account_event(event: dict):
+            ws = self.websocket
+            if ws is None:
+                return
+            async def _push():
+                try:
+                    await ws.send(json.dumps({
+                        "type": "account_event",
+                        "event": event,
+                    }))
+                    logger.info("Instant push: %s (orderId=%s)",
+                                event.get("event"), event.get("orderId"))
+                except Exception:
+                    pass  # connection may be closing
+            try:
+                loop.call_soon_threadsafe(asyncio.ensure_future, _push())
+            except RuntimeError:
+                pass  # loop is closed
+        return on_account_event
+
     async def run(self):
         """Main run loop"""
         self.running = True
@@ -1066,6 +1091,10 @@ class IBDataAgent:
         if not self.connect_to_ib():
             logger.error("Cannot start agent without IB connection")
             return
+
+        # Register instant account-event callback (bridges IB thread → asyncio → WS)
+        loop = asyncio.get_running_loop()
+        self.scanner.set_account_event_callback(self._make_account_event_callback(loop))
         
         while self.running:
             try:

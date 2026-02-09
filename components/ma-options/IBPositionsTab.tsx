@@ -1185,7 +1185,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       } catch {
         // Silently ignore — this is best-effort polling
       }
-    }, 3000);
+    }, 500); // 500ms poll — instant callback on agent pushes events within ~50ms
     return () => clearInterval(interval);
   }, [isConnected, fetchPositions, fetchOpenOrders]);
 
