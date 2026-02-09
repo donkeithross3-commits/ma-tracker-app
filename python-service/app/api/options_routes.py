@@ -619,7 +619,7 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
                             response_data = await send_request_to_provider(
                                 request_type="test_futures",
                                 payload={},
-                                timeout=15.0,
+                                timeout=25.0,
                                 user_id=target_user_id
                             )
                             if "error" in response_data:
@@ -688,7 +688,7 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
         response_data = await send_request_to_provider(
             request_type="test_futures",
             payload={},
-            timeout=15.0,
+            timeout=25.0,
             user_id=connected_user_id
         )
         

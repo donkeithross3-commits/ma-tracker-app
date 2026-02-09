@@ -374,7 +374,7 @@ class IBDataAgent:
             original_tickPrice = self.scanner.tickPrice
             
             # ── Helper: streaming request, wait for ticks, then cancel ──────
-            def _try_streaming(mkt_data_type: int, label: str, timeout_sec: float = 5.0):
+            def _try_streaming(mkt_data_type: int, label: str, timeout_sec: float = 3.0):
                 """Open streaming subscription, collect ticks, cancel.
                 
                 Uses snapshot=False because snapshot=True silently returns

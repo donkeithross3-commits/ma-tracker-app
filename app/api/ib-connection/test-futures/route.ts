@@ -12,12 +12,16 @@ export async function GET(request: NextRequest) {
     if (userId) url.searchParams.set("user_id", String(userId));
     console.log("[test-futures] user_id for routing:", userId ?? "(none)");
 
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
     const response = await fetch(url.toString(), {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
       },
+      signal: controller.signal,
     });
+    clearTimeout(fetchTimeout);
 
     const contentType = response.headers.get("content-type") ?? "";
     const text = await response.text();
@@ -62,12 +66,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error testing futures:", error);
+    const isAbort =
+      error instanceof DOMException && error.name === "AbortError";
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to test futures",
+        error: isAbort
+          ? "Futures test timed out (30s). The agent may still be processing — check the agent log for results."
+          : error instanceof Error
+            ? error.message
+            : "Failed to test futures",
       },
-      { status: 500 }
+      { status: isAbort ? 504 : 500 }
     );
   }
 }
