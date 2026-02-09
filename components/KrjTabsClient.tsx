@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -51,11 +51,51 @@ type GroupData = {
   tickerCount?: number;
 };
 
+// Enriched signal decomposition data (from Python signal_generator.py)
+type EnrichedTickerData = {
+  raw_prediction: number;
+  regime_adjusted: number;
+  decomposition: {
+    krj: number;
+    stock_specific: number;
+    market_regime: number;
+    cross_sectional: number;
+  };
+  legacy_signal: string;
+  legacy_long_sv: number | null;
+  legacy_short_sv: number | null;
+};
+
+type EnrichedRegime = {
+  score: number;
+  confidence: number;
+  label: string;
+  features: {
+    breadth: number;
+    dispersion: number;
+    market_mom: number;
+    market_dip: number;
+    vol_regime: number;
+  };
+};
+
+type EnrichedSignalsData = {
+  signal_date?: string;
+  generated_at?: string;
+  regime?: EnrichedRegime;
+  model_info?: {
+    n_features: number;
+    base_value: number;
+  };
+  tickers?: Record<string, EnrichedTickerData>;
+};
+
 interface KrjTabsClientProps {
   groups: GroupData[];
   columns: Array<{ key: string; label: string; description: string }>;
   userId?: string | null;
   userAlias?: string | null;
+  enrichedSignals?: EnrichedSignalsData | null;
 }
 
 // Signal filter types
@@ -212,7 +252,7 @@ const KRJ_DEFAULT_COLUMNS = [
   "25D_ADV_Shares_MM", "25D_ADV_nortional_B", "avg_trade_size",
 ]
 
-export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias }: KrjTabsClientProps) {
+export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias, enrichedSignals }: KrjTabsClientProps) {
   const router = useRouter()
   const { getVisibleColumns, setVisibleColumns, isComfort } = useUIPreferences()
 
@@ -292,6 +332,16 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
     (keys: string[]) => setVisibleColumns("krj", keys),
     [setVisibleColumns]
   )
+
+  // Expanded decomposition row
+  const [expandedTicker, setExpandedTicker] = useState<string | null>(null)
+  // Regime banner expanded state
+  const [regimeBannerExpanded, setRegimeBannerExpanded] = useState(false)
+
+  // Enriched data lookups
+  const regime = enrichedSignals?.regime ?? null
+  const enrichedTickers = enrichedSignals?.tickers ?? {}
+  const hasEnrichedData = Object.keys(enrichedTickers).length > 0
 
   // Sort state management
   const [sortConfig, setSortConfig] = useState<SortConfig>({ column: null, direction: "asc" })
@@ -637,6 +687,66 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
             </div>
           </div>
 
+      {/* Regime Banner */}
+      {regime && (
+        <div className="mb-1">
+          <button
+            onClick={() => setRegimeBannerExpanded(!regimeBannerExpanded)}
+            className={`w-full text-left rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+              regime.confidence >= 0.6
+                ? "bg-emerald-900/40 border border-emerald-700/50 text-emerald-200"
+                : regime.confidence >= 0.3
+                ? "bg-yellow-900/30 border border-yellow-700/40 text-yellow-200"
+                : "bg-gray-800/60 border border-gray-700/40 text-gray-400"
+            }`}
+          >
+            <span className="flex items-center gap-3">
+              <span className={`inline-block w-2 h-2 rounded-full ${
+                regime.confidence >= 0.6 ? "bg-emerald-400" :
+                regime.confidence >= 0.3 ? "bg-yellow-400" : "bg-gray-500"
+              }`} />
+              <span>
+                Market Regime: <span className="font-semibold">{regime.label}</span>
+                <span className="ml-2 opacity-70">
+                  (score: {regime.score > 0 ? "+" : ""}{regime.score.toFixed(2)} | confidence: {(regime.confidence * 100).toFixed(0)}%)
+                </span>
+              </span>
+              <span className="ml-auto text-xs opacity-50">
+                {regimeBannerExpanded ? "collapse" : "expand"}
+              </span>
+            </span>
+          </button>
+          {regimeBannerExpanded && (
+            <div className="mt-1 rounded bg-gray-800/40 border border-gray-700/30 px-3 py-2 text-xs text-gray-400 grid grid-cols-5 gap-3">
+              <div>
+                <span className="block text-gray-500">Breadth</span>
+                <span className="text-gray-200 font-mono">{(regime.features.breadth * 100).toFixed(1)}%</span>
+              </div>
+              <div>
+                <span className="block text-gray-500">Dispersion</span>
+                <span className="text-gray-200 font-mono">{(regime.features.dispersion * 100).toFixed(2)}%</span>
+              </div>
+              <div>
+                <span className="block text-gray-500">Mkt Momentum</span>
+                <span className={`font-mono ${regime.features.market_mom >= 0 ? "text-emerald-300" : "text-red-300"}`}>
+                  {regime.features.market_mom >= 0 ? "+" : ""}{(regime.features.market_mom * 100).toFixed(2)}%
+                </span>
+              </div>
+              <div>
+                <span className="block text-gray-500">Mkt Dip</span>
+                <span className={`font-mono ${regime.features.market_dip >= 0 ? "text-emerald-300" : "text-red-300"}`}>
+                  {regime.features.market_dip >= 0 ? "+" : ""}{(regime.features.market_dip * 100).toFixed(2)}%
+                </span>
+              </div>
+              <div>
+                <span className="block text-gray-500">Vol Regime</span>
+                <span className="text-gray-200 font-mono">{regime.features.vol_regime.toFixed(2)}x</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {visibleGroups.map((group) => {
         const filteredRows = getFilteredRows(group.rows);
         const sortedRows = sortRows(filteredRows, sortConfig);
@@ -771,7 +881,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
               <thead className="bg-gray-800 sticky top-0 z-10">
                 <tr>
                   {visibleColumns.map((col) => {
-                    const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size'];
+                    const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size', 'prediction', 'adj_prediction'];
                     const isNumeric = numericCols.includes(col.key);
                     const isSorted = sortConfig.column === col.key;
                     return (
@@ -798,15 +908,73 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
               </thead>
               <tbody>
                 {sortedRows.map((row, idx) => {
-                  const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size'];
+                  const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size', 'prediction', 'adj_prediction'];
+                  const tickerUpper = (row["ticker"] || "").trim().toUpperCase();
+                  const enrichedRow = enrichedTickers[tickerUpper] as EnrichedTickerData | undefined;
+                  const isExpanded = expandedTicker === tickerUpper;
                   return (
+                    <React.Fragment key={(row["ticker"] || "") + "-" + idx}>
                     <tr
-                      key={(row["ticker"] || "") + "-" + idx}
-                      className={`${idx % 2 === 0 ? "bg-gray-900" : "bg-gray-800/50"} hover:bg-gray-700 transition-colors text-gray-100`}
+                      className={`${idx % 2 === 0 ? "bg-gray-900" : "bg-gray-800/50"} hover:bg-gray-700 transition-colors text-gray-100 ${enrichedRow ? "cursor-pointer" : ""} ${isExpanded ? "bg-gray-700/60" : ""}`}
+                      onClick={enrichedRow ? () => setExpandedTicker(isExpanded ? null : tickerUpper) : undefined}
                     >
                       {visibleColumns.map((col) => {
                         let value = row[col.key] ?? "";
                         
+                        // Enriched columns: prediction and adj_prediction
+                        if (col.key === "prediction" && enrichedRow) {
+                          const p = enrichedRow.raw_prediction * 100;
+                          const cls = p > 0 ? "text-emerald-400" : p < 0 ? "text-red-400" : "text-gray-400";
+                          return (
+                            <td key={col.key} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                              {p > 0 ? "+" : ""}{p.toFixed(2)}%
+                            </td>
+                          );
+                        }
+                        if (col.key === "adj_prediction" && enrichedRow) {
+                          const p = enrichedRow.regime_adjusted * 100;
+                          const cls = p > 0 ? "text-emerald-400" : p < 0 ? "text-red-400" : "text-gray-400";
+                          return (
+                            <td key={col.key} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                              {p > 0 ? "+" : ""}{p.toFixed(2)}%
+                            </td>
+                          );
+                        }
+                        if ((col.key === "prediction" || col.key === "adj_prediction") && !enrichedRow) {
+                          return (
+                            <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right text-gray-600 text-sm">
+                              --
+                            </td>
+                          );
+                        }
+
+                        // Signal source mini bar
+                        if (col.key === "signal_source" && enrichedRow) {
+                          const d = enrichedRow.decomposition;
+                          const total = Math.abs(d.krj) + Math.abs(d.stock_specific) + Math.abs(d.market_regime) + Math.abs(d.cross_sectional);
+                          const pctKrj = total > 0 ? Math.abs(d.krj) / total * 100 : 25;
+                          const pctStock = total > 0 ? Math.abs(d.stock_specific) / total * 100 : 25;
+                          const pctMarket = total > 0 ? Math.abs(d.market_regime) / total * 100 : 25;
+                          const pctCross = total > 0 ? Math.abs(d.cross_sectional) / total * 100 : 25;
+                          return (
+                            <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap">
+                              <div className="flex h-3 w-20 rounded-sm overflow-hidden" title={`KRJ: ${(d.krj*100).toFixed(2)}% | Stock: ${(d.stock_specific*100).toFixed(2)}% | Market: ${(d.market_regime*100).toFixed(2)}% | Cross: ${(d.cross_sectional*100).toFixed(2)}%`}>
+                                <div style={{ width: `${pctKrj}%` }} className={d.krj >= 0 ? "bg-blue-500" : "bg-blue-800"} />
+                                <div style={{ width: `${pctStock}%` }} className={d.stock_specific >= 0 ? "bg-purple-500" : "bg-purple-800"} />
+                                <div style={{ width: `${pctMarket}%` }} className={d.market_regime >= 0 ? "bg-emerald-500" : "bg-emerald-800"} />
+                                <div style={{ width: `${pctCross}%` }} className={d.cross_sectional >= 0 ? "bg-amber-500" : "bg-amber-800"} />
+                              </div>
+                            </td>
+                          );
+                        }
+                        if (col.key === "signal_source" && !enrichedRow) {
+                          return (
+                            <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-gray-600 text-sm">
+                              --
+                            </td>
+                          );
+                        }
+
                         // Apply formatting based on column type
                         if (col.key === "ticker") {
                           // Strip c: prefix from currency pairs for cleaner display
@@ -875,6 +1043,93 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                         );
                       })}
                     </tr>
+                    {/* Decomposition drawer */}
+                    {isExpanded && enrichedRow && (
+                      <tr className="bg-gray-800/80">
+                        <td colSpan={visibleColumns.length} className="px-3 py-2">
+                          <div className="flex gap-6 items-start">
+                            {/* 4 SHAP group bars */}
+                            <div className="flex-1 space-y-1">
+                              <div className="text-xs text-gray-400 font-medium mb-1">Signal Decomposition</div>
+                              {([
+                                { key: "krj" as const, label: "KRJ Signal", barClass: "bg-blue-500/70" },
+                                { key: "stock_specific" as const, label: "Stock Specific", barClass: "bg-purple-500/70" },
+                                { key: "market_regime" as const, label: "Market Regime", barClass: "bg-emerald-500/70" },
+                                { key: "cross_sectional" as const, label: "Cross-Sectional", barClass: "bg-amber-500/70" },
+                              ]).map(({ key, label, barClass }) => {
+                                const val = enrichedRow.decomposition[key];
+                                const pct = val * 100;
+                                // Scale: map contribution to bar width (max ~50px per 1% contribution)
+                                const maxBarWidth = 120;
+                                const maxContrib = 0.02; // 2% is a large contribution
+                                const barWidth = Math.min(Math.abs(val) / maxContrib * maxBarWidth, maxBarWidth);
+                                const isPositive = val >= 0;
+                                return (
+                                  <div key={key} className="flex items-center gap-2 text-xs">
+                                    <span className="w-28 text-gray-400 text-right">{label}</span>
+                                    <div className="flex items-center w-72">
+                                      {/* Center-origin bar chart */}
+                                      <div className="relative w-60 h-3 bg-gray-700/50 rounded-sm">
+                                        {isPositive ? (
+                                          <div
+                                            className={`absolute left-1/2 top-0 h-full rounded-r-sm ${barClass}`}
+                                            style={{ width: `${barWidth / 2.4}px` }}
+                                          />
+                                        ) : (
+                                          <div
+                                            className={`absolute top-0 h-full rounded-l-sm ${barClass}`}
+                                            style={{ width: `${barWidth / 2.4}px`, right: "50%" }}
+                                          />
+                                        )}
+                                        {/* Center line */}
+                                        <div className="absolute left-1/2 top-0 h-full w-px bg-gray-500" />
+                                      </div>
+                                    </div>
+                                    <span className={`w-16 text-right font-mono ${pct > 0 ? "text-emerald-400" : pct < 0 ? "text-red-400" : "text-gray-500"}`}>
+                                      {pct > 0 ? "+" : ""}{pct.toFixed(2)}%
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                              <div className="flex items-center gap-2 text-xs mt-1 pt-1 border-t border-gray-700/50">
+                                <span className="w-28 text-gray-300 text-right font-medium">Total (raw)</span>
+                                <div className="w-72" />
+                                <span className={`w-16 text-right font-mono font-medium ${enrichedRow.raw_prediction > 0 ? "text-emerald-300" : enrichedRow.raw_prediction < 0 ? "text-red-300" : "text-gray-400"}`}>
+                                  {enrichedRow.raw_prediction > 0 ? "+" : ""}{(enrichedRow.raw_prediction * 100).toFixed(2)}%
+                                </span>
+                              </div>
+                            </div>
+                            {/* Summary text */}
+                            <div className="text-xs text-gray-400 max-w-xs space-y-1">
+                              <div>
+                                <span className="text-gray-300">Regime-adjusted:</span>{" "}
+                                <span className={`font-mono ${enrichedRow.regime_adjusted > 0 ? "text-emerald-300" : enrichedRow.regime_adjusted < 0 ? "text-red-300" : "text-gray-400"}`}>
+                                  {enrichedRow.regime_adjusted > 0 ? "+" : ""}{(enrichedRow.regime_adjusted * 100).toFixed(2)}%
+                                </span>
+                              </div>
+                              {(() => {
+                                const d = enrichedRow.decomposition;
+                                const entries = [
+                                  { k: "Market regime", v: d.market_regime },
+                                  { k: "KRJ signal", v: d.krj },
+                                  { k: "Stock-specific", v: d.stock_specific },
+                                  { k: "Cross-sectional", v: d.cross_sectional },
+                                ];
+                                const sorted = [...entries].sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+                                const dominant = sorted[0];
+                                return (
+                                  <div className="text-gray-500">
+                                    Dominant driver: <span className="text-gray-300">{dominant.k}</span>{" "}
+                                    ({dominant.v > 0 ? "+" : ""}{(dominant.v * 100).toFixed(2)}%)
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
