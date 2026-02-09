@@ -213,6 +213,16 @@ class IBDataAgent:
                             logger.info("Re-established streaming quote subscriptions")
                     except Exception as e:
                         logger.error("Failed to re-establish streaming subscriptions: %s", e)
+                    # Notify frontend to refetch positions and open orders (orders may have filled while disconnected)
+                    try:
+                        if self.websocket:
+                            await self.websocket.send(json.dumps({
+                                "type": "account_event",
+                                "event": {"event": "tws_reconnected", "ts": time.time()},
+                            }))
+                            logger.info("Pushed tws_reconnected event for UI sync")
+                    except Exception as e:
+                        logger.error("Failed to push tws_reconnected: %s", e)
                     self._tws_reconnecting = False
                     break
                 await asyncio.sleep(delay)

@@ -672,6 +672,15 @@ class IBMergerArbScanner(EWrapper, EClient):
                     self.logger.error(f"Reconnect sync failed: {e}")
                 # Re-establish streaming subscriptions that were silently lost
                 self._resubscribe_streams()
+                # Notify frontend to refetch positions and open orders (orders may have filled while disconnected)
+                event = {"event": "tws_reconnected", "ts": time.time()}
+                with self._account_events_lock:
+                    self._account_events.append(event)
+                if self._account_event_callback:
+                    try:
+                        self._account_event_callback(event)
+                    except Exception:
+                        pass
         # Data farm connection status codes
         elif errorCode in [2103, 2105, 2157]:
             # Broken: market data (2103), HMDS (2105), sec-def (2157)
