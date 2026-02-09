@@ -264,23 +264,32 @@ class IBDataAgent:
         if con_id or (sec_type and sec_type != "STK"):
             from ibapi.contract import Contract
             resolved = Contract()
-            resolved.symbol = ticker
-            resolved.secType = sec_type or "STK"
-            resolved.currency = payload.get("currency", "USD")
             # Determine exchange: use provided, then lookup table, then CME default
             exch = payload.get("exchange") or ""
             if not exch and sec_type == "FUT":
                 exch = _FUTURES_EXCHANGE.get(ticker, "CME")
-            resolved.exchange = exch or "SMART"
+
             if con_id:
+                # When conId is available, use ONLY conId + exchange.
+                # Setting other fields (symbol, secType, expiry, multiplier) alongside
+                # conId causes IB to validate ALL of them — any mismatch → error 200.
                 resolved.conId = con_id
-            if payload.get("lastTradeDateOrContractMonth"):
-                resolved.lastTradeDateOrContractMonth = payload["lastTradeDateOrContractMonth"]
-            if payload.get("multiplier"):
-                resolved.multiplier = payload["multiplier"]
-            logger.info(f"fetch_underlying: using {sec_type} contract for {ticker} "
-                        f"conId={con_id} expiry={resolved.lastTradeDateOrContractMonth} "
-                        f"exchange={resolved.exchange}")
+                resolved.exchange = exch or "SMART"
+                logger.info(f"fetch_underlying: using conId={con_id} exchange={resolved.exchange} "
+                            f"for {ticker} ({sec_type})")
+            else:
+                # No conId — specify full contract details
+                resolved.symbol = ticker
+                resolved.secType = sec_type or "STK"
+                resolved.currency = payload.get("currency", "USD")
+                resolved.exchange = exch or "SMART"
+                if payload.get("lastTradeDateOrContractMonth"):
+                    resolved.lastTradeDateOrContractMonth = payload["lastTradeDateOrContractMonth"]
+                if payload.get("multiplier"):
+                    resolved.multiplier = payload["multiplier"]
+                logger.info(f"fetch_underlying: using {sec_type} contract for {ticker} "
+                            f"expiry={resolved.lastTradeDateOrContractMonth} "
+                            f"exchange={resolved.exchange}")
         
         data = self.scanner.fetch_underlying_data(ticker, resolved_contract=resolved)
         return {
