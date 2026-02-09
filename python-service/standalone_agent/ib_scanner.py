@@ -243,6 +243,38 @@ class IBMergerArbScanner(EWrapper, EClient):
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _order_content_key(entry: dict) -> tuple:
+        """Stable key for deduplication: same contract + order signature."""
+        c = entry.get("contract") or {}
+        o = entry.get("order") or {}
+        lmt = o.get("lmtPrice")
+        aux = o.get("auxPrice")
+        trail = o.get("trailStopPrice")
+        return (
+            c.get("conId") or c.get("symbol") or "",
+            (c.get("secType") or "").strip().upper(),
+            (o.get("action") or "").strip().upper(),
+            float(o.get("totalQuantity") or 0),
+            (o.get("orderType") or "").strip().upper(),
+            float(lmt) if lmt is not None else None,
+            float(aux) if aux is not None else None,
+            float(trail) if trail is not None else None,
+        )
+
+    @staticmethod
+    def _dedupe_live_orders(orders: List[dict]) -> List[dict]:
+        """Deduplicate by content key so the same logical order (e.g. re-bound with new orderId/permId) appears once."""
+        if not orders:
+            return []
+        by_key: Dict[tuple, dict] = {}
+        for entry in orders:
+            key = IBSocketManager._order_content_key(entry)
+            oid = entry.get("orderId") or 0
+            if key not in by_key or (by_key[key].get("orderId") or 0) < oid:
+                by_key[key] = entry
+        return list(by_key.values())
+
     def get_positions_snapshot(self, timeout_sec: float = 15.0) -> List[dict]:
         """Request positions, wait for positionEnd(), return list and cancel subscription.
         Thread-safe: only one snapshot at a time (concurrent callers block)."""
@@ -273,7 +305,7 @@ class IBMergerArbScanner(EWrapper, EClient):
             if not self._live_orders_synced and self.isConnected():
                 need_refresh = True
             if not need_refresh:
-                return list(self._live_orders.values())
+                return self._dedupe_live_orders(list(self._live_orders.values()))
 
         # Full refresh from TWS
         with self._open_orders_lock:
@@ -287,13 +319,13 @@ class IBMergerArbScanner(EWrapper, EClient):
             # The openOrder callback already updated _live_orders for each order,
             # so return from the live book (it's the most authoritative view).
             with self._live_orders_lock:
-                return list(self._live_orders.values())
+                return self._dedupe_live_orders(list(self._live_orders.values()))
 
     def get_live_orders(self) -> List[dict]:
         """Return current live order book without issuing any TWS request.
         Fast read suitable for frequent polling (no TWS round-trip)."""
         with self._live_orders_lock:
-            return list(self._live_orders.values())
+            return self._dedupe_live_orders(list(self._live_orders.values()))
 
     def get_live_order_count(self) -> int:
         """Number of orders currently tracked in the live book."""
@@ -393,6 +425,10 @@ class IBMergerArbScanner(EWrapper, EClient):
             o.lmtPrice = float(d["lmtPrice"])
         if d.get("auxPrice") is not None:
             o.auxPrice = float(d["auxPrice"])
+        if d.get("trailStopPrice") is not None:
+            o.trailStopPrice = float(d["trailStopPrice"])
+        if d.get("trailingPercent") is not None:
+            o.trailingPercent = float(d["trailingPercent"])
         o.tif = (d.get("tif") or "DAY").strip().upper()
         o.transmit = bool(d.get("transmit", True))
         o.whatIf = bool(d.get("whatIf", False))
@@ -416,11 +452,14 @@ class IBMergerArbScanner(EWrapper, EClient):
             202: "Limit price too far from market. Use a limit price closer to the current market price.",
             399: "Order rejected by exchange.",
             404: "Order not found (may already be filled or cancelled).",
-            10167: "Order rejected: trading permission or market hours.",
+            # 10167: used for both market-data and order errors; show TWS text so user sees e.g. "order size does not match"
         }
         if code in known:
             return f"{known[code]} (IB {code}: {text})"
-        return f"IB error {code}: {text}"
+        # Prefer TWS message when present (e.g. 10167 "order size does not match...")
+        if text and text.strip():
+            return f"IB {code}: {text.strip()}"
+        return f"IB error {code}: {text or 'Unknown'}"
 
     def place_order_sync(self, contract_d: dict, order_d: dict, timeout_sec: float = 30.0) -> dict:
         """Place order, wait for orderStatus/error, return result dict. Validates contract and order first."""
@@ -482,6 +521,21 @@ class IBMergerArbScanner(EWrapper, EClient):
         ok, err = self.validate_order_params(order_d)
         if not ok:
             return {"error": err}
+        # TRAIL LIMIT: IB rejects if we send UNSET_DOUBLE for stop/limit. Merge current prices from live order when missing.
+        order_type = (order_d.get("orderType") or "MKT").strip().upper()
+        if order_type in ("TRAIL LIMIT", "TRAILLIMIT"):
+            with self._live_orders_lock:
+                existing = self._live_orders.get(order_id)
+            if existing:
+                o = (existing.get("order") or {})
+                if order_d.get("lmtPrice") is None and o.get("lmtPrice") is not None:
+                    order_d = {**order_d, "lmtPrice": o["lmtPrice"]}
+                if order_d.get("auxPrice") is None and o.get("auxPrice") is not None:
+                    order_d = {**order_d, "auxPrice": o["auxPrice"]}
+                if order_d.get("trailStopPrice") is None and o.get("trailStopPrice") is not None:
+                    order_d = {**order_d, "trailStopPrice": o["trailStopPrice"]}
+                if order_d.get("trailingPercent") is None and o.get("trailingPercent") is not None:
+                    order_d = {**order_d, "trailingPercent": o["trailingPercent"]}
         self._order_events[order_id] = Event()
         self._order_results[order_id] = {}
         try:

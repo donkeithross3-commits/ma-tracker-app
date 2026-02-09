@@ -270,20 +270,21 @@ function displayOrderSymbol(o: IBOpenOrder): string {
 
 function formatOrderPrice(o: IBOpenOrder): string {
   const { orderType, lmtPrice, auxPrice, trailStopPrice, trailingPercent } = o.order;
-  if (orderType === "MKT" || orderType === "MOC") return orderType;
-  if (orderType === "LMT" && lmtPrice != null) return `LMT ${lmtPrice.toFixed(2)}`;
-  if (orderType === "STP LMT" && lmtPrice != null && auxPrice != null)
+  const type = (orderType ?? "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (type === "MKT" || type === "MOC") return orderType ?? type;
+  if (type === "LMT" && lmtPrice != null) return `LMT ${lmtPrice.toFixed(2)}`;
+  if (type === "STP LMT" && lmtPrice != null && auxPrice != null)
     return `STP ${auxPrice.toFixed(2)} LMT ${lmtPrice.toFixed(2)}`;
-  if (orderType === "STP" && auxPrice != null) return `STP ${auxPrice.toFixed(2)}`;
-  // TRAIL LIMIT: show current stop and limit (IB updates trailStopPrice as market moves)
-  if ((orderType === "TRAIL LIMIT" || orderType === "TRAILLIMIT") && (trailStopPrice != null || lmtPrice != null)) {
+  if (type === "STP" && auxPrice != null) return `STP ${auxPrice.toFixed(2)}`;
+  // TRAIL LIMIT: always show dedicated line (IB updates trailStopPrice as market moves)
+  if (type === "TRAIL LIMIT" || type === "TRAILLIMIT") {
     const parts: string[] = [];
-    if (trailStopPrice != null) parts.push(`Trail ${trailStopPrice.toFixed(2)}`);
-    if (lmtPrice != null) parts.push(`LMT ${lmtPrice.toFixed(2)}`);
+    parts.push(trailStopPrice != null ? `Trail ${trailStopPrice.toFixed(2)}` : "Trail —");
+    parts.push(lmtPrice != null ? `LMT ${lmtPrice.toFixed(2)}` : "LMT —");
     if (trailingPercent != null) parts.push(`${trailingPercent.toFixed(1)}%`);
     return parts.join(" ");
   }
-  return orderType;
+  return orderType ?? type;
 }
 
 function formatGroupPosition(group: GroupAggregate): string {
