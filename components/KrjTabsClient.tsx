@@ -692,6 +692,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
         <div className="mb-1">
           <button
             onClick={() => setRegimeBannerExpanded(!regimeBannerExpanded)}
+            title="Market regime assessment from the LightGBM prediction model. Indicates whether current market conditions are favorable for the model's predictions. Click to expand and see the 5 underlying market features."
             className={`w-full text-left rounded px-3 py-1.5 text-sm font-medium transition-colors ${
               regime.confidence >= 0.6
                 ? "bg-emerald-900/40 border border-emerald-700/50 text-emerald-200"
@@ -701,14 +702,21 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
             }`}
           >
             <span className="flex items-center gap-3">
-              <span className={`inline-block w-2 h-2 rounded-full ${
-                regime.confidence >= 0.6 ? "bg-emerald-400" :
-                regime.confidence >= 0.3 ? "bg-yellow-400" : "bg-gray-500"
-              }`} />
+              <span
+                title={`Regime confidence indicator: ${regime.confidence >= 0.6 ? "Green = high confidence (>=60%)" : regime.confidence >= 0.3 ? "Yellow = moderate confidence (30-60%)" : "Gray = low confidence (<30%)"}`}
+                className={`inline-block w-2 h-2 rounded-full ${
+                  regime.confidence >= 0.6 ? "bg-emerald-400" :
+                  regime.confidence >= 0.3 ? "bg-yellow-400" : "bg-gray-500"
+                }`}
+              />
               <span>
-                Market Regime: <span className="font-semibold">{regime.label}</span>
+                <span title="Overall market environment classification based on 5 market-wide features. Labels: High Dislocation (score >= 0.6), Moderate Dislocation (0.35-0.6), Moderate Opportunity (0.15-0.35), Low Signal Environment (< 0.15).">
+                  Market Regime: <span className="font-semibold">{regime.label}</span>
+                </span>
                 <span className="ml-2 opacity-70">
-                  (score: {regime.score > 0 ? "+" : ""}{regime.score.toFixed(2)} | confidence: {(regime.confidence * 100).toFixed(0)}%)
+                  (<span title="Regime score from -1 to +1. Positive = favorable environment for model predictions (historically more accurate). Derived from a logistic regression trained on which market conditions led to accurate predictions in out-of-sample walk-forward testing.">score: {regime.score > 0 ? "+" : ""}{regime.score.toFixed(2)}</span>
+                  {" | "}
+                  <span title="Absolute value of regime score. Used to scale predictions: Adj. Prediction = Raw Prediction x Confidence. Higher confidence means the model's predictions are more trustworthy this week.">confidence: {(regime.confidence * 100).toFixed(0)}%</span>)
                 </span>
               </span>
               <span className="ml-auto text-xs opacity-50">
@@ -718,27 +726,27 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
           </button>
           {regimeBannerExpanded && (
             <div className="mt-1 rounded bg-gray-800/40 border border-gray-700/30 px-3 py-2 text-xs text-gray-400 grid grid-cols-5 gap-3">
-              <div>
+              <div title="Fraction of tickers in the universe with their weekly low above their reference moving average. High breadth (>50%) = broad market strength. Low breadth (<30%) = widespread weakness. Currently indicates how many stocks are holding above support.">
                 <span className="block text-gray-500">Breadth</span>
                 <span className="text-gray-200 font-mono">{(regime.features.breadth * 100).toFixed(1)}%</span>
               </div>
-              <div>
+              <div title="Cross-sectional standard deviation of signal values across all tickers. High dispersion = stocks are moving independently (idiosyncratic opportunities). Low dispersion = stocks moving in lockstep (harder to pick winners). The model historically performs better when dispersion is elevated.">
                 <span className="block text-gray-500">Dispersion</span>
                 <span className="text-gray-200 font-mono">{(regime.features.dispersion * 100).toFixed(2)}%</span>
               </div>
-              <div>
+              <div title="SPY's weekly return — a direct measure of broad market direction. Positive = up week for the market, negative = down week. Used as a proxy for overall market momentum.">
                 <span className="block text-gray-500">Mkt Momentum</span>
                 <span className={`font-mono ${regime.features.market_mom >= 0 ? "text-emerald-300" : "text-red-300"}`}>
                   {regime.features.market_mom >= 0 ? "+" : ""}{(regime.features.market_mom * 100).toFixed(2)}%
                 </span>
               </div>
-              <div>
+              <div title="SPY's own dip signal value: (SPY weekly low - SPY 25DMA) / SPY 25DMA. Strongly negative = the market itself has dipped well below its moving average. This captures how far the broad market has pulled back from its trend.">
                 <span className="block text-gray-500">Mkt Dip</span>
                 <span className={`font-mono ${regime.features.market_dip >= 0 ? "text-emerald-300" : "text-red-300"}`}>
                   {regime.features.market_dip >= 0 ? "+" : ""}{(regime.features.market_dip * 100).toFixed(2)}%
                 </span>
               </div>
-              <div>
+              <div title="Mean volatility ratio across the universe — an implicit VIX proxy. Values above 2x indicate elevated market volatility. Computed as the average of each stock's daily range divided by SPY's daily range. Higher = more volatile market environment.">
                 <span className="block text-gray-500">Vol Regime</span>
                 <span className="text-gray-200 font-mono">{regime.features.vol_regime.toFixed(2)}x</span>
               </div>
@@ -757,7 +765,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
           {/* Summary card and filter controls - same row */}
           <div className="mb-1 flex items-center gap-4 flex-wrap">
             {/* Yellow summary box */}
-            <div className="bg-yellow-300 text-black rounded px-4 py-2 inline-block text-[18px] font-semibold">
+            <div title="Signal summary for this list. L = Long (bullish), N = Neutral, S = Short (bearish). Numbers in parentheses show the change from last week (e.g. +3 means 3 more stocks entered that signal this week). Tot = total tickers with signal data." className="bg-yellow-300 text-black rounded px-4 py-2 inline-block text-[18px] font-semibold">
               {displaySummary.rowsSummary.map((r, idx) => {
                 // Color coding: Long=blue, Neutral=black, Short=red
                 const labelColor = r.label === "Long" ? "text-blue-700" : r.label === "Short" ? "text-red-700" : "text-black";
@@ -926,7 +934,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           const p = enrichedRow.raw_prediction * 100;
                           const cls = p > 0 ? "text-emerald-400" : p < 0 ? "text-red-400" : "text-gray-400";
                           return (
-                            <td key={col.key} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                            <td key={col.key} title={`Raw LightGBM predicted 1-week return for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. This is the model's best estimate of next week's price change, before regime adjustment. Heavily influenced by market-wide factors when the regime signal is strong.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
                               {p > 0 ? "+" : ""}{p.toFixed(2)}%
                             </td>
                           );
@@ -935,7 +943,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           const p = enrichedRow.regime_adjusted * 100;
                           const cls = p > 0 ? "text-emerald-400" : p < 0 ? "text-red-400" : "text-gray-400";
                           return (
-                            <td key={col.key} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                            <td key={col.key} title={`Regime-adjusted prediction for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. Calculated as Raw Prediction (${(enrichedRow.raw_prediction * 100).toFixed(2)}%) x Regime Confidence (${regime ? (regime.confidence * 100).toFixed(0) : "?"}%). Scales down the raw signal when the model is less confident about the current market regime. Use this as the actionable signal.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
                               {p > 0 ? "+" : ""}{p.toFixed(2)}%
                             </td>
                           );
@@ -958,7 +966,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           const pctCross = total > 0 ? Math.abs(d.cross_sectional) / total * 100 : 25;
                           return (
                             <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap">
-                              <div className="flex h-3 w-20 rounded-sm overflow-hidden" title={`KRJ: ${(d.krj*100).toFixed(2)}% | Stock: ${(d.stock_specific*100).toFixed(2)}% | Market: ${(d.market_regime*100).toFixed(2)}% | Cross: ${(d.cross_sectional*100).toFixed(2)}%`}>
+                              <div className="flex h-3 w-20 rounded-sm overflow-hidden" title={`SHAP signal decomposition for ${tickerUpper} — how much each category contributes to the prediction:\n\nBlue = KRJ Signal (${(d.krj*100).toFixed(2)}%): price action vs moving average (dip/strength)\nPurple = Stock Specific (${(d.stock_specific*100).toFixed(2)}%): vol ratio, SPX correlation, market cap, 52-week high proximity, return autocorrelation\nGreen = Market Regime (${(d.market_regime*100).toFixed(2)}%): breadth, dispersion, SPY momentum, market dip, vol regime\nAmber = Cross-Sectional (${(d.cross_sectional*100).toFixed(2)}%): z-scores vs peers, percentile rank, interaction terms\n\nBright = positive (bullish) contribution, Dark = negative (bearish) contribution\nBar width = proportion of total explanation from that category\nClick row to expand full decomposition view.`}>
                                 <div style={{ width: `${pctKrj}%` }} className={d.krj >= 0 ? "bg-blue-500" : "bg-blue-800"} />
                                 <div style={{ width: `${pctStock}%` }} className={d.stock_specific >= 0 ? "bg-purple-500" : "bg-purple-800"} />
                                 <div style={{ width: `${pctMarket}%` }} className={d.market_regime >= 0 ? "bg-emerald-500" : "bg-emerald-800"} />
@@ -1050,13 +1058,13 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           <div className="flex gap-6 items-start">
                             {/* 4 SHAP group bars */}
                             <div className="flex-1 space-y-1">
-                              <div className="text-xs text-gray-400 font-medium mb-1">Signal Decomposition</div>
+                              <div className="text-xs text-gray-400 font-medium mb-1" title="SHAP (SHapley Additive exPlanations) decomposition of the LightGBM prediction into 4 interpretable signal categories. Each bar shows how much that category contributed to the total predicted return. Positive = bullish contribution, negative = bearish. The bars sum to the total raw prediction.">Signal Decomposition</div>
                               {([
-                                { key: "krj" as const, label: "KRJ Signal", barClass: "bg-blue-500/70" },
-                                { key: "stock_specific" as const, label: "Stock Specific", barClass: "bg-purple-500/70" },
-                                { key: "market_regime" as const, label: "Market Regime", barClass: "bg-emerald-500/70" },
-                                { key: "cross_sectional" as const, label: "Cross-Sectional", barClass: "bg-amber-500/70" },
-                              ]).map(({ key, label, barClass }) => {
+                                { key: "krj" as const, label: "KRJ Signal", barClass: "bg-blue-500/70", tip: "Legacy KRJ oscillator contribution: how far the stock's price dipped (long_sv) or rallied (short_sv, high_sv) relative to its reference moving average. Positive = price action is bullish, negative = bearish." },
+                                { key: "stock_specific" as const, label: "Stock Specific", barClass: "bg-purple-500/70", tip: "Stock-specific characteristics contribution: volatility ratio to SPY, rolling 60-day SPX correlation, log market cap, proximity to 52-week high, and 60-day return autocorrelation. Captures what kind of stock this is and how it tends to behave." },
+                                { key: "market_regime" as const, label: "Market Regime", barClass: "bg-emerald-500/70", tip: "Market-wide regime contribution: breadth (% of stocks above reference), dispersion (spread of signals), SPY momentum, SPY dip level, and vol regime. Same value for all tickers — captures whether the overall market environment is bullish or bearish." },
+                                { key: "cross_sectional" as const, label: "Cross-Sectional", barClass: "bg-amber-500/70", tip: "Cross-sectional positioning contribution: how this stock's signals compare to the universe via z-scores, percentile rank, and interaction terms (dip x breadth, dip x dispersion). Captures relative strength or weakness versus peers." },
+                              ]).map(({ key, label, barClass, tip }) => {
                                 const val = enrichedRow.decomposition[key];
                                 const pct = val * 100;
                                 // Scale: map contribution to bar width (max ~50px per 1% contribution)
@@ -1066,7 +1074,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                                 const isPositive = val >= 0;
                                 return (
                                   <div key={key} className="flex items-center gap-2 text-xs">
-                                    <span className="w-28 text-gray-400 text-right">{label}</span>
+                                    <span className="w-28 text-gray-400 text-right" title={tip}>{label}</span>
                                     <div className="flex items-center w-72">
                                       {/* Center-origin bar chart */}
                                       <div className="relative w-60 h-3 bg-gray-700/50 rounded-sm">
@@ -1092,7 +1100,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                                 );
                               })}
                               <div className="flex items-center gap-2 text-xs mt-1 pt-1 border-t border-gray-700/50">
-                                <span className="w-28 text-gray-300 text-right font-medium">Total (raw)</span>
+                                <span className="w-28 text-gray-300 text-right font-medium" title="Sum of all 4 SHAP contributions plus the model's base value. This equals the raw LightGBM prediction — the model's best estimate of this stock's 1-week forward return before regime adjustment.">Total (raw)</span>
                                 <div className="w-72" />
                                 <span className={`w-16 text-right font-mono font-medium ${enrichedRow.raw_prediction > 0 ? "text-emerald-300" : enrichedRow.raw_prediction < 0 ? "text-red-300" : "text-gray-400"}`}>
                                   {enrichedRow.raw_prediction > 0 ? "+" : ""}{(enrichedRow.raw_prediction * 100).toFixed(2)}%
@@ -1101,7 +1109,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                             </div>
                             {/* Summary text */}
                             <div className="text-xs text-gray-400 max-w-xs space-y-1">
-                              <div>
+                              <div title="The actionable signal: Raw Prediction multiplied by the current Regime Confidence. When the regime model is less confident about the market environment, predictions are scaled down. This is the signal you'd actually use for trading decisions.">
                                 <span className="text-gray-300">Regime-adjusted:</span>{" "}
                                 <span className={`font-mono ${enrichedRow.regime_adjusted > 0 ? "text-emerald-300" : enrichedRow.regime_adjusted < 0 ? "text-red-300" : "text-gray-400"}`}>
                                   {enrichedRow.regime_adjusted > 0 ? "+" : ""}{(enrichedRow.regime_adjusted * 100).toFixed(2)}%
@@ -1118,7 +1126,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                                 const sorted = [...entries].sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
                                 const dominant = sorted[0];
                                 return (
-                                  <div className="text-gray-500">
+                                  <div className="text-gray-500" title="The signal category with the largest absolute SHAP contribution — the primary reason this stock has a bullish or bearish prediction. When 'Market regime' dominates, the prediction is mainly about overall market conditions, not this specific stock.">
                                     Dominant driver: <span className="text-gray-300">{dominant.k}</span>{" "}
                                     ({dominant.v > 0 ? "+" : ""}{(dominant.v * 100).toFixed(2)}%)
                                   </div>
