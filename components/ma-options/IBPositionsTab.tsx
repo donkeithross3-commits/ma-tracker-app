@@ -1651,7 +1651,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                         {ordVisibleSet.has("price") && (
                           <td className="py-1.5 px-3 text-gray-200 tabular-nums">
                             {isEditing && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT" || o.order.orderType === "STP") ? (
-                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                                 {(o.order.orderType === "STP LMT" || o.order.orderType === "STP") && (
                                   <span className="inline-flex items-center gap-1">
                                     <span className="text-gray-400 text-xs">STP</span>
@@ -2059,7 +2059,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       {o.contract.secType === "STK" ? "STK" : displayOrderSymbol(o)}
                                     </span>
                                     {isEd && (o.order.orderType === "LMT" || o.order.orderType === "STP LMT" || o.order.orderType === "STP") ? (
-                                      <div className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                                      <div className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1.5">
                                         {(o.order.orderType === "STP LMT" || o.order.orderType === "STP") && (
                                           <span className="inline-flex items-center gap-0.5">
                                             <span className="text-gray-400 text-[10px]">STP</span>
