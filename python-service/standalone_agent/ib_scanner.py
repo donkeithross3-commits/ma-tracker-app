@@ -140,6 +140,11 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._last_tick_req_params = {}     # reqId -> (minTick, bboExchange, snapshotPermissions)
         self._snapshot_end_events = set()   # reqIds that received tickSnapshotEnd
 
+        # Data farm health: tracks which data farms are up/down
+        # Keys are farm names extracted from IB error strings (e.g. "usfarm.nj", "usfuture", "cashfarm")
+        # Values are True (connected) or False (broken)
+        self._farm_status: dict[str, bool] = {}
+
         # Resource manager: optional, provides dynamic batch sizing when execution engine is active
         self.resource_manager = None  # set by IBDataAgent after construction
 
@@ -532,6 +537,34 @@ class IBMergerArbScanner(EWrapper, EClient):
             self._order_events.pop(order_id, None)
             self._order_results.pop(order_id, None)
 
+    # ------------------------------------------------------------------
+    # Farm health accessors
+    # ------------------------------------------------------------------
+    def get_farm_status(self) -> dict[str, bool]:
+        """Return current data farm health status.
+        
+        Keys are farm names (e.g. "usfarm.nj", "usfuture", "ushmds").
+        Values: True = up, False = down.
+        """
+        return dict(self._farm_status)
+
+    def is_data_available(self) -> bool:
+        """Return True if at least one relevant market-data farm is up.
+        
+        When no farm status has been reported yet (startup), assume available.
+        """
+        if not self._farm_status:
+            return True  # No status reported yet — assume OK
+        # Check if any market-data or futures farm is up
+        for farm, up in self._farm_status.items():
+            # Skip HMDS and sec-def; focus on live market data farms
+            if "hmds" in farm.lower() or "secdef" in farm.lower():
+                continue
+            if up:
+                return True
+        # If only HMDS/secdef farms exist in status, check those too
+        return any(up for up in self._farm_status.values())
+
     def connect_to_ib(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1):
         """Connect to IB Gateway or TWS"""
         print(f"Connecting to IB at {host}:{port} with client_id={client_id}...")
@@ -585,7 +618,39 @@ class IBMergerArbScanner(EWrapper, EClient):
         print("⚠️  CONNECTION TO IB TWS LOST!")
         self.connection_lost = True
         self.connection_start_time = None
-    
+
+    def _resubscribe_streams(self):
+        """Re-establish streaming quote subscriptions after a 1101/1102 reconnect.
+        
+        IB silently drops all streaming subscriptions (reqMktData) when the
+        connection to TWS is lost and restored. Without re-subscribing, the
+        execution engine operates on frozen quotes — dangerous for risk management.
+        
+        Called from the IB message thread (error callback), so it must be fast
+        and non-blocking. The StreamingQuoteCache.resubscribe_all() method
+        handles the heavy lifting.
+        """
+        if self.streaming_cache is None:
+            return  # No execution engine active — nothing to resubscribe
+        try:
+            self.streaming_cache.resubscribe_all(self)
+        except Exception as e:
+            self.logger.error("Failed to resubscribe streams after reconnect: %s", e)
+
+    @staticmethod
+    def _parse_farm_name(error_string: str) -> str:
+        """Extract farm name from IB data-farm error strings.
+        
+        IB formats these as e.g.:
+            "Market data farm connection is OK:usfarm.nj"
+            "Market data farm connection is broken:usfarm"
+            "HMDS data farm connection is OK:ushmds"
+            "Sec-def data farm connection is OK:secdefnj"
+        """
+        if ":" in (error_string or ""):
+            return error_string.rsplit(":", 1)[-1].strip()
+        return ""
+
     def error(self, reqId, errorCode, errorString, advancedOrderRejectJson=""):
         """Handle errors"""
         if errorCode in [1100, 1101, 1102, 2110]:
@@ -603,9 +668,24 @@ class IBMergerArbScanner(EWrapper, EClient):
                     self.logger.info("Reconnect sync: requested fresh nextValidId + open orders")
                 except Exception as e:
                     self.logger.error(f"Reconnect sync failed: {e}")
+                # Re-establish streaming subscriptions that were silently lost
+                self._resubscribe_streams()
+        # Data farm connection status codes
+        elif errorCode in [2103, 2105, 2157]:
+            # Broken: market data (2103), HMDS (2105), sec-def (2157)
+            farm = self._parse_farm_name(errorString)
+            if farm:
+                self._farm_status[farm] = False
+                self.logger.warning(f"Data farm DOWN: {farm} (code {errorCode})")
+            else:
+                self.logger.warning(f"Data farm broken (unparsed): {errorString}")
         elif errorCode in [2104, 2106, 2158]:
-            # Informational messages
-            pass
+            # OK: market data (2104), HMDS (2106), sec-def (2158)
+            farm = self._parse_farm_name(errorString)
+            if farm:
+                self._farm_status[farm] = True
+                self.logger.info(f"Data farm UP: {farm} (code {errorCode})")
+            # Informational — no further action
         else:
             self.logger.error(f"IB Error {reqId}/{errorCode}: {errorString}")
             # Market data subscription errors -- surface for test_futures / scan retries

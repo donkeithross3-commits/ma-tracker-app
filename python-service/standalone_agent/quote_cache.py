@@ -123,6 +123,8 @@ class StreamingQuoteCache:
         self._req_id_to_key: Dict[int, str] = {}
         # cache_key -> IB reqId  (for cancellation)
         self._key_to_req_id: Dict[str, int] = {}
+        # cache_key -> (Contract, generic_ticks)  (for resubscription after reconnect)
+        self._key_to_contract: Dict[str, tuple] = {}
         self._lock = threading.Lock()
 
     # ── Subscription management ──
@@ -154,6 +156,8 @@ class StreamingQuoteCache:
             self._quotes[cache_key] = Quote()
             self._req_id_to_key[req_id] = cache_key
             self._key_to_req_id[cache_key] = req_id
+            # Store contract for resubscription after reconnect
+            self._key_to_contract[cache_key] = (contract, generic_ticks)
 
         # reqMktData outside the lock (it sends over the socket)
         # snapshot=False, regulatorySnapshot=False -> persistent streaming
@@ -170,6 +174,7 @@ class StreamingQuoteCache:
                 return
             self._req_id_to_key.pop(req_id, None)
             self._quotes.pop(cache_key, None)
+            self._key_to_contract.pop(cache_key, None)
 
         scanner.cancelMktData(req_id)
         self._resource_manager.release_execution_lines(1, allocation_key=cache_key)
@@ -182,6 +187,45 @@ class StreamingQuoteCache:
         for key in keys:
             self.unsubscribe(scanner, key)
         logger.info("Unsubscribed all streaming quotes (%d keys)", len(keys))
+
+    def resubscribe_all(self, scanner: "IBMergerArbScanner"):
+        """Re-establish all streaming subscriptions with fresh IB reqIds.
+        
+        Called after a TWS reconnect (error 1101/1102 or full reconnect).
+        The old reqIds are stale (IB does not resume streaming after reconnect),
+        so we allocate new reqIds and re-issue reqMktData for each subscription.
+        
+        Quote data is preserved — the Quote objects are NOT cleared, so
+        consumers see the last known tick values until fresh ticks arrive.
+        """
+        resub_list = []  # (cache_key, contract, generic_ticks, new_req_id)
+
+        with self._lock:
+            for cache_key, old_req_id in list(self._key_to_req_id.items()):
+                # Try to cancel stale IB req (may silently fail after socket reset)
+                try:
+                    scanner.cancelMktData(old_req_id)
+                except Exception:
+                    pass
+                self._req_id_to_key.pop(old_req_id, None)
+
+                contract_info = self._key_to_contract.get(cache_key)
+                if not contract_info:
+                    logger.warning("Cannot resubscribe %s: no stored contract", cache_key)
+                    continue
+                contract, generic_ticks = contract_info
+
+                new_req_id = scanner.get_next_req_id()
+                self._req_id_to_key[new_req_id] = cache_key
+                self._key_to_req_id[cache_key] = new_req_id
+                resub_list.append((cache_key, contract, generic_ticks, new_req_id))
+
+        # Issue reqMktData outside the lock (sends over socket)
+        for cache_key, contract, generic_ticks, req_id in resub_list:
+            scanner.reqMktData(req_id, contract, generic_ticks, False, False, [])
+            logger.info("Resubscribed streaming: %s -> reqId=%d", cache_key, req_id)
+
+        logger.info("Resubscribed %d streaming quotes after reconnect", len(resub_list))
 
     # ── Tick update methods (called from IB message thread) ──
 

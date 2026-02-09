@@ -102,9 +102,12 @@ class IBDataAgent:
         self.resource_manager = ResourceManager()
         self.quote_cache: Optional[StreamingQuoteCache] = None  # created after scanner is ready
         self.execution_engine: Optional[ExecutionEngine] = None  # created after scanner is ready
+        # TWS reconnection state
+        self._tws_reconnecting = False
+        self._tws_last_connected: Optional[float] = None
         
     def connect_to_ib(self) -> bool:
-        """Connect to IB TWS"""
+        """Connect to IB TWS (single attempt)."""
         logger.info(f"Connecting to IB TWS at {IB_HOST}:{IB_PORT}...")
         
         # Use clientId=0 (the "default client") so that:
@@ -123,17 +126,97 @@ class IBDataAgent:
         
         if connected:
             logger.info("Successfully connected to IB TWS")
+            self._tws_last_connected = time.time()
+            self._tws_reconnecting = False
             # Initialize execution infrastructure (quote cache + engine)
-            self.quote_cache = StreamingQuoteCache(self.resource_manager)
+            if self.quote_cache is None:
+                self.quote_cache = StreamingQuoteCache(self.resource_manager)
             self.scanner.streaming_cache = self.quote_cache
-            self.execution_engine = ExecutionEngine(
-                self.scanner, self.quote_cache, self.resource_manager
-            )
+            if self.execution_engine is None:
+                self.execution_engine = ExecutionEngine(
+                    self.scanner, self.quote_cache, self.resource_manager
+                )
+            else:
+                # Point existing engine at the new scanner instance
+                self.execution_engine._scanner = self.scanner
             logger.info("Execution infrastructure initialized (quote cache + engine ready)")
         else:
             logger.error("Failed to connect to IB TWS")
             
         return connected
+
+    async def _connect_to_ib_with_retry(self, max_attempts: int = 0) -> bool:
+        """Connect to IB TWS with exponential backoff.
+        
+        max_attempts=0 means retry forever (for startup when TWS may not be running yet).
+        """
+        attempt = 0
+        delay = 2.0
+        MAX_DELAY = 60.0
+        while self.running:
+            attempt += 1
+            if self.connect_to_ib():
+                return True
+            if max_attempts > 0 and attempt >= max_attempts:
+                return False
+            logger.warning(
+                "TWS not available (attempt %d). Retrying in %.0fs... "
+                "(Start TWS/Gateway if not running)",
+                attempt, delay,
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, MAX_DELAY)
+        return False
+
+    async def _tws_health_loop(self):
+        """Background task: detect TWS disconnection and auto-reconnect.
+        
+        Checks every 5s. When disconnected, attempts reconnect with backoff.
+        Re-syncs order book and streaming subscriptions on success.
+        """
+        CHECK_INTERVAL = 5.0
+        while self.running:
+            await asyncio.sleep(CHECK_INTERVAL)
+            if not self.scanner:
+                continue
+            # Check if TWS connection is healthy
+            if self.scanner.isConnected() and not self.scanner.connection_lost:
+                continue
+            # --- TWS is down ---
+            if not self._tws_reconnecting:
+                logger.warning("TWS connection lost — starting auto-reconnect...")
+                self._tws_reconnecting = True
+            # Clean up dead socket
+            try:
+                self.scanner.disconnect()
+            except Exception:
+                pass
+            # Attempt reconnect with backoff
+            delay = 5.0
+            MAX_DELAY = 60.0
+            while self.running and self._tws_reconnecting:
+                logger.info("Attempting TWS reconnect (delay=%.0fs)...", delay)
+                if self.connect_to_ib():
+                    logger.info("TWS reconnected successfully!")
+                    # Re-register account event callback
+                    try:
+                        loop = asyncio.get_running_loop()
+                        self.scanner.set_account_event_callback(
+                            self._make_account_event_callback(loop)
+                        )
+                    except Exception as e:
+                        logger.error("Failed to re-register account event callback: %s", e)
+                    # Re-establish streaming subscriptions (execution engine quotes)
+                    try:
+                        if self.quote_cache:
+                            self.quote_cache.resubscribe_all(self.scanner)
+                            logger.info("Re-established streaming quote subscriptions")
+                    except Exception as e:
+                        logger.error("Failed to re-establish streaming subscriptions: %s", e)
+                    self._tws_reconnecting = False
+                    break
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, MAX_DELAY)
     
     def disconnect_from_ib(self):
         """Disconnect from IB TWS, stopping execution engine first."""
@@ -201,19 +284,42 @@ class IBDataAgent:
             return await loop.run_in_executor(pool, func, *args)
     
     async def _handle_ib_status(self) -> dict:
-        """Check IB connection status"""
+        """Check IB connection status, including reconnection and farm health."""
         connected = self.scanner and self.scanner.isConnected()
+        farm_status = {}
+        data_available = True
+        if self.scanner:
+            farm_status = self.scanner.get_farm_status()
+            data_available = self.scanner.is_data_available()
+        if self._tws_reconnecting:
+            message = "IB TWS reconnecting..."
+        elif connected and not data_available:
+            message = "IB TWS connected but data farms are down"
+        elif connected:
+            message = "IB TWS connected"
+        else:
+            message = "IB TWS not connected"
         return {
             "connected": connected,
-            "message": "IB TWS connected" if connected else "IB TWS not connected"
+            "reconnecting": self._tws_reconnecting,
+            "message": message,
+            "farm_status": farm_status,
+            "data_available": data_available,
+            "last_connected": self._tws_last_connected,
         }
     
+    def _ib_not_connected_error(self) -> str:
+        """Return appropriate error string based on connection state."""
+        if self._tws_reconnecting:
+            return "IB reconnecting -- please wait..."
+        return "IB not connected"
+
     async def _handle_check_availability(self, payload: dict) -> dict:
         """Check if options are available for a ticker"""
         ticker = payload.get("ticker", "").upper()
         
         if not self.scanner or not self.scanner.isConnected():
-            return {"available": False, "expirationCount": 0, "error": "IB not connected"}
+            return {"available": False, "expirationCount": 0, "error": self._ib_not_connected_error()}
         
         contract_id = self.scanner.resolve_contract(ticker)
         if not contract_id:
@@ -235,7 +341,7 @@ class IBDataAgent:
         ticker = payload.get("ticker", "").upper()
         
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
         
         # Futures exchange lookup — IB requires exchange even with conId
         _FUTURES_EXCHANGE = {
@@ -304,7 +410,7 @@ class IBDataAgent:
     def _handle_get_positions_sync(self, payload: dict) -> dict:
         """Fetch all positions from IB (reqPositions -> position/positionEnd)."""
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
         timeout = float(payload.get("timeout_sec", 15.0))
         try:
             positions = self.scanner.get_positions_snapshot(timeout_sec=timeout)
@@ -321,7 +427,7 @@ class IBDataAgent:
         Pass force_refresh=true to re-query TWS and re-bind any manual orders.
         """
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
         timeout = float(payload.get("timeout_sec", 10.0))
         force = bool(payload.get("force_refresh", False))
         try:
@@ -343,7 +449,7 @@ class IBDataAgent:
     def _handle_place_order_sync(self, payload: dict) -> dict:
         """Place order via IB (placeOrder -> orderStatus/error)."""
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
         contract_d = payload.get("contract") or {}
         order_d = payload.get("order") or {}
         timeout_sec = float(payload.get("timeout_sec", 30.0))
@@ -356,7 +462,7 @@ class IBDataAgent:
     def _handle_modify_order_sync(self, payload: dict) -> dict:
         """Modify existing order via IB (placeOrder with same orderId)."""
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
         order_id = payload.get("orderId")
         if order_id is None:
             return {"error": "orderId required"}
@@ -372,7 +478,7 @@ class IBDataAgent:
     async def _handle_cancel_order(self, payload: dict) -> dict:
         """Cancel order by orderId (sync in thread)."""
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
         order_id = payload.get("orderId")
         if order_id is None:
             return {"error": "orderId required"}
@@ -397,7 +503,7 @@ class IBDataAgent:
            Always works, ~0.3 s.
         """
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
 
         contract_month = payload.get("contract_month", "")
 
@@ -594,7 +700,7 @@ class IBDataAgent:
         scan_params = payload.get("scanParams", {})
         
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
         
         days_before_close = scan_params.get("daysBeforeClose", 60)
         
@@ -684,7 +790,7 @@ class IBDataAgent:
         if not contracts:
             return {"error": "No contracts specified"}
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
         logger.info(f"Fetching prices for {len(contracts)} contracts (batch)")
         # Normalize and group by ticker to call get_option_data_batch once per ticker (preserves order).
         by_ticker = {}
@@ -719,7 +825,7 @@ class IBDataAgent:
     def _handle_sell_scan_sync(self, payload: dict) -> dict:
         """Fetch near-the-money calls or puts for expirations in the next 0-15 business days (for selling)."""
         if not self.scanner or not self.scanner.isConnected():
-            return {"error": "IB not connected"}
+            return {"error": self._ib_not_connected_error()}
         ticker = (payload.get("ticker") or "").upper()
         right = (payload.get("right") or "C").upper()
         if right not in ("C", "P"):
@@ -807,7 +913,7 @@ class IBDataAgent:
     async def _handle_execution_start(self, payload: dict) -> dict:
         """Start execution engine with strategy configuration."""
         if not self.execution_engine:
-            return {"error": "Execution engine not initialized (IB not connected?)"}
+            return {"error": f"Execution engine not initialized ({self._ib_not_connected_error()})"}
         if self.execution_engine.is_running:
             return {"error": "Execution engine is already running"}
 
@@ -1088,13 +1194,19 @@ class IBDataAgent:
         """Main run loop"""
         self.running = True
         
-        if not self.connect_to_ib():
-            logger.error("Cannot start agent without IB connection")
+        # Startup: connect to TWS with retry (waits for TWS to be available)
+        logger.info("Waiting for IB TWS connection (will retry with backoff)...")
+        if not await self._connect_to_ib_with_retry(max_attempts=0):
+            logger.error("Cannot start agent — shutting down")
             return
 
         # Register instant account-event callback (bridges IB thread → asyncio → WS)
         loop = asyncio.get_running_loop()
         self.scanner.set_account_event_callback(self._make_account_event_callback(loop))
+
+        # Launch background TWS health monitor
+        tws_health_task = asyncio.create_task(self._tws_health_loop())
+        logger.info("TWS health monitor started (auto-reconnect enabled)")
         
         while self.running:
             try:
@@ -1128,12 +1240,19 @@ class IBDataAgent:
                     task.cancel()
                 
                 if self.running:
-                    logger.warning(f"Connection lost, reconnecting in {RECONNECT_DELAY}s...")
+                    logger.warning(f"Relay connection lost, reconnecting in {RECONNECT_DELAY}s...")
                     await asyncio.sleep(RECONNECT_DELAY)
             except Exception as e:
                 logger.error(f"Agent error: {e}")
                 if self.running:
                     await asyncio.sleep(RECONNECT_DELAY)
+        
+        # Clean up health monitor
+        tws_health_task.cancel()
+        try:
+            await tws_health_task
+        except asyncio.CancelledError:
+            pass
         
         self.disconnect_from_ib()
         if self.websocket:
