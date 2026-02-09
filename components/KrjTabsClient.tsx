@@ -740,7 +740,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                   {regime.features.market_mom >= 0 ? "+" : ""}{(regime.features.market_mom * 100).toFixed(2)}%
                 </span>
               </div>
-              <div title="SPY's own dip signal value: (SPY weekly low - SPY 25DMA) / SPY 25DMA. Strongly negative = the market itself has dipped well below its moving average. This captures how far the broad market has pulled back from its trend.">
+              <div title="SPY's own long signal value: (SPY weekly low - SPY DEMA43 reference) / SPY DEMA43. Normal range: -0.5% to -3%. Strongly negative = the market itself has dipped well below its moving average. This captures how far the broad market has pulled back from its trend.">
                 <span className="block text-gray-500">Mkt Dip</span>
                 <span className={`font-mono ${regime.features.market_dip >= 0 ? "text-emerald-300" : "text-red-300"}`}>
                   {regime.features.market_dip >= 0 ? "+" : ""}{(regime.features.market_dip * 100).toFixed(2)}%
