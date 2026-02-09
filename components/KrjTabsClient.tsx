@@ -711,13 +711,13 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                 }`}
               />
               <span>
-                <span title="Overall market environment classification based on 5 market-wide features. Labels: High Dislocation (score >= 0.6), Moderate Dislocation (0.35-0.6), Moderate Opportunity (0.15-0.35), Low Signal Environment (< 0.15).">
+                <span title="Overall market environment classification based on 5 market-wide features. Labels: High Dislocation (confidence >= 60%) = extreme conditions, rare and strong signal. Moderate Dislocation (35-60%) = notable stress or opportunity. Moderate Opportunity (15-35%) = some useful signal. Low Signal Environment (< 15%) = calm conditions, model has less conviction. Most weeks fall in the low-to-moderate range.">
                   Market Regime: <span className="font-semibold">{regime.label}</span>
                 </span>
                 <span className="ml-2 opacity-70">
-                  (<span title="Regime score from -1 to +1. Positive = favorable environment for model predictions (historically more accurate). Derived from a logistic regression trained on which market conditions led to accurate predictions in out-of-sample walk-forward testing.">score: {regime.score > 0 ? "+" : ""}{regime.score.toFixed(2)}</span>
+                  (<span title="Regime score from -1 to +1. Positive = favorable environment for model predictions (historically more accurate). Negative = adverse conditions. Derived from logistic regression trained on out-of-sample walk-forward results. Most weeks are near zero (±0.2). Readings beyond ±0.5 are uncommon and signal strong regime conviction.">score: {regime.score > 0 ? "+" : ""}{regime.score.toFixed(2)}</span>
                   {" | "}
-                  <span title="Absolute value of regime score. Used to scale predictions: Adj. Prediction = Raw Prediction x Confidence. Higher confidence means the model's predictions are more trustworthy this week.">confidence: {(regime.confidence * 100).toFixed(0)}%</span>)
+                  <span title="Absolute value of regime score (0-100%). Used to scale predictions: Adj. Prediction = Raw Prediction x Confidence. Low (<15%) = calm market, predictions heavily discounted. Moderate (15-35%) = some conviction. High (>60%) = strong regime signal, predictions carry near full weight. Most weeks are below 30%.">confidence: {(regime.confidence * 100).toFixed(0)}%</span>)
                 </span>
               </span>
               <span className="ml-auto text-xs opacity-50">
@@ -727,27 +727,27 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
           </button>
           {regimeBannerExpanded && (
             <div className="mt-1 rounded bg-gray-800/40 border border-gray-700/30 px-3 py-2 text-xs text-gray-400 grid grid-cols-5 gap-3">
-              <div title="Fraction of tickers in the universe with their weekly low above their reference moving average. High breadth (>50%) = broad market strength. Low breadth (<30%) = widespread weakness. Currently indicates how many stocks are holding above support.">
+              <div title="Fraction of tickers in the universe with their weekly low above their reference moving average. Typical range: 7-22% (middle 50% of weeks since 2016). Median: ~13%. High breadth (>50%) = broad market strength, rare. Low breadth (<7%) = widespread weakness, bottom 25% of history. Extremely low (<1.5%) signals a severe sell-off.">
                 <span className="block text-gray-500">Breadth</span>
                 <span className="text-gray-200 font-mono">{(regime.features.breadth * 100).toFixed(1)}%</span>
               </div>
-              <div title="Cross-sectional standard deviation of signal values across all tickers. High dispersion = stocks are moving independently (idiosyncratic opportunities). Low dispersion = stocks moving in lockstep (harder to pick winners). The model historically performs better when dispersion is elevated.">
+              <div title="Cross-sectional standard deviation of signal values across all tickers — how spread out stocks are from each other. Typical range: 1.0-2.1% (middle 50% of weeks since 2016). Median: ~1.4%. Low (<1.0%) = stocks moving in lockstep, harder to find differentiated trades. Elevated (>2.1%) = idiosyncratic dispersion, more alpha opportunities. Extreme (>3.2%) = top 5% historically, often during sector rotations or crisis periods.">
                 <span className="block text-gray-500">Dispersion</span>
                 <span className="text-gray-200 font-mono">{(regime.features.dispersion * 100).toFixed(2)}%</span>
               </div>
-              <div title="SPY's weekly return — a direct measure of broad market direction. Positive = up week for the market, negative = down week. Used as a proxy for overall market momentum.">
+              <div title="SPY's weekly return — a direct measure of broad market direction. Typical range: -0.9% to +1.5% (middle 50% of weeks since 2016). Median: +0.4% (slight upward bias). Beyond +/-3% is an extreme week (top/bottom 5% of history). The worst week in the dataset was -15% (March 2020 COVID crash). Used as a proxy for overall market momentum.">
                 <span className="block text-gray-500">Mkt Momentum</span>
                 <span className={`font-mono ${regime.features.market_mom >= 0 ? "text-emerald-300" : "text-red-300"}`}>
                   {regime.features.market_mom >= 0 ? "+" : ""}{(regime.features.market_mom * 100).toFixed(2)}%
                 </span>
               </div>
-              <div title="SPY's own long signal value: (SPY weekly low - SPY DEMA43 reference) / SPY DEMA43. Normal range: -0.5% to -3%. Strongly negative = the market itself has dipped well below its moving average. This captures how far the broad market has pulled back from its trend.">
+              <div title="SPY's own long signal value: (SPY weekly low - SPY DEMA43 reference) / SPY DEMA43. Measures how far the market has pulled back from its trend. Typical range: -2.6% to -0.3% (middle 50% of weeks). Median: -1.2%. Near zero or positive = market trading at or above its moving average (bullish). Below -5% = top 5% of dips, significant pullback. The deepest reading was -17% (March 2020).">
                 <span className="block text-gray-500">Mkt Dip</span>
                 <span className={`font-mono ${regime.features.market_dip >= 0 ? "text-emerald-300" : "text-red-300"}`}>
                   {regime.features.market_dip >= 0 ? "+" : ""}{(regime.features.market_dip * 100).toFixed(2)}%
                 </span>
               </div>
-              <div title="Mean volatility ratio across the universe — an implicit VIX proxy. Values above 2x indicate elevated market volatility. Computed as the average of each stock's daily range divided by SPY's daily range. Higher = more volatile market environment.">
+              <div title="Mean volatility ratio across the universe — an implicit VIX proxy. Computed as the average of each stock's daily range divided by SPY's daily range. Typical range: 2.6x to 4.9x (middle 50% of weeks since 2016). Median: ~3.6x. Calm markets (<2.5x) = low vol, bottom 25%. Elevated (>5x) = high vol, top 25%. Extreme (>7x) = top 5%, crisis-level volatility (the max was ~14x during COVID). Higher readings mean the average stock is swinging much wider than SPY.">
                 <span className="block text-gray-500">Vol Regime</span>
                 <span className="text-gray-200 font-mono">{regime.features.vol_regime.toFixed(2)}x</span>
               </div>
@@ -935,7 +935,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           const p = enrichedRow.raw_prediction * 100;
                           const cls = p > 0 ? "text-emerald-400" : p < 0 ? "text-red-400" : "text-gray-400";
                           return (
-                            <td key={col.key} title={`Raw LightGBM predicted 1-week return for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. This is the model's best estimate of next week's price change, before regime adjustment. Heavily influenced by market-wide factors when the regime signal is strong.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                            <td key={col.key} title={`Raw LightGBM predicted 1-week return for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. This is the model's best estimate of next week's price change, before regime adjustment. Scale: within ±0.5% is weak/noise. ±0.5-1.5% is a moderate signal. Beyond ±2% is strong conviction (rare). The prediction is capped at ±15% as a guardrail.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
                               {p > 0 ? "+" : ""}{p.toFixed(2)}%
                             </td>
                           );
@@ -944,7 +944,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           const p = enrichedRow.regime_adjusted * 100;
                           const cls = p > 0 ? "text-emerald-400" : p < 0 ? "text-red-400" : "text-gray-400";
                           return (
-                            <td key={col.key} title={`Regime-adjusted prediction for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. Calculated as Raw Prediction (${(enrichedRow.raw_prediction * 100).toFixed(2)}%) x Regime Confidence (${regime ? (regime.confidence * 100).toFixed(0) : "?"}%). Scales down the raw signal when the model is less confident about the current market regime. Use this as the actionable signal.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                            <td key={col.key} title={`Regime-adjusted prediction for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. Calculated as Raw Prediction (${(enrichedRow.raw_prediction * 100).toFixed(2)}%) x Regime Confidence (${regime ? (regime.confidence * 100).toFixed(0) : "?"}%). In calm markets (low confidence), this will be much smaller than the raw prediction. In high-conviction regimes, it approaches the raw value. This is the actionable signal — it reflects both the model's stock-level view and its trust in current conditions.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
                               {p > 0 ? "+" : ""}{p.toFixed(2)}%
                             </td>
                           );
@@ -1064,11 +1064,11 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                             <div className="flex-1 space-y-1">
                               <div className="text-xs text-gray-400 font-medium mb-1" title="SHAP (SHapley Additive exPlanations) decomposition of the LightGBM prediction into 5 interpretable signal categories. Each bar shows how much that category contributed to the total predicted return. Positive = bullish contribution, negative = bearish. The bars sum to the total raw prediction.">Signal Decomposition</div>
                               {([
-                                { key: "krj" as const, label: "KRJ Signal", barClass: "bg-blue-500/70", tip: "Legacy KRJ oscillator contribution: how far the stock's price dipped (long_sv) or rallied (short_sv, high_sv) relative to its reference moving average. Positive = price action is bullish, negative = bearish." },
-                                { key: "stock_specific" as const, label: "Stock Specific", barClass: "bg-purple-500/70", tip: "Stock-specific characteristics contribution: volatility ratio to SPY, rolling 60-day SPX correlation, log market cap, proximity to 52-week high, and 60-day return autocorrelation. Captures what kind of stock this is and how it tends to behave." },
-                                { key: "market_regime" as const, label: "Market Regime", barClass: "bg-emerald-500/70", tip: "Market-wide regime contribution: breadth (% of stocks above reference), dispersion (spread of signals), SPY momentum, SPY dip level, and vol regime. Same value for all tickers — captures whether the overall market environment is bullish or bearish." },
-                                { key: "peer_market" as const, label: "Peer Market", barClass: "bg-teal-500/70", tip: "Adaptive peer market contribution: dynamically selects other tickers that are correlated with AND predictive of this stock, weighted by Information Coefficient. Different for every ticker — a bank stock's peers include XLF/IEF, a tech stock's peers include QQQ/XLK. Captures sector, macro, and factor effects through the peer mechanism." },
-                                { key: "cross_sectional" as const, label: "Cross-Sectional", barClass: "bg-amber-500/70", tip: "Cross-sectional positioning contribution: how this stock's signals compare to the universe via z-scores, percentile rank, and interaction terms (dip x breadth, dip x dispersion). Captures relative strength or weakness versus peers." },
+                                { key: "krj" as const, label: "KRJ Signal", barClass: "bg-blue-500/70", tip: "Legacy KRJ oscillator contribution: how far the stock's price dipped (long_sv) or rallied (short_sv, high_sv) relative to its reference moving average. Positive = price action is bullish, negative = bearish. Typical contribution: -0.02% to +0.02%. When this dominates (>0.05%), the stock's own price action is strongly driving the signal." },
+                                { key: "stock_specific" as const, label: "Stock Specific", barClass: "bg-purple-500/70", tip: "Stock-specific characteristics contribution: volatility ratio, SPX correlation, market cap, 52-week high proximity, and return autocorrelation. Typical contribution: -0.3% to +0.2%. Large negative values often come from small-cap, high-vol stocks that the model views as riskier. Near zero for blue-chips." },
+                                { key: "market_regime" as const, label: "Market Regime", barClass: "bg-emerald-500/70", tip: "Market-wide regime contribution from breadth, dispersion, SPY momentum, market dip, and vol regime. Same for all tickers in a given week — captures whether the overall market environment is bullish or bearish. Often the largest contributor (typically -1.5% to +0.5%). When this dominates, the model is saying 'market conditions matter more than stock selection right now.'" },
+                                { key: "peer_market" as const, label: "Peer Market", barClass: "bg-teal-500/70", tip: "Adaptive peer market contribution: dynamically selects correlated tickers with predictive ability (weighted by IC). Different for every ticker — e.g. bank stocks get XLF/IEF peers, tech gets QQQ/XLK. Typical contribution: -0.1% to +0.1%. Larger values mean this stock's sector/factor peers are sending a clear directional signal." },
+                                { key: "cross_sectional" as const, label: "Cross-Sectional", barClass: "bg-amber-500/70", tip: "Cross-sectional positioning: z-scores, percentile rank, and interaction terms vs the universe. Typical contribution: -0.02% to +0.02%. Captures relative strength or weakness. Large positive = stock is holding up better than peers; large negative = lagging." },
                               ]).map(({ key, label, barClass, tip }) => {
                                 const val = enrichedRow.decomposition[key] ?? 0;
                                 const pct = val * 100;
