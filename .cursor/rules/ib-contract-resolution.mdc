@@ -1,0 +1,71 @@
+---
+description: IB API contract resolution patterns — critical pitfalls for futures, conId, and exchange mapping
+globs: python-service/standalone_agent/**/*.py
+alwaysApply: false
+---
+
+# IB Contract Resolution — Lessons Learned
+
+## conId Is King, But Exchange Is Still Required for Futures
+
+When resolving a contract via `conId`:
+- Set **only** `contract.conId` and `contract.exchange`. Do NOT set `symbol`, `secType`,
+  `lastTradeDateOrContractMonth`, or `multiplier`. IB validates ALL fields together and
+  returns Error 200 ("no security definition") if any field conflicts with the conId.
+- Futures **always** need an explicit exchange — `SMART` routing does not work for futures.
+  Without it, IB returns Error 321 ("Please enter exchange").
+
+## Futures Exchange Mapping
+
+IB uses specific exchange names that don't always match common expectations:
+
+| Futures | IB Exchange | Note |
+|---------|-------------|------|
+| ES, NQ, RTY, MES, MNQ, M2K, YM, MYM | CME | E-mini / Micro indices |
+| SI, GC, HG, SIL, MGC | **COMEX** | Metals — NOT NYMEX |
+| PL, PA | NYMEX | Platinum, Palladium |
+| CL, NG, RB, HO, MCL | NYMEX | Energy |
+| ZB, ZN, ZF, ZT, UB | CBOT | Treasuries |
+| ZC, ZS, ZW, ZM, ZL | CBOT | Grains |
+| 6E, 6J, 6B, 6A, 6C, 6S | CME | FX futures |
+
+The mapping lives in `_FUTURES_EXCHANGE` in `ib_data_agent.py`. When adding new futures,
+look up the exact exchange in TWS contract details — don't assume NYMEX for metals.
+
+## Frontend → Agent Data Flow for Quotes
+
+When fetching prices for non-stock instruments (futures, options), the full contract
+metadata must travel the entire chain:
+
+```
+IBPositionsTab.tsx (fetchQuote with contractMeta + conId)
+  → /api/ma-options/stock-quote/route.ts (pass-through)
+  → options_routes.py relay_stock_quote (pass-through)
+  → ib_data_agent.py _handle_fetch_underlying (builds Contract)
+  → ib_scanner.py fetch_underlying_data (executes reqMktData)
+```
+
+If any link drops the metadata, the agent defaults to `STK` on `SMART` which fails
+for futures. Always pass `conId` when available — it's the most reliable identifier.
+
+## Deduplication of Frontend Requests
+
+Multiple `useEffect` hooks and callbacks in `IBPositionsTab.tsx` can trigger `fetchQuote`
+for the same ticker simultaneously. Use a `useRef<Set<string>>` (e.g., `inFlightQuotesRef`)
+to track in-flight requests and skip duplicates. Without this, the agent processes requests
+sequentially, and N duplicate requests for one ticker block all other tickers for N × RTT.
+
+## Event-Based Early Exit Pattern
+
+For any IB request that uses callbacks (market data, contract details, etc.):
+
+```python
+self._done_event = Event()
+self.reqMktData(req_id, contract, "", False, False, [])
+self._done_event.wait(timeout=3.0)   # exits in ~50ms when tick arrives
+self._done_event = None
+self.cancelMktData(req_id)
+```
+
+Signal the event in the callback (e.g., `tickPrice`) when the critical data arrives.
+This cuts latency from the timeout value to the actual IB response time.

@@ -13,7 +13,7 @@ These rules apply to ALL code changes in this repository.
 ## Latency / Instrumentation
 
 - **All IB relay endpoints must have `RequestTimer` instrumentation** (from `app/utils/timing.py`). Log `[perf]` lines with operation name, per-stage timing, and payload size.
-- **Fixed sleeps in `ib_scanner.py`** (e.g. `time.sleep(3.0)`) exist because IB TWS needs time to populate tick data via callbacks. Do NOT remove them without measuring first. Document the reason in a code comment.
+- **Use `threading.Event` for IB data waits, not `time.sleep()`.** IB returns tick data via callbacks on a separate thread; `Event.wait(timeout=N)` exits instantly when the callback fires (typically 50-100ms) while still having a safety timeout. See `fetch_underlying_data` in `ib_scanner.py` as the reference pattern: set `self._underlying_done = Event()` before `reqMktData`, call `.wait(timeout=3.0)`, and `.set()` in `tickPrice` when the LAST price arrives.
 - **Polling intervals** in React components must skip ticks when `document.hidden` to avoid wasting resources when the tab is backgrounded.
 - **The `computeGroups()` call in `IBPositionsTab.tsx`** must be wrapped in `useMemo` keyed on `filteredPositions`.
 

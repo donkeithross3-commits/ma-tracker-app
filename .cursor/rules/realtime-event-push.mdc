@@ -1,0 +1,48 @@
+---
+description: Architecture for real-time account event push (order fills, status changes) from IB to UI
+globs: python-service/standalone_agent/**/*.py,components/ma-options/IBPositionsTab.tsx,python-service/app/api/ws_relay.py
+alwaysApply: false
+---
+
+# Real-Time Account Event Push Architecture
+
+## Data Flow (target: <500ms end-to-end)
+
+```
+IB TWS thread (orderStatus/execDetails callback)
+  → scanner._account_event_callback()              [instant, same thread]
+  → loop.call_soon_threadsafe(asyncio.ensure_future, _push())  [~1ms]
+  → agent pushes JSON over WebSocket to relay       [~10-50ms]
+  → ws_relay.py stores in per-user deque            [instant]
+  → frontend polls GET /relay/account-events every 500ms
+  → detects new events → triggers fetchPositions() + fetchOpenOrders()
+```
+
+## Three Layers
+
+1. **Scanner** (`ib_scanner.py`): Queues events in `_account_events` deque (thread-safe
+   with Lock). Also calls `_account_event_callback` if set — this is the instant path.
+
+2. **Agent** (`ib_data_agent.py`): Registers the callback at startup via
+   `scanner.set_account_event_callback()`. The callback uses `call_soon_threadsafe` to
+   bridge the IB thread to the asyncio event loop, then sends over WebSocket. A fallback
+   `_account_event_push_loop` (10s interval) drains any events the callback missed.
+
+3. **Relay** (`ws_relay.py`): Stores events in `ProviderRegistry._account_events`
+   (per-user deque, maxlen=200). The `GET /relay/account-events?user_id=X&since=T`
+   endpoint returns events newer than timestamp T.
+
+## Key Design Decisions
+
+- **Callback + fallback, not just polling.** The instant callback handles 99% of events.
+  The 10s fallback loop is a safety net for edge cases (WebSocket briefly disconnected).
+- **`call_soon_threadsafe` is critical.** The IB API callbacks run on a non-asyncio thread.
+  You cannot `await` inside them. The only safe way to schedule async work (like WebSocket
+  send) is `loop.call_soon_threadsafe(asyncio.ensure_future, coroutine)`.
+- **Frontend polls, not WebSocket.** The frontend uses simple HTTP polling (500ms) rather
+  than a separate WebSocket connection. This keeps the frontend simple and avoids managing
+  another persistent connection. The polling endpoint is lightweight (no DB query, just
+  in-memory deque filter).
+- **Events are ephemeral.** The deque has maxlen=200. Events older than a few minutes are
+  dropped. The frontend uses them only as a trigger to refresh — it doesn't parse event
+  details for display.
