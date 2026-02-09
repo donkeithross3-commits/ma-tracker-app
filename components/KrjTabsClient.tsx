@@ -71,10 +71,27 @@ type EnrichedTickerData = {
 };
 
 type EnrichedRegime = {
+  // New macro regime classifier fields
+  name?: string;
+  probability?: number;
+  dimensions?: {
+    risk_appetite: number;
+    safety_flow: number;
+    inflation_pressure: number;
+  };
+  all_probabilities?: Record<string, number>;
+  description?: string;
+  confidence?: {
+    score: number;
+    label: string;
+    regime_historical_quality: number;
+    regime_historical_hit_rate: number;
+    n_historical_weeks: number;
+  };
+  // Legacy fields (backward compat)
   score: number;
-  confidence: number;
   label: string;
-  features: {
+  features?: {
     breadth: number;
     dispersion: number;
     market_mom: number;
@@ -691,73 +708,165 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
             </div>
           </div>
 
-      {/* Regime Banner */}
-      {regime && (
+      {/* Macro Regime Banner */}
+      {regime && (() => {
+        const regimeName = regime.name ?? regime.label ?? "Unknown";
+        const regimeProb = regime.probability ?? 0;
+        const dims = regime.dimensions;
+        const allProbs = regime.all_probabilities;
+        const conf = regime.confidence;
+        const desc = regime.description ?? "";
+
+        // Color by regime name
+        const regimeColors: Record<string, { bg: string; border: string; text: string; dot: string }> = {
+          "Crisis": { bg: "bg-red-900/50", border: "border-red-700/60", text: "text-red-200", dot: "bg-red-400" },
+          "Stagflation": { bg: "bg-orange-900/40", border: "border-orange-700/50", text: "text-orange-200", dot: "bg-orange-400" },
+          "Safe Haven Rotation": { bg: "bg-yellow-900/30", border: "border-yellow-700/40", text: "text-yellow-200", dot: "bg-yellow-400" },
+          "Reflation Rally": { bg: "bg-emerald-900/40", border: "border-emerald-700/50", text: "text-emerald-200", dot: "bg-emerald-400" },
+          "Steady Growth": { bg: "bg-gray-800/60", border: "border-gray-700/40", text: "text-gray-300", dot: "bg-blue-400" },
+        };
+        const colors = regimeColors[regimeName] ?? regimeColors["Steady Growth"];
+
+        // Dimension gauge helper
+        const DimGauge = ({ label, value, tooltip }: { label: string; value: number; tooltip: string }) => {
+          const clamped = Math.max(-3, Math.min(3, value));
+          const pct = ((clamped + 3) / 6) * 100;
+          const isPositive = value >= 0;
+          return (
+            <div title={tooltip} className="flex-1 min-w-0">
+              <div className="flex justify-between text-[10px] mb-0.5">
+                <span className="text-gray-500 truncate">{label}</span>
+                <span className={`font-mono ${isPositive ? "text-emerald-400" : "text-red-400"}`}>
+                  {value > 0 ? "+" : ""}{value.toFixed(2)}
+                </span>
+              </div>
+              <div className="h-1.5 bg-gray-700 rounded-full relative overflow-hidden">
+                <div className="absolute top-0 left-1/2 w-px h-full bg-gray-500/50" />
+                {isPositive ? (
+                  <div className="absolute top-0 h-full bg-emerald-500/70 rounded-full" style={{ left: "50%", width: `${(pct - 50)}%` }} />
+                ) : (
+                  <div className="absolute top-0 h-full bg-red-500/70 rounded-full" style={{ left: `${pct}%`, width: `${(50 - pct)}%` }} />
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        return (
         <div className="mb-1">
           <button
             onClick={() => setRegimeBannerExpanded(!regimeBannerExpanded)}
-            title="Market regime assessment from the LightGBM prediction model. Indicates whether current market conditions are favorable for the model's predictions. Click to expand and see the 5 underlying market features."
-            className={`w-full text-left rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-              regime.confidence >= 0.6
-                ? "bg-emerald-900/40 border border-emerald-700/50 text-emerald-200"
-                : regime.confidence >= 0.3
-                ? "bg-yellow-900/30 border border-yellow-700/40 text-yellow-200"
-                : "bg-gray-800/60 border border-gray-700/40 text-gray-400"
-            }`}
+            title={desc || `Macro regime classification based on 4-week rolling returns of 10 benchmark ETFs (SPY, QQQ, IWM, GLD, SLV, TLT, UUP, USO, HYG, EEM). Uses PCA + Gaussian Mixture Model to identify 5 market states. Click to expand.`}
+            className={`w-full text-left rounded px-3 py-1.5 text-sm font-medium transition-colors ${colors.bg} border ${colors.border} ${colors.text}`}
           >
             <span className="flex items-center gap-3">
-              <span
-                title={`Regime confidence indicator: ${regime.confidence >= 0.6 ? "Green = high confidence (>=60%)" : regime.confidence >= 0.3 ? "Yellow = moderate confidence (30-60%)" : "Gray = low confidence (<30%)"}`}
-                className={`inline-block w-2 h-2 rounded-full ${
-                  regime.confidence >= 0.6 ? "bg-emerald-400" :
-                  regime.confidence >= 0.3 ? "bg-yellow-400" : "bg-gray-500"
-                }`}
-              />
-              <span>
-                <span title="Overall market environment classification based on 5 market-wide features. Labels: High Dislocation (confidence >= 60%) = extreme conditions, rare and strong signal. Moderate Dislocation (35-60%) = notable stress or opportunity. Moderate Opportunity (15-35%) = some useful signal. Low Signal Environment (< 15%) = calm conditions, model has less conviction. Most weeks fall in the low-to-moderate range.">
-                  Market Regime: <span className="font-semibold">{regime.label}</span>
+              <span className={`inline-block w-2 h-2 rounded-full ${colors.dot}`} />
+              <span className="flex-1 min-w-0">
+                <span>
+                  Macro Regime: <span className="font-semibold">{regimeName}</span>
                 </span>
-                <span className="ml-2 opacity-70">
-                  (<span title="Regime score from -1 to +1. Positive = favorable environment for model predictions (historically more accurate). Negative = adverse conditions. Derived from logistic regression trained on out-of-sample walk-forward results. Most weeks are near zero (±0.2). Readings beyond ±0.5 are uncommon and signal strong regime conviction.">score: {regime.score > 0 ? "+" : ""}{regime.score.toFixed(2)}</span>
-                  {" | "}
-                  <span title="Absolute value of regime score (0-100%). Used to scale predictions: Adj. Prediction = Raw Prediction x Confidence. Low (<15%) = calm market, predictions heavily discounted. Moderate (15-35%) = some conviction. High (>60%) = strong regime signal, predictions carry near full weight. Most weeks are below 30%.">confidence: {(regime.confidence * 100).toFixed(0)}%</span>)
+                <span className="ml-2 opacity-70 text-xs">
+                  ({(regimeProb * 100).toFixed(0)}% probability)
                 </span>
               </span>
-              <span className="ml-auto text-xs opacity-50">
+              {conf && (
+                <span className="text-xs opacity-60 whitespace-nowrap" title={`Signal confidence in this regime. Based on historical out-of-sample prediction quality when the market was in the "${regimeName}" regime. Hit rate = fraction of per-ticker predictions that got the direction right.`}>
+                  hist. hit: {(conf.regime_historical_hit_rate * 100).toFixed(0)}% ({conf.n_historical_weeks}w)
+                </span>
+              )}
+              <span className="text-xs opacity-50 flex-shrink-0">
                 {regimeBannerExpanded ? "collapse" : "expand"}
               </span>
             </span>
           </button>
           {regimeBannerExpanded && (
-            <div className="mt-1 rounded bg-gray-800/40 border border-gray-700/30 px-3 py-2 text-xs text-gray-400 grid grid-cols-5 gap-3">
-              <div title="Fraction of tickers in the universe with their weekly low above their reference moving average. Typical range: 7-22% (middle 50% of weeks since 2016). Median: ~13%. High breadth (>50%) = broad market strength, rare. Low breadth (<7%) = widespread weakness, bottom 25% of history. Extremely low (<1.5%) signals a severe sell-off.">
-                <span className="block text-gray-500">Breadth</span>
-                <span className="text-gray-200 font-mono">{(regime.features.breadth * 100).toFixed(1)}%</span>
-              </div>
-              <div title="Cross-sectional standard deviation of signal values across all tickers — how spread out stocks are from each other. Typical range: 1.0-2.1% (middle 50% of weeks since 2016). Median: ~1.4%. Low (<1.0%) = stocks moving in lockstep, harder to find differentiated trades. Elevated (>2.1%) = idiosyncratic dispersion, more alpha opportunities. Extreme (>3.2%) = top 5% historically, often during sector rotations or crisis periods.">
-                <span className="block text-gray-500">Dispersion</span>
-                <span className="text-gray-200 font-mono">{(regime.features.dispersion * 100).toFixed(2)}%</span>
-              </div>
-              <div title="SPY's weekly return — a direct measure of broad market direction. Typical range: -0.9% to +1.5% (middle 50% of weeks since 2016). Median: +0.4% (slight upward bias). Beyond +/-3% is an extreme week (top/bottom 5% of history). The worst week in the dataset was -15% (March 2020 COVID crash). Used as a proxy for overall market momentum.">
-                <span className="block text-gray-500">Mkt Momentum</span>
-                <span className={`font-mono ${regime.features.market_mom >= 0 ? "text-emerald-300" : "text-red-300"}`}>
-                  {regime.features.market_mom >= 0 ? "+" : ""}{(regime.features.market_mom * 100).toFixed(2)}%
-                </span>
-              </div>
-              <div title="SPY's own long signal value: (SPY weekly low - SPY DEMA43 reference) / SPY DEMA43. Measures how far the market has pulled back from its trend. Typical range: -2.6% to -0.3% (middle 50% of weeks). Median: -1.2%. Near zero or positive = market trading at or above its moving average (bullish). Below -5% = top 5% of dips, significant pullback. The deepest reading was -17% (March 2020).">
-                <span className="block text-gray-500">Mkt Dip</span>
-                <span className={`font-mono ${regime.features.market_dip >= 0 ? "text-emerald-300" : "text-red-300"}`}>
-                  {regime.features.market_dip >= 0 ? "+" : ""}{(regime.features.market_dip * 100).toFixed(2)}%
-                </span>
-              </div>
-              <div title="Mean volatility ratio across the universe — an implicit VIX proxy. Computed as the average of each stock's daily range divided by SPY's daily range. Typical range: 2.6x to 4.9x (middle 50% of weeks since 2016). Median: ~3.6x. Calm markets (<2.5x) = low vol, bottom 25%. Elevated (>5x) = high vol, top 25%. Extreme (>7x) = top 5%, crisis-level volatility (the max was ~14x during COVID). Higher readings mean the average stock is swinging much wider than SPY.">
-                <span className="block text-gray-500">Vol Regime</span>
-                <span className="text-gray-200 font-mono">{regime.features.vol_regime.toFixed(2)}x</span>
-              </div>
+            <div className="mt-1 rounded bg-gray-800/40 border border-gray-700/30 px-3 py-2 text-xs text-gray-400">
+              {/* Macro dimensions */}
+              {dims && (
+                <div className="flex gap-4 mb-2">
+                  <DimGauge
+                    label="Risk Appetite"
+                    value={dims.risk_appetite}
+                    tooltip="PC1 (47% of benchmark variance). Positive = risk-on: equities, credit, EM rising vs dollar weakening. Negative = risk-off: flight to safety. Range: typically -2 to +2. Beyond ±3 is extreme (e.g. COVID crash was -4)."
+                  />
+                  <DimGauge
+                    label="Safety Flow"
+                    value={dims.safety_flow}
+                    tooltip="PC2 (19% of benchmark variance). Positive = gold, bonds, silver rising vs equities. Safe haven demand increasing. Negative = safe havens underperforming. Range: typically -2 to +2. Strong positive readings during uncertainty/geopolitical stress."
+                  />
+                  <DimGauge
+                    label="Inflation Pressure"
+                    value={dims.inflation_pressure}
+                    tooltip="PC3 (12% of benchmark variance). Positive = oil and commodities up, bonds down. Inflationary pressure. Negative = deflationary: commodities weak, bonds strong. Range: typically -2 to +2. Strong positive during 2022 rate-hike era."
+                  />
+                </div>
+              )}
+              {/* Regime probability breakdown */}
+              {allProbs && (
+                <div className="mb-2">
+                  <div className="text-[10px] text-gray-500 mb-1">Regime Probabilities</div>
+                  <div className="flex h-2.5 rounded-sm overflow-hidden gap-px">
+                    {[
+                      { key: "steady_growth", label: "Steady Growth", color: "bg-blue-600" },
+                      { key: "safe_haven_rotation", label: "Safe Haven", color: "bg-yellow-500" },
+                      { key: "reflation_rally", label: "Reflation", color: "bg-emerald-500" },
+                      { key: "stagflation", label: "Stagflation", color: "bg-orange-500" },
+                      { key: "crisis", label: "Crisis", color: "bg-red-600" },
+                    ].map(({ key, label, color }) => {
+                      const p = allProbs[key] ?? 0;
+                      if (p < 0.01) return null;
+                      return (
+                        <div
+                          key={key}
+                          style={{ width: `${Math.max(p * 100, 2)}%` }}
+                          className={`${color} relative group cursor-default`}
+                          title={`${label}: ${(p * 100).toFixed(1)}%`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-3 mt-1 text-[10px] flex-wrap">
+                    {[
+                      { key: "steady_growth", label: "Steady Growth", color: "text-blue-400" },
+                      { key: "safe_haven_rotation", label: "Safe Haven", color: "text-yellow-400" },
+                      { key: "reflation_rally", label: "Reflation", color: "text-emerald-400" },
+                      { key: "stagflation", label: "Stagflation", color: "text-orange-400" },
+                      { key: "crisis", label: "Crisis", color: "text-red-400" },
+                    ].map(({ key, label, color }) => {
+                      const p = allProbs[key] ?? 0;
+                      if (p < 0.01) return null;
+                      return (
+                        <span key={key} className={color}>
+                          {label} {(p * 100).toFixed(0)}%
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {/* Confidence detail */}
+              {conf && (
+                <div className="text-[10px] text-gray-500 border-t border-gray-700/30 pt-1">
+                  Signal confidence in <span className="text-gray-300">{regimeName}</span> regime:
+                  {" "}
+                  <span className="text-gray-300">
+                    {(conf.regime_historical_hit_rate * 100).toFixed(1)}% directional hit rate
+                  </span>
+                  {" "}across {conf.n_historical_weeks} historical weeks
+                  {" "}(Spearman quality: {conf.regime_historical_quality > 0 ? "+" : ""}{(conf.regime_historical_quality * 100).toFixed(2)}%)
+                </div>
+              )}
+              {/* Description */}
+              {desc && (
+                <div className="text-[10px] text-gray-500 mt-1 italic">
+                  {desc}
+                </div>
+              )}
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {visibleGroups.map((group) => {
         const filteredRows = getFilteredRows(group.rows);
@@ -947,7 +1056,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           const p = enrichedRow.regime_adjusted * 100;
                           const cls = p > 0 ? "text-emerald-400" : p < 0 ? "text-red-400" : "text-gray-400";
                           return (
-                            <td key={col.key} title={`Regime-adjusted prediction for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. Calculated as Raw Prediction (${(enrichedRow.raw_prediction * 100).toFixed(2)}%) x Regime Confidence (${regime ? (regime.confidence * 100).toFixed(0) : "?"}%). In calm markets (low confidence), this will be much smaller than the raw prediction. In high-conviction regimes, it approaches the raw value. This is the actionable signal — it reflects both the model's stock-level view and its trust in current conditions.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                            <td key={col.key} title={`Regime-adjusted prediction for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. Calculated as Raw Prediction (${(enrichedRow.raw_prediction * 100).toFixed(2)}%) scaled by signal confidence derived from the current macro regime (${regime?.name ?? "?"}, hist. hit rate: ${regime?.confidence ? (regime.confidence.regime_historical_hit_rate * 100).toFixed(0) + "%" : "?"}). This is the actionable signal — it reflects both the model's stock-level view and its trust in current conditions.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
                               {p > 0 ? "+" : ""}{p.toFixed(2)}%
                             </td>
                           );
