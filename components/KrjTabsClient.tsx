@@ -82,13 +82,10 @@ type EnrichedRegime = {
   // New macro regime classifier fields
   name?: string;
   probability?: number;
-  dimensions?: {
-    risk_appetite: number;
-    safety_flow: number;
-    inflation_pressure: number;
-  };
+  dimensions?: Record<string, number>;
   all_probabilities?: Record<string, number>;
   description?: string;
+  is_transition?: boolean;
   confidence?: {
     score: number;
     label: string;
@@ -728,12 +725,16 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
           : null;
         const desc = regime.description ?? "";
 
-        // Color by regime name
+        const isTransition = Boolean(regime.is_transition);
+        // Color by regime name (V2: 7 regimes)
         const regimeColors: Record<string, { bg: string; border: string; text: string; dot: string }> = {
           "Crisis": { bg: "bg-red-900/50", border: "border-red-700/60", text: "text-red-200", dot: "bg-red-400" },
+          "Liquidity Shock": { bg: "bg-red-800/40", border: "border-red-600/50", text: "text-red-300", dot: "bg-red-500" },
           "Stagflation": { bg: "bg-orange-900/40", border: "border-orange-700/50", text: "text-orange-200", dot: "bg-orange-400" },
+          "Defensive Rotation": { bg: "bg-yellow-900/30", border: "border-yellow-700/40", text: "text-yellow-200", dot: "bg-yellow-400" },
           "Safe Haven Rotation": { bg: "bg-yellow-900/30", border: "border-yellow-700/40", text: "text-yellow-200", dot: "bg-yellow-400" },
           "Reflation Rally": { bg: "bg-emerald-900/40", border: "border-emerald-700/50", text: "text-emerald-200", dot: "bg-emerald-400" },
+          "Goldilocks": { bg: "bg-sky-900/40", border: "border-sky-700/50", text: "text-sky-200", dot: "bg-sky-400" },
           "Steady Growth": { bg: "bg-gray-800/60", border: "border-gray-700/40", text: "text-gray-300", dot: "bg-blue-400" },
         };
         const colors = regimeColors[regimeName] ?? regimeColors["Steady Growth"];
@@ -775,6 +776,11 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
               <span className="flex-1 min-w-0">
                 <span>
                   Macro Regime: <span className="font-semibold">{regimeName}</span>
+                  {isTransition && (
+                    <span className="ml-1.5 text-[10px] opacity-60 italic" title="Regime classification uncertain (low posterior probability)">
+                      (transition)
+                    </span>
+                  )}
                 </span>
                 <span className="ml-2 opacity-70 text-xs">
                   ({(regimeProb * 100).toFixed(0)}% probability)
@@ -792,36 +798,51 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
           </button>
           {regimeBannerExpanded && (
             <div className="mt-1 rounded bg-gray-800/40 border border-gray-700/30 px-3 py-2 text-xs text-gray-400">
-              {/* Macro dimensions */}
-              {dims && (
-                <div className="flex gap-4 mb-2">
-                  <DimGauge
-                    label="Risk Appetite"
-                    value={dims.risk_appetite}
-                    tooltip="PC1 (47% of benchmark variance). Positive = risk-on: equities, credit, EM rising vs dollar weakening. Negative = risk-off: flight to safety. Range: typically -2 to +2. Beyond ±3 is extreme (e.g. COVID crash was -4)."
-                  />
-                  <DimGauge
-                    label="Safety Flow"
-                    value={dims.safety_flow}
-                    tooltip="PC2 (19% of benchmark variance). Positive = gold, bonds, silver rising vs equities. Safe haven demand increasing. Negative = safe havens underperforming. Range: typically -2 to +2. Strong positive readings during uncertainty/geopolitical stress."
-                  />
-                  <DimGauge
-                    label="Inflation Pressure"
-                    value={dims.inflation_pressure}
-                    tooltip="PC3 (12% of benchmark variance). Positive = oil and commodities up, bonds down. Inflationary pressure. Negative = deflationary: commodities weak, bonds strong. Range: typically -2 to +2. Strong positive during 2022 rate-hike era."
-                  />
-                </div>
-              )}
-              {/* Regime probability breakdown */}
+              {/* Macro dimensions (dynamic: any factor keys from backend) */}
+              {dims && Object.keys(dims).length > 0 && (() => {
+                const factorLabels: Record<string, string> = {
+                  risk_appetite_4w: "Risk Appetite (4w)",
+                  risk_appetite_1w: "Risk Appetite (1w)",
+                  safety_flow_4w: "Safety Flow (4w)",
+                  safety_flow_1w: "Safety Flow (1w)",
+                  inflation_pressure_4w: "Inflation (4w)",
+                  inflation_pressure_1w: "Inflation (1w)",
+                  credit_stress_4w: "Credit Stress (4w)",
+                  credit_stress_1w: "Credit Stress (1w)",
+                  curve_slope_4w: "Curve Slope (4w)",
+                  curve_slope_1w: "Curve Slope (1w)",
+                  vol_panic: "Vol / Panic",
+                  speculative_liquidity_4w: "Speculative Liq (4w)",
+                  risk_appetite: "Risk Appetite",
+                  safety_flow: "Safety Flow",
+                  inflation_pressure: "Inflation Pressure",
+                };
+                return (
+                  <div className="flex flex-wrap gap-4 mb-2">
+                    {Object.entries(dims).map(([key, value]) => (
+                      <DimGauge
+                        key={key}
+                        label={factorLabels[key] ?? key}
+                        value={typeof value === "number" ? value : 0}
+                        tooltip={`Factor: ${key}. Scaled value; positive/negative indicate direction.`}
+                      />
+                    ))}
+                  </div>
+                );
+              })()}
+              {/* Regime probability breakdown (V2: 6-7 regimes) */}
               {allProbs && (
                 <div className="mb-2">
                   <div className="text-[10px] text-gray-500 mb-1">Regime Probabilities</div>
                   <div className="flex h-2.5 rounded-sm overflow-hidden gap-px">
                     {[
                       { key: "steady_growth", label: "Steady Growth", color: "bg-blue-600" },
-                      { key: "safe_haven_rotation", label: "Safe Haven", color: "bg-yellow-500" },
+                      { key: "goldilocks", label: "Goldilocks", color: "bg-sky-500" },
                       { key: "reflation_rally", label: "Reflation", color: "bg-emerald-500" },
+                      { key: "defensive_rotation", label: "Defensive", color: "bg-yellow-500" },
+                      { key: "safe_haven_rotation", label: "Safe Haven", color: "bg-yellow-600" },
                       { key: "stagflation", label: "Stagflation", color: "bg-orange-500" },
+                      { key: "liquidity_shock", label: "Liq Shock", color: "bg-red-500" },
                       { key: "crisis", label: "Crisis", color: "bg-red-600" },
                     ].map(({ key, label, color }) => {
                       const p = allProbs[key] ?? 0;
@@ -838,11 +859,14 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                   </div>
                   <div className="flex gap-3 mt-1 text-[10px] flex-wrap">
                     {[
-                      { key: "steady_growth", label: "Steady Growth", color: "text-blue-400" },
-                      { key: "safe_haven_rotation", label: "Safe Haven", color: "text-yellow-400" },
+                      { key: "steady_growth", label: "Steady", color: "text-blue-400" },
+                      { key: "goldilocks", label: "Goldilocks", color: "text-sky-400" },
                       { key: "reflation_rally", label: "Reflation", color: "text-emerald-400" },
+                      { key: "defensive_rotation", label: "Defensive", color: "text-yellow-400" },
+                      { key: "safe_haven_rotation", label: "Safe Haven", color: "text-yellow-500" },
                       { key: "stagflation", label: "Stagflation", color: "text-orange-400" },
-                      { key: "crisis", label: "Crisis", color: "text-red-400" },
+                      { key: "liquidity_shock", label: "Liq Shock", color: "text-red-400" },
+                      { key: "crisis", label: "Crisis", color: "text-red-500" },
                     ].map(({ key, label, color }) => {
                       const p = allProbs[key] ?? 0;
                       if (p < 0.01) return null;
