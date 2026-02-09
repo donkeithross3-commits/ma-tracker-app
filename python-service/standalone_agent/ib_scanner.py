@@ -269,7 +269,7 @@ class IBMergerArbScanner(EWrapper, EClient):
             return []
         by_key: Dict[tuple, dict] = {}
         for entry in orders:
-            key = IBSocketManager._order_content_key(entry)
+            key = IBMergerArbScanner._order_content_key(entry)
             oid = entry.get("orderId") or 0
             if key not in by_key or (by_key[key].get("orderId") or 0) < oid:
                 by_key[key] = entry
