@@ -58,9 +58,12 @@ type EnrichedTickerData = {
   decomposition: {
     krj: number;
     stock_specific: number;
-    market_regime: number;
+    market_state: number;
+    factor_sensitivity: number;
     peer_market: number;
     cross_sectional: number;
+    // Legacy compat: old key still accepted
+    market_regime?: number;
   };
   legacy_signal: string;
   legacy_long_sv: number | null;
@@ -960,19 +963,23 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                         // Signal source mini bar
                         if (col.key === "signal_source" && enrichedRow) {
                           const d = enrichedRow.decomposition;
+                          const mktState = d.market_state ?? d.market_regime ?? 0;
+                          const factorSens = d.factor_sensitivity ?? 0;
                           const peerMkt = d.peer_market ?? 0;
-                          const total = Math.abs(d.krj) + Math.abs(d.stock_specific) + Math.abs(d.market_regime) + Math.abs(peerMkt) + Math.abs(d.cross_sectional);
-                          const pctKrj = total > 0 ? Math.abs(d.krj) / total * 100 : 20;
-                          const pctStock = total > 0 ? Math.abs(d.stock_specific) / total * 100 : 20;
-                          const pctMarket = total > 0 ? Math.abs(d.market_regime) / total * 100 : 20;
-                          const pctPeer = total > 0 ? Math.abs(peerMkt) / total * 100 : 20;
-                          const pctCross = total > 0 ? Math.abs(d.cross_sectional) / total * 100 : 20;
+                          const total = Math.abs(d.krj) + Math.abs(d.stock_specific) + Math.abs(mktState) + Math.abs(factorSens) + Math.abs(peerMkt) + Math.abs(d.cross_sectional);
+                          const pctKrj = total > 0 ? Math.abs(d.krj) / total * 100 : 16.67;
+                          const pctStock = total > 0 ? Math.abs(d.stock_specific) / total * 100 : 16.67;
+                          const pctMktState = total > 0 ? Math.abs(mktState) / total * 100 : 16.67;
+                          const pctFactor = total > 0 ? Math.abs(factorSens) / total * 100 : 16.67;
+                          const pctPeer = total > 0 ? Math.abs(peerMkt) / total * 100 : 16.67;
+                          const pctCross = total > 0 ? Math.abs(d.cross_sectional) / total * 100 : 16.67;
                           return (
                             <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap">
-                              <div className="flex h-3 w-20 rounded-sm overflow-hidden" title={`SHAP signal decomposition for ${tickerUpper} — how much each category contributes to the prediction:\n\nBlue = KRJ Signal (${(d.krj*100).toFixed(2)}%): price action vs moving average (dip/strength)\nPurple = Stock Specific (${(d.stock_specific*100).toFixed(2)}%): vol ratio, SPX correlation, market cap, 52-week high proximity, return autocorrelation\nGreen = Market Regime (${(d.market_regime*100).toFixed(2)}%): breadth, dispersion, SPY momentum, market dip, vol regime\nTeal = Peer Market (${(peerMkt*100).toFixed(2)}%): adaptive per-ticker peer signal — dynamically selected correlated tickers weighted by predictive IC\nAmber = Cross-Sectional (${(d.cross_sectional*100).toFixed(2)}%): z-scores vs peers, percentile rank, interaction terms\n\nBright = positive (bullish) contribution, Dark = negative (bearish) contribution\nBar width = proportion of total explanation from that category\nClick row to expand full decomposition view.`}>
+                              <div className="flex h-3 w-20 rounded-sm overflow-hidden" title={`SHAP signal decomposition for ${tickerUpper} — how much each category contributes to the prediction:\n\nBlue = KRJ Signal (${(d.krj*100).toFixed(2)}%): price action vs moving average\nPurple = Stock Specific (${(d.stock_specific*100).toFixed(2)}%): vol, correlation, market cap, 52w high, autocorr\nGreen = Market State (${(mktState*100).toFixed(2)}%): breadth, dispersion, vol regime\nRose = Factor Sensitivity (${(factorSens*100).toFixed(2)}%): per-ticker betas to 10 macro factors\nTeal = Peer Market (${(peerMkt*100).toFixed(2)}%): adaptive peer signal weighted by IC\nAmber = Cross-Sectional (${(d.cross_sectional*100).toFixed(2)}%): z-scores, rank, interactions\n\nBright = bullish, Dark = bearish. Click row to expand.`}>
                                 <div style={{ width: `${pctKrj}%` }} className={d.krj >= 0 ? "bg-blue-500" : "bg-blue-800"} />
                                 <div style={{ width: `${pctStock}%` }} className={d.stock_specific >= 0 ? "bg-purple-500" : "bg-purple-800"} />
-                                <div style={{ width: `${pctMarket}%` }} className={d.market_regime >= 0 ? "bg-emerald-500" : "bg-emerald-800"} />
+                                <div style={{ width: `${pctMktState}%` }} className={mktState >= 0 ? "bg-emerald-500" : "bg-emerald-800"} />
+                                <div style={{ width: `${pctFactor}%` }} className={factorSens >= 0 ? "bg-rose-500" : "bg-rose-800"} />
                                 <div style={{ width: `${pctPeer}%` }} className={peerMkt >= 0 ? "bg-teal-500" : "bg-teal-800"} />
                                 <div style={{ width: `${pctCross}%` }} className={d.cross_sectional >= 0 ? "bg-amber-500" : "bg-amber-800"} />
                               </div>
@@ -1060,17 +1067,20 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                       <tr className="bg-gray-800/80">
                         <td colSpan={visibleColumns.length} className="px-3 py-2">
                           <div className="flex gap-6 items-start">
-                            {/* 5 SHAP group bars */}
+                            {/* 6 SHAP group bars */}
                             <div className="flex-1 space-y-1">
-                              <div className="text-xs text-gray-400 font-medium mb-1" title="SHAP (SHapley Additive exPlanations) decomposition of the LightGBM prediction into 5 interpretable signal categories. Each bar shows how much that category contributed to the total predicted return. Positive = bullish contribution, negative = bearish. The bars sum to the total raw prediction.">Signal Decomposition</div>
+                              <div className="text-xs text-gray-400 font-medium mb-1" title="SHAP (SHapley Additive exPlanations) decomposition of the LightGBM prediction into 6 interpretable signal categories. Each bar shows how much that category contributed to the total predicted return. Positive = bullish contribution, negative = bearish. The bars sum to the total raw prediction.">Signal Decomposition</div>
                               {([
                                 { key: "krj" as const, label: "KRJ Signal", barClass: "bg-blue-500/70", tip: "Legacy KRJ oscillator contribution: how far the stock's price dipped (long_sv) or rallied (short_sv, high_sv) relative to its reference moving average. Positive = price action is bullish, negative = bearish. Typical contribution: -0.02% to +0.02%. When this dominates (>0.05%), the stock's own price action is strongly driving the signal." },
                                 { key: "stock_specific" as const, label: "Stock Specific", barClass: "bg-purple-500/70", tip: "Stock-specific characteristics contribution: volatility ratio, SPX correlation, market cap, 52-week high proximity, and return autocorrelation. Typical contribution: -0.3% to +0.2%. Large negative values often come from small-cap, high-vol stocks that the model views as riskier. Near zero for blue-chips." },
-                                { key: "market_regime" as const, label: "Market Regime", barClass: "bg-emerald-500/70", tip: "Market-wide regime contribution from breadth, dispersion, SPY momentum, market dip, and vol regime. Same for all tickers in a given week — captures whether the overall market environment is bullish or bearish. Often the largest contributor (typically -1.5% to +0.5%). When this dominates, the model is saying 'market conditions matter more than stock selection right now.'" },
-                                { key: "peer_market" as const, label: "Peer Market", barClass: "bg-teal-500/70", tip: "Adaptive peer market contribution: dynamically selects correlated tickers with predictive ability (weighted by IC). Different for every ticker — e.g. bank stocks get XLF/IEF peers, tech gets QQQ/XLK. Typical contribution: -0.1% to +0.1%. Larger values mean this stock's sector/factor peers are sending a clear directional signal." },
+                                { key: "market_state" as const, label: "Market State", barClass: "bg-emerald-500/70", tip: "Market-wide state contribution from breadth, dispersion, and vol regime. Same for all tickers in a given week — captures whether the overall market environment is bullish or bearish. Typical contribution: -0.5% to +0.3%. Smaller than the old 'Market Regime' group because directional factors (SPY momentum, market dip) have been replaced by per-ticker factor sensitivity." },
+                                { key: "factor_sensitivity" as const, label: "Factor Sensitivity", barClass: "bg-rose-500/70", tip: "Per-ticker multi-factor contribution: rolling 60-day betas to 10 macro benchmarks (SPY, QQQ, IWM, GLD, SLV, TLT, UUP, USO, HYG, EEM) multiplied by each benchmark's current weekly return. DIFFERENT for every ticker — a bank has high beta to TLT/HYG, a gold miner to GLD/SLV, a tech stock to QQQ. This is the key factor that makes market impact stock-specific rather than uniform." },
+                                { key: "peer_market" as const, label: "Peer Market", barClass: "bg-teal-500/70", tip: "Adaptive peer market contribution: dynamically selects correlated tickers with predictive ability (weighted by IC). Different for every ticker — captures sector/thematic relationships beyond the 10 macro benchmarks. Typical contribution: -0.1% to +0.1%." },
                                 { key: "cross_sectional" as const, label: "Cross-Sectional", barClass: "bg-amber-500/70", tip: "Cross-sectional positioning: z-scores, percentile rank, and interaction terms vs the universe. Typical contribution: -0.02% to +0.02%. Captures relative strength or weakness. Large positive = stock is holding up better than peers; large negative = lagging." },
                               ]).map(({ key, label, barClass, tip }) => {
-                                const val = enrichedRow.decomposition[key] ?? 0;
+                                const decomp = enrichedRow.decomposition;
+                                const rawVal = key === "market_state" ? (decomp.market_state ?? decomp.market_regime ?? 0) : (decomp[key] ?? 0);
+                                const val = rawVal;
                                 const pct = val * 100;
                                 // Scale: map contribution to bar width (max ~50px per 1% contribution)
                                 const maxBarWidth = 120;
@@ -1105,7 +1115,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                                 );
                               })}
                               <div className="flex items-center gap-2 text-xs mt-1 pt-1 border-t border-gray-700/50">
-                                <span className="w-28 text-gray-300 text-right font-medium" title="Sum of all 5 SHAP contributions plus the model's base value. This equals the raw LightGBM prediction — the model's best estimate of this stock's 1-week forward return before regime adjustment.">Total (raw)</span>
+                                <span className="w-28 text-gray-300 text-right font-medium" title="Sum of all 6 SHAP contributions plus the model's base value. This equals the raw LightGBM prediction — the model's best estimate of this stock's 1-week forward return before regime adjustment.">Total (raw)</span>
                                 <div className="w-72" />
                                 <span className={`w-16 text-right font-mono font-medium ${enrichedRow.raw_prediction > 0 ? "text-emerald-300" : enrichedRow.raw_prediction < 0 ? "text-red-300" : "text-gray-400"}`}>
                                   {enrichedRow.raw_prediction > 0 ? "+" : ""}{(enrichedRow.raw_prediction * 100).toFixed(2)}%
@@ -1123,15 +1133,17 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                               {(() => {
                                 const d = enrichedRow.decomposition;
                                 const entries = [
-                                  { k: "Market regime", v: d.market_regime },
+                                  { k: "Market state", v: d.market_state ?? d.market_regime ?? 0 },
+                                  { k: "Factor sensitivity", v: d.factor_sensitivity ?? 0 },
                                   { k: "KRJ signal", v: d.krj },
                                   { k: "Stock-specific", v: d.stock_specific },
+                                  { k: "Peer market", v: d.peer_market ?? 0 },
                                   { k: "Cross-sectional", v: d.cross_sectional },
                                 ];
                                 const sorted = [...entries].sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
                                 const dominant = sorted[0];
                                 return (
-                                  <div className="text-gray-500" title="The signal category with the largest absolute SHAP contribution — the primary reason this stock has a bullish or bearish prediction. When 'Market regime' dominates, the prediction is mainly about overall market conditions, not this specific stock.">
+                                  <div className="text-gray-500" title="The signal category with the largest absolute SHAP contribution — the primary reason this stock has a bullish or bearish prediction. When 'Factor sensitivity' dominates, the prediction is driven by this stock's specific macro factor exposures (betas to SPY, QQQ, TLT, GLD, etc).">
                                     Dominant driver: <span className="text-gray-300">{dominant.k}</span>{" "}
                                     ({dominant.v > 0 ? "+" : ""}{(dominant.v * 100).toFixed(2)}%)
                                   </div>
