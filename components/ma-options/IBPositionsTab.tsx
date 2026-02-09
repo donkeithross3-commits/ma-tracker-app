@@ -1928,6 +1928,29 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             >
                               Trade stock
                             </button>
+                            {group.rows.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  // Pick the primary row (first non-OPT, or first row)
+                                  const row = group.rows.find((r) => r.contract?.secType !== "OPT") || group.rows[0];
+                                  const c = row.contract;
+                                  const last = legPrices[`${c.symbol || ""}:${c.secType}:${c.strike || ""}:${c.lastTradeDateOrContractMonth || ""}:${c.right || ""}`]?.last;
+                                  setRiskModalPosition({
+                                    symbol: c.symbol || c.localSymbol || "?",
+                                    secType: c.secType || "STK",
+                                    position: row.position,
+                                    avgCost: row.avgCost,
+                                    lastPrice: last || (quote && "price" in quote ? quote.price : undefined),
+                                    contract: c as unknown as Record<string, unknown>,
+                                  });
+                                }}
+                                className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-bold bg-yellow-700 hover:bg-yellow-600 text-white"
+                                title="Open Risk Manager for this position"
+                              >
+                                &#9881; Risk Mgr
+                              </button>
+                            )}
                           </div>
                           {/* ---- Per-position working orders ---- */}
                           {(() => {
