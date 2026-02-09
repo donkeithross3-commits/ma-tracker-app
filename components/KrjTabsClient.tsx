@@ -55,6 +55,14 @@ type GroupData = {
 type EnrichedTickerData = {
   raw_prediction: number;
   regime_adjusted: number;
+  ticker_confidence?: number;
+  optimized_signal?: string;
+  ticker_regime_confidence?: {
+    hit_rate: number;
+    raw_hit_rate: number;
+    n_weeks: number;
+    confidence: number;
+  };
   decomposition: {
     krj: number;
     stock_specific: number;
@@ -1057,9 +1065,10 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                         }
                         if (col.key === "adj_prediction" && enrichedRow) {
                           const p = enrichedRow.regime_adjusted * 100;
+                          const tickerConf = enrichedRow.ticker_confidence ?? 0;
                           const cls = p > 0 ? "text-emerald-400" : p < 0 ? "text-red-400" : "text-gray-400";
                           return (
-                            <td key={col.key} title={`Regime-adjusted prediction for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. Calculated as Raw Prediction (${(enrichedRow.raw_prediction * 100).toFixed(2)}%) scaled by signal confidence derived from the current macro regime (${regime?.name ?? regime?.label ?? "?"}). This is the actionable signal — it reflects both the model's stock-level view and its trust in current conditions.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                            <td key={col.key} title={`Regime-adjusted prediction for ${tickerUpper}: ${p > 0 ? "+" : ""}${p.toFixed(3)}%. Calculated as Raw Prediction (${(enrichedRow.raw_prediction * 100).toFixed(2)}%) x Per-Ticker Confidence (${(tickerConf * 100).toFixed(1)}%). Confidence is based on ${tickerUpper}'s historical directional hit rate in the current "${regime?.name ?? "?"}" regime${enrichedRow.ticker_regime_confidence ? ` (${(enrichedRow.ticker_regime_confidence.hit_rate * 100).toFixed(0)}% hit rate over ${enrichedRow.ticker_regime_confidence.n_weeks} weeks)` : ""}.`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
                               {p > 0 ? "+" : ""}{p.toFixed(2)}%
                             </td>
                           );
@@ -1072,7 +1081,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           );
                         }
 
-                        // Signal source mini bar
+                        // Signal source mini bar (with intensity shading)
                         if (col.key === "signal_source" && enrichedRow) {
                           const d = enrichedRow.decomposition;
                           const mktState = d.market_state ?? d.market_regime ?? 0;
@@ -1085,9 +1094,12 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           const pctFactor = total > 0 ? Math.abs(factorSens) / total * 100 : 16.67;
                           const pctPeer = total > 0 ? Math.abs(peerMkt) / total * 100 : 16.67;
                           const pctCross = total > 0 ? Math.abs(d.cross_sectional) / total * 100 : 16.67;
+                          // Intensity: scale opacity by total SHAP magnitude relative to a reference (2% = full intensity)
+                          const intensityRef = 0.02;
+                          const intensity = Math.max(0.15, Math.min(1.0, total / intensityRef));
                           return (
                             <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap">
-                              <div className="flex h-3 w-20 rounded-sm overflow-hidden" title={`SHAP signal decomposition for ${tickerUpper} — how much each category contributes to the prediction:\n\nBlue = KRJ Signal (${(d.krj*100).toFixed(2)}%): price action vs moving average\nPurple = Stock Specific (${(d.stock_specific*100).toFixed(2)}%): vol, correlation, market cap, 52w high, autocorr\nGreen = Market State (${(mktState*100).toFixed(2)}%): breadth, dispersion, vol regime\nRose = Factor Sensitivity (${(factorSens*100).toFixed(2)}%): per-ticker betas to 10 macro factors\nTeal = Peer Market (${(peerMkt*100).toFixed(2)}%): adaptive peer signal weighted by IC\nAmber = Cross-Sectional (${(d.cross_sectional*100).toFixed(2)}%): z-scores, rank, interactions\n\nBright = bullish, Dark = bearish. Click row to expand.`}>
+                              <div className="flex h-3 w-20 rounded-sm overflow-hidden" style={{ opacity: intensity }} title={`SHAP signal decomposition for ${tickerUpper} (intensity: ${(intensity*100).toFixed(0)}%) — how much each category contributes to the prediction:\n\nBlue = KRJ Signal (${(d.krj*100).toFixed(2)}%): price action vs moving average\nPurple = Stock Specific (${(d.stock_specific*100).toFixed(2)}%): vol, correlation, market cap, 52w high, autocorr\nGreen = Market State (${(mktState*100).toFixed(2)}%): breadth, dispersion, vol regime\nRose = Factor Sensitivity (${(factorSens*100).toFixed(2)}%): per-ticker betas to 10 macro factors\nTeal = Peer Market (${(peerMkt*100).toFixed(2)}%): adaptive peer signal weighted by IC\nAmber = Cross-Sectional (${(d.cross_sectional*100).toFixed(2)}%): z-scores, rank, interactions\n\nBright = bullish, Dark = bearish. Faded = low conviction. Click row to expand.`}>
                                 <div style={{ width: `${pctKrj}%` }} className={d.krj >= 0 ? "bg-blue-500" : "bg-blue-800"} />
                                 <div style={{ width: `${pctStock}%` }} className={d.stock_specific >= 0 ? "bg-purple-500" : "bg-purple-800"} />
                                 <div style={{ width: `${pctMktState}%` }} className={mktState >= 0 ? "bg-emerald-500" : "bg-emerald-800"} />
@@ -1129,6 +1141,11 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                         }
                         
                         const isNumeric = numericCols.includes(col.key);
+
+                        // Override optimized signal columns from enriched JSON data
+                        if (col.key === "optimized_signal" && enrichedRow && enrichedRow.optimized_signal) {
+                          value = enrichedRow.optimized_signal;
+                        }
                         
                         // Color coding for signal columns
                         let cellColorClass = "";
