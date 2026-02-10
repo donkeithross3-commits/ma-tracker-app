@@ -413,8 +413,16 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [showAllOrders, setShowAllOrders] = useState(true);
   const [collapsedBoxOrders, setCollapsedBoxOrders] = useState<Record<string, boolean>>({});
 
+  const filteredOpenOrders = useMemo(
+    () =>
+      selectedAccount
+        ? openOrders.filter((o) => o.order.account === selectedAccount)
+        : openOrders,
+    [openOrders, selectedAccount]
+  );
+
   // ---- Order modification state ----
-  const [editingOrderIdx, setEditingOrderIdx] = useState<number | null>(null);
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
   const [editLmtPrice, setEditLmtPrice] = useState("");
   const [editStopPrice, setEditStopPrice] = useState("");
   const [editQty, setEditQty] = useState("");
@@ -556,10 +564,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
   }, [fetchOpenOrders]);
 
-  /** Start editing an order — pre-fill with current values.
-   *  We track by array index (not orderId) because multiple orders can share the same orderId. */
-  const startEditOrder = useCallback((o: IBOpenOrder, idx: number) => {
-    setEditingOrderIdx(idx);
+  /** Start editing an order — pre-fill with current values. */
+  const startEditOrder = useCallback((o: IBOpenOrder) => {
+    setEditingOrderId(o.orderId);
     setEditLmtPrice(
       o.order.lmtPrice != null ? o.order.lmtPrice.toFixed(2) : ""
     );
@@ -571,7 +578,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   }, []);
 
   const cancelEditOrder = useCallback(() => {
-    setEditingOrderIdx(null);
+    setEditingOrderId(null);
     setEditError(null);
   }, []);
 
@@ -651,7 +658,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         }
       }
       // Success — close editor and refresh orders
-      setEditingOrderIdx(null);
+      setEditingOrderId(null);
       setEditError(null);
       setTimeout(() => fetchOpenOrders(), 500);
     } catch (e) {
@@ -661,13 +668,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     }
   }, [editQty, editLmtPrice, editStopPrice, fetchOpenOrders]);
 
-  /** Get open orders for a specific underlying symbol */
+  /** Get open orders for a specific underlying symbol (uses filteredOpenOrders so account filter applies) */
   const ordersForTicker = useCallback((ticker: string) => {
-    return openOrders.filter((o) => {
+    return filteredOpenOrders.filter((o) => {
       const sym = o.contract?.symbol?.toUpperCase() || "";
       return sym === ticker.toUpperCase();
     });
-  }, [openOrders]);
+  }, [filteredOpenOrders]);
 
   const [krjSignals, setKrjSignals] = useState<Record<string, "Long" | "Short" | "Neutral" | null>>({});
   const [requestingSignalTicker, setRequestingSignalTicker] = useState<string | null>(null);
@@ -1603,7 +1610,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
             className="flex items-center gap-2 text-sm font-semibold text-gray-200 hover:text-white"
           >
             <span className={`transition-transform ${showAllOrders ? "rotate-90" : ""}`}>&#9654;</span>
-            Working Orders ({openOrders.length})
+            Working Orders ({filteredOpenOrders.length})
           </button>
           <div className="flex items-center gap-2">
             <ColumnChooser columns={ORDERS_COLUMNS} visible={ordVisibleKeys} defaults={ORDERS_DEFAULTS} onChange={handleOrdColsChange} locked={ORDERS_LOCKED} />
@@ -1622,7 +1629,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
             {openOrdersError && (
               <div className="px-3 py-2 text-sm text-red-400">{openOrdersError}</div>
             )}
-            {openOrders.length === 0 ? (
+            {filteredOpenOrders.length === 0 ? (
               <div className="px-3 py-3 text-sm text-gray-400">No working orders.</div>
             ) : (
               <table className="w-full text-sm d-table">
@@ -1641,11 +1648,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   </tr>
                 </thead>
                 <tbody>
-                  {openOrders.map((o, oIdx) => {
-                    const isEditing = editingOrderIdx === oIdx;
+                  {filteredOpenOrders.map((o, oIdx) => {
+                    const isEditing = editingOrderId === o.orderId;
                     return (
                       <tr
-                        key={`order-${oIdx}-${o.orderId}`}
+                        key={`order-${o.orderId}`}
                         className={`border-b border-gray-700/50 ${isEditing ? "bg-indigo-900/20" : "hover:bg-gray-700/30"}`}
                       >
                         {ordVisibleSet.has("account") && <td className="py-1.5 px-3 text-gray-300">{getAccountLabel(o.order.account, userAlias)}</td>}
@@ -1752,7 +1759,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               <>
                                 <button
                                   type="button"
-                                  onClick={() => startEditOrder(o, oIdx)}
+                                  onClick={() => startEditOrder(o)}
                                   className="min-h-[28px] px-2 py-0.5 rounded text-xs font-medium bg-indigo-800 hover:bg-indigo-700 text-white"
                                 >
                                   Edit
@@ -2060,11 +2067,10 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                   Working Orders ({tickerOrders.length})
                                 </button>
                                 {boxOpen && tickerOrders.map((o) => {
-                                  const globalIdx = openOrders.indexOf(o);
-                                  const isEd = editingOrderIdx === globalIdx;
+                                  const isEd = editingOrderId === o.orderId;
                                   return (
                                   <div
-                                    key={`ticker-order-${globalIdx}-${o.orderId}`}
+                                    key={`ticker-order-${o.orderId}`}
                                     className={`flex flex-wrap items-center gap-2 px-3 py-1.5 border-b border-gray-700/30 text-xs last:border-b-0 ${isEd ? "bg-indigo-900/20" : ""}`}
                                   >
                                     <span className={`font-semibold ${o.order.action === "BUY" ? "text-blue-400" : "text-red-400"}`}>
@@ -2149,7 +2155,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                         <>
                                           <button
                                             type="button"
-                                            onClick={() => startEditOrder(o, globalIdx)}
+                                            onClick={() => startEditOrder(o)}
                                             className="min-h-[24px] px-2 py-0.5 rounded text-xs font-medium bg-indigo-800/80 hover:bg-indigo-700 text-white"
                                           >
                                             Edit
