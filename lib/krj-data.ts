@@ -155,6 +155,26 @@ const KRJ_CSV_COLUMNS = [
 /** Path to on-demand (single-ticker) signals merged into list data */
 const ON_DEMAND_SIGNALS_PATH = path.join(process.cwd(), "data", "krj", "on_demand_signals.json");
 
+/** Path to optional ticker -> market cap (billions) JSON; pipeline or script can write this */
+const TICKER_MARKET_CAPS_PATH = path.join(process.cwd(), "data", "krj", "ticker_market_caps.json");
+
+function loadTickerMarketCaps(): Record<string, number> {
+  try {
+    if (!fs.existsSync(TICKER_MARKET_CAPS_PATH)) return {};
+    const raw = fs.readFileSync(TICKER_MARKET_CAPS_PATH, "utf8");
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, number> = {};
+    for (const [ticker, val] of Object.entries(data)) {
+      const t = (ticker || "").toUpperCase();
+      const n = Number(val);
+      if (t && !Number.isNaN(n) && n > 0) out[t] = n;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Row is a placeholder when it has a ticker but no Friday close or signal (no CSV data yet).
  */
@@ -316,19 +336,9 @@ export async function getKrjListsForUser(userId: string | null): Promise<{
           if (upperTicker.startsWith("C:")) continue;
           // ETFs/FX: only show tickers that have data (CSV or on-demand). Do not add placeholders so the tab matches the original behavior and is not cluttered with "No signal yet" rows.
           if (dbList.slug === "etfs_fx") continue;
-          // #region agent log
-          if (placeholderRows.length === 0 && dbList.slug) {
-            fetch("http://127.0.0.1:7242/ingest/5eb096b0-06f6-4f03-a0db-0e4112629bad", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "krj-data.ts:placeholder", message: "placeholder added", data: { listSlug: dbList.slug, ticker: upperTicker }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H1" }) }).catch(() => {});
-          }
-          // #endregion
           placeholderRows.push(makePlaceholderRow(ticker));
         }
       }
-      // #region agent log
-      if (placeholderRows.length > 0) {
-        fetch("http://127.0.0.1:7242/ingest/5eb096b0-06f6-4f03-a0db-0e4112629bad", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location: "krj-data.ts:placeholders", message: "placeholder rows added", data: { listSlug: dbList.slug, placeholderTickers: placeholderRows.map((r) => r.ticker), count: placeholderRows.length }, timestamp: Date.now(), sessionId: "debug-session", hypothesisId: "H1" }) }).catch(() => {});
-      }
-      // #endregion
       // Build rows map for quick lookup
       const rowMap = new Map<string, RawRow>();
       for (const row of [...rowsFromOwnCsv, ...rowsFromMaster, ...placeholderRows]) {
@@ -373,6 +383,47 @@ export async function getKrjListsForUser(userId: string | null): Promise<{
       if (bIdx === -1) return -1;
       return aIdx - bIdx;
     });
+  }
+
+  // Enrich market_cap_b: 1) optional JSON file (pipeline), 2) ticker_master (DB)
+  const allTickers = new Set<string>();
+  for (const list of lists) {
+    for (const row of list.rows) {
+      const t = (row.ticker || "").trim().toUpperCase();
+      if (t) allTickers.add(t);
+    }
+  }
+  const tickerArray = Array.from(allTickers);
+  const marketCapByTicker: Record<string, number> = loadTickerMarketCaps();
+  if (tickerArray.length > 0) {
+    try {
+      type Row = { ticker: string; market_cap_usd: unknown };
+      const rows = await prisma.$queryRawUnsafe<Row[]>(
+        "SELECT ticker, market_cap_usd FROM ticker_master WHERE ticker = ANY($1::text[]) AND market_cap_usd IS NOT NULL",
+        tickerArray
+      );
+      for (const r of rows) {
+        const cap = Number(r.market_cap_usd);
+        const t = (r.ticker || "").toUpperCase();
+        if (t && !Number.isNaN(cap) && cap > 0) {
+          const capB = cap / 1e9;
+          if (marketCapByTicker[t] == null) marketCapByTicker[t] = capB;
+        }
+      }
+    } catch {
+      // ticker_master may not exist or may differ; skip DB enrichment
+    }
+  }
+  if (Object.keys(marketCapByTicker).length > 0) {
+    for (const list of lists) {
+      for (const row of list.rows) {
+        const t = (row.ticker || "").trim().toUpperCase();
+        const capB = marketCapByTicker[t];
+        if (capB != null && (!row.market_cap_b || String(row.market_cap_b).trim() === "")) {
+          row.market_cap_b = String(capB);
+        }
+      }
+    }
   }
 
   return {
