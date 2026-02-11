@@ -133,7 +133,7 @@
 
 [data-density="comfort"] .d-table th,
 [data-density="comfort"] .d-table td {
-  font-size: clamp(0.875rem, calc(100cqi / var(--visible-cols, 15) / 6), 1.375rem);
+  font-size: clamp(var(--d-table-font, 0.875rem), calc(100cqi / var(--visible-cols, 15) / 6), 1.375rem);
   padding-top: clamp(0.25rem, calc(100cqi / var(--visible-cols, 15) / 20), 0.75rem);
   padding-bottom: clamp(0.25rem, calc(100cqi / var(--visible-cols, 15) / 20), 0.75rem);
   padding-left: clamp(0.25rem, calc(100cqi / var(--visible-cols, 15) / 16), 0.75rem);
@@ -143,7 +143,7 @@
 }
 
 [data-density="comfort"] .d-table th {
-  font-size: clamp(0.75rem, calc(100cqi / var(--visible-cols, 15) / 7), 1.125rem);
+  font-size: clamp(var(--d-header-font, 0.75rem), calc(100cqi / var(--visible-cols, 15) / 7), 1.125rem);
 }
 
 /* ── Comfort-mode: global interactive element scaling ──
@@ -251,6 +251,11 @@
   /* ─── Small text promotion: text-xs → text-sm ─── */
   [data-density="comfort"] .text-xs:not(.no-density) {
     font-size: 0.875rem !important;  /* promote xs to sm */
+  }
+
+  /* ─── Body text promotion: text-sm → 1rem for readability ─── */
+  [data-density="comfort"] .text-sm:not(.no-density) {
+    font-size: 1rem !important;
   }
 
 }

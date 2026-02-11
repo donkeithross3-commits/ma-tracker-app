@@ -22,6 +22,18 @@ const POSITIONS_COLUMNS: ColumnDef[] = [
 ];
 const POSITIONS_DEFAULTS = POSITIONS_COLUMNS.map((c) => c.key);
 const POSITIONS_LOCKED = ["symbol", "trade"];
+/** Weights for position table columns (percent-like); sum normalized to 100% for visible columns. */
+const POSITIONS_COL_WEIGHTS: Record<string, number> = {
+  account: 10,
+  symbol: 18,
+  type: 5,
+  pos: 6,
+  avgCost: 12,
+  last: 8,
+  mktVal: 14,
+  pnl: 14,
+  trade: 9,
+};
 
 /* ─── Column definitions for Working Orders table ─── */
 const ORDERS_COLUMNS: ColumnDef[] = [
@@ -2192,9 +2204,12 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                         <div className="min-w-0 overflow-hidden d-table-wrap" style={{ "--visible-cols": posVisibleKeys.length } as React.CSSProperties}>
                           <table className="w-full text-sm table-fixed d-table">
                             <colgroup>
-                              {posVisibleKeys.map((key) => (
-                                <col key={key} style={{ width: `${100 / posVisibleKeys.length}%` }} />
-                              ))}
+                              {(() => {
+                                const weightSum = posVisibleKeys.reduce((s, k) => s + (POSITIONS_COL_WEIGHTS[k] ?? 10), 0);
+                                return posVisibleKeys.map((key) => (
+                                  <col key={key} style={{ width: `${((POSITIONS_COL_WEIGHTS[key] ?? 10) / weightSum) * 100}%` }} />
+                                ));
+                              })()}
                             </colgroup>
                             <thead>
                               <tr className="bg-gray-700/50 text-gray-200 text-sm border-b border-gray-600">
@@ -2242,12 +2257,12 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       </td>
                                     )}
                                     {posVisibleSet.has("avgCost") && (
-                                      <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm whitespace-nowrap">
+                                      <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm whitespace-nowrap" title={formatAvgCost(row.avgCost)}>
                                         {formatAvgCost(row.avgCost)}
                                       </td>
                                     )}
                                     {posVisibleSet.has("last") && (
-                                      <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-200 whitespace-nowrap">
+                                      <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-200 whitespace-nowrap" title={isLegLoading ? undefined : rowPrice != null ? rowPrice.toFixed(2) : "—"}>
                                         {isLegLoading ? "…" : rowPrice != null ? rowPrice.toFixed(2) : "—"}
                                       </td>
                                     )}
@@ -2310,14 +2325,14 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                   <td colSpan={["account","symbol","type","pos","avgCost"].filter(k => posVisibleSet.has(k)).length || 1} className="py-2 px-2 text-right text-gray-300 whitespace-nowrap">Totals</td>
                                   {posVisibleSet.has("last") && <td className="py-2 px-2"></td>}
                                   {posVisibleSet.has("mktVal") && (
-                                    <td className="py-2 px-2 text-right tabular-nums text-white whitespace-nowrap">
+                                    <td className="py-2 px-2 text-right tabular-nums text-white whitespace-nowrap" title={formatCostBasis(groupMktVal)}>
                                       {formatCostBasis(groupMktVal)}
                                     </td>
                                   )}
                                   {posVisibleSet.has("pnl") && (
                                     <td className={`py-2 px-2 text-right tabular-nums font-bold whitespace-nowrap ${
                                       groupPnl != null && groupPnl >= 0 ? "text-green-400" : "text-red-400"
-                                    }`}>
+                                    }`} title={groupPnl != null ? formatPnl(groupPnl) : undefined}>
                                       {groupPnl != null ? formatPnl(groupPnl) : "—"}
                                     </td>
                                   )}
