@@ -254,7 +254,7 @@
   }
 
   /* ─── Body text promotion: text-sm → 1rem for readability ─── */
-  [data-density="comfort"] .text-sm:not(.no-density) {
+  [data-density="comfort"] [class~="text-sm"]:not(.no-density) {
     font-size: 1rem !important;
   }
 
