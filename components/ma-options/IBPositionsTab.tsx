@@ -827,6 +827,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const [stockOrderQuoteRefreshing, setStockOrderQuoteRefreshing] = useState(false);
   const [stockOrderTicker, setStockOrderTicker] = useState(""); // underlying ticker for open ticket
   const stockOrderPriceInitRef = useRef(false); // track whether we've auto-filled price
+  const stockOrderResultRef = useRef<HTMLDivElement>(null);
   // Option-specific fields (used when ticketSecType === "OPT")
   const [ticketSecType, setTicketSecType] = useState<"STK" | "OPT">("STK");
   const [ticketExpiry, setTicketExpiry] = useState("");
@@ -1038,6 +1039,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       setStockOrderSubmitting(false);
     }
   }, [stockOrderKey, stockOrderAction, stockOrderType, stockOrderTif, stockOrderQty, stockOrderLmtPrice, stockOrderStopPrice, stockOrderAccount, ticketSecType, ticketExpiry, ticketStrike, ticketRight, fetchOpenOrders]);
+
+  // Scroll order result (accepted/error) into view when it appears so it's not cut off
+  useEffect(() => {
+    if (stockOrderResult != null && stockOrderKey != null) {
+      stockOrderResultRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [stockOrderResult, stockOrderKey]);
 
   // Manual tickers (position boxes without an IB position); persisted in user preferences
   const [manualTickers, setManualTickers] = useState<ManualTickerEntry[]>([]);
@@ -2577,7 +2585,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         };
         return (
         <div className="fixed inset-0 z-50 bg-gray-950/95 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeStockOrder(); }}>
-          <div className="max-w-6xl mx-auto px-5 py-4 min-h-screen flex flex-col">
+          <div className="max-w-6xl mx-auto px-5 py-4 flex flex-col">
             {/* ── Top bar: BUY/SELL toggle + contract info + spot + account + close ── */}
             <div className="flex items-center gap-4 mb-4 flex-wrap">
               {/* BUY / SELL toggle */}
@@ -2697,7 +2705,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
             </div>
 
             {/* ── Main body: 3-column layout ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_1fr] gap-5 flex-1">
+            <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_1fr] gap-5">
 
               {/* Column 1: Order type + TIF */}
               <div className="flex flex-col gap-3">
@@ -2914,6 +2922,21 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   )}
                 </div>
               )}
+              {/* Result message above button so it's always visible and not cut off */}
+              {(stockOrderResult?.error ?? stockOrderResult?.orderId) && (
+                <div ref={stockOrderResultRef} className="min-h-0">
+                  {stockOrderResult?.error && (
+                    <div className="p-4 rounded-xl bg-red-900/50 border border-red-700 text-red-200 text-lg">
+                      {stockOrderResult.error}
+                    </div>
+                  )}
+                  {stockOrderResult?.orderId && !stockOrderResult.error && (
+                    <div className="p-4 rounded-xl bg-green-900/50 border border-green-700 text-green-200 text-lg">
+                      Order #{stockOrderResult.orderId} — {stockOrderResult.status || "Submitted"}
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 type="button"
                 onClick={submitStockOrder}
@@ -2928,16 +2951,6 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   ? "Sending order…"
                   : `${stockOrderAction} ${stockOrderQty || "0"} ${unitLabel}`}
               </button>
-              {stockOrderResult?.error && (
-                <div className="p-4 rounded-xl bg-red-900/50 border border-red-700 text-red-200 text-lg">
-                  {stockOrderResult.error}
-                </div>
-              )}
-              {stockOrderResult?.orderId && !stockOrderResult.error && (
-                <div className="p-4 rounded-xl bg-green-900/50 border border-green-700 text-green-200 text-lg">
-                  Order #{stockOrderResult.orderId} — {stockOrderResult.status || "Submitted"}
-                </div>
-              )}
             </div>
           </div>
         </div>
