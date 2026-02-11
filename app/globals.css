@@ -121,6 +121,11 @@
   container-type: inline-size;
 }
 
+.d-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 [data-density="comfort"] .d-table {
   table-layout: fixed;
   width: 100%;

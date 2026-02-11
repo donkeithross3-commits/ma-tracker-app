@@ -1900,10 +1900,10 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                     return (
                       <div
                         key={`group-${group.key}`}
-                        className={`rounded-lg border border-gray-600 overflow-hidden border-l-4 ${accent}`}
+                        className={`min-w-0 rounded-lg border border-gray-600 overflow-hidden border-l-4 ${accent}`}
                       >
                         <div
-                          className={`flex flex-col gap-1.5 px-4 py-3 border-b border-gray-600 ${headerAccent}`}
+                          className={`min-w-0 flex flex-col gap-1.5 px-4 py-3 border-b border-gray-600 ${headerAccent}`}
                         >
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                             <span className="text-xl font-bold text-white tracking-tight">
@@ -1974,7 +1974,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               {formatCostBasis(group.costBasis)}
                             </span>
                             {groupPnl != null && (
-                              <span className={`tabular-nums font-semibold whitespace-nowrap ${groupPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                              <span className={`tabular-nums font-semibold ${groupPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
                                 P&L: {formatPnl(groupPnl)}
                                 {group.costBasis !== 0 && (
                                   <span className="text-xs ml-1 opacity-75">
@@ -2181,18 +2181,12 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             );
                           })()}
                         </div>
-                        <div className="overflow-x-auto d-table-wrap" style={{ "--visible-cols": posVisibleKeys.length } as React.CSSProperties}>
-                          <table className="w-full text-sm table-fixed d-table" style={{ minWidth: posVisibleKeys.length >= 8 ? 860 : posVisibleKeys.length * 100 }}>
+                        <div className="min-w-0 overflow-hidden d-table-wrap" style={{ "--visible-cols": posVisibleKeys.length } as React.CSSProperties}>
+                          <table className="w-full text-sm table-fixed d-table">
                             <colgroup>
-                              {posVisibleSet.has("account") && <col className="w-[90px]" />}
-                              {posVisibleSet.has("symbol") && <col />}
-                              {posVisibleSet.has("type") && <col className="w-[52px]" />}
-                              {posVisibleSet.has("pos") && <col className="w-[100px]" />}
-                              {posVisibleSet.has("avgCost") && <col className="w-[110px]" />}
-                              {posVisibleSet.has("last") && <col className="w-[90px]" />}
-                              {posVisibleSet.has("mktVal") && <col className="w-[135px]" />}
-                              {posVisibleSet.has("pnl") && <col className="w-[145px]" />}
-                              {posVisibleSet.has("trade") && <col className="w-[84px]" />}
+                              {posVisibleKeys.map((key) => (
+                                <col key={key} style={{ width: `${100 / posVisibleKeys.length}%` }} />
+                              ))}
                             </colgroup>
                             <thead>
                               <tr className="bg-gray-700/50 text-gray-200 text-sm border-b border-gray-600">
