@@ -2583,6 +2583,31 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
           const cur = parseFloat(current) || 0;
           setter(Math.max(0, cur + d * sign).toFixed(2));
         };
+        // Round-off helpers (magnitude-based step)
+        const getQtyRoundStep = (value: number): number => {
+          const v = Math.abs(value);
+          if (v < 10) return 5;
+          if (v < 100) return 10;
+          if (v < 1000) return 50;
+          return 100;
+        };
+        const roundQtyDown = (value: number): number => Math.max(0, Math.floor(value / getQtyRoundStep(value)) * getQtyRoundStep(value));
+        const roundQtyUp = (value: number): number => Math.ceil(value / getQtyRoundStep(value)) * getQtyRoundStep(value);
+        const getPriceRoundStep = (value: number): number => {
+          const v = Math.abs(value);
+          if (v < 1) return 0.01;
+          if (v < 20) return 0.10;
+          if (v < 100) return 0.50;
+          return 1;
+        };
+        const roundPriceDown = (value: number): string => {
+          const step = getPriceRoundStep(value);
+          return Math.max(0, Math.floor(value / step) * step).toFixed(2);
+        };
+        const roundPriceUp = (value: number): string => {
+          const step = getPriceRoundStep(value);
+          return (Math.ceil(value / step) * step).toFixed(2);
+        };
         return (
         <div className="fixed inset-0 z-50 bg-gray-950/95 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeStockOrder(); }}>
           <div className="max-w-6xl mx-auto px-5 py-4 flex flex-col">
@@ -2773,9 +2798,36 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   value={stockOrderQty}
                   onChange={(e) => setStockOrderQty(e.target.value)}
                   placeholder="0"
-                  className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none mb-3"
+                  className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none mb-2"
                 />
-
+                {/* Round quantity to nearby step (magnitude-based) */}
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = parseInt(stockOrderQty) || 0;
+                      const step = getQtyRoundStep(cur);
+                      setStockOrderQty(String(roundQtyDown(cur)));
+                    }}
+                    title={`Round quantity down to nearest ${getQtyRoundStep(parseInt(stockOrderQty) || 0)}`}
+                    className="min-h-[68px] rounded-xl border-2 border-gray-500 bg-gray-700/80 hover:bg-gray-600 text-gray-200 text-lg font-bold"
+                    aria-label={`Round quantity down to nearest ${getQtyRoundStep(parseInt(stockOrderQty) || 0)}`}
+                  >
+                    Round ↓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = parseInt(stockOrderQty) || 0;
+                      setStockOrderQty(String(roundQtyUp(cur)));
+                    }}
+                    title={`Round quantity up to nearest ${getQtyRoundStep(parseInt(stockOrderQty) || 0)}`}
+                    className="min-h-[68px] rounded-xl border-2 border-gray-500 bg-gray-700/80 hover:bg-gray-600 text-gray-200 text-lg font-bold"
+                    aria-label={`Round quantity up to nearest ${getQtyRoundStep(parseInt(stockOrderQty) || 0)}`}
+                  >
+                    Round ↑
+                  </button>
+                </div>
                 {/* ── Absolute quantity buttons (mode-independent) ── */}
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <button
@@ -2844,6 +2896,26 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                       placeholder="0.00"
                       className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
                     />
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setStockOrderLmtPrice(roundPriceDown(parseFloat(stockOrderLmtPrice) || 0))}
+                        title={`Round limit price down to nearest $${(s => s >= 1 ? s : s.toFixed(2))(getPriceRoundStep(parseFloat(stockOrderLmtPrice) || 0))}`}
+                        className="min-h-[68px] rounded-xl border-2 border-gray-500 bg-gray-700/80 hover:bg-gray-600 text-gray-200 text-lg font-bold"
+                        aria-label={`Round limit price down to nearest $${getPriceRoundStep(parseFloat(stockOrderLmtPrice) || 0)}`}
+                      >
+                        Round ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStockOrderLmtPrice(roundPriceUp(parseFloat(stockOrderLmtPrice) || 0))}
+                        title={`Round limit price up to nearest $${(s => s >= 1 ? s : s.toFixed(2))(getPriceRoundStep(parseFloat(stockOrderLmtPrice) || 0))}`}
+                        className="min-h-[68px] rounded-xl border-2 border-gray-500 bg-gray-700/80 hover:bg-gray-600 text-gray-200 text-lg font-bold"
+                        aria-label={`Round limit price up to nearest $${getPriceRoundStep(parseFloat(stockOrderLmtPrice) || 0)}`}
+                      >
+                        Round ↑
+                      </button>
+                    </div>
                     <div className="grid grid-cols-3 gap-2 mt-2">
                       {priceDeltas.map((d) => (
                         <button
@@ -2876,6 +2948,26 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                       placeholder="0.00"
                       className="w-full min-h-[72px] rounded-xl bg-gray-800 border-2 border-gray-600 text-white text-4xl font-extrabold text-center px-4 py-4 placeholder-gray-600 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
                     />
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setStockOrderStopPrice(roundPriceDown(parseFloat(stockOrderStopPrice) || 0))}
+                        title={`Round stop price down to nearest $${(s => s >= 1 ? s : s.toFixed(2))(getPriceRoundStep(parseFloat(stockOrderStopPrice) || 0))}`}
+                        className="min-h-[68px] rounded-xl border-2 border-gray-500 bg-gray-700/80 hover:bg-gray-600 text-gray-200 text-lg font-bold"
+                        aria-label={`Round stop price down to nearest $${getPriceRoundStep(parseFloat(stockOrderStopPrice) || 0)}`}
+                      >
+                        Round ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStockOrderStopPrice(roundPriceUp(parseFloat(stockOrderStopPrice) || 0))}
+                        title={`Round stop price up to nearest $${(s => s >= 1 ? s : s.toFixed(2))(getPriceRoundStep(parseFloat(stockOrderStopPrice) || 0))}`}
+                        className="min-h-[68px] rounded-xl border-2 border-gray-500 bg-gray-700/80 hover:bg-gray-600 text-gray-200 text-lg font-bold"
+                        aria-label={`Round stop price up to nearest $${getPriceRoundStep(parseFloat(stockOrderStopPrice) || 0)}`}
+                      >
+                        Round ↑
+                      </button>
+                    </div>
                     <div className="grid grid-cols-3 gap-2 mt-2">
                       {priceDeltas.map((d) => (
                         <button
