@@ -102,4 +102,12 @@ npm run krj:fetch-market-caps
 # Or: npx tsx scripts/fetch-krj-market-caps.ts
 ```
 
-**Behavior:** Reads all `data/krj/latest_*.csv` files, collects unique tickers, fetches market cap from Polygon for any ticker not already in `ticker_market_caps.json`, then writes the merged result. Rate-limited to ~4.5 requests/sec. After running, commit the updated `data/krj/ticker_market_caps.json` and deploy so production shows market caps for all tickers.
+**Behavior:** Reads all `data/krj/latest_*.csv` files, collects unique tickers, fetches market cap from Polygon for any ticker not already in `ticker_market_caps.json`, then writes the merged result. Rate-limited to ~4.5 requests/sec.
+
+**Run from the droplet:** Polygon key is in `python-service/.env`. From the repo on the droplet:
+```bash
+docker run --rm -v "$(pwd):/app" -w /app --env-file python-service/.env node:22-slim npx tsx scripts/fetch-krj-market-caps.ts
+```
+Then rebuild and recreate the web container so the new file is in the image: `cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web`.
+
+**Run locally:** After running, commit the updated `data/krj/ticker_market_caps.json` and deploy so production shows market caps for all tickers.
