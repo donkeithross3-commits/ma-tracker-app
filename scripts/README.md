@@ -88,3 +88,18 @@ docker compose build krj-batch
 **See Also:**
 - `KRJ_DATE_FIX_DEPLOYMENT.md` - Deployment guide
 - `KRJ_DATE_FIX_SUMMARY.md` - Implementation summary
+
+---
+
+## fetch-krj-market-caps.ts
+
+**Purpose:** Populate `data/krj/ticker_market_caps.json` with market cap (in billions) for every ticker that appears in the KRJ CSVs. Uses Polygon’s ticker details API so the Mkt Cap column on the KRJ signals dashboard is filled for all tickers.
+
+**Usage:**
+```bash
+# From project root (requires POLYGON_API_KEY in .env.local, .env, or env)
+npm run krj:fetch-market-caps
+# Or: npx tsx scripts/fetch-krj-market-caps.ts
+```
+
+**Behavior:** Reads all `data/krj/latest_*.csv` files, collects unique tickers, fetches market cap from Polygon for any ticker not already in `ticker_market_caps.json`, then writes the merged result. Rate-limited to ~4.5 requests/sec. After running, commit the updated `data/krj/ticker_market_caps.json` and deploy so production shows market caps for all tickers.
