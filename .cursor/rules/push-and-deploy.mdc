@@ -11,8 +11,11 @@ When you **complete a task** that changed code in this repo:
 2. **Push** to `origin main`: `git push origin main`
 3. **Deploy** to production (droplet):
    ```bash
- ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
+ ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && mkdir -p ~/apps/data/krj && cp -r ~/apps/ma-tracker-app/data/krj/* ~/apps/data/krj/ && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
  ```
+   The `cp -r ... data/krj/*` step syncs KRJ data from the repo into the volume mount so the container sees the same `enriched_signals.json`, CSVs, and `ticker_market_caps.json` as in the repo; without it the container keeps serving whatever was previously in `~/apps/data/krj`.
+
+   **If you ran `fetch-krj-market-caps` on the droplet:** the script writes to the repo’s `data/krj/`. Copy into the web volume so the app sees it: `mkdir -p ~/apps/data/krj && cp ~/apps/ma-tracker-app/data/krj/ticker_market_caps.json ~/apps/data/krj/` (no rebuild needed).
 
 Do this **automatically** at the end of the task—do not wait for the user to ask. The agent has permission to push and deploy.
 

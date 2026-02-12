@@ -104,10 +104,35 @@ npm run krj:fetch-market-caps
 
 **Behavior:** Reads all `data/krj/latest_*.csv` files, collects unique tickers, fetches market cap from Polygon for any ticker not already in `ticker_market_caps.json`, then writes the merged result. Rate-limited to ~4.5 requests/sec.
 
-**Run from the droplet:** Polygon key is in `python-service/.env`. From the repo on the droplet:
+**Run from the droplet:** Polygon key is in `python-service/.env`. The web container mounts `~/apps/data/krj`, not the repo’s `data/krj`, so you must copy the generated file into that volume after the script runs:
+
 ```bash
+cd ~/apps/ma-tracker-app
 docker run --rm -v "$(pwd):/app" -w /app --env-file python-service/.env node:22-slim npx tsx scripts/fetch-krj-market-caps.ts
+mkdir -p ~/apps/data/krj && cp data/krj/ticker_market_caps.json ~/apps/data/krj/
 ```
-Then rebuild and recreate the web container so the new file is in the image: `cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web`.
+
+No rebuild needed—the container reads the mount live. To persist the file in the repo for future deploys: commit and push `data/krj/ticker_market_caps.json`, then run your normal deploy (which does `cp ~/apps/ma-tracker-app/data/krj/* ~/apps/data/krj/`).
 
 **Run locally:** After running, commit the updated `data/krj/ticker_market_caps.json` and deploy so production shows market caps for all tickers.
+
+---
+
+## run_weekly_krj.sh
+
+**Purpose:** Single entry point for the weekly KRJ update: (1) run the Python batch (copy CSVs + metadata), (2) run the market cap fetch so `ticker_market_caps.json` is refreshed in the same volume the web container uses.
+
+**Usage on droplet:** From the apps directory (where `docker-compose` lives):
+
+```bash
+cd /home/don/apps
+./ma-tracker-app/scripts/run_weekly_krj.sh
+```
+
+**Cron (Saturday 8 AM):** Add to crontab (`crontab -e`):
+
+```
+0 8 * * 6 cd /home/don/apps && ./ma-tracker-app/scripts/run_weekly_krj.sh >> /home/don/apps/logs/krj_weekly.log 2>&1
+```
+
+Ensure `/home/don/apps/logs` exists (`mkdir -p /home/don/apps/logs`). After `git pull`, the script is at `~/apps/ma-tracker-app/scripts/run_weekly_krj.sh`; cron runs from a minimal env so paths are absolute.

@@ -116,7 +116,11 @@ async function main() {
   }
 
   fs.writeFileSync(OUT_PATH, JSON.stringify(sorted, null, 2), "utf8");
-  console.log(`Wrote ${Object.keys(sorted).length} entries to ${OUT_PATH}.`);
+  const count = Object.keys(sorted).length;
+  console.log(`Wrote ${count} entries to ${OUT_PATH}.`);
+  if (count > 0) {
+    console.log("On the droplet, copy to the web volume so the app sees it: mkdir -p ~/apps/data/krj && cp data/krj/ticker_market_caps.json ~/apps/data/krj/");
+  }
 }
 
 main().catch((e) => {

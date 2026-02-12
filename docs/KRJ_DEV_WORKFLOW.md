@@ -122,11 +122,20 @@ cd /home/don/apps
 docker compose run --rm krj-batch
 ```
 
-### Future State (Automated - TODO)
+### Weekly batch (including market caps)
 
+The script `scripts/run_weekly_krj.sh` runs (1) the Python batch (copy CSVs + metadata) and (2) the market cap fetch, writing `ticker_market_caps.json` into the same volume the web container uses.
+
+**Manual run on droplet:**
 ```bash
-# Cron job on droplet (Saturday 8 AM)
-0 8 * * 6 cd /home/don/apps && docker compose run --rm krj-batch
+cd /home/don/apps
+./ma-tracker-app/scripts/run_weekly_krj.sh
+```
+
+**Cron (Saturday 8 AM):**
+```bash
+# Ensure logs dir exists: mkdir -p /home/don/apps/logs
+0 8 * * 6 cd /home/don/apps && ./ma-tracker-app/scripts/run_weekly_krj.sh >> /home/don/apps/logs/krj_weekly.log 2>&1
 ```
 
 ---
