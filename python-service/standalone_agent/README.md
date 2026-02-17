@@ -100,14 +100,17 @@ After installation, the startup script will automatically install the required d
 
 Your `config.env` file is pre-configured with your API key. You only need to edit it if:
 
-- You want to change the IB port (default: 7497 for paper trading)
+- You want to connect to live instead of paper (or change the IB port)
 - You're connecting to IB Gateway on a different machine
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `IB_PROVIDER_KEY` | (your key) | Your API key - already set! |
 | `IB_HOST` | `127.0.0.1` | IB TWS/Gateway host |
-| `IB_PORT` | `7497` | IB port (7497=paper, 7496=live) |
+| `IB_PORT` | (see below) | IB port; overrides `IB_MODE` if set |
+| `IB_MODE` | `paper` | `paper` → port 7497, `live` → port 7496 (TWS). Use when you don't set `IB_PORT`. |
+
+You can set either **`IB_PORT`** (e.g. `7496` or `7497`) or **`IB_MODE`** (`paper` / `live`). If both are set, `IB_PORT` wins.
 
 ## Troubleshooting
 
