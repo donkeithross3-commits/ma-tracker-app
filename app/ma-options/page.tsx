@@ -55,7 +55,7 @@ export default async function MAOptionsPage() {
       <div className="max-w-[1800px] mx-auto">
         <MAOptionsContent 
           initialDeals={scannerDeals} 
-          initialUser={session?.user ? { name: session.user.name, email: session.user.email } : undefined}
+          initialUser={session?.user ? { name: session.user.name, email: session.user.email, alias: session.user.alias } : undefined}
         />
       </div>
     </div>

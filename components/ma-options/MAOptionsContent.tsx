@@ -13,6 +13,7 @@ interface MAOptionsContentProps {
   initialUser?: {
     name?: string | null;
     email?: string | null;
+    alias?: string | null;
   };
 }
 
@@ -72,6 +73,7 @@ export default function MAOptionsContent({ initialDeals, initialUser }: MAOption
         deals={deals} 
         onDealsChange={handleDealsChange}
         onRefreshDeals={refreshDeals}
+        userAlias={initialUser?.alias ?? undefined}
       />
     </IBConnectionProvider>
   );

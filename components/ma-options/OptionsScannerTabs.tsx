@@ -11,14 +11,17 @@ interface OptionsScannerTabsProps {
   deals: ScannerDeal[];
   onDealsChange: (deals: ScannerDeal[]) => void;
   onRefreshDeals: () => void;
+  /** When "KRJ", default tab is Account; otherwise Monitor. */
+  userAlias?: string | null;
 }
 
 export default function OptionsScannerTabs({ 
   deals, 
   onDealsChange,
   onRefreshDeals,
+  userAlias,
 }: OptionsScannerTabsProps) {
-  const [activeTab, setActiveTab] = useState("monitor");
+  const [activeTab, setActiveTab] = useState(userAlias === "KRJ" ? "account" : "monitor");
 
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab}>
