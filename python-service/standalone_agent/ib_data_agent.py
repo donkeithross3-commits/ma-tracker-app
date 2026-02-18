@@ -313,13 +313,17 @@ class IBDataAgent:
         connected = self.scanner and self.scanner.isConnected()
         farm_status = {}
         data_available = True
+        read_only = False
         if self.scanner:
             farm_status = self.scanner.get_farm_status()
             data_available = self.scanner.is_data_available()
+            read_only = getattr(self.scanner, "read_only_session", False)
         if self._tws_reconnecting:
             message = "IB TWS reconnecting..."
         elif connected and not data_available:
             message = "IB TWS connected but data farms are down"
+        elif connected and read_only:
+            message = "IB TWS connected (Read-Only — quotes only, no positions/orders)"
         elif connected:
             message = "IB TWS connected"
         else:
@@ -330,6 +334,7 @@ class IBDataAgent:
             "message": message,
             "farm_status": farm_status,
             "data_available": data_available,
+            "read_only_session": read_only,
             "last_connected": self._tws_last_connected,
         }
     

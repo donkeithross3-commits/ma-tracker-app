@@ -197,6 +197,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._account_event_callback = None
         # Early-exit event for fetch_underlying_data (set when price tick arrives)
         self._underlying_done: Optional[Event] = None
+        # True when TWS is in Read-Only API mode (we detected an error saying so).
+        # When set, we skip reqPositions, reqOpenOrders, placeOrder, cancelOrder.
+        self.read_only_session = False
 
     def managedAccounts(self, accountsList: str):
         """Store comma-separated account ids from TWS on connect."""
@@ -277,7 +280,10 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def get_positions_snapshot(self, timeout_sec: float = 15.0) -> List[dict]:
         """Request positions, wait for positionEnd(), return list and cancel subscription.
-        Thread-safe: only one snapshot at a time (concurrent callers block)."""
+        Thread-safe: only one snapshot at a time (concurrent callers block).
+        Returns [] without calling TWS when TWS is in Read-Only API mode."""
+        if self.read_only_session:
+            return []
         with self._positions_lock:
             self._positions_list = []
             self._positions_done.clear()
@@ -300,6 +306,8 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         Thread-safe: only one refresh at a time (concurrent callers block).
         """
+        if self.read_only_session:
+            return []  # Order info not available in Read-Only API mode
         need_refresh = force_refresh
         with self._live_orders_lock:
             if not self._live_orders_synced and self.isConnected():
@@ -462,7 +470,13 @@ class IBMergerArbScanner(EWrapper, EClient):
         return f"IB error {code}: {text or 'Unknown'}"
 
     def place_order_sync(self, contract_d: dict, order_d: dict, timeout_sec: float = 30.0) -> dict:
-        """Place order, wait for orderStatus/error, return result dict. Validates contract and order first."""
+        """Place order via IB (placeOrder -> orderStatus/error). Returns {} on success or error dict."""
+        if self.read_only_session:
+            return {
+                "error": "TWS is in Read-Only API mode. Uncheck Read-Only in TWS API Settings to place orders.",
+                "errorCode": None,
+                "errorString": "Read-Only API",
+            }
         ok, err = self.validate_contract_for_order(contract_d)
         if not ok:
             return {"error": err}
@@ -511,6 +525,13 @@ class IBMergerArbScanner(EWrapper, EClient):
         the TWS setting "Use negative numbers to bind automatic orders" is on).
         Only orderId == 0 is invalid (means the order was never bound).
         """
+        if self.read_only_session:
+            return {
+                "error": "TWS is in Read-Only API mode. Uncheck Read-Only in TWS API Settings to modify orders.",
+                "orderId": order_id,
+                "errorCode": None,
+                "errorString": "Read-Only API",
+            }
         if order_id == 0:
             return {"error": "Cannot modify order: orderId is 0 (unbound). "
                     "The order may have been placed manually and not yet bound. "
@@ -573,6 +594,12 @@ class IBMergerArbScanner(EWrapper, EClient):
         Cancelled/ApiCancelled/Filled status. Returns result dict.
         Rejects orderId==0 (unbound manual TWS orders).
         """
+        if self.read_only_session:
+            return {
+                "error": "TWS is in Read-Only API mode. Uncheck Read-Only in TWS API Settings to cancel orders.",
+                "orderId": order_id,
+                "errorCode": None,
+            }
         if order_id == 0:
             return {"error": "Cannot cancel order: orderId is 0 (unbound). "
                     "Fetch open orders first to bind it, then retry.",
@@ -728,13 +755,14 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self.logger.info(f"Connection restored (code {errorCode}): {errorString}")
                 self.connection_lost = False
                 self.last_heartbeat = time.time()
-                # Re-sync order ID sequence and live order book after reconnect
-                try:
-                    self.reqIds(-1)  # Refresh nextValidId
-                    self.reqOpenOrders()  # Refresh live order book
-                    self.logger.info("Reconnect sync: requested fresh nextValidId + open orders")
-                except Exception as e:
-                    self.logger.error(f"Reconnect sync failed: {e}")
+                # Re-sync order ID sequence and live order book after reconnect (skip if Read-Only)
+                if not self.read_only_session:
+                    try:
+                        self.reqIds(-1)  # Refresh nextValidId
+                        self.reqOpenOrders()  # Refresh live order book
+                        self.logger.info("Reconnect sync: requested fresh nextValidId + open orders")
+                    except Exception as e:
+                        self.logger.error(f"Reconnect sync failed: {e}")
                 # Re-establish streaming subscriptions that were silently lost
                 self._resubscribe_streams()
                 # Notify frontend to refetch positions and open orders (orders may have filled while disconnected)
@@ -764,6 +792,20 @@ class IBMergerArbScanner(EWrapper, EClient):
             # Informational — no further action
         else:
             self.logger.error(f"IB Error {reqId}/{errorCode}: {errorString}")
+            # Detect Read-Only API mode: IB blocks order/position info in that mode.
+            # Stop making those requests to avoid repeated errors.
+            _msg = (errorString or "").lower()
+            if not self.read_only_session and (
+                "read only" in _msg or "read-only" in _msg or "read only api" in _msg
+                or "order information is not available" in _msg
+                or "information about orders" in _msg
+                or "uncheck read only" in _msg
+            ):
+                self.read_only_session = True
+                self.logger.warning(
+                    "TWS is in Read-Only API mode. Skipping positions, open orders, and order placement. "
+                    "Market data (quotes) will continue to work. Uncheck Read-Only in TWS API Settings to enable orders."
+                )
             # Market data subscription errors -- surface for test_futures / scan retries
             # 354   = "Requested market data is not subscribed"
             # 10090 = "Part of requested market data is not subscribed"
