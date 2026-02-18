@@ -16,7 +16,7 @@ Usage:
 Environment variables:
     IB_HOST         - IB TWS host (default: 127.0.0.1)
     IB_PORT         - IB TWS port (optional; overrides IB_MODE)
-    IB_MODE         - "paper" (7497) or "live" (7496) when IB_PORT not set (default: paper)
+    IB_MODE         - "paper" (7496) or "live" (7497) when IB_PORT not set (default: paper)
     RELAY_URL       - WebSocket relay URL (default: wss://dr3-dashboard.com/ws/data-provider)
     IB_PROVIDER_KEY - API key for authentication (required)
 """
@@ -50,13 +50,13 @@ logger = logging.getLogger(__name__)
 
 # Configuration from environment
 IB_HOST = os.environ.get("IB_HOST", "127.0.0.1")
-# Port: use IB_PORT if set; else IB_MODE live=7496, paper=7497 (TWS standard)
+# Port: use IB_PORT if set; else IB_MODE paper=7496, live=7497 (TWS: 7496 paper, 7497 live)
 _raw_port = os.environ.get("IB_PORT")
 if _raw_port is not None and _raw_port.strip() != "":
     IB_PORT = int(_raw_port)
 else:
     _mode = (os.environ.get("IB_MODE") or "paper").strip().lower()
-    IB_PORT = 7496 if _mode == "live" else 7497
+    IB_PORT = 7496 if _mode == "paper" else 7497
 RELAY_URL = os.environ.get("RELAY_URL", "wss://dr3-dashboard.com/ws/data-provider")
 IB_PROVIDER_KEY = os.environ.get("IB_PROVIDER_KEY", "")
 HEARTBEAT_INTERVAL = 10  # seconds

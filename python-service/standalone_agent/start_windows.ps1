@@ -40,10 +40,10 @@ if (-not $env:IB_PROVIDER_KEY -or $env:IB_PROVIDER_KEY -eq "your-api-key-here") 
     exit 1
 }
 
-# Set defaults if not configured (IB_MODE=live -> 7496, paper -> 7497)
+# Set defaults if not configured (IB_MODE=paper -> 7496, live -> 7497)
 if (-not $env:IB_HOST) { $env:IB_HOST = "127.0.0.1" }
 if (-not $env:IB_PORT) {
-    if ($env:IB_MODE -eq "live") { $env:IB_PORT = "7496" } else { $env:IB_PORT = "7497" }
+    if ($env:IB_MODE -eq "live") { $env:IB_PORT = "7497" } else { $env:IB_PORT = "7496" }
 }
 if (-not $env:RELAY_URL) { $env:RELAY_URL = "wss://dr3-dashboard.com/ws/data-provider" }
 

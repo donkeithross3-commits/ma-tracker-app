@@ -73,12 +73,12 @@ if [ -z "$IB_PROVIDER_KEY" ] || [ "$IB_PROVIDER_KEY" = "your-api-key-here" ]; th
     exit 1
 fi
 
-# Set defaults if not configured (IB_MODE=live -> 7496, paper -> 7497)
+# Set defaults if not configured (IB_MODE=paper -> 7496, live -> 7497)
 : ${IB_HOST:="127.0.0.1"}
 if [ -z "$IB_PORT" ]; then
   case "${IB_MODE:-paper}" in
-    live) IB_PORT=7496 ;;
-    *)    IB_PORT=7497 ;;
+    live) IB_PORT=7497 ;;
+    *)    IB_PORT=7496 ;;
   esac
 fi
 : ${RELAY_URL:="wss://dr3-dashboard.com/ws/data-provider"}

@@ -17,7 +17,7 @@ Configure these three settings:
 |---|---------|---------------|-----|
 | 1 | **Enable ActiveX and Socket Clients** | ✅ Checked | Master switch — nothing works without this. TWS has it OFF by default. |
 | 2 | **Read-Only API** | ❌ Unchecked | When checked (the IB default), order placement and order info are blocked. Market data still works, but our agent needs order access. |
-| 3 | **Socket Port** | `7497` (paper) or `7496` (live) | Must match the `IB_PORT` in your `config.env`. Use 7497 for paper trading, 7496 for live. |
+| 3 | **Socket Port** | `7496` (paper) or `7497` (live) | Must match the `IB_PORT` in your `config.env`. Use 7496 for paper trading, 7497 for live. |
 
 **Recommended** (optional but avoids popups):
 - Add `127.0.0.1` to **Trusted IP Addresses** so TWS doesn't prompt you every time the agent connects.
@@ -108,7 +108,7 @@ Your `config.env` file is pre-configured with your API key. You only need to edi
 | `IB_PROVIDER_KEY` | (your key) | Your API key - already set! |
 | `IB_HOST` | `127.0.0.1` | IB TWS/Gateway host |
 | `IB_PORT` | (see below) | IB port; overrides `IB_MODE` if set |
-| `IB_MODE` | `paper` | `paper` → port 7497, `live` → port 7496 (TWS). Use when you don't set `IB_PORT`. |
+| `IB_MODE` | `paper` | `paper` → port 7496, `live` → port 7497 (TWS). Use when you don't set `IB_PORT`. |
 
 You can set either **`IB_PORT`** (e.g. `7496` or `7497`) or **`IB_MODE`** (`paper` / `live`). If both are set, `IB_PORT` wins.
 
@@ -118,7 +118,7 @@ You can set either **`IB_PORT`** (e.g. `7496` or `7497`) or **`IB_MODE`** (`pape
 
 1. Make sure IB TWS or Gateway is running and logged in
 2. Check **Enable ActiveX and Socket Clients** is checked (see Step 1 above)
-3. Verify the port number in `config.env` matches TWS (7497 for paper, 7496 for live; or 4002/4001 for IB Gateway)
+3. Verify the port number in `config.env` matches TWS (7496 for paper, 7497 for live; or 4002/4001 for IB Gateway)
 4. Try restarting TWS — API setting changes sometimes require a restart to take effect
 
 ### Agent connects but orders don't work / order book is empty
