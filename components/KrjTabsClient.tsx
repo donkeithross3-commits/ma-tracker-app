@@ -119,12 +119,21 @@ type EnrichedSignalsData = {
   tickers?: Record<string, EnrichedTickerData>;
 };
 
+type DisplacementRegimeContext = {
+  regime_label: string;
+  regime_prob: number;
+  regime_age_days: number;
+  transitioning: boolean;
+  interpretation: string;
+} | null;
+
 interface KrjTabsClientProps {
   groups: GroupData[];
   columns: Array<{ key: string; label: string; description: string }>;
   userId?: string | null;
   userAlias?: string | null;
   enrichedSignals?: EnrichedSignalsData | null;
+  displacementRegimeContext?: DisplacementRegimeContext;
 }
 
 // Signal filter types
@@ -281,7 +290,7 @@ const KRJ_DEFAULT_COLUMNS = [
   "25D_ADV_Shares_MM", "25D_ADV_nortional_B", "avg_trade_size",
 ]
 
-export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias, enrichedSignals }: KrjTabsClientProps) {
+export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias, enrichedSignals, displacementRegimeContext }: KrjTabsClientProps) {
   const router = useRouter()
   const { getVisibleColumns, setVisibleColumns, isComfort } = useUIPreferences()
 
@@ -886,6 +895,23 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
         );
       })()}
 
+      {/* Displacement Regime Banner */}
+      {displacementRegimeContext && (() => {
+        const drc = displacementRegimeContext;
+        const isMomentum = drc.interpretation.startsWith("MOMENTUM");
+        const borderColor = isMomentum ? "border-l-emerald-500" : "border-l-amber-500";
+        const textAccent = isMomentum ? "text-emerald-400" : "text-amber-400";
+        return (
+          <div className={`mb-1 rounded bg-gray-900/60 border border-gray-700/40 border-l-2 ${borderColor} px-3 py-1.5 text-sm flex items-center gap-3`}>
+            <span className="text-gray-400">Displacement Regime:</span>
+            <span className="text-gray-200 font-medium">{drc.regime_label}</span>
+            <span className="text-gray-500">({(drc.regime_prob * 100).toFixed(0)}%)</span>
+            <span className="text-gray-600">|</span>
+            <span className={`font-medium ${textAccent}`}>{drc.interpretation}</span>
+          </div>
+        );
+      })()}
+
       {visibleGroups.map((group) => {
         const filteredRows = getFilteredRows(group.rows);
         const sortedRows = sortRows(filteredRows, sortConfig);
@@ -1020,7 +1046,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
               <thead className="bg-gray-800 sticky top-0 z-10">
                 <tr>
                   {visibleColumns.map((col) => {
-                    const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size', 'prediction', 'adj_prediction'];
+                    const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size', 'prediction', 'adj_prediction', 'displacement_composite', 'displacement_confidence'];
                     const isNumeric = numericCols.includes(col.key);
                     const isSorted = sortConfig.column === col.key;
                     return (
@@ -1047,7 +1073,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
               </thead>
               <tbody>
                 {sortedRows.map((row, idx) => {
-                  const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size', 'prediction', 'adj_prediction'];
+                  const numericCols = ['market_cap_b', 'c', 'weekly_low', '25DMA', '25DMA_shifted', 'long_signal_value', 'short_signal_value', 'vol_ratio', '25DMA_range_bps', '25D_ADV_Shares_MM', '25D_ADV_nortional_B', 'avg_trade_size', 'prediction', 'adj_prediction', 'displacement_composite', 'displacement_confidence'];
                   const tickerUpper = (row["ticker"] || "").trim().toUpperCase();
                   const enrichedRow = enrichedTickers[tickerUpper] as EnrichedTickerData | undefined;
                   const isExpanded = expandedTicker === tickerUpper;
@@ -1121,6 +1147,66 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           return (
                             <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-gray-600 text-sm">
                               --
+                            </td>
+                          );
+                        }
+
+                        // Displacement composite z-score (heatmap cell)
+                        if (col.key === "displacement_composite") {
+                          const raw = row.displacement_composite;
+                          if (!raw || raw === "") {
+                            return (
+                              <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right text-gray-600 text-sm">--</td>
+                            );
+                          }
+                          const z = Number(raw);
+                          const absZ = Math.abs(z);
+                          const cls = absZ < 0.5 ? "text-gray-400" : z > 0 ? "text-emerald-400" : "text-red-400";
+                          // Subtle heatmap background: intensity 0-20% based on |z| (capped at 3)
+                          const bgOpacity = Math.min(absZ / 3, 1) * 0.2;
+                          const bgColor = z > 0 ? `rgba(16, 185, 129, ${bgOpacity})` : z < 0 ? `rgba(239, 68, 68, ${bgOpacity})` : "transparent";
+                          return (
+                            <td key={col.key} title={`Displacement composite z-score for ${tickerUpper}: ${z > 0 ? "+" : ""}${z.toFixed(3)}. 1m z: ${row.displacement_1m_z ?? "n/a"}, 3m z: ${row.displacement_3m_z ?? "n/a"}. Benchmark: ${row.displacement_benchmark ?? "n/a"}`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`} style={{ backgroundColor: bgColor }}>
+                              {z > 0 ? "+" : ""}{z.toFixed(2)}
+                            </td>
+                          );
+                        }
+
+                        // Displacement direction pill (LONG/SHORT/NEUTRAL)
+                        if (col.key === "displacement_direction") {
+                          const dir = (row.displacement_direction || "").trim();
+                          if (!dir) {
+                            return (
+                              <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-gray-600 text-sm">--</td>
+                            );
+                          }
+                          const pillCls = dir === "LONG"
+                            ? "bg-emerald-900/50 text-emerald-300 border-emerald-700/50"
+                            : dir === "SHORT"
+                            ? "bg-red-900/50 text-red-300 border-red-700/50"
+                            : "bg-gray-800/50 text-gray-400 border-gray-700/50";
+                          return (
+                            <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap">
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium border ${pillCls}`}>
+                                {dir}
+                              </span>
+                            </td>
+                          );
+                        }
+
+                        // Displacement confidence (0-1 decimal, dimmed when low)
+                        if (col.key === "displacement_confidence") {
+                          const raw = row.displacement_confidence;
+                          if (!raw || raw === "") {
+                            return (
+                              <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right text-gray-600 text-sm">--</td>
+                            );
+                          }
+                          const conf = Number(raw);
+                          const cls = conf >= 0.5 ? "text-gray-200" : conf >= 0.25 ? "text-gray-400" : "text-gray-600";
+                          return (
+                            <td key={col.key} title={`Displacement confidence for ${tickerUpper}: ${conf.toFixed(3)}`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                              {conf.toFixed(3)}
                             </td>
                           );
                         }
