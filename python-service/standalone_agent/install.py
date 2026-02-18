@@ -139,7 +139,7 @@ def print_success():
     print("2. Start IB TWS or IB Gateway")
     print("   - Enable API: File → Global Configuration → API → Settings")
     print("   - Check 'Enable ActiveX and Socket Clients'")
-    print("   - Set Socket Port to 7496 (paper) or 7497 (live)")
+    print("   - Set Socket Port to 7497 (paper) or 7496 (live) — agent tries both if needed")
     print()
     print("3. Run the agent:")
     if sys.platform == "win32":

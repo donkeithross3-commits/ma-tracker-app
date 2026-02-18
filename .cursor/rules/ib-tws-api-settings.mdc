@@ -12,39 +12,30 @@ connections.  Our agent's `EClient.connect()` will fail.  Nothing works without 
 - TWS default: **OFF**
 - IB Gateway default: **ON**
 
-## 2. Read-Only API  ❌ Must be UNCHECKED
+## 2. Read-Only API  — Optional (checked = quote-only; unchecked = orders allowed)
 
-When checked (the IB default), TWS blocks:
+When **checked** (the IB default), TWS blocks:
 - Order placement: `placeOrder`, `cancelOrder`
 - Order information: `reqOpenOrders`, `reqAutoOpenOrders`, `openOrder`/`orderStatus` callbacks
 
-When checked, these still work normally:
+When checked, these **still work** (per IB docs):
 - Market data: `reqMktData`, `reqMarketDataType`
 - Contract lookups: `reqContractDetails`, `reqSecDefOptParams`
 - Positions: `reqPositions`
 - Account data: `reqAccountUpdates`
 
-Our agent calls `reqAutoOpenOrders(True)` and `reqOpenOrders()` on connect
-(`ib_scanner.py` `connect_to_ib`).  With Read-Only enabled these silently return
-nothing — the live order book stays empty and `placeOrder` is rejected.
+So users can **leave Read-Only checked** for maximum safety when they only need quotes and positions; the agent connects and works for market data. For order placement and order book, they must **uncheck** Read-Only.
 
-**Key debugging insight**: If a user reports "agent is connected, market data works,
-but orders fail / order book is empty", the first thing to check is Read-Only API.
+**Debugging**: "Agent connected, market data works, but orders fail / order book empty" → Read-Only is still checked.
 
-## 3. Socket Port
+## 3. Socket Port (TWS default: 7496 = live, 7497 = paper)
 
 | Application | Live | Paper |
 |-------------|------|-------|
 | TWS         | 7496 | 7497  |
 | IB Gateway  | 4001 | 4002  |
 
-Our agent defaults to port 7497 (paper) via `config.env`.  The code is not sensitive
-to paper vs live — all API calls work identically on both.  The port just determines
-which TWS session receives the connection.
-
-Users must ensure:
-1. The port in `config.env` matches the port shown in TWS API Settings
-2. If running both paper and live TWS, they connect to the intended one
+The agent tries the configured port first, then the other (7496/7497), so it connects to whichever TWS is running without requiring a config change. Default in config is 7497 (paper). For IB Gateway, set `IB_PORT` to 4001 or 4002 in `config.env`.
 
 ## Optional but Recommended
 

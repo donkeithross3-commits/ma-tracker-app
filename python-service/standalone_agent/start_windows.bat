@@ -85,10 +85,10 @@ if "%IB_PROVIDER_KEY%"=="your-api-key-here" (
     exit /b 1
 )
 
-REM Set defaults if not configured (IB_MODE=paper -> 7496, live -> 7497)
+REM Set defaults if not configured (official TWS: paper=7497, live=7496)
 if "%IB_HOST%"=="" set "IB_HOST=127.0.0.1"
 if "%IB_PORT%"=="" (
-  if /i "%IB_MODE%"=="live" (set "IB_PORT=7497") else (set "IB_PORT=7496")
+  if /i "%IB_MODE%"=="live" (set "IB_PORT=7496") else (set "IB_PORT=7497")
 )
 if "%RELAY_URL%"=="" set "RELAY_URL=wss://dr3-dashboard.com/ws/data-provider"
 

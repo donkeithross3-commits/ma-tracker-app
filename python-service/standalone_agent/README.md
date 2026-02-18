@@ -17,22 +17,22 @@ Configure these three settings:
 |---|---------|---------------|-----|
 | 1 | **Enable ActiveX and Socket Clients** | ✅ Checked | Master switch — nothing works without this. TWS has it OFF by default. |
 | 2 | **Read-Only API** | ❌ Unchecked | When checked (the IB default), order placement and order info are blocked. Market data still works, but our agent needs order access. |
-| 3 | **Socket Port** | `7496` (paper) or `7497` (live) | Must match the `IB_PORT` in your `config.env`. Use 7496 for paper trading, 7497 for live. |
+| 3 | **Socket Port** | `7497` (paper) or `7496` (live) | TWS default. The agent tries both ports if one fails, so you usually don't need to set `IB_PORT` in config. |
 
 **Recommended** (optional but avoids popups):
 - Add `127.0.0.1` to **Trusted IP Addresses** so TWS doesn't prompt you every time the agent connects.
 
 Click **Apply** and **OK** when done.
 
-> **IB Gateway users:** IB Gateway has "Enable ActiveX and Socket Clients" ON by default and uses ports 4002 (paper) / 4001 (live) instead of 7497/7496.
+> **IB Gateway users:** IB Gateway has "Enable ActiveX and Socket Clients" ON by default and uses ports 4002 (paper) / 4001 (live) instead of 7497/7496. Set `IB_PORT` in config to match.
 
 #### What each setting controls
 
-- **Enable ActiveX and Socket Clients** — The master API switch. When off, TWS refuses all socket connections. No market data, no positions, no orders — the agent simply cannot connect.
+- **Enable ActiveX and Socket Clients** — The master API switch. When off, TWS refuses all socket connections. No market data, no positions, no orders — the agent simply cannot connect. **Required.**
 
-- **Read-Only API** — Blocks order placement (`placeOrder`, `cancelOrder`) and hides order information (`reqOpenOrders`, `reqAutoOpenOrders`) from the API. Does NOT block market data (`reqMktData`), positions (`reqPositions`), contract lookups (`reqContractDetails`), or option parameters (`reqSecDefOptParams`). IB enables this by default as a safety measure.
+- **Read-Only API** — When **checked** (IB default): the API can still request **market data** (`reqMktData`), **positions** (`reqPositions`), and contract lookups; **order placement** and **order info** (`reqOpenOrders`, `placeOrder`, `cancelOrder`) are blocked. So you can leave Read-Only **checked** if you only use the agent for quotes and positions (no order placement). When **unchecked**: the agent can place and manage orders. Use the **Socket Port** (paper vs live) to choose which account is used; Read-Only is an extra safety to prevent any API orders.
 
-- **Socket Port** — Determines which TWS session the agent connects to. If you run both paper and live TWS on the same machine, each listens on a different port. Our agent code is not sensitive to paper vs live — all API calls work identically on both. Just make sure the port in `config.env` matches the port shown in TWS.
+- **Socket Port** — TWS default is **7497** for paper and **7496** for live. The agent tries the configured port first, then the other, so it connects to whichever TWS you have running without requiring a config change. You can set `IB_PORT` or `IB_MODE` in `config.env` to prefer one port.
 
 ### 2. Run the Agent
 
@@ -107,10 +107,10 @@ Your `config.env` file is pre-configured with your API key. You only need to edi
 |----------|---------|-------------|
 | `IB_PROVIDER_KEY` | (your key) | Your API key - already set! |
 | `IB_HOST` | `127.0.0.1` | IB TWS/Gateway host |
-| `IB_PORT` | (see below) | IB port; overrides `IB_MODE` if set |
-| `IB_MODE` | `paper` | `paper` → port 7496, `live` → port 7497 (TWS). Use when you don't set `IB_PORT`. |
+| `IB_PORT` | (optional) | Try this port first; agent then tries the other (7496/7497) if connection fails. |
+| `IB_MODE` | `paper` | `paper` → 7497, `live` → 7496 (TWS default). Used when `IB_PORT` is not set. |
 
-You can set either **`IB_PORT`** (e.g. `7496` or `7497`) or **`IB_MODE`** (`paper` / `live`). If both are set, `IB_PORT` wins.
+You usually **don't need to set** `IB_PORT` or `IB_MODE`: the agent tries 7497 then 7496 (or the reverse if you set a preference) and connects to whichever TWS is running.
 
 ## Troubleshooting
 
@@ -118,7 +118,7 @@ You can set either **`IB_PORT`** (e.g. `7496` or `7497`) or **`IB_MODE`** (`pape
 
 1. Make sure IB TWS or Gateway is running and logged in
 2. Check **Enable ActiveX and Socket Clients** is checked (see Step 1 above)
-3. Verify the port number in `config.env` matches TWS (7496 for paper, 7497 for live; or 4002/4001 for IB Gateway)
+3. Ensure TWS is running; the agent tries both 7497 (paper) and 7496 (live). For IB Gateway use 4002 (paper) or 4001 (live) and set `IB_PORT` in config.
 4. Try restarting TWS — API setting changes sometimes require a restart to take effect
 
 ### Agent connects but orders don't work / order book is empty

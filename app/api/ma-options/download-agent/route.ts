@@ -132,8 +132,8 @@ IB_PROVIDER_KEY=${agentKey.key}
 
 # IB TWS/Gateway connection settings (modify if needed)
 # IB_HOST=127.0.0.1
-# Paper: IB_PORT=7496 or IB_MODE=paper   Live: IB_PORT=7497 or IB_MODE=live
-# IB_PORT=7496
+# Port: 7497=paper, 7496=live (TWS default). Agent tries both if one fails.
+# IB_PORT=7497
 # IB_MODE=paper
 
 # WebSocket relay URL (don't change unless instructed)

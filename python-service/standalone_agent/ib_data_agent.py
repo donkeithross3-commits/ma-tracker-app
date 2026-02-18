@@ -16,7 +16,7 @@ Usage:
 Environment variables:
     IB_HOST         - IB TWS host (default: 127.0.0.1)
     IB_PORT         - IB TWS port (optional; overrides IB_MODE)
-    IB_MODE         - "paper" (7496) or "live" (7497) when IB_PORT not set (default: paper)
+    IB_MODE         - "paper" (7497) or "live" (7496) when IB_PORT not set; TWS default ports
     RELAY_URL       - WebSocket relay URL (default: wss://dr3-dashboard.com/ws/data-provider)
     IB_PROVIDER_KEY - API key for authentication (required)
 """
@@ -48,17 +48,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration from environment
-IB_HOST = os.environ.get("IB_HOST", "127.0.0.1")
-# Port: use IB_PORT if set; else IB_MODE paper=7496, live=7497 (TWS: 7496 paper, 7497 live)
-_raw_port = os.environ.get("IB_PORT")
-if _raw_port is not None and _raw_port.strip() != "":
+# Configuration from environment (trim whitespace; config.env may have spaces)
+def _env(key: str, default: str = "") -> str:
+    v = os.environ.get(key) or default
+    return v.strip() if isinstance(v, str) else str(v)
+
+IB_HOST = _env("IB_HOST") or "127.0.0.1"
+# Port: use IB_PORT if set; else IB_MODE. Official TWS: 7496=live, 7497=paper.
+_raw_port = _env("IB_PORT")
+if _raw_port and _raw_port.isdigit():
     IB_PORT = int(_raw_port)
 else:
-    _mode = (os.environ.get("IB_MODE") or "paper").strip().lower()
-    IB_PORT = 7496 if _mode == "paper" else 7497
-RELAY_URL = os.environ.get("RELAY_URL", "wss://dr3-dashboard.com/ws/data-provider")
-IB_PROVIDER_KEY = os.environ.get("IB_PROVIDER_KEY", "")
+    _mode = (_env("IB_MODE") or "paper").lower()
+    IB_PORT = 7497 if _mode == "paper" else 7496  # TWS default: paper=7497, live=7496
+RELAY_URL = _env("RELAY_URL") or "wss://dr3-dashboard.com/ws/data-provider"
+IB_PROVIDER_KEY = _env("IB_PROVIDER_KEY")
 HEARTBEAT_INTERVAL = 10  # seconds
 RECONNECT_DELAY = 5  # seconds
 CACHE_TTL_SECONDS = 60  # How long to cache option chain data
@@ -114,43 +118,47 @@ class IBDataAgent:
         self._tws_last_connected: Optional[float] = None
         
     def connect_to_ib(self) -> bool:
-        """Connect to IB TWS (single attempt)."""
-        logger.info(f"Connecting to IB TWS at {IB_HOST}:{IB_PORT}...")
-        
+        """Connect to IB TWS. Tries configured port first; on failure tries the other (7496/7497)
+        so the agent works with either paper or live TWS without config change."""
         # Use clientId=0 (the "default client") so that:
         # 1) reqAutoOpenOrders(True) works (IB only allows this for clientId 0)
         # 2) reqOpenOrders() returns ALL orders (TWS + API) with valid orderIds
         # 3) Orders from previous sessions can be modified/cancelled
         client_id = 0
-        
-        self.scanner = IBMergerArbScanner()
-        self.scanner.resource_manager = self.resource_manager
-        connected = self.scanner.connect_to_ib(
-            host=IB_HOST,
-            port=IB_PORT,
-            client_id=client_id
-        )
-        
-        if connected:
-            logger.info("Successfully connected to IB TWS")
-            self._tws_last_connected = time.time()
-            self._tws_reconnecting = False
-            # Initialize execution infrastructure (quote cache + engine)
-            if self.quote_cache is None:
-                self.quote_cache = StreamingQuoteCache(self.resource_manager)
-            self.scanner.streaming_cache = self.quote_cache
-            if self.execution_engine is None:
-                self.execution_engine = ExecutionEngine(
-                    self.scanner, self.quote_cache, self.resource_manager
-                )
-            else:
-                # Point existing engine at the new scanner instance
-                self.execution_engine._scanner = self.scanner
-            logger.info("Execution infrastructure initialized (quote cache + engine ready)")
-        else:
-            logger.error("Failed to connect to IB TWS")
-            
-        return connected
+        # Try configured port first; then the other TWS port (7496=live, 7497=paper)
+        other_port = 7497 if IB_PORT == 7496 else 7496
+        ports_to_try = [IB_PORT, other_port]
+
+        for port in ports_to_try:
+            logger.info(f"Connecting to IB TWS at {IB_HOST}:{port}...")
+            self.scanner = IBMergerArbScanner()
+            self.scanner.resource_manager = self.resource_manager
+            connected = self.scanner.connect_to_ib(
+                host=IB_HOST,
+                port=port,
+                client_id=client_id,
+            )
+            if connected:
+                logger.info("Successfully connected to IB TWS")
+                self._tws_last_connected = time.time()
+                self._tws_reconnecting = False
+                # Initialize execution infrastructure (quote cache + engine)
+                if self.quote_cache is None:
+                    self.quote_cache = StreamingQuoteCache(self.resource_manager)
+                self.scanner.streaming_cache = self.quote_cache
+                if self.execution_engine is None:
+                    self.execution_engine = ExecutionEngine(
+                        self.scanner, self.quote_cache, self.resource_manager
+                    )
+                else:
+                    self.execution_engine._scanner = self.scanner
+                logger.info("Execution infrastructure initialized (quote cache + engine ready)")
+                return True
+            if port == ports_to_try[0]:
+                logger.warning(f"Connection to {IB_HOST}:{port} failed; trying {other_port}...")
+
+        logger.error("Failed to connect to IB TWS on either port (7496 or 7497)")
+        return False
 
     async def _connect_to_ib_with_retry(self, max_attempts: int = 0) -> bool:
         """Connect to IB TWS with exponential backoff.
