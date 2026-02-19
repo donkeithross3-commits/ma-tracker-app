@@ -1,0 +1,16 @@
+{
+  "date": "2026-02-19",
+  "title": "Feb 19, 2026",
+  "summary": "KRJ can now log in with an alternate email address.",
+  "features": [
+    {
+      "id": "krj-alternate-login-email",
+      "title": "Alternate Login Email for KRJ",
+      "summary": "KRJ can now log in using a second email address in addition to their primary one.",
+      "description": "Added backend support for KRJ to authenticate with an alternate email. Both addresses resolve to the same account — same alias, role, preferences, and session. No password change required.",
+      "category": "auth",
+      "image": "",
+      "screenshot": null
+    }
+  ]
+}

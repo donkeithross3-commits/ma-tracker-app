@@ -25,9 +25,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const email = (credentials.email as string).toLowerCase().trim()
         const password = credentials.password as string
 
+        // Hardcoded email aliases: alternate login emails that resolve to a canonical account
+        const EMAIL_ALIASES: Record<string, string> = {
+          "kross@ravenfoundation.org": "keith@unrival.network",
+        }
+        const resolvedEmail = EMAIL_ALIASES[email] ?? email
+
         // Check if user exists
         let user = await prisma.user.findUnique({
-          where: { email }
+          where: { email: resolvedEmail }
         })
 
         // If user doesn't exist, check whitelist and auto-provision with default password
@@ -41,7 +47,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
           // Check if email is whitelisted
           const whitelistEntry = await prisma.emailWhitelist.findUnique({
-            where: { email }
+            where: { email: resolvedEmail }
           })
 
           if (!whitelistEntry) {
@@ -58,7 +64,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const hashedPassword = await bcrypt.hash(DEFAULT_PASSWORD, 10)
           user = await prisma.user.create({
             data: {
-              email,
+              email: resolvedEmail,
               password: hashedPassword,
               alias,
               role: "analyst",
