@@ -1,7 +1,7 @@
 {
   "date": "2026-02-18",
   "title": "Week of Feb 16–18, 2026",
-  "summary": "IB Data Agent: connect to either paper or live TWS without config, optional Read-Only API support, and KRJ default tab.",
+  "summary": "IB Data Agent: auto-connect to paper or live TWS, Read-Only API support, KRJ default tab, and displacement signal model documentation.",
   "features": [
     {
       "id": "agent-try-both-ports",
@@ -36,6 +36,15 @@
       "summary": "When the KRJ user opens the M&A Options Scanner, the Account tab is selected by default.",
       "description": "The option scanner page (Curate / Monitor / Account tabs) now defaults to the **Account** tab for the KRJ user (alias \"KRJ\") and to the **Monitor** tab for all other users. This is driven by the user's alias from session preferences, with no config change required.",
       "category": "options",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "displacement-signal-model",
+      "title": "Displacement Signal: How It Works",
+      "summary": "The displacement signal combines per-stock relative strength z-scores with macro regime context to switch between momentum and mean-reversion modes.",
+      "description": "The displacement signal measures how far each stock has moved from its benchmark (QQQ for NDX-100 stocks, SPY for all others) using a z-score of 1-month and 3-month excess returns normalized against a trailing 252-day window. The composite z-score is the average of both horizons.\n\nThe signal direction depends on the macro regime state, which is detected by a walk-forward Gaussian Mixture Model fitted on 19 market features (oscillator percentiles, volatility, correlation, yield curve shape). The GMM discovers 4 regimes from 7 years of daily data (2019\u2013present, ~1,400 days, 520+ stocks).\n\n**Within a stable regime (age > 10 days): momentum mode.** Phase 3 research measured per-stock rank persistence (lag-1 autocorrelation) across all four regimes and found consistently high values: 0.81\u20130.84 mean. Leaders keep leading. The signal rides the displacement direction \u2014 positive z \u2192 LONG, negative z \u2192 SHORT.\n\n**At regime transitions (age \u2264 10 days): mean-reversion mode.** Spearman rank correlation was measured across all 256 observed regime transitions in the sample:\n\n- +1 day: 0.84 (leadership unchanged)\n- +5 days: 0.59 (decaying fast)\n- +21 days: -0.02 (complete shuffle)\n\nWithin 21 days of a regime change, old rankings become uncorrelated with new rankings. Pre-transition leaders are no better than random picks. The signal fades the displacement \u2014 positive z \u2192 SHORT (old outperformer likely to fade), negative z \u2192 LONG (old underperformer likely to recover).\n\nThe 10-day threshold is the active reversal window: rank correlation is still 0.59 at +5d but essentially zero at +21d. Stocks with |z| < 0.5 always get a NEUTRAL signal regardless of regime. Confidence scales linearly with displacement magnitude (capped at |z| = 3) and is multiplied by regime probability.\n\nThe model does not differentiate between which regimes transition to which \u2014 all transitions are treated equally. The momentum/mean-reversion switch is binary, not graduated.",
+      "category": "signals",
       "image": "",
       "screenshot": null
     }
