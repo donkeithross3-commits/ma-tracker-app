@@ -127,6 +127,7 @@ type DisplacementRegimeContext = {
   regime_age_days: number;
   transitioning: boolean;
   interpretation: string;
+  regime_weight_applied?: boolean;
 } | null;
 
 interface KrjTabsClientProps {
@@ -910,6 +911,14 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
             <span className="text-gray-500">({(drc.regime_prob * 100).toFixed(0)}%)</span>
             <span className="text-gray-600">|</span>
             <span className={`font-medium ${textAccent}`}>{drc.interpretation}</span>
+            {drc.regime_weight_applied && (
+              <>
+                <span className="text-gray-600">|</span>
+                <span className="text-gray-400 text-xs" title="Regime weights are active: signals may be amplified, inverted, or suppressed based on leader type and regime context">
+                  Regime weights active
+                </span>
+              </>
+            )}
           </div>
         );
       })()}
@@ -929,7 +938,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
           {/* Summary card and filter controls - same row */}
           <div className="mb-1 flex items-center gap-4 flex-wrap">
             {/* Yellow summary box */}
-            <div title="Signal summary for this list. L = Long (bullish), N = Neutral, S = Short (bearish). Numbers in parentheses show the change from last week (e.g. +3 means 3 more stocks entered that signal this week). Tot = total tickers with signal data." className="bg-yellow-300 text-black rounded px-4 py-2 inline-block text-[18px] font-semibold">
+            <div title="Signal summary for this list. L = Long, N = Neutral, S = Short. Tot = tickers with signal data. The number in parentheses is total constituents in the list." className="bg-yellow-300 text-black rounded px-4 py-2 inline-block text-[18px] font-semibold">
               {displaySummary.rowsSummary.map((r, idx) => {
                 // Color coding: Long=blue, Neutral=black, Short=red
                 const labelColor = r.label === "Long" ? "text-blue-700" : r.label === "Short" ? "text-red-700" : "text-black";
@@ -949,6 +958,9 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                 );
               })}
               {" | Tot:"}{displaySummary.totals.current}
+              {group.rows.length !== displaySummary.totals.current && (
+                <span className="text-black/80"> ({group.rows.length} tickers)</span>
+              )}
             </div>
 
             {/* Edit button for list owners */}
@@ -1168,18 +1180,20 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                           }
                           const z = Number(raw);
                           const absZ = Math.abs(z);
-                          const cls = absZ < 0.5 ? "text-gray-400" : z > 0 ? "text-emerald-400" : "text-red-400";
+                          const weightAction = (row.displacement_weight_action || "").trim();
+                          const isSuppressed = weightAction === "suppress";
+                          const cls = isSuppressed ? "text-gray-500" : absZ < 0.5 ? "text-gray-400" : z > 0 ? "text-emerald-400" : "text-red-400";
                           // Subtle heatmap background: intensity 0-20% based on |z| (capped at 3)
-                          const bgOpacity = Math.min(absZ / 3, 1) * 0.2;
+                          const bgOpacity = isSuppressed ? 0 : Math.min(absZ / 3, 1) * 0.2;
                           const bgColor = z > 0 ? `rgba(16, 185, 129, ${bgOpacity})` : z < 0 ? `rgba(239, 68, 68, ${bgOpacity})` : "transparent";
                           return (
-                            <td key={col.key} title={`Displacement composite z-score for ${tickerUpper}: ${z > 0 ? "+" : ""}${z.toFixed(3)}. 1m z: ${row.displacement_1m_z ?? "n/a"}, 3m z: ${row.displacement_3m_z ?? "n/a"}. Benchmark: ${row.displacement_benchmark ?? "n/a"}`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`} style={{ backgroundColor: bgColor }}>
+                            <td key={col.key} title={`Displacement composite z-score for ${tickerUpper}: ${z > 0 ? "+" : ""}${z.toFixed(3)}. 1m z: ${row.displacement_1m_z ?? "n/a"}, 3m z: ${row.displacement_3m_z ?? "n/a"}. Benchmark: ${row.displacement_benchmark ?? "n/a"}${weightAction ? `. Weight action: ${weightAction}` : ""}`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls} ${isSuppressed ? "opacity-50" : ""}`} style={{ backgroundColor: bgColor }}>
                               {z > 0 ? "+" : ""}{z.toFixed(2)}
                             </td>
                           );
                         }
 
-                        // Displacement direction pill (LONG/SHORT/NEUTRAL)
+                        // Displacement direction pill (LONG/SHORT/NEUTRAL) with regime weight indicators
                         if (col.key === "displacement_direction") {
                           const dir = (row.displacement_direction || "").trim();
                           if (!dir) {
@@ -1187,21 +1201,45 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                               <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-gray-600 text-sm">--</td>
                             );
                           }
-                          const pillCls = dir === "LONG"
+                          const weightAction = (row.displacement_weight_action || "").trim();
+                          const leaderType = (row.displacement_leader_type || "").trim();
+                          const regimeWeight = row.displacement_regime_weight ? Number(row.displacement_regime_weight) : null;
+                          const isInverted = weightAction === "invert";
+                          const isSuppressed = weightAction === "suppress";
+                          const pillCls = isSuppressed
+                            ? "bg-gray-800/50 text-gray-500 border-gray-700/50"
+                            : isInverted
+                            ? dir === "LONG"
+                              ? "bg-emerald-900/50 text-emerald-300 border-amber-500/60"
+                              : dir === "SHORT"
+                              ? "bg-red-900/50 text-red-300 border-amber-500/60"
+                              : "bg-gray-800/50 text-gray-400 border-amber-500/60"
+                            : dir === "LONG"
                             ? "bg-emerald-900/50 text-emerald-300 border-emerald-700/50"
                             : dir === "SHORT"
                             ? "bg-red-900/50 text-red-300 border-red-700/50"
                             : "bg-gray-800/50 text-gray-400 border-gray-700/50";
+                          const leaderLabel = leaderType ? leaderType.replace(/_/g, " ") : "";
+                          const tooltipParts = [`Direction: ${dir}`];
+                          if (weightAction) tooltipParts.push(`Weight action: ${weightAction}`);
+                          if (regimeWeight != null) tooltipParts.push(`Regime weight: ${regimeWeight.toFixed(2)}`);
+                          if (leaderLabel) tooltipParts.push(`Leader type: ${leaderLabel}`);
                           return (
-                            <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap">
-                              <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium border ${pillCls}`}>
+                            <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap" title={tooltipParts.join("\n")}>
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium border ${pillCls} ${isSuppressed ? "opacity-50" : ""}`}>
+                                {isInverted && <span className="text-amber-400 text-[10px]" title="Signal inverted by regime weights">inv</span>}
                                 {dir}
                               </span>
+                              {leaderLabel && (
+                                <span className="ml-1 text-[10px] text-gray-500" title={`Leader type: ${leaderLabel}`}>
+                                  {leaderLabel}
+                                </span>
+                              )}
                             </td>
                           );
                         }
 
-                        // Displacement confidence (0-1 decimal, dimmed when low)
+                        // Displacement confidence (0-1 decimal, dimmed when low or suppressed)
                         if (col.key === "displacement_confidence") {
                           const raw = row.displacement_confidence;
                           if (!raw || raw === "") {
@@ -1210,9 +1248,11 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                             );
                           }
                           const conf = Number(raw);
-                          const cls = conf >= 0.5 ? "text-gray-200" : conf >= 0.25 ? "text-gray-400" : "text-gray-600";
+                          const weightAction = (row.displacement_weight_action || "").trim();
+                          const isSuppressed = weightAction === "suppress";
+                          const cls = isSuppressed ? "text-gray-600" : conf >= 0.5 ? "text-gray-200" : conf >= 0.25 ? "text-gray-400" : "text-gray-600";
                           return (
-                            <td key={col.key} title={`Displacement confidence for ${tickerUpper}: ${conf.toFixed(3)}`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls}`}>
+                            <td key={col.key} title={`Displacement confidence for ${tickerUpper}: ${conf.toFixed(3)}${weightAction ? `. Weight action: ${weightAction}` : ""}`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls} ${isSuppressed ? "opacity-50" : ""}`}>
                               {conf.toFixed(3)}
                             </td>
                           );
