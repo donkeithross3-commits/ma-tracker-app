@@ -1073,7 +1073,7 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                         key={col.key}
                         title={col.description}
                         onClick={() => handleColumnSort(col.key)}
-                        className={`px-1 py-1 ${isNumeric ? 'text-right' : 'text-left'} font-bold text-gray-100 border-b border-gray-600 whitespace-normal max-w-[50px] text-[14px] leading-tight cursor-pointer select-none hover:bg-gray-700/50 transition-colors ${isSorted ? 'text-blue-300' : ''}`}
+                        className={`px-1.5 py-1 ${isNumeric ? 'text-right' : 'text-left'} font-bold text-gray-100 border-b border-gray-600 whitespace-nowrap text-[13px] leading-tight cursor-pointer select-none hover:bg-gray-700/50 transition-colors ${isSorted ? 'text-blue-300' : ''}`}
                       >
                         <span className="inline-flex items-center gap-0.5">
                           {col.label}
@@ -1219,19 +1219,21 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                             : dir === "SHORT"
                             ? "bg-red-900/50 text-red-300 border-red-700/50"
                             : "bg-gray-800/50 text-gray-400 border-gray-700/50";
-                          const leaderLabel = leaderType ? leaderType.replace(/_/g, " ") : "";
+                          const leaderAbbrev: Record<string, string> = { old_leader: "old", new_leader: "new", defensive: "def", cyclical: "cyc", other: "oth" };
+                          const leaderLabel = leaderType ? (leaderAbbrev[leaderType] ?? leaderType.replace(/_/g, " ")) : "";
+                          const leaderFull = leaderType ? leaderType.replace(/_/g, " ") : "";
                           const tooltipParts = [`Direction: ${dir}`];
                           if (weightAction) tooltipParts.push(`Weight action: ${weightAction}`);
                           if (regimeWeight != null) tooltipParts.push(`Regime weight: ${regimeWeight.toFixed(2)}`);
-                          if (leaderLabel) tooltipParts.push(`Leader type: ${leaderLabel}`);
+                          if (leaderFull) tooltipParts.push(`Leader type: ${leaderFull}`);
                           return (
                             <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap" title={tooltipParts.join("\n")}>
-                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium border ${pillCls} ${isSuppressed ? "opacity-50" : ""}`}>
+                              <span className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-xs font-medium border ${pillCls} ${isSuppressed ? "opacity-50" : ""}`}>
                                 {isInverted && <span className="text-amber-400 text-[10px]" title="Signal inverted by regime weights">inv</span>}
                                 {dir}
                               </span>
                               {leaderLabel && (
-                                <span className="ml-1 text-[10px] text-gray-500" title={`Leader type: ${leaderLabel}`}>
+                                <span className="ml-0.5 text-[10px] text-gray-500" title={`Leader type: ${leaderFull}`}>
                                   {leaderLabel}
                                 </span>
                               )}
