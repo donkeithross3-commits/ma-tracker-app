@@ -127,6 +127,9 @@ export default async function KrjPage() {
     direction?: string;
     confidence?: number;
     benchmark?: string;
+    regime_weight?: number;
+    leader_type?: string;
+    weight_action?: string;
   }> | undefined;
   if (displacementTickers) {
     for (const list of lists) {
@@ -140,6 +143,9 @@ export default async function KrjPage() {
           if (dispData.direction) row.displacement_direction = dispData.direction;
           if (dispData.confidence != null) row.displacement_confidence = String(dispData.confidence);
           if (dispData.benchmark) row.displacement_benchmark = dispData.benchmark;
+          if (dispData.regime_weight != null) row.displacement_regime_weight = String(dispData.regime_weight);
+          if (dispData.leader_type) row.displacement_leader_type = dispData.leader_type;
+          if (dispData.weight_action) row.displacement_weight_action = dispData.weight_action;
         }
       }
     }
@@ -152,6 +158,7 @@ export default async function KrjPage() {
     regime_age_days: displacementSignals.regime_context.regime_age_days as number,
     transitioning: displacementSignals.regime_context.transitioning as boolean,
     interpretation: displacementSignals.regime_context.interpretation as string,
+    regime_weight_applied: (displacementSignals.regime_context.regime_weight_applied as boolean) ?? false,
   } : null;
 
   // Transform lists to the format expected by KrjTabsClient

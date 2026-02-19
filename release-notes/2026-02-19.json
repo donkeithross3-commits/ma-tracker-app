@@ -1,7 +1,7 @@
 {
   "date": "2026-02-19",
   "title": "Feb 19, 2026",
-  "summary": "Alternate KRJ login, and more reliable index composition for SP500/SP100/NDX100 with in-app warnings when counts are off.",
+  "summary": "Regime-weighted displacement signals with nightly automation, alternate KRJ login, and improved index composition.",
   "features": [
     {
       "id": "krj-alternate-login-email",
@@ -17,6 +17,33 @@
       "title": "Index Composition Warning on KRJ Signals",
       "summary": "When an index list (SP500, SP100, NDX100) has an unexpected ticker count, a clear notice is shown.",
       "description": "The KRJ Signals page now checks that system index lists have the expected number of constituents (e.g. S&P 500: 498-505). If the count is outside that range, an amber banner appears above the summary box. The weekly pipeline has also been hardened: it only overwrites constituent files when the fetched count is in the expected range and uses an optional FMP fallback for S&P 500 when Wikipedia is wrong.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "regime-weight-indicators",
+      "title": "Regime Weight Indicators on Displacement Signals",
+      "summary": "Displacement signals now show whether they were amplified, inverted, or suppressed by regime weights.",
+      "description": "The displacement signal columns (Disp. Signal, Displacement, Disp. Conf.) now display visual context from the regime weight system. Inverted signals show an amber 'inv' tag and border. Suppressed signals are dimmed to 50% opacity. Each ticker's leader type (new leader, defensive, cyclical, etc.) appears next to the signal pill. Hovering any displacement cell reveals the weight action, regime weight value, and leader type. The displacement regime banner also indicates when regime weights are active.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "regime-weighted-displacement-backend",
+      "title": "Data-Driven Regime Weights for Displacement Signals",
+      "summary": "Displacement signal direction is now conditioned on macro regime and stock classification using backtested weights.",
+      "description": "A new research pipeline analyzed historical displacement signal efficacy across 6 macro regimes and 5 stock classifications (old_leader, new_leader, defensive, cyclical, other). The resulting 30-cell weight matrix determines whether each signal is amplified, inverted, or suppressed.\n\nKey findings: during Defensive Rotation, cyclical stocks' displacement signals are inverted (w=-1.39) while old tech leaders are amplified (w=+1.50, +96 bps mean). During Stagflation, old leaders are inverted. The system falls back to the original transitioning/stable logic when weights are unavailable.\n\nGICS sector mapping (517 tickers via yfinance) classifies each stock by sector and market cap for leader type assignment.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "nightly-displacement-automation",
+      "title": "Nightly Displacement Signal Updates",
+      "summary": "Displacement signals now refresh automatically every weekday morning at 5 AM.",
+      "description": "A new nightly pipeline runs at 5 AM Mon-Fri on the droplet. It incrementally refreshes market data from Polygon, recomputes the market state regime classification, and exports updated displacement signals to the dashboard. The Saturday weekly pipeline also now includes displacement signal generation as Step 5 (with sector cache refresh). Signals are always fresh by market open.",
       "category": "signals",
       "image": "",
       "screenshot": null
