@@ -49,6 +49,8 @@ type GroupData = {
   isFork?: boolean;
   forkDelta?: { added: string[]; removed: string[] };
   tickerCount?: number;
+  /** Shown when index constituent count is outside expected range */
+  compositionWarning?: string;
 };
 
 // Enriched signal decomposition data (from Python signal_generator.py)
@@ -919,6 +921,11 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
         
         return (
         <TabsContent key={group.key} value={group.key} className="mt-0">
+          {group.compositionWarning && (
+            <div className="mb-1 rounded bg-amber-900/40 border border-amber-600/50 px-3 py-1.5 text-sm text-amber-200" role="alert">
+              {group.compositionWarning}
+            </div>
+          )}
           {/* Summary card and filter controls - same row */}
           <div className="mb-1 flex items-center gap-4 flex-wrap">
             {/* Yellow summary box */}

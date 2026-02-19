@@ -5,6 +5,27 @@ import Papa from "papaparse";
 
 export type RawRow = Record<string, string>;
 
+/** Expected constituent count ranges for system index lists (must match py_proj sync_indexes). */
+export const INDEX_EXPECTED_RANGES: Record<string, { min: number; max: number }> = {
+  sp500: { min: 498, max: 505 },
+  sp100: { min: 98, max: 102 },
+  ndx100: { min: 98, max: 102 },
+};
+
+/**
+ * Returns a warning message when a system index list's row count is outside the expected range.
+ * Used for compositionWarning on KrjListData.
+ */
+export function getCompositionWarning(
+  slug: string,
+  count: number,
+  listName: string
+): string | undefined {
+  const range = INDEX_EXPECTED_RANGES[slug];
+  if (!range || (count >= range.min && count <= range.max)) return undefined;
+  return `${listName} shows ${count} tickers (expected ${range.min}–${range.max}). Index composition may be incomplete.`;
+}
+
 export type KrjListData = {
   id: string;
   key: string; // slug
@@ -22,6 +43,8 @@ export type KrjListData = {
     added: string[];
     removed: string[];
   };
+  /** Set when system list row count is outside expected range (e.g. SP500 has 493). */
+  compositionWarning?: string;
 };
 
 export type KrjMetadata = {
@@ -52,44 +75,48 @@ function loadCsv(fileName: string): RawRow[] {
   return parsed.data;
 }
 
+/** Return the most recent Friday (UTC date). Used when metadata is missing. */
+function getMostRecentFriday(): Date {
+  const now = new Date();
+  const day = now.getUTCDay(); // 0 Sun .. 6 Sat
+  const daysBack = day <= 5 ? (day === 0 ? 2 : 5 - day) : day - 5;
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysBack));
+}
+
+function formatSignalDate(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 /**
- * Get signal date from metadata.json
+ * Get signal date for the KRJ header.
+ * Reads from metadata.json (written by the Saturday weekly job). If missing or invalid,
+ * falls back to the most recent Friday so we never show a misleading file mtime.
  */
 export function getSignalDate(): string {
   try {
     const metadataPath = path.join(process.cwd(), "data", "krj", "metadata.json");
-    
+
     if (fs.existsSync(metadataPath)) {
       const metadataContent = fs.readFileSync(metadataPath, "utf8");
       const metadata: KrjMetadata = JSON.parse(metadataContent);
-      
+
       if (metadata.signal_date) {
-        const [year, month, day] = metadata.signal_date.split('-');
-        const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-        
-        return date.toLocaleDateString('en-US', { 
-          year: 'numeric', 
-          month: 'short', 
-          day: 'numeric' 
-        });
+        const [y, m, d] = metadata.signal_date.split("-").map(Number);
+        if (y && m && d) {
+          const date = new Date(Date.UTC(y, m - 1, d));
+          return formatSignalDate(date);
+        }
       }
     }
-    
-    // Fallback: Use file modification timestamp
-    const filePath = path.join(process.cwd(), "data", "krj", "latest_equities.csv");
-    if (fs.existsSync(filePath)) {
-      const stats = fs.statSync(filePath);
-      return stats.mtime.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric' 
-      });
-    }
-    
-    return "—";
+
+    return formatSignalDate(getMostRecentFriday());
   } catch (error) {
     console.error(`Error reading signal date:`, error);
-    return "—";
+    return formatSignalDate(getMostRecentFriday());
   }
 }
 
@@ -354,6 +381,10 @@ export async function getKrjListsForUser(userId: string | null): Promise<{
       }
     }
 
+    const compositionWarning = dbList.isSystem
+      ? getCompositionWarning(dbList.slug, rows.length, dbList.name)
+      : undefined;
+
     lists.push({
       id: dbList.id,
       key: dbList.slug,
@@ -370,6 +401,7 @@ export async function getKrjListsForUser(userId: string | null): Promise<{
       forkDelta: fork
         ? { added: fork.addedTickers, removed: fork.removedTickers }
         : undefined,
+      compositionWarning,
     });
   }
 

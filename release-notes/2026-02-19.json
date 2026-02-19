@@ -1,7 +1,7 @@
 {
   "date": "2026-02-19",
   "title": "Feb 19, 2026",
-  "summary": "KRJ can now log in with an alternate email address.",
+  "summary": "Alternate KRJ login, and more reliable index composition for SP500/SP100/NDX100 with in-app warnings when counts are off.",
   "features": [
     {
       "id": "krj-alternate-login-email",
@@ -9,6 +9,15 @@
       "summary": "KRJ can now log in using a second email address in addition to their primary one.",
       "description": "Added backend support for KRJ to authenticate with an alternate email. Both addresses resolve to the same account — same alias, role, preferences, and session. No password change required.",
       "category": "auth",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "index-composition-warning",
+      "title": "Index Composition Warning on KRJ Signals",
+      "summary": "When an index list (SP500, SP100, NDX100) has an unexpected ticker count, a clear notice is shown.",
+      "description": "The KRJ Signals page now checks that system index lists have the expected number of constituents (e.g. S&P 500: 498-505). If the count is outside that range, an amber banner appears above the summary box. The weekly pipeline has also been hardened: it only overwrites constituent files when the fetched count is in the expected range and uses an optional FMP fallback for S&P 500 when Wikipedia is wrong.",
+      "category": "signals",
       "image": "",
       "screenshot": null
     }

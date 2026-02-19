@@ -170,6 +170,7 @@ export default async function KrjPage() {
     isFork: list.isFork,
     forkDelta: list.forkDelta,
     tickerCount: list.tickers.length,
+    compositionWarning: list.compositionWarning,
   }));
 
   return (
