@@ -1,0 +1,43 @@
+{
+  "date": "2026-02-18",
+  "title": "Week of Feb 16–18, 2026",
+  "summary": "IB Data Agent: connect to either paper or live TWS without config, optional Read-Only API support, and KRJ default tab.",
+  "features": [
+    {
+      "id": "agent-try-both-ports",
+      "title": "Agent Connects to Either Paper or Live TWS",
+      "summary": "Agent tries both TWS ports (7497 paper, 7496 live) so it connects without editing config.",
+      "description": "The IB Data Agent now tries the configured port first, then the other standard TWS port if the connection fails. You can start paper TWS (7497) or live TWS (7496) and run the agent without setting IB_PORT or IB_MODE in config.env.\n\nPort mapping follows official TWS defaults: 7497 = paper, 7496 = live. Config parsing also trims whitespace so values from config.env are read correctly.",
+      "category": "options",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "read-only-optional",
+      "title": "Read-Only API Is Optional",
+      "summary": "Leave Read-Only checked in TWS for quote-only use; market data and positions docs clarified.",
+      "description": "Documentation and behavior now reflect that TWS Read-Only API mode only blocks order placement and order information — not market data (reqMktData) or positions. You can leave Read-Only **checked** when you only need quotes and want maximum safety against accidental API orders. Uncheck it when you need to place or manage orders; the socket port (7496 vs 7497) still determines which account (live vs paper) is used.",
+      "category": "options",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "agent-detect-read-only",
+      "title": "Agent Detects Read-Only and Stops Restricted Requests",
+      "summary": "When TWS is in Read-Only mode, the agent stops calling positions and orders so IB errors stop.",
+      "description": "If the agent receives an error from IB indicating Read-Only API mode (e.g. \"order information is not available\" or \"read only\"), it sets an internal flag and from then on:\n\n- Does not call reqPositions or reqOpenOrders (returns empty lists)\n- Does not call reqOpenOrders on reconnect\n- Place, modify, and cancel order requests return a clear message: \"TWS is in Read-Only API mode. Uncheck Read-Only in TWS API Settings to place orders.\"\n\nMarket data (quotes) and contract lookups continue to work. The status response includes **read_only_session** and the dashboard can show \"IB TWS connected (Read-Only — quotes only, no positions/orders)\" so users know why positions/orders are empty.",
+      "category": "options",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "krj-default-account-tab",
+      "title": "KRJ User Defaults to Account Tab on Options Scanner",
+      "summary": "When the KRJ user opens the M&A Options Scanner, the Account tab is selected by default.",
+      "description": "The option scanner page (Curate / Monitor / Account tabs) now defaults to the **Account** tab for the KRJ user (alias \"KRJ\") and to the **Monitor** tab for all other users. This is driven by the user's alias from session preferences, with no config change required.",
+      "category": "options",
+      "image": "",
+      "screenshot": null
+    }
+  ]
+}
