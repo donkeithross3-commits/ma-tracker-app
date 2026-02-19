@@ -4,6 +4,8 @@ globs: python-service/standalone_agent/**/*.py
 alwaysApply: false
 ---
 
+> Shared agent contract: [docs/agent/AGENTS.md](docs/agent/AGENTS.md)
+
 # IB Contract Resolution — Lessons Learned
 
 ## conId Is King, But Exchange Is Still Required for Futures

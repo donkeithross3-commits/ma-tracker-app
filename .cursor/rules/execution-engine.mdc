@@ -4,6 +4,8 @@ globs: python-service/standalone_agent/**/*.py, python-service/app/api/ws_relay.
 alwaysApply: false
 ---
 
+> Shared agent contract: [docs/agent/AGENTS.md](docs/agent/AGENTS.md)
+
 # Execution Engine Architecture
 
 ## Component Map

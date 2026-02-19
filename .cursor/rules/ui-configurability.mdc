@@ -3,6 +3,8 @@ description: UI configurability architecture — column chooser, comfort mode, p
 alwaysApply: true
 ---
 
+> Shared agent contract: [docs/agent/AGENTS.md](docs/agent/AGENTS.md)
+
 # UI Configurability Architecture
 
 ## Philosophy

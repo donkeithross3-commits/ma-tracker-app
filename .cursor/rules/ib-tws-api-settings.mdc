@@ -1,3 +1,5 @@
+> Shared agent contract: [docs/agent/AGENTS.md](docs/agent/AGENTS.md)
+
 # IB TWS API Settings — Required Configuration
 
 When working on the IB Data Agent or any code that connects to IB TWS via the API,

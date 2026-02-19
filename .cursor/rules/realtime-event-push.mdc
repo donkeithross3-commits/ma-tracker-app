@@ -4,6 +4,8 @@ globs: python-service/standalone_agent/**/*.py,components/ma-options/IBPositions
 alwaysApply: false
 ---
 
+> Shared agent contract: [docs/agent/AGENTS.md](docs/agent/AGENTS.md)
+
 # Real-Time Account Event Push Architecture
 
 ## Data Flow (target: <500ms end-to-end)
