@@ -121,6 +121,19 @@ type EnrichedSignalsData = {
   tickers?: Record<string, EnrichedTickerData>;
 };
 
+// ETF regime-conditional signal (from displacement pipeline etf_signals key)
+type EtfSignal = {
+  group: string;
+  regime_bias: string;  // "momentum" or "mean_reversion"
+  lookback: string;
+  trailing_return_pct: number;
+  trailing_z: number;
+  direction: string;    // "LONG" | "SHORT" | "NEUTRAL"
+  confidence: number;
+  significant: boolean;
+  signal_type: string;  // "etf_regime"
+};
+
 type DisplacementRegimeContext = {
   regime_label: string;
   regime_prob: number;
@@ -150,6 +163,7 @@ interface KrjTabsClientProps {
   enrichedSignals?: EnrichedSignalsData | null;
   displacementRegimeContext?: DisplacementRegimeContext;
   transitionWarning?: TransitionWarning;
+  etfSignals?: Record<string, EtfSignal>;
 }
 
 // Signal filter types
@@ -306,7 +320,7 @@ const KRJ_DEFAULT_COLUMNS = [
   "25D_ADV_Shares_MM", "25D_ADV_nortional_B", "avg_trade_size",
 ]
 
-export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias, enrichedSignals, displacementRegimeContext, transitionWarning }: KrjTabsClientProps) {
+export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias, enrichedSignals, displacementRegimeContext, transitionWarning, etfSignals }: KrjTabsClientProps) {
   const router = useRouter()
   const { getVisibleColumns, setVisibleColumns, isComfort } = useUIPreferences()
 
@@ -1208,6 +1222,21 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
 
                         // Displacement composite z-score (heatmap cell)
                         if (col.key === "displacement_composite") {
+                          // ETF signal override: show trailing_z instead of stock displacement
+                          const etfSig = etfSignals?.[tickerUpper];
+                          if (etfSig) {
+                            const z = etfSig.trailing_z;
+                            const absZ = Math.abs(z);
+                            const dimmed = !etfSig.significant;
+                            const cls = dimmed ? "text-gray-500" : absZ < 0.5 ? "text-gray-400" : z > 0 ? "text-sky-400" : "text-orange-400";
+                            const bgOpacity = dimmed ? 0 : Math.min(absZ / 3, 1) * 0.2;
+                            const bgColor = z > 0 ? `rgba(56, 189, 248, ${bgOpacity})` : z < 0 ? `rgba(251, 146, 60, ${bgOpacity})` : "transparent";
+                            return (
+                              <td key={col.key} title={`ETF regime signal for ${tickerUpper}\nGroup: ${etfSig.group}\nRegime bias: ${etfSig.regime_bias}\nLookback: ${etfSig.lookback}\nTrailing return: ${etfSig.trailing_return_pct > 0 ? "+" : ""}${etfSig.trailing_return_pct.toFixed(2)}%\nTrailing z-score: ${z > 0 ? "+" : ""}${z.toFixed(3)}\nDirection: ${etfSig.direction}\nConfidence: ${etfSig.confidence.toFixed(3)}\nSignificant: ${etfSig.significant ? "yes" : "no"}`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls} ${dimmed ? "opacity-50" : ""}`} style={{ backgroundColor: bgColor }}>
+                                {z > 0 ? "+" : ""}{z.toFixed(2)}
+                              </td>
+                            );
+                          }
                           const raw = row.displacement_composite;
                           if (!raw || raw === "") {
                             return (
@@ -1231,6 +1260,30 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
 
                         // Displacement direction pill (LONG/SHORT/NEUTRAL) with regime weight indicators
                         if (col.key === "displacement_direction") {
+                          // ETF signal override: blue-tinted pill with regime bias tag
+                          const etfSig = etfSignals?.[tickerUpper];
+                          if (etfSig) {
+                            const dir = etfSig.direction;
+                            const dimmed = !etfSig.significant;
+                            const biasTag = etfSig.regime_bias === "momentum" ? "mtm" : "mr";
+                            const pillCls = dimmed
+                              ? "bg-gray-800/50 text-gray-500 border-gray-700/50"
+                              : dir === "LONG"
+                              ? "bg-sky-900/50 text-sky-300 border-sky-700/50"
+                              : dir === "SHORT"
+                              ? "bg-indigo-900/50 text-indigo-300 border-indigo-700/50"
+                              : "bg-gray-800/50 text-gray-400 border-gray-700/50";
+                            return (
+                              <td key={col.key} className="px-1 py-0.5 border-b border-gray-700 whitespace-nowrap" title={`ETF regime signal for ${tickerUpper}\nGroup: ${etfSig.group}\nDirection: ${dir}\nRegime bias: ${etfSig.regime_bias}\nLookback: ${etfSig.lookback}\nTrailing return: ${etfSig.trailing_return_pct > 0 ? "+" : ""}${etfSig.trailing_return_pct.toFixed(2)}%\nTrailing z: ${etfSig.trailing_z > 0 ? "+" : ""}${etfSig.trailing_z.toFixed(3)}\nConfidence: ${etfSig.confidence.toFixed(3)}\nSignificant: ${etfSig.significant ? "yes" : "no"}`}>
+                                <span className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-xs font-medium border ${pillCls} ${dimmed ? "opacity-50" : ""}`}>
+                                  {dir}
+                                </span>
+                                <span className="ml-0.5 text-[10px] text-sky-500" title={`Regime bias: ${etfSig.regime_bias}`}>
+                                  {biasTag}
+                                </span>
+                              </td>
+                            );
+                          }
                           const dir = (row.displacement_direction || "").trim();
                           if (!dir) {
                             return (
@@ -1279,6 +1332,18 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
 
                         // Displacement confidence (0-1 decimal, dimmed when low or suppressed)
                         if (col.key === "displacement_confidence") {
+                          // ETF signal override: show ETF confidence
+                          const etfSig = etfSignals?.[tickerUpper];
+                          if (etfSig) {
+                            const conf = etfSig.confidence;
+                            const dimmed = !etfSig.significant;
+                            const cls = dimmed ? "text-gray-600" : conf >= 0.5 ? "text-sky-200" : conf >= 0.25 ? "text-gray-400" : "text-gray-600";
+                            return (
+                              <td key={col.key} title={`ETF signal confidence for ${tickerUpper}: ${conf.toFixed(3)}\nRegime bias: ${etfSig.regime_bias}\nSignificant: ${etfSig.significant ? "yes" : "no"}`} className={`px-1 py-0.5 border-b border-gray-700 whitespace-nowrap text-right font-mono text-sm ${cls} ${dimmed ? "opacity-50" : ""}`}>
+                                {conf.toFixed(3)}
+                              </td>
+                            );
+                          }
                           const raw = row.displacement_confidence;
                           if (!raw || raw === "") {
                             return (

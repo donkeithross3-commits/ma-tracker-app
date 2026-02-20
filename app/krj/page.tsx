@@ -151,6 +151,19 @@ export default async function KrjPage() {
     }
   }
 
+  // Extract ETF regime-conditional signals (new key from displacement pipeline)
+  const etfSignals = displacementSignals?.etf_signals as Record<string, {
+    group: string;
+    regime_bias: string;
+    lookback: string;
+    trailing_return_pct: number;
+    trailing_z: number;
+    direction: string;
+    confidence: number;
+    significant: boolean;
+    signal_type: string;
+  }> | undefined;
+
   // Extract displacement regime context for the banner
   const displacementRegimeContext = displacementSignals?.regime_context ? {
     regime_label: displacementSignals.regime_context.regime_label as string,
@@ -228,6 +241,7 @@ export default async function KrjPage() {
         enrichedSignals={enrichedSignals}
         displacementRegimeContext={displacementRegimeContext}
         transitionWarning={transitionWarning}
+        etfSignals={etfSignals}
       />
     </div>
   );
