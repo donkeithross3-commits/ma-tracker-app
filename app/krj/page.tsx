@@ -161,6 +161,19 @@ export default async function KrjPage() {
     regime_weight_applied: (displacementSignals.regime_context.regime_weight_applied as boolean) ?? false,
   } : null;
 
+  // Extract transition warning data
+  const transitionWarning = displacementSignals?.transition_warning ? {
+    warning_score: displacementSignals.transition_warning.warning_score as number,
+    warning_level: displacementSignals.transition_warning.warning_level as string,
+    components: displacementSignals.transition_warning.components as {
+      prob_instability: number;
+      prob_3w_change: number;
+      current_prob: number;
+      velocity_score: number;
+      features_used: string[];
+    },
+  } : null;
+
   // Transform lists to the format expected by KrjTabsClient
   const groupsData = lists.map(list => ({
     key: list.key,
@@ -214,6 +227,7 @@ export default async function KrjPage() {
         userAlias={session?.user?.alias}
         enrichedSignals={enrichedSignals}
         displacementRegimeContext={displacementRegimeContext}
+        transitionWarning={transitionWarning}
       />
     </div>
   );

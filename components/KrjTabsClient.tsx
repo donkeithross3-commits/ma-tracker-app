@@ -130,6 +130,18 @@ type DisplacementRegimeContext = {
   regime_weight_applied?: boolean;
 } | null;
 
+type TransitionWarning = {
+  warning_score: number;
+  warning_level: string;
+  components: {
+    prob_instability: number;
+    prob_3w_change: number;
+    current_prob: number;
+    velocity_score: number;
+    features_used: string[];
+  };
+} | null;
+
 interface KrjTabsClientProps {
   groups: GroupData[];
   columns: Array<{ key: string; label: string; description: string }>;
@@ -137,6 +149,7 @@ interface KrjTabsClientProps {
   userAlias?: string | null;
   enrichedSignals?: EnrichedSignalsData | null;
   displacementRegimeContext?: DisplacementRegimeContext;
+  transitionWarning?: TransitionWarning;
 }
 
 // Signal filter types
@@ -293,7 +306,7 @@ const KRJ_DEFAULT_COLUMNS = [
   "25D_ADV_Shares_MM", "25D_ADV_nortional_B", "avg_trade_size",
 ]
 
-export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias, enrichedSignals, displacementRegimeContext }: KrjTabsClientProps) {
+export default function KrjTabsClient({ groups: groupsProp, columns, userId, userAlias, enrichedSignals, displacementRegimeContext, transitionWarning }: KrjTabsClientProps) {
   const router = useRouter()
   const { getVisibleColumns, setVisibleColumns, isComfort } = useUIPreferences()
 
@@ -919,6 +932,29 @@ export default function KrjTabsClient({ groups: groupsProp, columns, userId, use
                 </span>
               </>
             )}
+            {transitionWarning && (() => {
+              const tw = transitionWarning;
+              const levelColors: Record<string, { bg: string; text: string; border: string }> = {
+                low: { bg: "bg-emerald-900/50", text: "text-emerald-300", border: "border-emerald-700/50" },
+                moderate: { bg: "bg-yellow-900/50", text: "text-yellow-300", border: "border-yellow-700/50" },
+                elevated: { bg: "bg-orange-900/50", text: "text-orange-300", border: "border-orange-700/50" },
+                high: { bg: "bg-red-900/50", text: "text-red-300", border: "border-red-700/50" },
+              };
+              const c = levelColors[tw.warning_level] ?? levelColors.low;
+              const prob3wPct = (tw.components.prob_3w_change * 100).toFixed(1);
+              const prob3wSign = tw.components.prob_3w_change >= 0 ? "+" : "";
+              return (
+                <>
+                  <span className="text-gray-600">|</span>
+                  <span
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium border ${c.bg} ${c.text} ${c.border} cursor-default`}
+                    title={`Transition Warning Score: ${tw.warning_score.toFixed(2)}\nLevel: ${tw.warning_level}\n\nComponents:\n  Prob instability: ${tw.components.prob_instability.toFixed(3)} (1 - current regime prob)\n  Current regime prob: ${(tw.components.current_prob * 100).toFixed(1)}%\n  3-week prob change: ${prob3wSign}${prob3wPct}%\n  Feature velocity: ${tw.components.velocity_score.toFixed(3)}\n  Features: ${tw.components.features_used.join(", ")}\n\nThresholds: low <0.3, moderate 0.3-0.5, elevated 0.5-0.7, high >0.7`}
+                  >
+                    Transition: {tw.warning_level} ({tw.warning_score.toFixed(2)})
+                  </span>
+                </>
+              );
+            })()}
           </div>
         );
       })()}
