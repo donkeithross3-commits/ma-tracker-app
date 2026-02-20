@@ -1,7 +1,7 @@
 {
   "date": "2026-02-20",
   "title": "Feb 20, 2026",
-  "summary": "Regime signal improvements: Bayesian-shrunk weights, age gating, long-only Defensive Rotation, and transition early warning on dashboard.",
+  "summary": "Regime signal improvements: Bayesian-shrunk weights, age gating, long-only Defensive Rotation, transition early warning, and regime-calibrated ETF signals.",
   "features": [
     {
       "id": "bayesian-shrunk-weights",
@@ -35,6 +35,15 @@
       "title": "Regime Transition Early Warning",
       "summary": "A new indicator on the KRJ page shows the probability of an imminent regime transition.",
       "description": "A colored badge next to the displacement regime banner displays the current transition risk: low (green), moderate (yellow), elevated (orange), or high (red). The score combines regime probability decay (60% weight) and feature velocity (40% weight) based on research showing 93% precision at the 0.5 threshold.\n\nHovering the badge shows the full breakdown: warning score, probability instability, 3-week probability change, and feature velocity components. The warning helps anticipate regime changes before they trigger the age gate.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "etf-regime-signals",
+      "title": "Regime-Calibrated ETF Signals",
+      "summary": "ETFs now show regime-conditional momentum/mean-reversion signals instead of invalid displacement signals.",
+      "description": "Displacement signals were invalid for ETFs (no GICS sector, benchmarked to SPY = just relative performance). ETF displacement is now suppressed and replaced with a regime-calibrated momentum/mean-reversion signal based on time-series autocorrelation research (script 30).\n\nThe signal map covers 16 ETFs across 5 groups: Equity Indices (DIA, SPY, QQQ, MDY, IWM, OEF), Commodities (GLD, SLV, USO), Sectors (XLE, XLF), Risk Assets (EEM, ARKK), and Safe Havens (TLT, HYG). Each (group, regime) pair uses the lookback and direction type (momentum or mean-reversion) with the strongest statistical significance from the research.\n\nOn the dashboard, ETF signals appear as blue-tinted pills (sky for LONG, indigo for SHORT) with regime bias tags ('mtm' or 'mr'). Non-significant signals are dimmed. Hovering shows the full breakdown: trailing return, z-score, lookback, and significance.",
       "category": "signals",
       "image": "",
       "screenshot": null
