@@ -1,0 +1,43 @@
+{
+  "date": "2026-02-20",
+  "title": "Feb 20, 2026",
+  "summary": "Regime signal improvements: Bayesian-shrunk weights, age gating, long-only Defensive Rotation, and transition early warning on dashboard.",
+  "features": [
+    {
+      "id": "bayesian-shrunk-weights",
+      "title": "Bayesian-Shrunk Regime Weights",
+      "summary": "Regime displacement weights now use Bayesian shrinkage for better out-of-sample performance.",
+      "description": "The 30-cell regime weight matrix (macro_regime x leader_type) has been updated using Bayesian shrinkage toward the grand mean (k=50). Low-sample cells are pulled toward the population average proportional to 1/sqrt(n), preventing overfitting on sparse data.\n\nKey improvements: out-of-sample Sharpe improved from 0.74 to 0.82. Extreme weights from small samples were regularized (e.g., Stagflation|old_leader moved from -1.32 to 0.04). High-sample cells were barely affected. The original weights are preserved as a backup.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "regime-age-gating",
+      "title": "Regime Age Gating",
+      "summary": "Displacement signals are now suppressed during the first 5 days of a new regime to avoid false signals.",
+      "description": "Research showed that the first 5 days after a regime transition have negative expected returns for displacement signals. A new age gate suppresses all signals to NEUTRAL during this period. The regime banner displays 'GATED' status when active. Signals resume after 5 days when the regime stabilizes and displacement gains predictive power (p=0.006 interaction effect).",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "long-only-defensive-rotation",
+      "title": "Long-Only Mode for Defensive Rotation",
+      "summary": "SHORT signals are suppressed during Defensive Rotation regime where the short side has negative alpha.",
+      "description": "Research found the short side of displacement signals has a Sharpe of -0.64 during Defensive Rotation, while the long side contributes 60-66% of alpha (Sharpe +1.12). All SHORT signals are now overridden to NEUTRAL when the macro regime is Defensive Rotation. This eliminates the drag from the non-performing short book in this regime.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "transition-warning",
+      "title": "Regime Transition Early Warning",
+      "summary": "A new indicator on the KRJ page shows the probability of an imminent regime transition.",
+      "description": "A colored badge next to the displacement regime banner displays the current transition risk: low (green), moderate (yellow), elevated (orange), or high (red). The score combines regime probability decay (60% weight) and feature velocity (40% weight) based on research showing 93% precision at the 0.5 threshold.\n\nHovering the badge shows the full breakdown: warning score, probability instability, 3-week probability change, and feature velocity components. The warning helps anticipate regime changes before they trigger the age gate.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    }
+  ]
+}
