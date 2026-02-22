@@ -1,11 +1,16 @@
 """
 Single-ticker KRJ signal computation using Polygon API (no IB dependency).
 Reuses the same logic as the weekly batch: 25DMA, weekly low, Friday close, 3% rule.
+
+Resilience: retries on 429 (rate limit) and 5xx with exponential backoff; configurable
+timeout via KRJ_POLYGON_TIMEOUT (default 30s). Paid Developer tier allows higher
+throughput; retries reduce "No signal yet" when Polygon is briefly throttled.
 """
 
 import csv
-import os
 import logging
+import os
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -13,6 +18,10 @@ from typing import Any
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Retries and backoff for Polygon (429 / 5xx)
+POLYGON_MAX_ATTEMPTS = 3
+POLYGON_BACKOFF_BASE_SEC = 2  # 2, 4, 8s
 
 # Path to KRJ data directory (on droplet: ~/apps/data/krj/)
 KRJ_DATA_DIR = Path(os.getenv("KRJ_DATA_DIR", "/home/don/apps/data/krj"))
@@ -59,21 +68,55 @@ def _last_friday() -> datetime:
 
 def _fetch_daily_bars(ticker: str, from_date: str, to_date: str, api_key: str) -> list[dict]:
     """
-    Fetch daily aggregates from Polygon.
+    Fetch daily aggregates from Polygon with retries.
     GET /v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}
     Returns list of { o, h, l, c, v, vw, t, n } per day.
+    Retries on 429 (rate limit) and 5xx with exponential backoff; respects Retry-After when present.
     """
     url = (
         f"https://api.polygon.io/v2/aggs/ticker/{ticker.upper()}/range/1/day/{from_date}/{to_date}"
     )
     params = {"apiKey": api_key, "adjusted": "true", "sort": "asc"}
-    with httpx.Client(timeout=30.0) as client:
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-    if data.get("resultsCount", 0) == 0 or not data.get("results"):
-        return []
-    return data["results"]
+    timeout_sec = float(os.getenv("KRJ_POLYGON_TIMEOUT", "30"))
+    last_exc = None
+    for attempt in range(POLYGON_MAX_ATTEMPTS):
+        try:
+            with httpx.Client(timeout=timeout_sec) as client:
+                resp = client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("resultsCount", 0) == 0 or not data.get("results"):
+                    return []
+                return data["results"]
+        except httpx.HTTPStatusError as e:
+            last_exc = e
+            status = e.response.status_code
+            is_retriable = status == 429 or (500 <= status < 600)
+            if not is_retriable or attempt == POLYGON_MAX_ATTEMPTS - 1:
+                raise
+            retry_after = e.response.headers.get("Retry-After")
+            if retry_after and str(retry_after).isdigit():
+                sleep_sec = int(retry_after)
+            else:
+                sleep_sec = POLYGON_BACKOFF_BASE_SEC ** (attempt + 1)
+            logger.warning(
+                "Polygon HTTP %s for %s (attempt %s/%s), retrying in %ss",
+                status, ticker, attempt + 1, POLYGON_MAX_ATTEMPTS, sleep_sec,
+            )
+            time.sleep(sleep_sec)
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            last_exc = e
+            if attempt == POLYGON_MAX_ATTEMPTS - 1:
+                raise
+            sleep_sec = POLYGON_BACKOFF_BASE_SEC ** (attempt + 1)
+            logger.warning(
+                "Polygon request error for %s (attempt %s/%s): %s; retrying in %ss",
+                ticker, attempt + 1, POLYGON_MAX_ATTEMPTS, e, sleep_sec,
+            )
+            time.sleep(sleep_sec)
+    if last_exc:
+        raise last_exc
+    return []
 
 
 def _trading_days_back(from_date: datetime, n: int) -> datetime:

@@ -60,22 +60,50 @@ function collectTickers(): Set<string> {
   return tickers;
 }
 
+const MAX_RETRIES = 3;
+const BACKOFF_BASE_MS = 1000;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function fetchMarketCap(ticker: string): Promise<number | null> {
   const url = `https://api.polygon.io/v3/reference/tickers/${encodeURIComponent(ticker)}?apiKey=${API_KEY}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      if (res.status === 404) return null;
-      throw new Error(`${res.status} ${res.statusText}`);
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        const isRetriable = res.status === 429 || (res.status >= 500 && res.status < 600);
+        if (isRetriable && attempt < MAX_RETRIES - 1) {
+          const retryAfter = res.headers.get("Retry-After");
+          const waitMs = retryAfter && /^\d+$/.test(retryAfter) ? parseInt(retryAfter, 10) * 1000 : BACKOFF_BASE_MS * Math.pow(2, attempt);
+          console.warn(`[${ticker}] Polygon ${res.status}, retrying in ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+          await sleep(waitMs);
+          continue;
+        }
+        throw new Error(`${res.status} ${res.statusText}`);
+      }
+      const data = (await res.json()) as { results?: { market_cap?: number } };
+      const cap = data.results?.market_cap;
+      if (cap == null || typeof cap !== "number" || cap <= 0) return null;
+      return cap / 1e9; // dollars -> billions
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      const isRetriable = attempt < MAX_RETRIES - 1 && (lastErr.message.includes("429") || lastErr.message.includes("50"));
+      if (isRetriable) {
+        const waitMs = BACKOFF_BASE_MS * Math.pow(2, attempt);
+        console.warn(`[${ticker}] ${lastErr.message}; retrying in ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await sleep(waitMs);
+      } else {
+        console.warn(`[${ticker}] ${lastErr.message}`);
+        return null;
+      }
     }
-    const data = (await res.json()) as { results?: { market_cap?: number } };
-    const cap = data.results?.market_cap;
-    if (cap == null || typeof cap !== "number" || cap <= 0) return null;
-    return cap / 1e9; // dollars -> billions
-  } catch (e) {
-    console.warn(`[${ticker}] ${e}`);
-    return null;
   }
+  if (lastErr) console.warn(`[${ticker}] ${lastErr.message}`);
+  return null;
 }
 
 async function main() {
