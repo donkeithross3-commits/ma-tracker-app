@@ -1,13 +1,22 @@
 {
   "date": "2026-02-21",
   "title": "Feb 21, 2026",
-  "summary": "Big Move Convexity: autonomous 0DTE options trading pipeline with real-time Polygon WebSocket data, ML signal generation, and dashboard monitoring.",
+  "summary": "Big Move Convexity: autonomous 0DTE options trading pipeline with real-time Polygon WebSocket data, 351-feature ML signal, and dashboard monitoring.",
   "features": [
     {
       "id": "bmc-strategy",
       "title": "Big Move Convexity Strategy",
-      "summary": "New autonomous 0DTE options entry strategy powered by LightGBM ensemble signal from Phase 2 research.",
-      "description": "A new ExecutionStrategy that runs inside the IB agent's 100ms eval loop. Every 5 minutes during the scan window (13:30-15:55 ET), it assembles a 50+ feature vector from real-time bars, computes a volatility prediction via the trained LightGBM model, and generates entry signals for 20bp OTM 0DTE SPY options.\n\nKey parameters are hot-reloadable via the dashboard: signal threshold, cooldown, direction mode, max contracts, contract budget, scan window, and auto-entry toggle. Auto-entry defaults to OFF for safety.\n\nOn fill, the strategy spawns a RiskManagerStrategy with the new 'zero_dte_convexity' preset: no stop loss (hold losers to expiry), trailing stop at 25% below peak (activates at +50%), and tiered profit-taking at 2x/4x/6x/11x.",
+      "summary": "Autonomous 0DTE options entry strategy powered by a 351-feature LightGBM ensemble signal evaluated every 60 seconds.",
+      "description": "A new ExecutionStrategy that runs inside the IB agent's 100ms eval loop. Every 60 seconds during the scan window (13:30-15:55 ET), it assembles a 351-feature vector from real-time bars, computes a volatility prediction via the trained LightGBM model, and generates entry signals for 20bp OTM 0DTE SPY options.\n\nKey parameters are hot-reloadable via the dashboard: signal threshold, cooldown, direction mode, max contracts, contract budget, scan window, and auto-entry toggle. Auto-entry defaults to OFF for safety.\n\nOn fill, the strategy spawns a RiskManagerStrategy with the new 'zero_dte_convexity' preset: no stop loss (hold losers to expiry), trailing stop at 25% below peak (activates at +50%), and tiered profit-taking at 2x/4x/6x/11x.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "bmc-feature-groups",
+      "title": "351-Feature Signal Architecture",
+      "summary": "The signal draws from 6 feature groups spanning microstructure, intraday path, cross-asset, macro, options-implied, and day signature.",
+      "description": "The Big Move Convexity signal assembles 351 features across 6 groups, computed at multiple bar resolutions (5s, 15s, 1m):\n\n**Group A: Equity Microstructure (270 features)**\nRealtime market microstructure at 5 lookback windows (30s, 2m, 10m, 60m, open-to-t) x 3 bar resolutions. Includes: Garman-Klass realized volatility, vol-of-vol, bid-ask spread mean/vol, quote/trade intensity, volume rate & acceleration, trade imbalance (signed order flow), quote imbalance, Amihud illiquidity, VWAP displacement, and a parametric EMA displacement grid (spans 5/10/20/50/100/200).\n\n**Group B: Intraday Path (12 features)**\nSession-level price trajectory: premarket return, overnight gap, opening range (size + position within range), midday drift, post-13:30 drift, session return/vol, distance from session high/low, trend-vs-chop (R-squared), reversal count.\n\n**Group C: Cross-Asset Displacement (17 features)**\nSPY vs QQQ divergence (return spread, vol ratio, rolling correlation, correlation breakdown, lead-lag). Plus cross-asset displacement vs IWM, TLT, GLD, HYG (return spread, vol ratio, rolling correlation each). The HYG return spread and TLT return spread were the top-ranked features in Phase 2 research -- they capture slow cross-asset information propagation into SPY option pricing.\n\n**Group D: Macro Context (9 features)**\nPrior-session regime state: KRJ macro regime ID + probability, regime age, VIX level + 1d change, displacement composite, VIX term structure slope (VIX/VIX3M), VIX 20-day percentile, realized-vs-implied variance risk premium.\n\n**Group E: Options-Implied (7 features)**\nLive options chain signals: ATM implied volatility, 25-delta skew, 0DTE/1DTE term structure slope, put-call volume ratio, dealer gamma exposure proxy, realized-vs-implied intraday, straddle richness.\n\n**Group F: Day Signature (36 features)**\n12-bin intraday path shape encoding: cumulative return, normalized volume fraction, and realized volatility per bin. Also provides a (T, 3) tensor for sequence model input (LSTM/TCN/Transformer).",
       "category": "signals",
       "image": "",
       "screenshot": null
@@ -16,7 +25,7 @@
       "id": "polygon-ws-bars",
       "title": "Real-Time Polygon WebSocket + Bar Construction",
       "summary": "Live tick data from Polygon WebSocket feeds real-time 5s/15s/1m OHLCV bars for feature computation.",
-      "description": "Two new modules in the research repo: PolygonWSClient handles WebSocket connection management (auth, subscribe, reconnect with exponential backoff) on top of the existing PolygonWebSocketProvider message parser. BarAccumulator converts individual trade and quote ticks into multi-resolution OHLCV bars (5s, 15s, 1m) with thread-safe accumulation.\n\nThe strategy runs the Polygon WS in a background thread, feeding ticks to BarAccumulator which emits completed bars to LiveDataStore. Supports both delayed (free tier, 15-min lag) and live (paid tier) Polygon feeds.",
+      "description": "Two new modules in the research repo: PolygonWSClient handles WebSocket connection management (auth, subscribe, reconnect with exponential backoff) on top of the existing PolygonWebSocketProvider message parser. BarAccumulator converts individual trade and quote ticks into multi-resolution OHLCV bars (5s, 15s, 1m) with thread-safe accumulation.\n\nThe strategy runs the Polygon WS in a background thread, feeding ticks to BarAccumulator which emits completed bars to LiveDataStore. Defaults to real-time data via the paid Polygon tier (configurable to delayed for testing).",
       "category": "signals",
       "image": "",
       "screenshot": null

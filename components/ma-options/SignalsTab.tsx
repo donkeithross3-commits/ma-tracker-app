@@ -85,7 +85,7 @@ const DEFAULT_CONFIG: BMCConfig = {
   signal_threshold: 0.5,
   min_signal_strength: 0.3,
   cooldown_minutes: 15,
-  decision_interval_seconds: 300,
+  decision_interval_seconds: 60,
   max_contracts: 5,
   contract_budget_usd: 150,
   scan_start: "13:30",

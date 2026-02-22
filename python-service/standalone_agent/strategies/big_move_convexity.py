@@ -50,7 +50,7 @@ _DEFAULTS: dict[str, Any] = {
     "min_signal_strength": 0.3,
     "direction_mode": "both",          # "long_only" | "both"
     "cooldown_minutes": 15,
-    "decision_interval_seconds": 300,  # 5 minutes
+    "decision_interval_seconds": 60,   # 1 minute
     "max_contracts": 5,
     "contract_budget_usd": 150.0,
     "scan_start": "13:30",            # HH:MM ET
