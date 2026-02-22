@@ -1472,3 +1472,131 @@ async def relay_execution_budget(request: ExecutionBudgetRequest):
         logger.error(f"Relay execution/budget error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ---------------------------------------------------------------------------
+# BMC (Big Move Convexity) relay endpoints
+# ---------------------------------------------------------------------------
+
+class BMCStartRequest(BaseModel):
+    userId: str
+    config: dict = {}  # BigMoveConvexityStrategy config overrides
+
+
+@router.post("/relay/bmc-start")
+async def relay_bmc_start(request: BMCStartRequest):
+    """Start the BigMoveConvexityStrategy on the user's agent.
+
+    Wraps execution_start with strategy_type='big_move_convexity' and the
+    provided config (threshold, auto_entry, scan window, etc.).
+    """
+    timer = RequestTimer("relay_bmc_start")
+    try:
+        strategies = [{
+            "strategy_id": "bmc_main",
+            "strategy_type": "big_move_convexity",
+            "config": request.config,
+        }]
+        response_data = await send_request_to_provider(
+            request_type="execution_start",
+            payload={"strategies": strategies},
+            timeout=30.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        timer.finish()
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay bmc-start error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class BMCConfigRequest(BaseModel):
+    userId: str
+    config: dict  # hot-reload config: signal_threshold, auto_entry, etc.
+
+
+@router.post("/relay/bmc-config")
+async def relay_bmc_config(request: BMCConfigRequest):
+    """Hot-reload BigMoveConvexityStrategy configuration.
+
+    Updates strategy config without restart: threshold, cooldown,
+    auto_entry toggle, scan window, max contracts, etc.
+    """
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_config",
+            payload={"strategy_id": "bmc_main", "config": request.config},
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay bmc-config error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/relay/bmc-signal")
+async def relay_bmc_signal(user_id: str = ""):
+    """Read BigMoveConvexityStrategy signal state from execution telemetry.
+
+    Returns the strategy_state from telemetry if available, otherwise
+    queries the agent directly. Low latency path uses cached telemetry.
+    """
+    if not user_id:
+        return {"error": "user_id required", "signal": None}
+    try:
+        # Try cached telemetry first (no round-trip)
+        registry = get_registry()
+        provider = await registry.get_active_provider(
+            user_id=user_id,
+            allow_fallback_to_any=False,
+        )
+        if provider and provider.execution_telemetry:
+            telemetry = provider.execution_telemetry
+            # Extract BMC strategy state from strategies list
+            for strat in telemetry.get("strategies", []):
+                if strat.get("strategy_id") == "bmc_main":
+                    return {
+                        "source": "cached_telemetry",
+                        "running": telemetry.get("running", False),
+                        "signal": strat.get("strategy_state", {}),
+                    }
+            # BMC not found in strategies — may not be loaded
+            return {
+                "source": "cached_telemetry",
+                "running": telemetry.get("running", False),
+                "signal": None,
+            }
+
+        # Fallback: direct query
+        response_data = await send_request_to_provider(
+            request_type="execution_status",
+            payload={},
+            timeout=10.0,
+            user_id=user_id,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            return {"source": "direct_query", "running": False, "signal": None}
+
+        for strat in response_data.get("strategies", []):
+            if strat.get("strategy_id") == "bmc_main":
+                return {
+                    "source": "direct_query",
+                    "running": response_data.get("running", False),
+                    "signal": strat.get("strategy_state", {}),
+                }
+        return {"source": "direct_query", "running": False, "signal": None}
+    except Exception as e:
+        logger.error(f"Relay bmc-signal error: {e}")
+        return {"error": str(e), "signal": None}
+

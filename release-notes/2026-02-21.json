@@ -1,0 +1,43 @@
+{
+  "date": "2026-02-21",
+  "title": "Feb 21, 2026",
+  "summary": "Big Move Convexity: autonomous 0DTE options trading pipeline with real-time Polygon WebSocket data, ML signal generation, and dashboard monitoring.",
+  "features": [
+    {
+      "id": "bmc-strategy",
+      "title": "Big Move Convexity Strategy",
+      "summary": "New autonomous 0DTE options entry strategy powered by LightGBM ensemble signal from Phase 2 research.",
+      "description": "A new ExecutionStrategy that runs inside the IB agent's 100ms eval loop. Every 5 minutes during the scan window (13:30-15:55 ET), it assembles a 50+ feature vector from real-time bars, computes a volatility prediction via the trained LightGBM model, and generates entry signals for 20bp OTM 0DTE SPY options.\n\nKey parameters are hot-reloadable via the dashboard: signal threshold, cooldown, direction mode, max contracts, contract budget, scan window, and auto-entry toggle. Auto-entry defaults to OFF for safety.\n\nOn fill, the strategy spawns a RiskManagerStrategy with the new 'zero_dte_convexity' preset: no stop loss (hold losers to expiry), trailing stop at 25% below peak (activates at +50%), and tiered profit-taking at 2x/4x/6x/11x.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "polygon-ws-bars",
+      "title": "Real-Time Polygon WebSocket + Bar Construction",
+      "summary": "Live tick data from Polygon WebSocket feeds real-time 5s/15s/1m OHLCV bars for feature computation.",
+      "description": "Two new modules in the research repo: PolygonWSClient handles WebSocket connection management (auth, subscribe, reconnect with exponential backoff) on top of the existing PolygonWebSocketProvider message parser. BarAccumulator converts individual trade and quote ticks into multi-resolution OHLCV bars (5s, 15s, 1m) with thread-safe accumulation.\n\nThe strategy runs the Polygon WS in a background thread, feeding ticks to BarAccumulator which emits completed bars to LiveDataStore. Supports both delayed (free tier, 15-min lag) and live (paid tier) Polygon feeds.",
+      "category": "signals",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "signals-tab",
+      "title": "Signals Dashboard Tab",
+      "summary": "New 'Signals' tab on the Options page shows real-time BMC signal state, positions, and configurable parameters.",
+      "description": "A new fourth tab on the M&A Options page provides full transparency into the autonomous trading pipeline:\n\n- Status bar: Polygon WS connection state, bars accumulated, last decision time\n- Signal panel: Current probability, direction, strength (color-coded green/red/gray)\n- Position monitor: Active BMC positions with entry price, current P&L, risk manager state\n- Config panel: Editable threshold, cooldown, auto-entry toggle, scan window, max contracts\n- Override buttons: Pause/Resume scanning, Force Close All, Manual Entry\n- Signal history: Last 20 signals with timestamps and outcomes\n\nPolls the agent every 2 seconds (skips when tab is backgrounded).",
+      "category": "options",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "zero-dte-convexity-preset",
+      "title": "Zero-DTE Convexity Risk Preset",
+      "summary": "New risk management preset optimized for 0DTE options: hold losers, trail winners at 25%.",
+      "description": "Research found that 79% of winning 0DTE trades retrace at least 50% from peak, and trailing at 25% adds +243pp to profit factor vs hold-to-expiry. The new 'zero_dte_convexity' preset implements this:\n\n- No stop loss (fees eat remaining value on losers)\n- Trailing stop: activates at +50%, trails at 25% below peak\n- Profit targets: bank 15% at 2x, 20% at 4x, 25% at 6x, 50% at 11x\n- Market orders for speed on 0DTE exits",
+      "category": "options",
+      "image": "",
+      "screenshot": null
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import type { ScannerDeal } from "@/types/ma-options";
 import CuratorTab from "./CuratorTab";
 import MonitoringTab from "./MonitoringTab";
 import IBPositionsTab from "./IBPositionsTab";
+import SignalsTab from "./SignalsTab";
 
 interface OptionsScannerTabsProps {
   deals: ScannerDeal[];
@@ -44,6 +45,12 @@ export default function OptionsScannerTabs({
         >
           Account
         </Tabs.Trigger>
+        <Tabs.Trigger
+          value="signals"
+          className="px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
+        >
+          Signals
+        </Tabs.Trigger>
       </Tabs.List>
 
       <Tabs.Content value="curate">
@@ -56,6 +63,10 @@ export default function OptionsScannerTabs({
 
       <Tabs.Content value="account">
         <IBPositionsTab autoRefresh />
+      </Tabs.Content>
+
+      <Tabs.Content value="signals">
+        <SignalsTab />
       </Tabs.Content>
     </Tabs.Root>
   );

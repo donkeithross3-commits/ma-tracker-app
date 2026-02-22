@@ -106,6 +106,24 @@ PRESETS = {
         },
         "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
     },
+    "zero_dte_convexity": {
+        "stop_loss": {"enabled": False, "type": "none"},  # hold losers to expiry
+        "profit_taking": {
+            "enabled": True,
+            "targets": [
+                {"trigger_pct": 100, "exit_pct": 15},   # bank 15% at 2x
+                {"trigger_pct": 300, "exit_pct": 20},   # bank 20% at 4x
+                {"trigger_pct": 500, "exit_pct": 25},   # bank 25% at 6x
+                {"trigger_pct": 1000, "exit_pct": 50},  # bank 50% at 11x
+            ],
+            "trailing_stop": {
+                "enabled": True,
+                "activation_pct": 50,   # activate trailing at +50%
+                "trail_pct": 25,        # 25% below peak (research: +243pp vs hold)
+            },
+        },
+        "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
+    },
     "stock_swing": {
         "stop_loss": {"enabled": True, "type": "simple", "trigger_pct": -5.0},
         "profit_taking": {

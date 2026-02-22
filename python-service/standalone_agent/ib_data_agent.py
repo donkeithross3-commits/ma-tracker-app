@@ -1021,8 +1021,34 @@ class IBDataAgent:
         if strategy_type == "risk_manager":
             from strategies.risk_manager import RiskManagerStrategy
             return RiskManagerStrategy()
+        if strategy_type == "big_move_convexity":
+            from strategies.big_move_convexity import BigMoveConvexityStrategy
+            strategy = BigMoveConvexityStrategy()
+            strategy._spawn_risk_manager = self._spawn_risk_manager_for_bmc
+            return strategy
         logger.warning("No strategy implementation for type: %s", strategy_type)
         return None
+
+    def _spawn_risk_manager_for_bmc(self, risk_config: dict) -> None:
+        """Spawn a RiskManagerStrategy instance for a BMC entry fill.
+
+        Called by BigMoveConvexityStrategy.on_fill() to create a position
+        guardian with the zero_dte_convexity preset.
+        """
+        if not self.execution_engine:
+            logger.warning("Cannot spawn risk manager: execution engine not initialized")
+            return
+
+        from strategies.risk_manager import RiskManagerStrategy
+
+        strategy = RiskManagerStrategy()
+        strategy_id = f"bmc_risk_{int(time.time())}"
+
+        result = self.execution_engine.load_strategy(strategy_id, strategy, risk_config)
+        if "error" in result:
+            logger.error("Failed to spawn risk manager for BMC: %s", result["error"])
+        else:
+            logger.info("Spawned RiskManagerStrategy %s for BMC position", strategy_id)
 
     async def send_heartbeat(self):
         """Send periodic heartbeats with agent state and execution telemetry."""
