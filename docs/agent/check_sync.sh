@@ -200,6 +200,52 @@ else
     report "FAIL" "check_sync.sh differs between repos"
 fi
 
+# --- Check 5: Repo-root AGENTS.md exists in both repos --------------------
+
+echo ""
+echo "--- Agent config files ---"
+
+if [ -f "$REPO_ROOT/AGENTS.md" ]; then
+    report "PASS" "$THIS_REPO has repo-root AGENTS.md"
+else
+    report "FAIL" "$THIS_REPO missing repo-root AGENTS.md"
+fi
+
+if [ -f "$OTHER_REPO/AGENTS.md" ]; then
+    report "PASS" "$SIBLING_NAME has repo-root AGENTS.md"
+else
+    report "FAIL" "$SIBLING_NAME missing repo-root AGENTS.md"
+fi
+
+# --- Check 6: .codex/config.toml exists in both repos --------------------
+
+if [ -f "$REPO_ROOT/.codex/config.toml" ]; then
+    report "PASS" "$THIS_REPO has .codex/config.toml"
+else
+    report "FAIL" "$THIS_REPO missing .codex/config.toml"
+fi
+
+if [ -f "$OTHER_REPO/.codex/config.toml" ]; then
+    report "PASS" "$SIBLING_NAME has .codex/config.toml"
+else
+    report "FAIL" "$SIBLING_NAME missing .codex/config.toml"
+fi
+
+# --- Check 7: No legacy .claude-rules in ma-tracker-app -------------------
+
+MA_REPO=""
+if [ "$THIS_REPO" = "ma-tracker-app" ]; then
+    MA_REPO="$REPO_ROOT"
+else
+    MA_REPO="$OTHER_REPO"
+fi
+
+if [ -f "$MA_REPO/.claude-rules" ]; then
+    report "FAIL" "Legacy .claude-rules still exists in ma-tracker-app (should be deleted)"
+else
+    report "PASS" "No legacy .claude-rules in ma-tracker-app"
+fi
+
 # --- Summary ---------------------------------------------------------------
 
 echo ""

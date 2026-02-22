@@ -1,6 +1,6 @@
 # ma-tracker-app rules
 
-> Full agent contract: [docs/agent/AGENTS.md](docs/agent/AGENTS.md)  
+> Full agent contract: [docs/agent/AGENTS.md](docs/agent/AGENTS.md)
 > Domain-specific rules: `.cursor/rules/*.mdc` (see AGENTS.md Section 3).
 
 <!-- BEGIN SHARED BLOCK — DO NOT EDIT — source: docs/agent/SHARED_BLOCK.md -->
@@ -53,223 +53,51 @@ The dashboard has a continuous release notes system. Every user-visible change M
 - Read `docs/agent/AGENTS.md` for the full contract including onboarding and change protocol.
 <!-- END SHARED BLOCK -->
 
-## Deployment Process (ALWAYS DO THIS AFTER CHANGES)
-After committing and pushing changes, deploy to production:
+## Deployment (ALWAYS DO THIS AFTER CHANGES)
+
 ```bash
+# Full deploy (Docker rebuild)
 ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
-```
-For Python service changes only (no Docker rebuild needed):
-```bash
+
+# Python-only deploy
 ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && kill $(lsof -t -i :8000) 2>/dev/null; sleep 2 && cd python-service && source .venv/bin/activate && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &'
 ```
 
-### Docker Build — Critical Rules
-- **ALWAYS use `docker compose build`**, never bare `docker build`.
-  `docker-compose.yml` defines the image tag as `ma-tracker-app-prod:latest`.
-  A bare `docker build -t <anything-else>` produces an image that compose ignores —
-  the container keeps running the old `ma-tracker-app-prod:latest` image silently.
-- **ALWAYS pass `--no-cache`** when deploying. BuildKit layer caching can serve stale
-  copies of `COPY . .` even after `git pull` updates files on disk.
-- **ALWAYS pass `--force-recreate`** to `docker compose up`. Without it, compose may
-  decide the existing container already matches and skip replacement.
-- The standalone agent bundle (`python-service/standalone_agent/`) is copied into the
-  Docker image at build time. The `/api/ma-options/agent-version` endpoint reads
-  `version.txt` from inside the running container, NOT from disk. So a `git pull` alone
-  does nothing — the image must be rebuilt and the container recreated.
-- **Static assets (images, PNGs) in `public/` are baked into the Docker image.**
-  After regenerating screenshots or other assets, you MUST rebuild + recreate the container.
-  Even then, **browsers cache images aggressively** — if the URL doesn't change, users see
-  stale content. The changelog system handles this with mtime-based `?v=` cache-busting
-  (see `app/changelog/[date]/page.tsx`). Apply the same pattern for any other static assets
-  that change after initial deployment.
+**Docker rules:** ALWAYS `docker compose build` (not bare `docker build`). ALWAYS `--no-cache`. ALWAYS `--force-recreate`.
 
-## IB Data Agent Architecture
+## Domain Rules (`.cursor/rules/*.mdc`)
 
-### Overview
-The IB Data Agent runs on users' local machines and connects to their IB TWS/Gateway.
-It communicates with the server via WebSocket relay, allowing the dashboard to fetch
-real-time options data through users' own IB accounts.
-
-### Data Flow
-```
-User's Browser <---> Next.js API <---> Python Service <--WebSocket--> Local IB Agent <---> IB TWS
-```
-
-### Key Components
-
-**Server-side (python-service/app/api/):**
-- `ws_relay.py` - WebSocket relay that manages agent connections
-  - `DataProviderRegistry` - Tracks all connected agents by provider_id and user_id
-  - `validate_api_key()` - Checks API key against database or legacy key
-  - Agents authenticate with their API key on WebSocket connect
-- `options_routes.py` - HTTP endpoints that forward requests to agents
-  - `/relay/ib-status` - Queries ALL connected agents, returns connected=true if ANY has IB
-  - `/relay/test-futures` - Finds agent with IB connected, sends request there
-  - `/relay/fetch-chain` - Fetches option chain via agent (passes user_id for routing)
-
-**Client-side (python-service/standalone_agent/):**
-- `ib_data_agent.py` - Main agent that connects to WebSocket relay and IB TWS
-- `ib_scanner.py` - IB API wrapper for fetching quotes and option chains
-- `start_windows.bat` - Windows launcher with auto-update, shortcut creation
-- `start_unix.sh` - Mac/Linux launcher with same features
-- `config.env` - User's API key and IB connection settings (generated per-user)
-- `version.txt` - Current version (NO trailing newline - use `printf "x.y.z" > version.txt`)
-
-**Download endpoints (app/api/ma-options/):**
-- `download-agent/route.ts` - Initial download (requires auth, includes config.env with API key)
-- `download-agent-update/route.ts` - Update download (uses API key auth, excludes config.env)
-- `agent-version/route.ts` - Returns current version (public endpoint for update checks)
-
-### Multi-Agent Support
-- Multiple agents can connect simultaneously (each user has their own)
-- Each agent is identified by provider_id (random UUID) and user_id (from API key)
-- When fetching data, requests are routed to the user's own agent if available
-- Status checks query ALL agents and return connected=true if ANY has IB connected
-
-### Auto-Update System
-1. Agent starts, reads local `version.txt`
-2. Calls `/api/ma-options/agent-version` to get server version
-3. If different, prompts user to update
-4. Downloads from `/api/ma-options/download-agent-update?key=xxx`
-5. Extracts new files (preserves config.env with user's API key)
-6. User restarts to use new version
-
-### Versioning Rules
-When making changes to agent files in `python-service/standalone_agent/`:
-1. Edit the files
-2. **BUMP THE VERSION** in `version.txt` using: `printf "x.y.z" > version.txt`
-3. Deploy as normal - users' agents auto-update on next startup
-
-Version format: MAJOR.MINOR.PATCH
-- PATCH: Bug fixes, minor improvements (1.0.2 → 1.0.3)
-- MINOR: New features, non-breaking changes (1.0.3 → 1.1.0)
-- MAJOR: Breaking changes requiring manual intervention (1.1.0 → 2.0.0)
-
-### Files Included in Agent Download
-See `app/api/ma-options/download-agent/route.ts`:
-- Python files: ib_data_agent.py, ib_scanner.py, install.py
-- Scripts: start_windows.bat, start_windows.ps1, start_unix.sh
-- Config: requirements.txt, README.md, config.env.template, version.txt
-- Directories: python_bundle/ (Windows Python), ibapi/ (IB API library)
-
-### Public Endpoints (no auth required)
-Defined in `auth.config.ts` under `isInternalAPI`:
-- `/api/ma-options/validate-agent-key` - Called by Python service to validate keys
-- `/api/ma-options/agent-version` - Called by agent for update checks
-- `/api/ma-options/download-agent-update` - Called by agent for updates (uses API key param)
-
-### TWS API Settings (Required for Agent)
-Three settings in TWS Global Configuration → API → Settings must be correct:
-1. **Enable ActiveX and Socket Clients** — MUST be checked (TWS default: OFF). Master switch; nothing works without it.
-2. **Read-Only API** — MUST be unchecked (TWS default: ON). When checked, blocks order placement AND hides order info from the API (`reqOpenOrders`, `reqAutoOpenOrders` return nothing). Market data, positions, and contract lookups still work — so the agent appears healthy but orders silently fail and the live order book is empty.
-3. **Socket Port** — Must match `IB_PORT` in config.env. TWS: 7496 (live) / 7497 (paper). Gateway: 4001 (live) / 4002 (paper). Our code is not sensitive to paper vs live.
-
-See `.cursor/rules/ib-tws-api-settings.mdc` for full details.
-
-### Troubleshooting
-- **Agent shows connected but dashboard says disconnected**: (1) Call `GET /api/ib-connection/relay-registry` (or `GET /options/relay/registry` on Python). If `providers_connected` is 0, the agent is not registered (wrong RELAY_URL or auth failed). If > 0, call `GET /options/relay/ib-status` and check `provider_statuses` for timeout/error. (2) Python relay must run with a single uvicorn worker (in-memory registry is per-process). (3) Hover the red status dot for the last error (e.g. relay timeout).
-- **Agent connected, market data works, but orders fail / order book empty**: Read-Only API is checked in TWS. Uncheck it, Apply, restart agent.
-- **Update downloads but extraction fails**: Check ZIP is valid (not HTML error page), file size > 1KB
-- **Version always shows update available**: Check for whitespace in version.txt (use printf, not echo)
-
-## Ticker Input Convention — SEC EDGAR Autocomplete
-**Every UI where a user types a ticker symbol MUST use the SEC EDGAR autocomplete pattern.**
-- API endpoint: `GET /api/ticker-lookup?q=<query>` (returns `{ matches: { ticker, name }[] }`)
-- Debounced search (300ms) with loading spinner
-- Dropdown shows ticker (monospace, blue) + company name
-- Keyboard navigation: ArrowUp/Down to move, Enter to select, Escape to close
-- Click-outside closes dropdown
-- On submit/add, validate exact ticker match exists in SEC EDGAR; show error if not found:
-  `"Ticker not found in SEC EDGAR. Type a few letters and pick from the list."`
-- Current implementations (follow these as reference):
-  - `components/ma-options/AddDealForm.tsx` — Add Deal form
-  - `components/ma-options/IBPositionsTab.tsx` — Add manual ticker modal
-  - `components/krj/TickerEditorModal.tsx` — Edit ticker lists (DRC, ETFs/FX, etc.)
+| File | When to Load |
+|------|-------------|
+| `execution-engine.mdc` | IB execution engine, strategy patterns, order management |
+| `security-and-latency.mdc` | Security non-negotiables, RequestTimer, threading.Event |
+| `ib-contract-resolution.mdc` | IB contract resolution, futures exchange mapping |
+| `realtime-event-push.mdc` | Real-time account event push architecture |
+| `ui-configurability.mdc` | Column chooser, comfort mode, CSS density system |
+| `ib-tws-api-settings.mdc` | IB TWS API settings for agent connectivity |
+| `push-and-deploy.mdc` | Auto-deploy on task completion |
 
 ## Framework
-- This is a Next.js 16 app using the App Router.
-- /app/krj/page.tsx:
-  - Reads CSVs from data/krj/*.csv.
-  - Should remain read-only (no mutations), just a report viewer for KRJ signals.
-  - Do not change the CSV location or naming scheme without explicit instruction.
-- middleware.ts:
-  - Provides NextAuth v5 authentication. Protected routes redirect to /login.
-  - Do not remove or relax this auth without explicit instruction.
-- Styling:
-  - Use Tailwind utility classes consistent with existing patterns.
 
-## UI Design Principles - HIGH DENSITY TRADER DASHBOARDS
-- **Ruthlessly minimize vertical space**: Every pixel counts on trading dashboards.
-  - Page padding: `px-3 py-2` (not `p-4` or larger)
-  - Margins between sections: `mb-1` to `mb-3` (not `mb-4` or `mb-6`)
-  - Tab lists: `mb-3` after tabs, `py-1.5` for tab triggers
-  - Filter/control rows: inline layout with `py-1.5 px-3`, not stacked with `p-4`
-  - Section spacing: `space-y-3` (not `space-y-6`)
-- **Combine related elements on single rows**:
-  - Title + subtitle on same row block (subtitle below title, no extra margin)
-  - Status indicators + action buttons + user menu all on one header row
-  - Filter labels inline with filter controls, not stacked
-- **Keep font sizes readable but reduce surrounding whitespace**:
-  - Maintain text-2xl for page titles, text-sm for body text
-  - Reduce padding/margin around text, not the text size itself
-- **Dark, high-contrast theme**: bg-gray-950, text-gray-100, no decorative fluff
-- **Right-aligned numeric columns** with limited decimals and compact units
-- **Allow header labels to wrap** rather than adding horizontal scroll
-- **Place summary elements above/below tables**, not at the side
-- **User-controlled column visibility on every data table** — see UI Configurability below
+- **Next.js 16** with App Router. Prisma ORM for frontend, asyncpg for backend.
+- `/app/krj/page.tsx`: Read-only KRJ signal viewer. Do not change CSV loading.
+- `middleware.ts`: NextAuth v5 auth. Do not relax without instruction.
+- Styling: Tailwind utility classes, dark high-contrast theme.
 
-- /app/krj/page.tsx is a trader-facing report. Follow docs/krj_ui_style.md.
-- Do not change CSV loading or data logic without explicit request.
-- Styling changes should be implemented via Tailwind classes and small formatting helpers only.
+## Essential Constraints
 
-## UI Configurability Architecture
+- **Ticker input**: Every UI ticker field MUST use SEC EDGAR autocomplete (see `CLAUDE.md`).
+- **UI density**: High-density trader dashboards. Minimize vertical space.
+- **Column choosers**: Every data table gets one. No exceptions.
+- **KRJ data**: Never overwrite `~/apps/data/krj/` during deploys.
+- **IB waits**: Use `threading.Event`, not `time.sleep()`.
+- **Cross-repo BMC**: 9 imports from py_proj in `strategies/big_move_convexity.py`. See CLAUDE.md.
 
-The app supports per-user UI configurability via a lightweight system that avoids backend
-or frontend bloat. Two core features: **Column Chooser** (per-table column visibility) and
-**Comfort Mode** (density toggle for accessibility). See `.cursor/rules/ui-configurability.mdc`
-for the full architecture reference.
+## Key Commands
 
-### Key Principles
-- **Every data table** gets a column chooser. No exceptions for new tables.
-- **Never auto-hide columns.** Let the user decide what to show/hide.
-- **Comfort mode scales intelligently** — fluid font/padding via CSS container queries,
-  not fixed breakpoints. The number of visible columns drives the scaling.
-- **Lightweight persistence** — one JSONB column (`ui_prefs`) on `user_preferences`,
-  no new tables or migrations for new column sets.
-
-### Comfort Mode — Two-Layer Architecture
-Comfort mode operates at two layers. Most components need zero code changes:
-
-1. **Global CSS layer** (`globals.css`, `@layer components`): Broad selectors keyed on
-   `[data-density="comfort"]` automatically scale ALL buttons (44px min), inputs (44px min),
-   checkboxes (24px), dropdown items, tabs, dialogs, drag handles, list rows, and SVG icons.
-   Also promotes `text-xs` → `text-sm` globally. Uses `!important` where needed to override
-   Tailwind utilities. Elements inside `.d-table` are excluded (tables have their own fluid
-   system). Any element can opt out with `.no-density`.
-
-2. **Component-specific layer**: Only needed when the global CSS causes layout issues
-   (e.g., stacked arrow buttons that shouldn't each be 44px tall). These components use
-   `isComfort` from `useUIPreferences()` for targeted layout changes plus `.no-density`
-   on elements that need different sizing. Currently: `TickerEditorModal`.
-
-**When building new UI**: Don't add comfort-mode logic by default — the global CSS handles
-it. Only add `isComfort` branching if testing reveals layout breakage in comfort mode.
-
-### Adding a Column Chooser to a New Table (Quick Reference)
-1. Define `const MY_COLUMNS: ColumnDef[] = [{ key: "col1", label: "Col 1" }, ...]`
-2. Define `const MY_DEFAULTS = MY_COLUMNS.map(c => c.key)` (or a subset)
-3. Define `const MY_LOCKED = ["essential_col"]` (columns that can't be hidden)
-4. In the component: `const { getVisibleColumns, setVisibleColumns } = useUIPreferences()`
-5. Derive `visibleKeys`, `visibleSet`, and `handleChange` via `useMemo`/`useCallback`
-6. Render `<ColumnChooser columns={MY_COLUMNS} visible={visibleKeys} defaults={MY_DEFAULTS} onChange={handleChange} locked={MY_LOCKED} />`
-7. Wrap table in `<div className="d-table-wrap" style={{ "--visible-cols": count }}>`, add `d-table` class to `<table>`
-8. Guard every `<th>` and `<td>` with `{visibleSet.has("key") && <th>...</th>}`
-
-### Current Table Keys (stored in `uiPrefs.columnVisibility`)
-- `krj` — KRJ signals dashboard
-- `watchedSpreads` — Monitor tab (WatchedSpreadsTable)
-- `candidateStrategies` — Curator tab (CandidateStrategiesTable)
-- `optionChain` — Curator tab (OptionChainViewer)
-- `dealSelector` — Curator tab (ScannerDealSelector)
-- `ibPositions` — Account tab positions table (IBPositionsTab)
-- `ibOrders` — Account tab working orders table (IBPositionsTab)
+```bash
+./dev-start.sh                    # Start dev services
+npm run dev                       # Frontend only
+cd python-service && source venv/bin/activate && python3 start_server.py  # Backend only
+npm run db:push                   # Push Prisma schema
+```

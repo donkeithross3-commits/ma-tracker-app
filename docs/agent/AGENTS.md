@@ -1,6 +1,6 @@
 # Agent Contract — DR3 Dashboard System
 
-> **Last updated:** 2026-02-18
+> **Last updated:** 2026-02-22
 > **Canonical location:** `docs/agent/AGENTS.md` in both `ma-tracker-app` and `py_proj`.
 
 ---
@@ -71,7 +71,7 @@ The shared block is delimited by markers:
 
 ### Additional Instruction Files
 
-`ma-tracker-app` also has `.cursor/rules/*.mdc` files with domain-specific rules:
+**ma-tracker-app** `.cursor/rules/*.mdc` (domain-specific Cursor rules):
 - `execution-engine.mdc` — IB execution engine patterns
 - `security-and-latency.mdc` — Security and latency non-negotiables
 - `ib-contract-resolution.mdc` — IB contract resolution lessons
@@ -80,7 +80,27 @@ The shared block is delimited by markers:
 - `ib-tws-api-settings.mdc` — IB TWS API settings
 - `push-and-deploy.mdc` — Auto-deploy on task completion
 
+**py_proj** `.cursor/rules/*.mdc` (domain-specific Cursor rules):
+- `bmc-pipeline.mdc` — BMC production pipeline architecture, module dependencies
+- `bmc-research.mdc` — Research scripts, feature groups, LSTM sweep, analysis
+- `market-state.mdc` — Regime detection, displacement, phase pipeline
+- `krj-backtester.mdc` — Weekly pipeline, CSV contracts, droplet deployment
+- `data-pipeline.mdc` — Polygon API, TAQ, VIX, rate limits, dataset builder
+
 These are Cursor-only and do NOT need to be synced to `CLAUDE.md` (Claude Code reads `CLAUDE.md` which has equivalent content inline).
+
+**Repo-root `AGENTS.md`** (both repos):
+- Discovered by Codex and OpenClaw at repo root
+- Contains repo overview, module map, constraints, key commands
+- NOT synced between repos (each has repo-specific content)
+
+**`.codex/config.toml`** (both repos):
+- Codex project configuration (model, sandbox mode, doc fallback)
+
+**`.claude/commands/*.md`** (both repos):
+- Claude Code slash commands for common workflows
+- py_proj: `init.md`, `research.md`, `bmc-dev.md`, `verify.md`
+- ma-tracker-app: `init.md`, `verify.md`, `bmc-strategy.md`, and others
 
 ---
 
@@ -246,7 +266,10 @@ python research/NN_script_name.py
 |------|------|---------|
 | `.cursorrules` | Both | Cursor instructions (shared block + repo-specific) |
 | `CLAUDE.md` | Both | Claude Code instructions (shared block + repo-specific) |
-| `.cursor/rules/*.mdc` | ma-tracker-app only | Domain-specific Cursor rules |
+| `AGENTS.md` (repo root) | Both | Codex/OpenClaw instruction file (repo-specific, NOT synced) |
+| `.codex/config.toml` | Both | Codex project configuration |
+| `.cursor/rules/*.mdc` | Both | Domain-specific Cursor rules (7 in ma-tracker-app, 5 in py_proj) |
+| `.claude/commands/*.md` | Both | Claude Code slash commands for common workflows |
 
 ---
 
