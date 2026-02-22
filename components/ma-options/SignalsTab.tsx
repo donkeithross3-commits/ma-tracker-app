@@ -92,7 +92,7 @@ const DEFAULT_CONFIG: BMCConfig = {
   scan_end: "15:55",
   auto_entry: false,
   direction_mode: "both",
-  use_delayed_data: true,
+  use_delayed_data: false,
 };
 
 // ---------------------------------------------------------------------------

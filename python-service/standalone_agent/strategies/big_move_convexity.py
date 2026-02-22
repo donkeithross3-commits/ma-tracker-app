@@ -58,7 +58,7 @@ _DEFAULTS: dict[str, Any] = {
     "otm_target_pct": 0.20,           # 20bp OTM
     "auto_entry": False,              # paper trading safety
     "model_registry_path": "",        # auto-resolved if empty
-    "use_delayed_data": True,         # free Polygon tier
+    "use_delayed_data": False,        # paid Polygon tier — real-time
     "polygon_channels": ["T.SPY", "Q.SPY"],
 }
 
@@ -406,7 +406,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Create client
         self._polygon_client = PolygonWSClient(
             self._polygon_provider,
-            use_delayed=cfg.get("use_delayed_data", True),
+            use_delayed=cfg.get("use_delayed_data", False),
         )
 
         # Start background thread with its own event loop
