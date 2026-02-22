@@ -7,7 +7,7 @@
       "id": "bmc-strategy",
       "title": "Big Move Convexity Strategy",
       "summary": "Autonomous 0DTE options entry strategy powered by a 351-feature LightGBM ensemble signal evaluated every 60 seconds.",
-      "description": "A new ExecutionStrategy that runs inside the IB agent's 100ms eval loop. Every 60 seconds during the scan window (13:30-15:55 ET), it assembles a 351-feature vector from real-time bars, computes a volatility prediction via the trained LightGBM model, and generates entry signals for 20bp OTM 0DTE SPY options.\n\nKey parameters are hot-reloadable via the dashboard: signal threshold, cooldown, direction mode, max contracts, contract budget, scan window, and auto-entry toggle. Auto-entry defaults to OFF for safety.\n\nOn fill, the strategy spawns a RiskManagerStrategy with the new 'zero_dte_convexity' preset: no stop loss (hold losers to expiry), trailing stop at 25% below peak (activates at +50%), and tiered profit-taking at 2x/4x/6x/11x.",
+      "description": "A new ExecutionStrategy that runs inside the IB agent's 100ms eval loop. Every 60 seconds during the scan window (13:30-15:55 ET), it assembles a 351-feature vector from real-time bars, computes a volatility prediction via the trained LightGBM model, and generates entry signals for 20bp OTM 0DTE SPY options.\n\nKey parameters are hot-reloadable via the dashboard: signal threshold, cooldown, direction mode, max contracts, contract budget, scan window, and auto-entry toggle. Auto-entry defaults to OFF for safety.\n\nOn fill, the strategy spawns a RiskManagerStrategy with the 'zero_dte_convexity' preset: no stop loss (hold losers to expiry), 15% trailing stop armed at +25% gain, no profit-taking ladder (exit sweep found ladders hurt P&L by cutting fat-tail winners).",
       "category": "signals",
       "image": "",
       "screenshot": null
@@ -42,8 +42,8 @@
     {
       "id": "zero-dte-convexity-preset",
       "title": "Zero-DTE Convexity Risk Preset",
-      "summary": "New risk management preset optimized for 0DTE options: hold losers, trail winners at 25%.",
-      "description": "Research found that 79% of winning 0DTE trades retrace at least 50% from peak, and trailing at 25% adds +243pp to profit factor vs hold-to-expiry. The new 'zero_dte_convexity' preset implements this:\n\n- No stop loss (fees eat remaining value on losers)\n- Trailing stop: activates at +50%, trails at 25% below peak\n- Profit targets: bank 15% at 2x, 20% at 4x, 25% at 6x, 50% at 11x\n- Market orders for speed on 0DTE exits",
+      "summary": "Risk preset optimized via 1,075-config parameter sweep: pure 15% trailing stop, no profit ladder.",
+      "description": "Exit parameter sweep tested 1,075 combinations of trailing stop %, activation threshold, and profit ladder configurations. Key findings:\n\n- Pure trailing stop at 15% below peak outperforms all ladder configurations (PF 9.59 vs 3.78 baseline)\n- Profit ladders at 2x/4x/6x/11x hurt performance by cutting fat-tail winners prematurely\n- Arm trailing stop early at +25% gain (vs +50%) with minimal downside\n- 79% of winning 0DTE trades retrace >= 50% from peak, validating tight trail\n\nFinal preset: no stop loss (hold losers to expiry), 15% trailing stop armed at +25%, no profit-taking ladder, market orders for 0DTE speed.",
       "category": "options",
       "image": "",
       "screenshot": null
