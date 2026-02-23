@@ -1819,23 +1819,43 @@ async def relay_execution_budget(request: ExecutionBudgetRequest):
 
 class BMCStartRequest(BaseModel):
     userId: str
-    config: dict = {}  # BigMoveConvexityStrategy config overrides
+    config: dict = {}  # Legacy: single-ticker config (backward compat)
+    tickers: list = []  # Multi-ticker: list of {ticker, config} dicts
 
 
 @router.post("/relay/bmc-start")
 async def relay_bmc_start(request: BMCStartRequest):
-    """Start the BigMoveConvexityStrategy on the user's agent.
+    """Start BigMoveConvexityStrategy instance(s) on the user's agent.
 
-    Wraps execution_start with strategy_type='big_move_convexity' and the
-    provided config (threshold, auto_entry, scan window, etc.).
+    Multi-ticker: pass tickers=[{ticker: "SPY", config: {...}}, {ticker: "SLV", config: {...}}].
+    Each ticker gets its own strategy instance with strategy_id="bmc_{ticker}".
+
+    Legacy single-ticker: pass config={...} (defaults to SPY, backward compat).
     """
     timer = RequestTimer("relay_bmc_start")
     try:
-        strategies = [{
-            "strategy_id": "bmc_main",
-            "strategy_type": "big_move_convexity",
-            "config": request.config,
-        }]
+        strategies = []
+        if request.tickers:
+            # Multi-ticker mode
+            for entry in request.tickers:
+                ticker = entry.get("ticker", "SPY").upper()
+                cfg = entry.get("config", {})
+                cfg["ticker"] = ticker
+                strategies.append({
+                    "strategy_id": f"bmc_{ticker.lower()}",
+                    "strategy_type": "big_move_convexity",
+                    "config": cfg,
+                })
+        else:
+            # Legacy single-ticker mode (backward compat)
+            ticker = request.config.get("ticker", "SPY").upper()
+            request.config["ticker"] = ticker
+            strategies.append({
+                "strategy_id": f"bmc_{ticker.lower()}",
+                "strategy_type": "big_move_convexity",
+                "config": request.config,
+            })
+
         response_data = await send_request_to_provider(
             request_type="execution_start",
             payload={"strategies": strategies},
@@ -1857,19 +1877,21 @@ async def relay_bmc_start(request: BMCStartRequest):
 class BMCConfigRequest(BaseModel):
     userId: str
     config: dict  # hot-reload config: signal_threshold, auto_entry, etc.
+    ticker: str = "SPY"  # which ticker's strategy to update
 
 
 @router.post("/relay/bmc-config")
 async def relay_bmc_config(request: BMCConfigRequest):
-    """Hot-reload BigMoveConvexityStrategy configuration.
+    """Hot-reload BigMoveConvexityStrategy configuration for a specific ticker.
 
     Updates strategy config without restart: threshold, cooldown,
     auto_entry toggle, scan window, max contracts, etc.
     """
     try:
+        strategy_id = f"bmc_{request.ticker.lower()}"
         response_data = await send_request_to_provider(
             request_type="execution_config",
-            payload={"strategy_id": "bmc_main", "config": request.config},
+            payload={"strategy_id": strategy_id, "config": request.config},
             timeout=10.0,
             user_id=request.userId,
             allow_fallback_to_any_provider=False,
@@ -1884,12 +1906,41 @@ async def relay_bmc_config(request: BMCConfigRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _extract_bmc_strategies(strategies_list: list) -> list:
+    """Extract all BMC strategy states from a strategies list.
+
+    Returns a list of {ticker, strategy_id, signal, config} dicts.
+    """
+    results = []
+    for strat in strategies_list:
+        sid = strat.get("strategy_id", "")
+        if sid.startswith("bmc_"):
+            state = strat.get("strategy_state", {})
+            results.append({
+                "ticker": state.get("ticker", sid.replace("bmc_", "").upper()),
+                "strategy_id": sid,
+                "signal": state,
+                "config": strat.get("config"),
+            })
+    return results
+
+
 @router.get("/relay/bmc-signal")
 async def relay_bmc_signal(user_id: str = ""):
-    """Read BigMoveConvexityStrategy signal state from execution telemetry.
+    """Read all BMC strategy states from execution telemetry.
 
-    Returns the strategy_state from telemetry if available, otherwise
-    queries the agent directly. Low latency path uses cached telemetry.
+    Returns signals for ALL running BMC tickers (multi-ticker).
+    Response format:
+        {
+            "running": true,
+            "strategies": [
+                {"ticker": "SPY", "strategy_id": "bmc_spy", "signal": {...}, "config": {...}},
+                {"ticker": "SLV", "strategy_id": "bmc_slv", "signal": {...}, "config": {...}},
+            ],
+            // Legacy compat: "signal" and "config" still present for first/only strategy
+            "signal": {...},
+            "config": {...},
+        }
     """
     if not user_id:
         return {"error": "user_id required", "signal": None}
@@ -1902,21 +1953,20 @@ async def relay_bmc_signal(user_id: str = ""):
         )
         if provider and provider.execution_telemetry:
             telemetry = provider.execution_telemetry
-            # Extract BMC strategy state from strategies list
-            for strat in telemetry.get("strategies", []):
-                if strat.get("strategy_id") == "bmc_main":
-                    return {
-                        "source": "cached_telemetry",
-                        "running": telemetry.get("running", False),
-                        "signal": strat.get("strategy_state", {}),
-                        "config": strat.get("config"),
-                    }
-            # BMC not found in strategies — may not be loaded
-            return {
+            bmc_strategies = _extract_bmc_strategies(telemetry.get("strategies", []))
+            result = {
                 "source": "cached_telemetry",
                 "running": telemetry.get("running", False),
-                "signal": None,
+                "strategies": bmc_strategies,
             }
+            # Legacy compat: populate top-level signal/config from first strategy
+            if bmc_strategies:
+                result["signal"] = bmc_strategies[0]["signal"]
+                result["config"] = bmc_strategies[0]["config"]
+            else:
+                result["signal"] = None
+                result["config"] = None
+            return result
 
         # Fallback: direct query
         response_data = await send_request_to_provider(
@@ -1927,18 +1977,22 @@ async def relay_bmc_signal(user_id: str = ""):
             allow_fallback_to_any_provider=False,
         )
         if "error" in response_data:
-            return {"source": "direct_query", "running": False, "signal": None}
+            return {"source": "direct_query", "running": False, "signal": None, "strategies": []}
 
-        for strat in response_data.get("strategies", []):
-            if strat.get("strategy_id") == "bmc_main":
-                return {
-                    "source": "direct_query",
-                    "running": response_data.get("running", False),
-                    "signal": strat.get("strategy_state", {}),
-                    "config": strat.get("config"),
-                }
-        return {"source": "direct_query", "running": False, "signal": None}
+        bmc_strategies = _extract_bmc_strategies(response_data.get("strategies", []))
+        result = {
+            "source": "direct_query",
+            "running": response_data.get("running", False),
+            "strategies": bmc_strategies,
+        }
+        if bmc_strategies:
+            result["signal"] = bmc_strategies[0]["signal"]
+            result["config"] = bmc_strategies[0]["config"]
+        else:
+            result["signal"] = None
+            result["config"] = None
+        return result
     except Exception as e:
         logger.error(f"Relay bmc-signal error: {e}")
-        return {"error": str(e), "signal": None}
+        return {"error": str(e), "signal": None, "strategies": []}
 

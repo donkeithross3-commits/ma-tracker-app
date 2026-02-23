@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { config } = body;
+    const { config, ticker = "SPY" } = body;
 
     if (!config || typeof config !== "object") {
       return NextResponse.json(
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, config }),
+        body: JSON.stringify({ userId: user.id, config, ticker }),
       }
     );
 

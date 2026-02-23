@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 interface SignalState {
   type: string;
+  ticker: string;
   started: boolean;
   startup_error: string;
   uptime_s: number;
@@ -67,7 +68,15 @@ interface SignalState {
   }>;
 }
 
+interface StrategyEntry {
+  ticker: string;
+  strategy_id: string;
+  signal: SignalState | null;
+  config: BMCConfig | null;
+}
+
 interface BMCConfig {
+  ticker: string;
   signal_threshold: number;
   min_signal_strength: number;
   cooldown_minutes: number;
@@ -79,9 +88,19 @@ interface BMCConfig {
   auto_entry: boolean;
   direction_mode: string;
   use_delayed_data: boolean;
+  // DTE / option selection
+  preferred_dte: number[];
+  max_spread: number;
+  premium_min: number;
+  premium_max: number;
+  // Signal gating
+  straddle_richness_max: number;
+  straddle_richness_ideal: number;
+  options_gate_enabled: boolean;
 }
 
 const DEFAULT_CONFIG: BMCConfig = {
+  ticker: "SPY",
   signal_threshold: 0.5,
   min_signal_strength: 0.3,
   cooldown_minutes: 15,
@@ -93,22 +112,79 @@ const DEFAULT_CONFIG: BMCConfig = {
   auto_entry: false,
   direction_mode: "both",
   use_delayed_data: false,
+  preferred_dte: [0, 1],
+  max_spread: 0.05,
+  premium_min: 0.10,
+  premium_max: 3.00,
+  straddle_richness_max: 1.5,
+  straddle_richness_ideal: 0.9,
+  options_gate_enabled: false,
 };
+
+// Per-ticker config overrides (mirrors _TICKER_PROFILES in Python)
+const TICKER_DEFAULTS: Record<string, Partial<BMCConfig>> = {
+  SPY: {},
+  SLV: {
+    preferred_dte: [0, 1, 2, 3, 4, 5],
+    max_spread: 0.20,
+    premium_min: 0.05,
+    premium_max: 1.50,
+    scan_start: "08:30",
+    scan_end: "13:30",
+    contract_budget_usd: 50,
+    straddle_richness_max: 2.5,
+    straddle_richness_ideal: 1.5,
+  },
+  QQQ: {
+    preferred_dte: [0, 1],
+    max_spread: 0.05,
+  },
+  IWM: {
+    preferred_dte: [0, 1],
+    max_spread: 0.10,
+    premium_min: 0.05,
+    premium_max: 2.00,
+  },
+  GLD: {
+    preferred_dte: [0, 1, 2, 3, 4, 5],
+    max_spread: 0.15,
+    premium_min: 0.05,
+    premium_max: 2.00,
+    straddle_richness_max: 2.0,
+    straddle_richness_ideal: 1.2,
+  },
+};
+
+// Available tickers for BMC strategies
+const AVAILABLE_TICKERS = ["SPY", "SLV", "QQQ", "IWM", "GLD"];
+
+function makeDefaultConfig(ticker: string): BMCConfig {
+  return { ...DEFAULT_CONFIG, ...TICKER_DEFAULTS[ticker], ticker };
+}
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export default function SignalsTab() {
-  const [signal, setSignal] = useState<SignalState | null>(null);
+  // Multi-ticker state: strategy entries from the agent, keyed by ticker
+  const [strategies, setStrategies] = useState<StrategyEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [config, setConfig] = useState<BMCConfig>({ ...DEFAULT_CONFIG });
-  const [configDirty, setConfigDirty] = useState(false);
-  const configDirtyRef = useRef(false);
-  const configLoadedRef = useRef(false);
+
+  // Which tickers are enabled for starting
+  const [enabledTickers, setEnabledTickers] = useState<string[]>(["SPY"]);
+  // Per-ticker configs (for editing before start or hot-reload)
+  const [configs, setConfigs] = useState<Record<string, BMCConfig>>({
+    SPY: makeDefaultConfig("SPY"),
+  });
+  const [configDirty, setConfigDirty] = useState<Record<string, boolean>>({});
+  const configDirtyRef = useRef<Record<string, boolean>>({});
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Currently selected ticker tab for viewing signal details
+  const [activeTicker, setActiveTicker] = useState("SPY");
 
   // ── Poll signal state ──
   const fetchSignal = useCallback(async () => {
@@ -118,30 +194,39 @@ export default function SignalsTab() {
       if (!res.ok) return;
       const data = await res.json();
       setRunning(data.running ?? false);
-      if (data.signal) {
-        setSignal(data.signal);
-      }
-      // Load running config from agent (skip if user has unsaved edits)
-      if (data.config && !configDirtyRef.current) {
-        const c = data.config;
-        setConfig({
-          signal_threshold: c.signal_threshold ?? DEFAULT_CONFIG.signal_threshold,
-          min_signal_strength: c.min_signal_strength ?? DEFAULT_CONFIG.min_signal_strength,
-          cooldown_minutes: c.cooldown_minutes ?? DEFAULT_CONFIG.cooldown_minutes,
-          decision_interval_seconds: c.decision_interval_seconds ?? DEFAULT_CONFIG.decision_interval_seconds,
-          max_contracts: c.max_contracts ?? DEFAULT_CONFIG.max_contracts,
-          contract_budget_usd: c.contract_budget_usd ?? DEFAULT_CONFIG.contract_budget_usd,
-          scan_start: c.scan_start ?? DEFAULT_CONFIG.scan_start,
-          scan_end: c.scan_end ?? DEFAULT_CONFIG.scan_end,
-          auto_entry: c.auto_entry ?? DEFAULT_CONFIG.auto_entry,
-          direction_mode: c.direction_mode ?? DEFAULT_CONFIG.direction_mode,
-          use_delayed_data: c.use_delayed_data ?? DEFAULT_CONFIG.use_delayed_data,
-        });
-        configLoadedRef.current = true;
+
+      // Multi-ticker: use strategies array if available
+      if (data.strategies && Array.isArray(data.strategies)) {
+        setStrategies(data.strategies);
+        // Update configs from agent for tickers not being edited
+        for (const strat of data.strategies) {
+          const t = strat.ticker;
+          if (strat.config && !configDirtyRef.current[t]) {
+            setConfigs(prev => ({
+              ...prev,
+              [t]: configFromAgent(strat.config, t),
+            }));
+          }
+        }
+      } else if (data.signal) {
+        // Legacy single-ticker fallback
+        const ticker = data.signal?.ticker || "SPY";
+        setStrategies([{
+          ticker,
+          strategy_id: `bmc_${ticker.toLowerCase()}`,
+          signal: data.signal,
+          config: data.config,
+        }]);
+        if (data.config && !configDirtyRef.current[ticker]) {
+          setConfigs(prev => ({
+            ...prev,
+            [ticker]: configFromAgent(data.config, ticker),
+          }));
+        }
       }
       setError(null);
     } catch {
-      // silent — poll will retry
+      // silent -- poll will retry
     }
   }, []);
 
@@ -151,15 +236,19 @@ export default function SignalsTab() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchSignal]);
 
-  // ── Start BMC ──
+  // ── Start BMC (multi-ticker) ──
   const handleStart = async () => {
     setLoading(true);
     setError(null);
     try {
+      const tickers = enabledTickers.map(t => ({
+        ticker: t,
+        config: configs[t] || makeDefaultConfig(t),
+      }));
       const res = await fetch("/api/ma-options/bmc-start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config }),
+        body: JSON.stringify({ tickers }),
         credentials: "include",
       });
       const data = await res.json();
@@ -172,21 +261,21 @@ export default function SignalsTab() {
     }
   };
 
-  // ── Update config ──
-  const handleConfigUpdate = async () => {
+  // ── Update config for a specific ticker ──
+  const handleConfigUpdate = async (ticker: string) => {
     setLoading(true);
     try {
       const res = await fetch("/api/ma-options/bmc-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config }),
+        body: JSON.stringify({ config: configs[ticker], ticker }),
         credentials: "include",
       });
       const data = await res.json();
       if (data.error) setError(data.error);
       else {
-        setConfigDirty(false);
-        configDirtyRef.current = false;
+        setConfigDirty(prev => ({ ...prev, [ticker]: false }));
+        configDirtyRef.current[ticker] = false;
         setError(null);
       }
     } catch (e: any) {
@@ -196,13 +285,40 @@ export default function SignalsTab() {
     }
   };
 
-  const updateConfig = (key: keyof BMCConfig, value: any) => {
-    setConfig(prev => ({ ...prev, [key]: value }));
-    setConfigDirty(true);
-    configDirtyRef.current = true;
+  const updateConfig = (ticker: string, key: keyof BMCConfig, value: any) => {
+    setConfigs(prev => ({
+      ...prev,
+      [ticker]: { ...(prev[ticker] || makeDefaultConfig(ticker)), [key]: value },
+    }));
+    setConfigDirty(prev => ({ ...prev, [ticker]: true }));
+    configDirtyRef.current[ticker] = true;
   };
 
-  // ── Derived values ──
+  const toggleTicker = (ticker: string) => {
+    setEnabledTickers(prev => {
+      if (prev.includes(ticker)) {
+        return prev.filter(t => t !== ticker);
+      }
+      // Ensure config exists
+      if (!configs[ticker]) {
+        setConfigs(c => ({ ...c, [ticker]: makeDefaultConfig(ticker) }));
+      }
+      return [...prev, ticker];
+    });
+  };
+
+  // ── Derived: which tickers have running strategies ──
+  const runningTickers = useMemo(
+    () => strategies.map(s => s.ticker),
+    [strategies],
+  );
+
+  // Current ticker's signal and config
+  const activeStrategy = strategies.find(s => s.ticker === activeTicker);
+  const signal = activeStrategy?.signal ?? null;
+  const activeConfig = configs[activeTicker] || makeDefaultConfig(activeTicker);
+  const activeConfigDirty = configDirty[activeTicker] ?? false;
+
   const ws = signal?.polygon_ws;
   const bars = signal?.bar_accumulator;
   const currentSig = signal?.current_signal;
@@ -212,11 +328,59 @@ export default function SignalsTab() {
 
   return (
     <div className="space-y-3">
+      {/* ── Ticker Selector / Tabs ── */}
+      <div className="flex items-center gap-2">
+        {!running ? (
+          // Before start: show ticker toggles
+          <>
+            <span className="text-xs text-gray-500 mr-1">Tickers:</span>
+            {AVAILABLE_TICKERS.map(t => (
+              <button
+                key={t}
+                onClick={() => {
+                  toggleTicker(t);
+                  setActiveTicker(t);
+                }}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  enabledTickers.includes(t)
+                    ? "bg-blue-900/50 text-blue-300 border border-blue-700"
+                    : "bg-gray-800 text-gray-500 border border-gray-700 hover:text-gray-300"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </>
+        ) : (
+          // While running: show ticker tabs for running strategies
+          <>
+            {runningTickers.map(t => (
+              <button
+                key={t}
+                onClick={() => setActiveTicker(t)}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  activeTicker === t
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+
       {/* ── Status Bar ── */}
       <div className="flex items-center gap-3 text-sm">
         <div className="flex items-center gap-1.5">
           <div className={`w-2 h-2 rounded-full ${running ? "bg-green-500" : "bg-gray-600"}`} />
           <span className="text-gray-400">{running ? "Running" : "Stopped"}</span>
+          {running && (
+            <span className="text-gray-600 text-xs">
+              ({runningTickers.length} ticker{runningTickers.length !== 1 ? "s" : ""})
+            </span>
+          )}
         </div>
 
         {ws && (
@@ -262,12 +426,14 @@ export default function SignalsTab() {
         {/* ── Signal Panel ── */}
         <div className="col-span-2 space-y-3">
           <div className="bg-gray-900 border border-gray-800 rounded p-3">
-            <h3 className="text-sm font-medium text-gray-300 mb-2">Current Signal</h3>
+            <h3 className="text-sm font-medium text-gray-300 mb-2">
+              Current Signal {activeTicker && <span className="text-blue-400">({activeTicker})</span>}
+            </h3>
             {currentSig ? (
               <div className="space-y-2">
                 <div className="flex items-baseline gap-3">
                   <span className={`text-2xl font-bold ${directionColor}`}>
-                    {currentSig.direction === "none" ? "—" : currentSig.direction.toUpperCase()}
+                    {currentSig.direction === "none" ? "\u2014" : currentSig.direction.toUpperCase()}
                   </span>
                   <span className="text-lg text-gray-300">
                     p={currentSig.probability.toFixed(4)}
@@ -281,7 +447,7 @@ export default function SignalsTab() {
                   <span>{currentSig.n_features} features ({currentSig.n_nan} NaN)</span>
                   <span>{currentSig.computation_ms?.toFixed(0)}ms</span>
                   {currentSig.underlying_price && (
-                    <span>SPY ${currentSig.underlying_price.toFixed(2)}</span>
+                    <span>{activeTicker} ${currentSig.underlying_price.toFixed(2)}</span>
                   )}
                   {currentSig.suppressed && (
                     <span className="text-yellow-500">suppressed: {currentSig.suppressed}</span>
@@ -295,7 +461,6 @@ export default function SignalsTab() {
                     {currentSig.option_contract.expiry}
                   </div>
                 )}
-                {/* Bars available */}
                 {currentSig.bars_available && (
                   <div className="flex gap-2 text-xs text-gray-600">
                     {Object.entries(currentSig.bars_available).map(([k, v]) => (
@@ -384,62 +549,138 @@ export default function SignalsTab() {
         {/* ── Config Panel ── */}
         <div className="space-y-3">
           <div className="bg-gray-900 border border-gray-800 rounded p-3">
-            <h3 className="text-sm font-medium text-gray-300 mb-2">Configuration</h3>
+            <h3 className="text-sm font-medium text-gray-300 mb-2">
+              Configuration {activeTicker && <span className="text-blue-400">({activeTicker})</span>}
+            </h3>
             <div className="space-y-2 text-xs">
               <ConfigField
                 label="Signal Threshold"
-                value={config.signal_threshold}
-                onChange={v => updateConfig("signal_threshold", parseFloat(v))}
+                value={activeConfig.signal_threshold}
+                onChange={v => updateConfig(activeTicker, "signal_threshold", parseFloat(v))}
                 type="number"
                 step="0.05"
               />
               <ConfigField
                 label="Min Strength"
-                value={config.min_signal_strength}
-                onChange={v => updateConfig("min_signal_strength", parseFloat(v))}
+                value={activeConfig.min_signal_strength}
+                onChange={v => updateConfig(activeTicker, "min_signal_strength", parseFloat(v))}
                 type="number"
                 step="0.05"
               />
               <ConfigField
                 label="Cooldown (min)"
-                value={config.cooldown_minutes}
-                onChange={v => updateConfig("cooldown_minutes", parseInt(v, 10))}
+                value={activeConfig.cooldown_minutes}
+                onChange={v => updateConfig(activeTicker, "cooldown_minutes", parseInt(v, 10))}
                 type="number"
               />
               <ConfigField
                 label="Interval (sec)"
-                value={config.decision_interval_seconds}
-                onChange={v => updateConfig("decision_interval_seconds", parseInt(v, 10))}
+                value={activeConfig.decision_interval_seconds}
+                onChange={v => updateConfig(activeTicker, "decision_interval_seconds", parseInt(v, 10))}
                 type="number"
               />
               <ConfigField
                 label="Max Contracts"
-                value={config.max_contracts}
-                onChange={v => updateConfig("max_contracts", parseInt(v, 10))}
+                value={activeConfig.max_contracts}
+                onChange={v => updateConfig(activeTicker, "max_contracts", parseInt(v, 10))}
                 type="number"
               />
               <ConfigField
                 label="Budget ($)"
-                value={config.contract_budget_usd}
-                onChange={v => updateConfig("contract_budget_usd", parseFloat(v))}
+                value={activeConfig.contract_budget_usd}
+                onChange={v => updateConfig(activeTicker, "contract_budget_usd", parseFloat(v))}
                 type="number"
               />
               <ConfigField
                 label="Scan Start"
-                value={config.scan_start}
-                onChange={v => updateConfig("scan_start", v)}
+                value={activeConfig.scan_start}
+                onChange={v => updateConfig(activeTicker, "scan_start", v)}
               />
               <ConfigField
                 label="Scan End"
-                value={config.scan_end}
-                onChange={v => updateConfig("scan_end", v)}
+                value={activeConfig.scan_end}
+                onChange={v => updateConfig(activeTicker, "scan_end", v)}
               />
 
+              {/* Option Selection */}
+              <div className="border-t border-gray-800 pt-2 mt-2">
+                <span className="text-gray-500 text-[10px] uppercase tracking-wider">Option Selection</span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <label className="text-gray-400">Preferred DTE</label>
+                <input
+                  type="text"
+                  value={activeConfig.preferred_dte.join(",")}
+                  onChange={e => {
+                    const parsed = e.target.value.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+                    updateConfig(activeTicker, "preferred_dte", parsed);
+                  }}
+                  className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-0.5 text-right text-gray-200 text-xs inline-edit"
+                  title="Comma-separated DTE values (e.g. 0,1 or 0,1,2,3,4,5)"
+                />
+              </div>
+              <ConfigField
+                label="Max Spread ($)"
+                value={activeConfig.max_spread}
+                onChange={v => updateConfig(activeTicker, "max_spread", parseFloat(v))}
+                type="number"
+                step="0.01"
+              />
+              <ConfigField
+                label="Premium Min ($)"
+                value={activeConfig.premium_min}
+                onChange={v => updateConfig(activeTicker, "premium_min", parseFloat(v))}
+                type="number"
+                step="0.01"
+              />
+              <ConfigField
+                label="Premium Max ($)"
+                value={activeConfig.premium_max}
+                onChange={v => updateConfig(activeTicker, "premium_max", parseFloat(v))}
+                type="number"
+                step="0.1"
+              />
+
+              {/* Signal Gating */}
+              <div className="border-t border-gray-800 pt-2 mt-2">
+                <span className="text-gray-500 text-[10px] uppercase tracking-wider">Signal Gating</span>
+              </div>
+              <ConfigField
+                label="Straddle Rich Max"
+                value={activeConfig.straddle_richness_max}
+                onChange={v => updateConfig(activeTicker, "straddle_richness_max", parseFloat(v))}
+                type="number"
+                step="0.1"
+              />
+              <ConfigField
+                label="Straddle Rich Ideal"
+                value={activeConfig.straddle_richness_ideal}
+                onChange={v => updateConfig(activeTicker, "straddle_richness_ideal", parseFloat(v))}
+                type="number"
+                step="0.1"
+              />
+              <div className="flex items-center justify-between py-1">
+                <label className="text-gray-400">Options Gate</label>
+                <button
+                  onClick={() => updateConfig(activeTicker, "options_gate_enabled", !activeConfig.options_gate_enabled)}
+                  className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    activeConfig.options_gate_enabled
+                      ? "bg-purple-900/50 text-purple-400 border border-purple-700"
+                      : "bg-gray-800 text-gray-500 border border-gray-700"
+                  }`}
+                >
+                  {activeConfig.options_gate_enabled ? "ON" : "OFF"}
+                </button>
+              </div>
+
+              <div className="border-t border-gray-800 pt-2 mt-2">
+                <span className="text-gray-500 text-[10px] uppercase tracking-wider">General</span>
+              </div>
               <div className="flex items-center justify-between py-1">
                 <label className="text-gray-400">Direction</label>
                 <select
-                  value={config.direction_mode}
-                  onChange={e => updateConfig("direction_mode", e.target.value)}
+                  value={activeConfig.direction_mode}
+                  onChange={e => updateConfig(activeTicker, "direction_mode", e.target.value)}
                   className="bg-gray-800 border border-gray-700 rounded px-2 py-0.5 text-gray-200 text-xs inline-edit"
                 >
                   <option value="both">Both</option>
@@ -450,28 +691,28 @@ export default function SignalsTab() {
               <div className="flex items-center justify-between py-1">
                 <label className="text-gray-400">Auto Entry</label>
                 <button
-                  onClick={() => updateConfig("auto_entry", !config.auto_entry)}
+                  onClick={() => updateConfig(activeTicker, "auto_entry", !activeConfig.auto_entry)}
                   className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    config.auto_entry
+                    activeConfig.auto_entry
                       ? "bg-green-900/50 text-green-400 border border-green-700"
                       : "bg-gray-800 text-gray-500 border border-gray-700"
                   }`}
                 >
-                  {config.auto_entry ? "ON" : "OFF"}
+                  {activeConfig.auto_entry ? "ON" : "OFF"}
                 </button>
               </div>
 
               <div className="flex items-center justify-between py-1">
                 <label className="text-gray-400">Delayed Data</label>
                 <button
-                  onClick={() => updateConfig("use_delayed_data", !config.use_delayed_data)}
+                  onClick={() => updateConfig(activeTicker, "use_delayed_data", !activeConfig.use_delayed_data)}
                   className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    config.use_delayed_data
+                    activeConfig.use_delayed_data
                       ? "bg-yellow-900/50 text-yellow-400 border border-yellow-700"
                       : "bg-blue-900/50 text-blue-400 border border-blue-700"
                   }`}
                 >
-                  {config.use_delayed_data ? "15min delay" : "LIVE"}
+                  {activeConfig.use_delayed_data ? "15min delay" : "LIVE"}
                 </button>
               </div>
             </div>
@@ -483,20 +724,20 @@ export default function SignalsTab() {
             {!running ? (
               <button
                 onClick={handleStart}
-                disabled={loading}
+                disabled={loading || enabledTickers.length === 0}
                 className="w-full px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded"
               >
-                {loading ? "Starting..." : "Start Strategy"}
+                {loading ? "Starting..." : `Start ${enabledTickers.length > 1 ? enabledTickers.join(" + ") : enabledTickers[0] || "Strategy"}`}
               </button>
             ) : (
               <>
-                {configDirty && (
+                {activeConfigDirty && (
                   <button
-                    onClick={handleConfigUpdate}
+                    onClick={() => handleConfigUpdate(activeTicker)}
                     disabled={loading}
                     className="w-full px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded"
                   >
-                    {loading ? "Applying..." : "Apply Config"}
+                    {loading ? "Applying..." : `Apply ${activeTicker} Config`}
                   </button>
                 )}
               </>
@@ -534,6 +775,35 @@ export default function SignalsTab() {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function configFromAgent(c: any, ticker: string): BMCConfig {
+  const defaults = makeDefaultConfig(ticker);
+  return {
+    ticker: c.ticker ?? ticker,
+    signal_threshold: c.signal_threshold ?? defaults.signal_threshold,
+    min_signal_strength: c.min_signal_strength ?? defaults.min_signal_strength,
+    cooldown_minutes: c.cooldown_minutes ?? defaults.cooldown_minutes,
+    decision_interval_seconds: c.decision_interval_seconds ?? defaults.decision_interval_seconds,
+    max_contracts: c.max_contracts ?? defaults.max_contracts,
+    contract_budget_usd: c.contract_budget_usd ?? defaults.contract_budget_usd,
+    scan_start: c.scan_start ?? defaults.scan_start,
+    scan_end: c.scan_end ?? defaults.scan_end,
+    auto_entry: c.auto_entry ?? defaults.auto_entry,
+    direction_mode: c.direction_mode ?? defaults.direction_mode,
+    use_delayed_data: c.use_delayed_data ?? defaults.use_delayed_data,
+    preferred_dte: c.preferred_dte ?? defaults.preferred_dte,
+    max_spread: c.max_spread ?? defaults.max_spread,
+    premium_min: c.premium_min ?? defaults.premium_min,
+    premium_max: c.premium_max ?? defaults.premium_max,
+    straddle_richness_max: c.straddle_richness_max ?? defaults.straddle_richness_max,
+    straddle_richness_ideal: c.straddle_richness_ideal ?? defaults.straddle_richness_ideal,
+    options_gate_enabled: c.options_gate_enabled ?? defaults.options_gate_enabled,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Config field helper
 // ---------------------------------------------------------------------------
 
@@ -552,13 +822,10 @@ function ConfigField({
   type?: string;
   step?: string;
 }) {
-  // For number fields, use a local string state so the user can freely
-  // type (including clearing the field) without the value snapping back.
   const isNumber = type === "number";
   const [localValue, setLocalValue] = useState(String(value));
   const prevValue = useRef(value);
 
-  // Sync from parent when the parent value changes (e.g. loaded from agent)
   if (value !== prevValue.current) {
     prevValue.current = value;
     setLocalValue(String(value));
@@ -575,7 +842,6 @@ function ConfigField({
           step={step}
           onChange={e => {
             setLocalValue(e.target.value);
-            // Only push valid numbers to parent (but allow empty for editing)
             const parsed = step?.includes(".") || String(value).includes(".")
               ? parseFloat(e.target.value)
               : parseInt(e.target.value, 10);
@@ -584,7 +850,6 @@ function ConfigField({
             }
           }}
           onBlur={() => {
-            // On blur, if empty or invalid, revert to parent value
             const parsed = step?.includes(".") || String(value).includes(".")
               ? parseFloat(localValue)
               : parseInt(localValue, 10);
