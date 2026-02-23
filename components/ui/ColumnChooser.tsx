@@ -77,8 +77,9 @@ export function ColumnChooser({
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
-          className={`${btnPad} rounded text-gray-400 hover:text-gray-100 hover:bg-gray-700 transition-colors`}
+          className={`${btnPad} rounded text-gray-400 hover:text-gray-100 hover:bg-gray-700 focus:text-gray-100 focus:bg-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400`}
           title="Choose columns"
+          aria-label="Choose columns"
         >
           <Columns3 className={iconSize} />
         </button>

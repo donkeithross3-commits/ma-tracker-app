@@ -7,6 +7,7 @@ import { useUIPreferences } from "@/lib/ui-preferences";
 import { ColumnChooser, type ColumnDef } from "@/components/ui/ColumnChooser";
 import { RiskManagerModal } from "./RiskManagerModal";
 import { OrderBudgetControl } from "./OrderBudgetControl";
+import { OrderConfirmationModal } from "./OrderConfirmationModal";
 
 /* ─── Column definitions for Position Details table ─── */
 const POSITIONS_COLUMNS: ColumnDef[] = [
@@ -857,6 +858,14 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   // ---- Dev stress test toggle (positions table + ticket) ----
   const [devStressTest, setDevStressTest] = useState(false);
 
+  // ---- Trade Lock: must be "armed" before orders can be submitted ----
+  const [tradeLockArmed, setTradeLockArmed] = useState(false);
+
+  // ---- Confirmation modal state (2-step Preview -> Confirm) ----
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  // Cancel-order confirmation modal
+  const [cancelConfirmOrderId, setCancelConfirmOrderId] = useState<number | null>(null);
+
   /** Open the unified trade ticket for a stock or option.
    *  If a specific position row is given, defaults to exit that position.
    *  Otherwise defaults to STK trade. */
@@ -1621,6 +1630,34 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         </span>
       </div>
 
+      {/* ─── Trade Lock toggle ─── */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={tradeLockArmed}
+          aria-label={tradeLockArmed ? "Trade lock is armed — orders can be submitted" : "Trade lock is on — orders are blocked"}
+          onClick={() => setTradeLockArmed((v) => !v)}
+          className={`relative inline-flex h-10 w-20 shrink-0 cursor-pointer items-center rounded-full border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+            tradeLockArmed
+              ? "bg-green-600 border-green-500 focus:ring-green-400"
+              : "bg-gray-700 border-gray-500 focus:ring-gray-400"
+          }`}
+        >
+          <span
+            className={`inline-block h-7 w-7 rounded-full bg-white shadow transition-transform ${
+              tradeLockArmed ? "translate-x-11" : "translate-x-1"
+            }`}
+          />
+        </button>
+        <span className={`text-base font-semibold select-none ${tradeLockArmed ? "text-green-400" : "text-gray-400"}`}>
+          {tradeLockArmed ? "Trading Armed" : "Trade Lock ON"}
+        </span>
+        <span className="text-sm text-gray-500">
+          {tradeLockArmed ? "Orders can be submitted" : "Arm to enable order submission"}
+        </span>
+      </div>
+
       {/* ─── Working Orders section ─── */}
       <div className="rounded-lg border border-gray-600 bg-gray-800/80 overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-600 bg-gray-800/60">
@@ -1786,7 +1823,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => cancelOrder(o.orderId)}
+                                  onClick={() => setCancelConfirmOrderId(o.orderId)}
                                   disabled={cancellingOrderId === o.orderId}
                                   className="min-h-[28px] px-2 py-0.5 rounded text-xs font-medium bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white"
                                 >
@@ -1817,9 +1854,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         </div>
       ) : (
         <>
-          <div className="flex gap-4 min-h-0">
+          <div className="flex flex-col lg:flex-row gap-4 min-h-0">
             {/* Left: one big box listing all tickers (one row each, STK/OPT on same line) */}
-            <div className="w-64 shrink-0 flex flex-col rounded-lg border border-gray-600 bg-gray-800/80 overflow-hidden">
+            <div className="w-full lg:w-64 shrink-0 flex flex-col rounded-lg border border-gray-600 bg-gray-800/80 overflow-hidden">
               <div className="px-3 py-2 border-b border-gray-600 flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold text-gray-200">Tickers ({groups.length})</span>
                 <button
@@ -1831,40 +1868,43 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                     setAddTickerError(null);
                     setTimeout(() => addTickerInputRef.current?.focus(), 100);
                   }}
-                  className="shrink-0 min-h-[40px] px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white"
+                  className="shrink-0 min-h-[40px] px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-500 focus:bg-blue-500 text-white"
+                  aria-label="Add ticker to watchlist"
                 >
                   + Add ticker
                 </button>
               </div>
-              <div className="overflow-y-auto flex-1 min-h-[200px]">
-                {groups.map((group) => {
-                  const selected = selectedTickers.has(group.key);
-                  const typeLine = [
-                    ...Object.entries(group.typeCounts).map(([t, n]) => `${t} ${n}`),
-                    group.callCount + group.putCount > 0
-                      ? `(${group.callCount}C/${group.putCount}P)`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" ");
-                  return (
-                    <button
-                      key={group.key}
-                      type="button"
-                      onClick={() => toggleTicker(group.key)}
-                      className={`w-full text-left px-3 py-2.5 border-b border-gray-700/50 text-base font-medium transition-colors min-h-[44px] flex items-center justify-between gap-2 ${
-                        selected
-                          ? "bg-blue-900/40 text-white border-l-4 border-l-blue-400"
-                          : "text-gray-300 hover:bg-gray-700/50 border-l-4 border-l-transparent"
-                      }`}
-                    >
-                      <span className="font-semibold truncate">{group.key}</span>
-                      <span className="text-sm text-gray-400 shrink-0 truncate max-w-[50%]">
-                        {typeLine}
-                      </span>
-                    </button>
-                  );
-                })}
+              <div className="overflow-y-auto lg:flex-1 lg:min-h-[200px] max-h-[200px] lg:max-h-none">
+                <div className="flex flex-row lg:flex-col overflow-x-auto lg:overflow-x-visible">
+                  {groups.map((group) => {
+                    const selected = selectedTickers.has(group.key);
+                    const typeLine = [
+                      ...Object.entries(group.typeCounts).map(([t, n]) => `${t} ${n}`),
+                      group.callCount + group.putCount > 0
+                        ? `(${group.callCount}C/${group.putCount}P)`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
+                    return (
+                      <button
+                        key={group.key}
+                        type="button"
+                        onClick={() => toggleTicker(group.key)}
+                        className={`shrink-0 lg:shrink lg:w-full text-left px-3 py-2.5 border-b border-gray-700/50 text-base font-medium transition-colors min-h-[44px] flex items-center justify-between gap-2 ${
+                          selected
+                            ? "bg-blue-900/40 text-white border-l-4 border-l-blue-400"
+                            : "text-gray-300 hover:bg-gray-700/50 border-l-4 border-l-transparent"
+                        }`}
+                      >
+                        <span className="font-semibold truncate">{group.key}</span>
+                        <span className="text-sm text-gray-400 shrink-0 truncate max-w-[50%]">
+                          {typeLine}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -1920,7 +1960,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                     return (
                       <div
                         key={`group-${group.key}`}
-                        className={`min-w-0 rounded-lg border border-gray-600 overflow-hidden border-l-4 ${accent}`}
+                        className={`min-w-0 rounded-lg border border-gray-600 overflow-hidden border-l-4 ticker-card ${accent}`}
+                        style={{ containerType: "inline-size" }}
                       >
                         <div
                           className={`min-w-0 flex flex-col gap-1.5 px-4 py-3 border-b border-gray-600 ${headerAccent}`}
@@ -1976,7 +2017,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               </button>
                             )}
                           </div>
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-200">
+                          <div className="tc-stats-row flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-200">
                             <span>
                               {Object.keys(group.typeCounts).length > 0
                                 ? Object.entries(group.typeCounts).map(([t, n]) => `${t} ${n}`).join(", ")
@@ -2022,12 +2063,12 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               {isLegLoading ? "Loading…" : "Refresh quotes"}
                             </button>
                           </div>
-                          <div className="flex flex-wrap gap-2 mt-2">
+                          <div className="tc-actions-row flex flex-wrap gap-2 mt-2">
                             <button
                               type="button"
                               onClick={() => runSellScan(group.key, "C")}
                               disabled={sellScanLoading}
-                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white"
+                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium bg-emerald-700 hover:bg-emerald-600 focus:bg-emerald-600 disabled:opacity-50 text-white"
                             >
                               Scan calls
                             </button>
@@ -2035,14 +2076,14 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                               type="button"
                               onClick={() => runSellScan(group.key, "P")}
                               disabled={sellScanLoading}
-                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white"
+                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-medium bg-amber-700 hover:bg-amber-600 focus:bg-amber-600 disabled:opacity-50 text-white"
                             >
                               Scan puts
                             </button>
                             <button
                               type="button"
                               onClick={() => openTradeTicket(group.key, group)}
-                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-bold bg-gray-600 hover:bg-gray-500 text-white"
+                              className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-bold bg-gray-600 hover:bg-gray-500 focus:bg-gray-500 text-white"
                             >
                               Trade
                             </button>
@@ -2064,8 +2105,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     contract: c as unknown as Record<string, unknown>,
                                   });
                                 }}
-                                className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-bold bg-yellow-700 hover:bg-yellow-600 text-white"
+                                className="min-h-[44px] px-4 py-2.5 rounded-lg text-base font-bold bg-yellow-700 hover:bg-yellow-600 focus:bg-yellow-600 text-white"
                                 title="Open Risk Manager for this position"
+                                aria-label="Open Risk Manager for this position"
                               >
                                 &#9881; Risk Mgr
                               </button>
@@ -2182,7 +2224,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                           </button>
                                           <button
                                             type="button"
-                                            onClick={() => cancelOrder(o.orderId)}
+                                            onClick={() => setCancelConfirmOrderId(o.orderId)}
                                             disabled={cancellingOrderId === o.orderId}
                                             className="min-h-[24px] px-2 py-0.5 rounded text-xs font-medium bg-red-800/80 hover:bg-red-700 disabled:opacity-50 text-white"
                                           >
@@ -2307,8 +2349,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                                 contract: c as unknown as Record<string, unknown>,
                                               });
                                             }}
-                                            className="min-h-[44px] min-w-[44px] px-2 py-2 rounded-lg text-sm font-semibold bg-yellow-700 hover:bg-yellow-600 text-white whitespace-nowrap"
+                                            className="min-h-[44px] min-w-[44px] px-2 py-2 rounded-lg text-sm font-semibold bg-yellow-700 hover:bg-yellow-600 focus:bg-yellow-600 text-white whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-yellow-400"
                                             title="Risk Manager"
+                                            aria-label="Open Risk Manager for this position"
                                           >
                                             &#9881;
                                           </button>
@@ -2485,7 +2528,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   setAddTickerName("");
                   setAddTickerError(null);
                 }}
-                className="min-h-[44px] min-w-[44px] px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-base font-medium"
+                className="min-h-[44px] min-w-[44px] px-4 rounded-lg bg-gray-700 hover:bg-gray-600 focus:bg-gray-600 text-white text-base font-medium"
+                aria-label="Close add ticker dialog"
               >
                 Close
               </button>
@@ -2636,8 +2680,10 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   className={`min-h-[52px] px-6 text-xl font-extrabold transition-colors ${
                     stockOrderAction === "BUY"
                       ? "bg-blue-600 text-white"
-                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                      : "bg-gray-800 text-gray-400 hover:bg-gray-700 focus:bg-gray-700"
                   }`}
+                  aria-label="Buy"
+                  aria-pressed={stockOrderAction === "BUY"}
                 >
                   BUY
                 </button>
@@ -2647,8 +2693,10 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   className={`min-h-[52px] px-6 text-xl font-extrabold transition-colors ${
                     stockOrderAction === "SELL"
                       ? "bg-red-600 text-white"
-                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                      : "bg-gray-800 text-gray-400 hover:bg-gray-700 focus:bg-gray-700"
                   }`}
+                  aria-label="Sell"
+                  aria-pressed={stockOrderAction === "SELL"}
                 >
                   SELL
                 </button>
@@ -2680,8 +2728,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                     await fetchQuote(tickerForQuote, ticketContractMeta ?? undefined);
                     setStockOrderQuoteRefreshing(false);
                   }}
-                  className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-lg disabled:opacity-40"
+                  className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-700 hover:bg-gray-600 focus:bg-gray-600 text-white text-lg disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-gray-400"
                   title="Refresh quote"
+                  aria-label="Refresh quote"
                 >
                   {stockOrderQuoteRefreshing ? "..." : "\u21BB"}
                 </button>
@@ -2711,7 +2760,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                 <span className="text-base text-gray-400">Position: <span className="text-white font-semibold">{posQty.toLocaleString()}</span></span>
               )}
               <div className="ml-auto">
-                <button type="button" onClick={closeStockOrder} className="min-h-[52px] min-w-[52px] rounded-xl bg-gray-700 hover:bg-gray-600 text-white text-2xl font-bold">
+                <button type="button" onClick={closeStockOrder} className="min-h-[52px] min-w-[52px] rounded-xl bg-gray-700 hover:bg-gray-600 focus:bg-gray-600 text-white text-2xl font-bold focus:outline-none focus:ring-2 focus:ring-gray-400" aria-label="Close trade ticket">
                   ✕
                 </button>
               </div>
@@ -3044,20 +3093,56 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   )}
                 </div>
               )}
+              {/* Trade Lock gate */}
+              {!tradeLockArmed && (
+                <div className="p-4 rounded-xl bg-gray-800 border border-gray-600 text-gray-300 text-base text-center">
+                  Trade Lock is <span className="font-bold text-amber-400">ON</span>. Arm the trade lock to place orders.
+                </div>
+              )}
               <button
                 type="button"
-                onClick={submitStockOrder}
-                disabled={stockOrderSubmitting || !stockOrderQty || parseFloat(stockOrderQty) <= 0}
+                onClick={() => {
+                  if (!tradeLockArmed) return;
+                  const qty = parseFloat(stockOrderQty);
+                  if (!qty || qty <= 0) { setStockOrderResult({ error: "Enter a valid quantity" }); return; }
+                  if (stockOrderType !== "MOC" && (!stockOrderLmtPrice || parseFloat(stockOrderLmtPrice) <= 0)) {
+                    setStockOrderResult({ error: "Enter a valid limit price" }); return;
+                  }
+                  if (stockOrderType === "STP LMT" && (!stockOrderStopPrice || parseFloat(stockOrderStopPrice) <= 0)) {
+                    setStockOrderResult({ error: "Enter a valid stop price" }); return;
+                  }
+                  setStockOrderResult(null);
+                  setConfirmModalOpen(true);
+                }}
+                disabled={stockOrderSubmitting || !stockOrderQty || parseFloat(stockOrderQty) <= 0 || !tradeLockArmed}
                 className={`w-full min-h-[80px] rounded-2xl text-2xl font-extrabold transition-colors disabled:opacity-40 ${
                   stockOrderAction === "BUY"
                     ? "bg-blue-600 hover:bg-blue-500 text-white"
                     : "bg-red-600 hover:bg-red-500 text-white"
                 }`}
+                aria-label={tradeLockArmed ? `${stockOrderAction} ${stockOrderQty || "0"} ${unitLabel}` : "Trade lock is on — arm it to place orders"}
               >
                 {stockOrderSubmitting
                   ? "Sending order…"
                   : `${stockOrderAction} ${stockOrderQty || "0"} ${unitLabel}`}
               </button>
+              {/* Order confirmation modal (2-step Preview -> Confirm) */}
+              <OrderConfirmationModal
+                variant="place"
+                open={confirmModalOpen}
+                onClose={() => setConfirmModalOpen(false)}
+                contractSummary={`${stockOrderTicker}${isOpt ? ` ${ticketExpiry.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3")} ${ticketStrike} ${ticketRight}` : ""}`}
+                action={stockOrderAction}
+                quantity={parseFloat(stockOrderQty) || 0}
+                orderType={stockOrderType === "MOC" ? "Market on Close" : stockOrderType}
+                limitPrice={stockOrderType !== "MOC" ? parseFloat(stockOrderLmtPrice) || undefined : undefined}
+                stopPrice={stockOrderType === "STP LMT" ? parseFloat(stockOrderStopPrice) || undefined : undefined}
+                onConfirm={async () => {
+                  setConfirmModalOpen(false);
+                  await submitStockOrder();
+                }}
+                isSubmitting={stockOrderSubmitting}
+              />
             </div>
           </div>
         </div>
@@ -3084,7 +3169,8 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
               <button
                 type="button"
                 onClick={closeSellScanModal}
-                className="min-h-[44px] min-w-[44px] px-4 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-base font-medium"
+                className="min-h-[44px] min-w-[44px] px-4 rounded-lg bg-gray-700 hover:bg-gray-600 focus:bg-gray-600 text-white text-base font-medium"
+                aria-label="Close scan results"
               >
                 Close
               </button>
@@ -3236,6 +3322,22 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
           executionStatus={executionStatus}
           onStart={handleRiskStart}
           onStop={handleRiskStop}
+        />
+      )}
+
+      {/* ── Cancel Order Confirmation Modal ── */}
+      {cancelConfirmOrderId != null && (
+        <OrderConfirmationModal
+          variant="cancel"
+          open={true}
+          onClose={() => setCancelConfirmOrderId(null)}
+          orderId={cancelConfirmOrderId}
+          onConfirm={async () => {
+            const oid = cancelConfirmOrderId;
+            setCancelConfirmOrderId(null);
+            await cancelOrder(oid);
+          }}
+          isSubmitting={cancellingOrderId === cancelConfirmOrderId}
         />
       )}
     </div>

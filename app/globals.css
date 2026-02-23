@@ -261,6 +261,102 @@
 }
 
 /* ============================================
+   Ticker Card Container Query Reflow
+   ============================================
+   Each ticker card (.ticker-card) sets container-type: inline-size
+   in the component. These rules reflow internal layout at narrow widths.
+   ============================================ */
+
+/* At narrow card widths (<400px), reduce gaps in header stats row */
+@container (max-width: 400px) {
+  .tc-stats-row {
+    column-gap: 0.375rem;
+    row-gap: 0.125rem;
+  }
+}
+
+/* At very narrow card widths (<320px), stack action buttons */
+@container (max-width: 320px) {
+  .tc-actions-row {
+    flex-direction: column;
+  }
+  .tc-actions-row > button {
+    width: 100%;
+  }
+}
+
+/* ============================================
+   Reduced Motion Support
+   ============================================
+   Respects prefers-reduced-motion by disabling
+   transitions, animations, and transforms that
+   could cause disorientation.
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Disable spinner animations */
+  .animate-spin {
+    animation: none !important;
+  }
+}
+
+/* ============================================
+   Enhanced Focus Ring Visibility
+   ============================================
+   Thick, high-contrast focus rings for keyboard
+   navigation. Applies globally; comfort mode
+   gets extra-thick rings.
+   ============================================ */
+
+@layer components {
+
+  /* Global focus-visible ring: 2px solid, high-contrast blue */
+  :focus-visible {
+    outline: 2px solid hsl(212, 100%, 55%);
+    outline-offset: 2px;
+  }
+
+  /* Comfort mode: thicker 3px ring with offset for larger targets */
+  [data-density="comfort"] :focus-visible {
+    outline-width: 3px;
+    outline-offset: 3px;
+  }
+
+  /* Remove default outline on buttons/inputs that already show focus-visible */
+  button:focus:not(:focus-visible),
+  input:focus:not(:focus-visible),
+  select:focus:not(:focus-visible),
+  textarea:focus:not(:focus-visible),
+  a:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* ─── Hover-only affordances also work on focus ───
+     Ensures keyboard users see the same visual feedback as mouse users.
+     Uses :focus-visible to avoid flashing on click. */
+  button:focus-visible,
+  a[role="button"]:focus-visible {
+    /* Repeat hover bg colors for common dark-theme button patterns */
+    --tw-bg-opacity: 1;
+  }
+
+  /* Trade Lock toggle: role="switch" focus ring */
+  [role="switch"]:focus-visible {
+    outline-width: 3px;
+  }
+
+}
+
+/* ============================================
    KRJ Print Styles
    ============================================ */
 

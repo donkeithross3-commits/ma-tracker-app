@@ -1,0 +1,43 @@
+{
+  "date": "2026-02-22",
+  "title": "Feb 22, 2026",
+  "summary": "Parkinson's-friendly UI improvements: Trade Lock safety toggle, 2-step order confirmation, enhanced focus rings, reduced-motion support, ticker card responsive reflow, and comprehensive accessibility tests.",
+  "features": [
+    {
+      "id": "trade-lock",
+      "title": "Trade Lock Safety Toggle",
+      "summary": "New armed/disarmed toggle that gates all order submission to prevent accidental trades.",
+      "description": "A large toggle switch (40x80px) on the Account tab that must be explicitly armed before any order can be submitted. Defaults to locked on page load.\n\nWhen locked, the Submit Order button is disabled and a clear message says \"Trade Lock is ON. Arm the trade lock to place orders.\" The toggle uses role=\"switch\" with aria-checked for screen reader accessibility.\n\nDesigned for users with Parkinson's disease — the toggle is large enough to activate without precision, uses a simple click (no long-press or swipe), and the locked/unlocked state is visually unambiguous (gray=locked, green=armed).",
+      "category": "positions",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "two-step-order-confirm",
+      "title": "2-Step Order Confirmation",
+      "summary": "Orders now require Preview then Confirm — two separate clicks with full details visible at each step.",
+      "description": "The order confirmation modal now implements a 2-step flow:\n\n**Step 1 (Preview):** Shows full order details (contract, action, quantity, order type, limit price) with a \"Preview -> Confirm\" button and a Cancel button.\n\n**Step 2 (Confirm):** Repeats the order details plus an amber warning asking \"Are you sure?\", with a \"BUY/SELL N — Send order\" button, a Back button to return to preview, and a Cancel button.\n\nAll buttons are 52px minimum height with clear labels. No countdown timers, no drag-to-confirm, no auto-submit. Cancel is always visible and equally prominent. The cancel-order variant also gets large buttons with a clear \"Back — keep order\" escape path.\n\nBased on WCAG 3.3.4 (Error Prevention for financial transactions) and PD-specific UI research.",
+      "category": "positions",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "accessibility-enhancements",
+      "title": "Focus Rings, Reduced Motion, and ARIA Labels",
+      "summary": "Enhanced keyboard navigation with visible focus rings, prefers-reduced-motion support, and ARIA labels on all icon-only buttons.",
+      "description": "Three accessibility improvements across the Account tab:\n\n**Focus rings:** All interactive elements now show a 2px blue outline on keyboard focus (3px in Comfort mode). Mouse clicks don't show the ring (uses :focus-visible). The ring has 2-3px offset for clear visibility on dark backgrounds.\n\n**Reduced motion:** A new @media (prefers-reduced-motion: reduce) rule disables all CSS animations and transitions globally. Spinner animations are also suppressed. Respects the OS-level setting.\n\n**ARIA labels:** 10+ icon-only buttons across the Account tab now have descriptive aria-labels (Close trade ticket, Refresh quote, Risk Manager, Choose columns, etc.). The Comfort Mode toggle and Trade Lock toggle use role=\"switch\" with aria-checked. BUY/SELL buttons use aria-pressed.\n\nAll hover-only button states now also appear on :focus-visible, ensuring keyboard users see the same visual feedback as mouse users.",
+      "category": "positions",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "ticker-card-reflow",
+      "title": "Ticker Card Responsive Reflow",
+      "summary": "Ticker cards now use container queries to reflow gracefully at narrow widths and in Comfort mode.",
+      "description": "Each ticker card now sets container-type: inline-size and uses CSS container queries for responsive internal layout:\n\n- At narrow card widths (<400px), header stats row reduces gaps\n- At very narrow widths (<320px), action buttons stack vertically at full width\n- Stats row and actions row use flex-wrap so content never overflows horizontally\n- The sidebar ticker list switches from vertical (desktop) to horizontal scroll (narrow) via flex-row lg:flex-col\n\nThese changes ensure the hard requirement of no horizontal scrollbars inside ticker cards is maintained across all viewport sizes and in Comfort mode with large fonts.",
+      "category": "positions",
+      "image": "",
+      "screenshot": null
+    }
+  ]
+}

@@ -105,6 +105,9 @@ export function UserMenu({ variant = "light", initialUser }: UserMenuProps) {
               {/* Comfort Mode toggle */}
               <button
                 onClick={toggleDensity}
+                role="switch"
+                aria-checked={isComfort}
+                aria-label="Comfort Mode"
                 className={`flex items-center justify-between px-4 py-2 text-sm w-full text-left ${textColor} ${hoverColor}`}
               >
                 <span className="flex items-center gap-2">
