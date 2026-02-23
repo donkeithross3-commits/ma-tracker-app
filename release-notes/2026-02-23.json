@@ -1,7 +1,7 @@
 {
   "date": "2026-02-23",
   "title": "Feb 23, 2026",
-  "summary": "Option quote on order entry, Parkinson's-friendly Account tab, and tremor-safe confirm debounce.",
+  "summary": "Option quote on order entry, Parkinson's-friendly Account tab, tremor-safe confirm debounce, and M&A scanner test suite.",
   "features": [
     {
       "id": "option-quote-order-entry",
@@ -35,6 +35,15 @@
       "title": "Comfort Mode: Touch and Motion",
       "summary": "Comfort mode adds touch-action to remove tap delay and shortens transitions on interactive elements.",
       "description": "Two small improvements when Comfort Mode is on:\n\n**Touch:** Buttons and tabs use touch-action: manipulation so touch devices don't add a 300ms tap delay. Helps users who use a tablet or touchscreen.\n\n**Motion:** When the OS has not set \"Reduce motion,\" Comfort mode still shortens transitions on buttons, tabs, checkboxes, and menu items to 0.08s. Reduces motion sensitivity without requiring the system preference.",
+      "category": "general",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "ma-scanner-test-suite",
+      "title": "M&A Options Scanner Test Suite",
+      "summary": "62 unit tests covering all five post-Polygon-migration bug fixes in the options scanner.",
+      "description": "Added a comprehensive test suite for the M&A options scanner business logic, covering the five bugs that shipped silently after the Polygon migration:\n\n**Bug #1 — Polygon null values:** Tests that `implied_vol: null` from Polygon falls back to 0.30 instead of crashing.\n\n**Bug #2 — Put spread IRR:** Tests that the HPR denominator is spread width (collateral), not max loss. A credit=8/width=10 spread returns 80%, not 400%.\n\n**Bug #3 — Short-dated annualization:** Tests that a 5-day option reports holding-period return, not a compounded annualized figure in the thousands of percent.\n\n**Bug #4 — Pre-close price interpolation:** Tests that a 1-day option on a 180-day deal barely converges (price ~90.06), not jumping to the deal price of 100.\n\n**Bug #5 — Expiration filtering:** Tests that `daysBeforeClose=60` on a July close yields `exp_gte = May 16`, not today.\n\nAll tests are pure unit tests (no network, no IB connection) using freezegun for deterministic dates.",
       "category": "general",
       "image": "",
       "screenshot": null
