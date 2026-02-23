@@ -346,55 +346,39 @@ export default function SignalsTab() {
     <div className="space-y-3">
       {/* ── Ticker Selector / Tabs ── */}
       <div className="flex items-center gap-2">
-        {!running ? (
-          // Before start: checkboxes to enable/disable, click to select for config viewing
-          <>
-            <span className="text-xs text-gray-500 mr-1">Tickers:</span>
-            {AVAILABLE_TICKERS.map(t => {
-              const isActive = activeTicker === t;
-              const isEnabled = enabledTickers.includes(t);
-              return (
-                <div key={t} className="flex items-center gap-1">
-                  <input
-                    type="checkbox"
-                    checked={isEnabled}
-                    onChange={() => toggleTicker(t)}
-                    className="w-3 h-3 accent-blue-600 cursor-pointer inline-edit"
-                  />
-                  <button
-                    onClick={() => setActiveTicker(t)}
-                    className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                      isActive
-                        ? "bg-blue-600 text-white"
-                        : isEnabled
-                          ? "bg-blue-900/30 text-blue-400 hover:bg-blue-900/50"
-                          : "text-gray-500 hover:text-gray-300"
-                    }`}
-                  >
-                    {t}
-                  </button>
-                </div>
-              );
-            })}
-          </>
-        ) : (
-          // While running: show ticker tabs for running strategies
-          <>
-            {runningTickers.map(t => (
+        <span className="text-xs text-gray-500 mr-1">Tickers:</span>
+        {AVAILABLE_TICKERS.map(t => {
+          const isActive = activeTicker === t;
+          const isEnabled = enabledTickers.includes(t);
+          const isRunning = runningTickers.includes(t);
+          return (
+            <div key={t} className="flex items-center gap-1">
+              {!running && (
+                <input
+                  type="checkbox"
+                  checked={isEnabled}
+                  onChange={() => toggleTicker(t)}
+                  className="w-3 h-3 accent-blue-600 cursor-pointer inline-edit"
+                />
+              )}
               <button
-                key={t}
                 onClick={() => setActiveTicker(t)}
-                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                  activeTicker === t
+                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  isActive
                     ? "bg-blue-600 text-white"
-                    : "bg-gray-800 text-gray-400 hover:text-gray-200"
+                    : isRunning
+                      ? "bg-green-900/30 text-green-400 hover:bg-green-900/50"
+                      : isEnabled
+                        ? "bg-blue-900/30 text-blue-400 hover:bg-blue-900/50"
+                        : "text-gray-500 hover:text-gray-300"
                 }`}
               >
                 {t}
+                {running && isRunning && !isActive && <span className="ml-1 text-[9px]">{"\u25CF"}</span>}
               </button>
-            ))}
-          </>
-        )}
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Status Bar ── */}
@@ -573,12 +557,31 @@ export default function SignalsTab() {
         </div>
 
         {/* ── Config Panel ── */}
-        <div className="space-y-3">
-          <div className="bg-gray-900 border border-gray-800 rounded p-3">
-            <h3 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-              <span className="bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded text-xs font-bold">{activeTicker}</span>
-              Configuration
-            </h3>
+        <div className="space-y-2">
+          <div className="bg-gray-900 border border-gray-800 rounded p-2.5">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                <span className="bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded text-xs font-bold">{activeTicker}</span>
+                Config
+              </h3>
+              {!running ? (
+                <button
+                  onClick={handleStart}
+                  disabled={loading || enabledTickers.length === 0}
+                  className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-medium rounded"
+                >
+                  {loading ? "Starting..." : `Start ${enabledTickers.length > 1 ? enabledTickers.join("+") : enabledTickers[0] || ""}`}
+                </button>
+              ) : activeConfigDirty ? (
+                <button
+                  onClick={() => handleConfigUpdate(activeTicker)}
+                  disabled={loading}
+                  className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-xs font-medium rounded"
+                >
+                  {loading ? "Applying..." : "Apply"}
+                </button>
+              ) : null}
+            </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
               <ConfigField
                 label="Signal Threshold"
@@ -736,32 +739,6 @@ export default function SignalsTab() {
                 </button>
               </div>
             </div>
-          </div>
-
-          {/* ── Actions ── */}
-          <div className="bg-gray-900 border border-gray-800 rounded p-3 space-y-2">
-            <h3 className="text-sm font-medium text-gray-300 mb-2">Actions</h3>
-            {!running ? (
-              <button
-                onClick={handleStart}
-                disabled={loading || enabledTickers.length === 0}
-                className="w-full px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded"
-              >
-                {loading ? "Starting..." : `Start ${enabledTickers.length > 1 ? enabledTickers.join(" + ") : enabledTickers[0] || "Strategy"}`}
-              </button>
-            ) : (
-              <>
-                {activeConfigDirty && (
-                  <button
-                    onClick={() => handleConfigUpdate(activeTicker)}
-                    disabled={loading}
-                    className="w-full px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded"
-                  >
-                    {loading ? "Applying..." : `Apply ${activeTicker} Config`}
-                  </button>
-                )}
-              </>
-            )}
           </div>
 
           {/* ── Data Store Status ── */}
