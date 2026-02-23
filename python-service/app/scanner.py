@@ -1133,8 +1133,12 @@ class MergerArbAnalyzer:
         option_expiry_date = datetime.strptime(long_put.expiry, "%Y%m%d")
         days_to_exit = min(self.deal.days_to_close, (option_expiry_date - datetime.now()).days)
         years_to_expiry = max(days_to_exit, 1) / 365  # At least 1 day to avoid division issues
-        annualized_return_mid = (expected_return_mid / max_loss_mid) / years_to_expiry if years_to_expiry > 0 and max_loss_mid > 0 else 0
-        annualized_return_ft = (expected_return_ft / max_loss_ft) / years_to_expiry if years_to_expiry > 0 and max_loss_ft > 0 else 0
+        # Credit spread IRR uses spread_width (collateral) as denominator,
+        # not max_loss.  Broker ties up spread_width in margin, so
+        # return-on-capital = credit / spread_width / years.
+        # Using max_loss blows up when credit ≈ spread_width (deep ITM).
+        annualized_return_mid = (expected_return_mid / spread_width) / years_to_expiry if years_to_expiry > 0 else 0
+        annualized_return_ft = (expected_return_ft / spread_width) / years_to_expiry if years_to_expiry > 0 else 0
         
         # Debug logging for far touch
         print(f"DEBUG PUT FT: {long_put.strike}/{short_put.strike}")
