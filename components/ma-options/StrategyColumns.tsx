@@ -94,14 +94,12 @@ export function renderLegPricesFar(legs: StrategyLeg[]): string {
 export function calculateMidMetrics(metrics: StrategyMetrics) {
   const midCost = Math.abs(metrics.netPremium || 0);
   const midProfit = metrics.maxProfit || 0;
-  const midReturn = midCost > 0 ? midProfit / midCost : 0;
-  const midReturn = metrics.annualizedYield || 0;
+  const midIrr = metrics.annualizedYield || 0;
 
   return {
     cost: midCost,
     profit: midProfit,
-    return: midReturn,
-    irr: midReturn,
+    irr: midIrr,
   };
 }
 
@@ -126,14 +124,12 @@ export function calculateFarMetrics(metrics: StrategyMetrics) {
     farProfit = strikeWidth - farCost;
   }
   
-  const farReturn = farCost > 0 ? farProfit / farCost : 0;
-  const farReturn = metrics.annualizedYieldFarTouch || 0;
+  const farIrr = metrics.annualizedYieldFarTouch || 0;
 
   return {
     cost: farCost,
     profit: farProfit,
-    return: farReturn,
-    irr: farReturn,
+    irr: farIrr,
   };
 }
 
