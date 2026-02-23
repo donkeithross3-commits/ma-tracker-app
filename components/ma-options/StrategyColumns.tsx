@@ -38,8 +38,8 @@ export interface StrategyMetrics {
   netPremiumFarTouch: number; // Far touch cost/max loss
   maxProfit: number; // Max profit (debit) or credit received (credit)
   maxProfitFarTouch?: number; // Far touch max profit (optional, calculated if not provided)
-  annualizedYield: number; // Midpoint IRR
-  annualizedYieldFarTouch: number; // Far touch IRR
+  annualizedYield: number; // Midpoint Return
+  annualizedYieldFarTouch: number; // Far touch Return
   liquidityScore: number;
 }
 
@@ -95,13 +95,13 @@ export function calculateMidMetrics(metrics: StrategyMetrics) {
   const midCost = Math.abs(metrics.netPremium || 0);
   const midProfit = metrics.maxProfit || 0;
   const midReturn = midCost > 0 ? midProfit / midCost : 0;
-  const midIRR = metrics.annualizedYield || 0;
+  const midReturn = metrics.annualizedYield || 0;
 
   return {
     cost: midCost,
     profit: midProfit,
     return: midReturn,
-    irr: midIRR,
+    irr: midReturn,
   };
 }
 
@@ -127,13 +127,13 @@ export function calculateFarMetrics(metrics: StrategyMetrics) {
   }
   
   const farReturn = farCost > 0 ? farProfit / farCost : 0;
-  const farIRR = metrics.annualizedYieldFarTouch || 0;
+  const farReturn = metrics.annualizedYieldFarTouch || 0;
 
   return {
     cost: farCost,
     profit: farProfit,
     return: farReturn,
-    irr: farIRR,
+    irr: farReturn,
   };
 }
 
@@ -146,12 +146,12 @@ export function calculateFarMetrics(metrics: StrategyMetrics) {
 export function calculateCreditMidMetrics(metrics: StrategyMetrics) {
   const credit = metrics.maxProfit || 0; // Credit received = max gain
   const maxLoss = Math.abs(metrics.netPremium || 0); // Capital at risk
-  const midIRR = metrics.annualizedYield || 0;
+  const midReturn = metrics.annualizedYield || 0;
 
   return {
     credit,
     maxLoss,
-    irr: midIRR,
+    irr: midReturn,
   };
 }
 
@@ -169,12 +169,12 @@ export function calculateCreditFarMetrics(metrics: StrategyMetrics) {
   // Can be negative if far touch prices result in net debit
   const strikeWidth = midCredit + midMaxLoss;
   const farCredit = strikeWidth - farMaxLoss;
-  const farIRR = metrics.annualizedYieldFarTouch || 0;
+  const farReturn = metrics.annualizedYieldFarTouch || 0;
 
   return {
     credit: farCredit,
     maxLoss: farMaxLoss,
-    irr: farIRR,
+    irr: farReturn,
   };
 }
 
@@ -252,14 +252,14 @@ export function DebitStrategyTableHeader({
           <>
             <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
             <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
-            <th className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200" onClick={() => onSort("annualizedYield")}>IRR</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200" onClick={() => onSort("annualizedYield")}>Return</th>
           </>
         )}
         {showFar && (
           <>
             <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Cost</th>
             <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Profit</th>
-            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Return</th>
           </>
         )}
       </tr>
@@ -299,14 +299,14 @@ export function CreditStrategyTableHeader({
           <>
             <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Credit</th>
             <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Max Loss</th>
-            <th className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200" onClick={() => onSort("annualizedYield")}>IRR</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px] cursor-pointer hover:text-gray-200" onClick={() => onSort("annualizedYield")}>Return</th>
           </>
         )}
         {showFar && (
           <>
             <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Credit</th>
             <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Max Loss</th>
-            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">IRR</th>
+            <th className="text-right py-1 px-2 text-gray-400 text-[10px]">Return</th>
           </>
         )}
       </tr>

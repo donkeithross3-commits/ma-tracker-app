@@ -22,6 +22,7 @@ interface CandidateStrategiesTableProps {
   onWatch: (strategy: CandidateStrategy) => void;
   dealPrice: number;
   daysToClose: number;
+  spotPrice?: number;
 }
 
 interface GroupedStrategies {
@@ -42,6 +43,7 @@ export default function CandidateStrategiesTable({
   onWatch,
   dealPrice,
   daysToClose,
+  spotPrice,
 }: CandidateStrategiesTableProps) {
   const [sortKey, setSortKey] = useState<string>("annualizedYield");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -76,72 +78,70 @@ export default function CandidateStrategiesTable({
     const legs = candidate.legs;
     const netPremium = candidate.netPremium; // Midpoint entry cost
     const netPremiumFarTouch = candidate.netPremiumFarTouch; // Far touch entry cost
-    
+
     // Calculate days to expiration
     let expiryDate: Date;
     if (candidate.expiration instanceof Date) {
       expiryDate = candidate.expiration;
     } else if (typeof candidate.expiration === 'string') {
-      // Handle YYYYMMDD format (e.g., "20260515")
       if (/^\d{8}$/.test(candidate.expiration)) {
         const year = parseInt(candidate.expiration.substring(0, 4));
-        const month = parseInt(candidate.expiration.substring(4, 6)) - 1; // 0-indexed
+        const month = parseInt(candidate.expiration.substring(4, 6)) - 1;
         const day = parseInt(candidate.expiration.substring(6, 8));
         expiryDate = new Date(year, month, day);
       } else {
-        // Try ISO format or other parseable formats
         expiryDate = new Date(candidate.expiration);
       }
     } else {
       expiryDate = new Date(candidate.expiration);
     }
-    
+
     const daysToExpiry = Math.max(1, Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
-    const yearsToExpiry = daysToExpiry / 365;
-    
-    let valueAtDealClose: number;
-    
+
+    // Interpolate expected stock price at option expiry.
+    // If option expires after deal close, assume full convergence to deal price.
+    // Otherwise linearly interpolate from current price toward deal price.
+    const currentPrice = spotPrice || dealPrice;
+    let expectedPrice: number;
+    if (daysToExpiry >= daysToClose) {
+      expectedPrice = dealPrice;
+    } else {
+      const convergence = daysToClose > 0 ? daysToExpiry / daysToClose : 1;
+      expectedPrice = currentPrice + convergence * (dealPrice - currentPrice);
+    }
+
+    let valueAtExpiry: number;
+
     if (candidate.strategyType === 'spread' || candidate.strategyType === 'call_vertical') {
-      // Call spread: Buy lower strike, sell higher strike
       const buyLeg = legs.find(l => l.side === 'BUY');
       const sellLeg = legs.find(l => l.side === 'SELL');
-      
+
       if (buyLeg && sellLeg) {
-        const buyStrike = buyLeg.strike;
-        const sellStrike = sellLeg.strike;
-        
-        // Value at deal close (same logic as Python scanner.py lines 992-1001)
-        if (dealPrice >= sellStrike) {
-          valueAtDealClose = sellStrike - buyStrike; // Full width
-        } else if (dealPrice > buyStrike) {
-          valueAtDealClose = dealPrice - buyStrike; // Partial
+        if (expectedPrice >= sellLeg.strike) {
+          valueAtExpiry = sellLeg.strike - buyLeg.strike;
+        } else if (expectedPrice > buyLeg.strike) {
+          valueAtExpiry = expectedPrice - buyLeg.strike;
         } else {
-          valueAtDealClose = 0; // OTM
+          valueAtExpiry = 0;
         }
       } else {
-        valueAtDealClose = 0;
+        valueAtExpiry = 0;
       }
     } else if (candidate.strategyType === 'call' || candidate.strategyType === 'long_call') {
-      // Long call: profit = intrinsic value at deal price - premium
       const strike = legs[0]?.strike || 0;
-      valueAtDealClose = Math.max(0, dealPrice - strike);
+      valueAtExpiry = Math.max(0, expectedPrice - strike);
     } else if (candidate.strategyType === 'put' || candidate.strategyType === 'long_put') {
-      // Long put: profit = intrinsic value at deal price - premium
-      // For M&A deals, we assume deal closes at deal price, so put is worthless
       const strike = legs[0]?.strike || 0;
-      valueAtDealClose = Math.max(0, strike - dealPrice);
+      valueAtExpiry = Math.max(0, strike - expectedPrice);
     } else if (candidate.strategyType === 'put_spread' || candidate.strategyType === 'put_vertical') {
-      // Put credit spread: Max profit is the credit received (doesn't change with deal price)
-      // Since it's a credit spread, maxProfit = credit received when deal closes above short strike
-      // For now, keep original profit since put spreads profit when deal closes
+      // Credit put spread: return original Python-computed values
       return {
         maxProfit: candidate.maxProfit,
-        maxProfitFarTouch: candidate.maxProfit, // Far touch profit is same for credit spreads
+        maxProfitFarTouch: candidate.maxProfit,
         annualizedYield: candidate.annualizedYield,
         annualizedYieldFarTouch: candidate.annualizedYieldFarTouch,
       };
     } else {
-      // Unknown strategy type, return original
       return {
         maxProfit: candidate.maxProfit,
         maxProfitFarTouch: candidate.maxProfit,
@@ -149,22 +149,22 @@ export default function CandidateStrategiesTable({
         annualizedYieldFarTouch: candidate.annualizedYieldFarTouch,
       };
     }
-    
+
     // Calculate profits
-    const maxProfit = valueAtDealClose - netPremium;
-    const maxProfitFarTouch = valueAtDealClose - netPremiumFarTouch;
-    
-    // Calculate annualized yields
-    const annualizedYield = netPremium > 0 ? (maxProfit / netPremium) / yearsToExpiry : 0;
-    const annualizedYieldFarTouch = netPremiumFarTouch > 0 ? (maxProfitFarTouch / netPremiumFarTouch) / yearsToExpiry : 0;
-    
+    const maxProfit = valueAtExpiry - netPremium;
+    const maxProfitFarTouch = valueAtExpiry - netPremiumFarTouch;
+
+    // Holding period return (not annualized — merger arb is a one-shot binary outcome)
+    const annualizedYield = netPremium > 0 ? maxProfit / netPremium : 0;
+    const annualizedYieldFarTouch = netPremiumFarTouch > 0 ? maxProfitFarTouch / netPremiumFarTouch : 0;
+
     return {
       maxProfit,
       maxProfitFarTouch,
       annualizedYield,
       annualizedYieldFarTouch,
     };
-  }, [dealPrice]);
+  }, [dealPrice, daysToClose, spotPrice]);
 
   // Create a map of candidate ID to recalculated metrics
   const recalculatedMetricsMap = useMemo(() => {
@@ -316,7 +316,7 @@ export default function CandidateStrategiesTable({
                         </span>
                       </div>
                       <div className="text-xs text-gray-400">
-                        Best: {((recalculatedMetricsMap.get(strategies[0].id)?.annualizedYield ?? strategies[0].annualizedYield) * 100).toFixed(1)}% annualized
+                        Best: {((recalculatedMetricsMap.get(strategies[0].id)?.annualizedYield ?? strategies[0].annualizedYield) * 100).toFixed(1)}% return
                       </div>
                     </div>
 

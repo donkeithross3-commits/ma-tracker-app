@@ -373,6 +373,7 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
           onWatch={handleWatchSpread}
           dealPrice={editableDealPrice}
           daysToClose={selectedDeal.daysToClose}
+          spotPrice={chainData?.spotPrice}
         />
       )}
 

@@ -914,6 +914,20 @@ class MergerArbAnalyzer:
         self.deal = deal
         self.risk_free_rate = 0.05  # 5% risk-free rate
 
+    def _expected_price_at_expiry(self, current_price: float, option_expiry: str) -> float:
+        """Estimate stock price at option expiry via linear interpolation.
+
+        If the option expires after the deal close, assume full convergence
+        to deal price.  Otherwise interpolate linearly between current price
+        and deal price based on how far through the timeline we are.
+        """
+        expiry_date = datetime.strptime(option_expiry, "%Y%m%d")
+        days_to_expiry = max((expiry_date - datetime.now()).days, 1)
+        if days_to_expiry >= self.deal.days_to_close:
+            return self.deal.total_deal_value
+        convergence = days_to_expiry / max(self.deal.days_to_close, 1)
+        return current_price + convergence * (self.deal.total_deal_value - current_price)
+
     def analyze_single_call(self, option: OptionData, current_price: float) -> Optional[TradeOpportunity]:
         """Analyze a single call option"""
 
@@ -921,16 +935,17 @@ class MergerArbAnalyzer:
         if option.mid_price <= 0 or option.ask <= 0:
             return None
 
-        # Calculate potential profit at deal close
-        intrinsic_at_deal = max(0, self.deal.total_deal_value - option.strike)
-        
+        # Expected stock price at option expiry (interpolated if before deal close)
+        expected_price = self._expected_price_at_expiry(current_price, option.expiry)
+        intrinsic_at_expiry = max(0, expected_price - option.strike)
+
         # MIDPOINT cost and profit
         cost_mid = option.mid_price
-        max_profit_mid = intrinsic_at_deal - cost_mid
+        max_profit_mid = intrinsic_at_expiry - cost_mid
 
         # FAR-TOUCH cost and profit (pay the ask)
         cost_ft = option.ask
-        max_profit_ft = intrinsic_at_deal - cost_ft
+        max_profit_ft = intrinsic_at_expiry - cost_ft
 
         # Skip if no profit potential at midpoint
         if max_profit_mid <= 0:
@@ -959,9 +974,9 @@ class MergerArbAnalyzer:
         days_to_exit = min(self.deal.days_to_close, (option_expiry_date - datetime.now()).days)
         years_to_expiry = max(days_to_exit, 1) / 365  # At least 1 day to avoid division issues
         
-        # Annualized return (midpoint and far-touch)
-        annualized_return_mid = (expected_return_mid / cost_mid) / years_to_expiry if years_to_expiry > 0 and cost_mid > 0 else 0
-        annualized_return_ft = (expected_return_ft / cost_ft) / years_to_expiry if years_to_expiry > 0 and cost_ft > 0 else 0
+        # Holding period return (not annualized — merger arb is a one-shot binary outcome)
+        annualized_return_mid = max_profit_mid / cost_mid if cost_mid > 0 else 0
+        annualized_return_ft = max_profit_ft / cost_ft if cost_ft > 0 else 0
 
         # Market implied probability
         market_prob = self.get_market_implied_probability(
@@ -1012,15 +1027,18 @@ class MergerArbAnalyzer:
         if spread_cost_mid <= 0 or spread_cost_ft <= 0:
             return None
 
-        # Value at deal close (same for both calculations)
-        if self.deal.total_deal_value >= short_call.strike:
-            # Deal price at or above short strike - get full spread value
+        # Expected stock price at option expiry (interpolated if before deal close)
+        expected_price = self._expected_price_at_expiry(current_price, long_call.expiry)
+
+        # Value at expiry based on expected price (not deal price)
+        if expected_price >= short_call.strike:
+            # Expected price at or above short strike - get full spread value
             value_at_deal_close = short_call.strike - long_call.strike
-        elif self.deal.total_deal_value > long_call.strike:
-            # Deal price between strikes - get partial value
-            value_at_deal_close = self.deal.total_deal_value - long_call.strike
+        elif expected_price > long_call.strike:
+            # Expected price between strikes - get partial value
+            value_at_deal_close = expected_price - long_call.strike
         else:
-            # Deal price below long strike - spread expires worthless
+            # Expected price below long strike - spread expires worthless
             value_at_deal_close = 0
 
         # MIDPOINT calculations
@@ -1037,13 +1055,12 @@ class MergerArbAnalyzer:
         option_expiry_date = datetime.strptime(long_call.expiry, "%Y%m%d")
         days_to_exit = min(self.deal.days_to_close, (option_expiry_date - datetime.now()).days)
         years_to_expiry = max(days_to_exit, 1) / 365  # At least 1 day to avoid division issues
-        # Annualized return = (return / cost) / years (not * years)
-        # This gives the return per year, which is what we want for annualized return
-        annualized_return_mid = (expected_return_mid / spread_cost_mid) / years_to_expiry if years_to_expiry > 0 and spread_cost_mid > 0 else 0
+        # Holding period return (not annualized — merger arb is a one-shot binary outcome)
+        annualized_return_mid = expected_return_mid / spread_cost_mid if spread_cost_mid > 0 else 0
 
         # FAR-TOUCH calculations
         expected_return_ft = value_at_deal_close - spread_cost_ft
-        annualized_return_ft = (expected_return_ft / spread_cost_ft) / years_to_expiry if years_to_expiry > 0 and spread_cost_ft > 0 else 0
+        annualized_return_ft = expected_return_ft / spread_cost_ft if spread_cost_ft > 0 else 0
         
         # Debug logging for far touch
         print(f"DEBUG FT CALL: {long_call.strike}/{short_call.strike}")
@@ -1124,21 +1141,33 @@ class MergerArbAnalyzer:
         risk_reward_mid = max_gain_mid / max_loss_mid
         risk_reward_ft = max_gain_ft / max_loss_ft
 
-        # Expected return: if deal closes at or above short strike, keep full credit
-        # For merger arb, we expect this outcome with high probability
-        expected_return_mid = max_gain_mid
-        expected_return_ft = max_gain_ft
+        # Expected stock price at option expiry (interpolated if before deal close)
+        expected_price = self._expected_price_at_expiry(current_price, long_put.expiry)
+
+        # Expected P&L at expiry based on where the stock is likely to be
+        if expected_price >= short_put.strike:
+            # Stock above short strike → both puts expire worthless → keep full credit
+            expected_return_mid = max_gain_mid
+            expected_return_ft = max_gain_ft
+        elif expected_price <= long_put.strike:
+            # Stock below long strike → max loss
+            expected_return_mid = -max_loss_mid
+            expected_return_ft = -max_loss_ft
+        else:
+            # Stock between strikes → partial loss
+            loss = short_put.strike - expected_price
+            expected_return_mid = credit_mid - loss
+            expected_return_ft = credit_ft - loss
 
         # Use the earlier of deal close or option expiration for IRR calculation
         option_expiry_date = datetime.strptime(long_put.expiry, "%Y%m%d")
         days_to_exit = min(self.deal.days_to_close, (option_expiry_date - datetime.now()).days)
         years_to_expiry = max(days_to_exit, 1) / 365  # At least 1 day to avoid division issues
-        # Credit spread IRR uses spread_width (collateral) as denominator,
-        # not max_loss.  Broker ties up spread_width in margin, so
-        # return-on-capital = credit / spread_width / years.
-        # Using max_loss blows up when credit ≈ spread_width (deep ITM).
-        annualized_return_mid = (expected_return_mid / spread_width) / years_to_expiry if years_to_expiry > 0 else 0
-        annualized_return_ft = (expected_return_ft / spread_width) / years_to_expiry if years_to_expiry > 0 else 0
+        # Holding period return on collateral (not annualized — merger arb is one-shot).
+        # Uses spread_width (collateral) as denominator, not max_loss, because
+        # the broker ties up spread_width in margin.
+        annualized_return_mid = expected_return_mid / spread_width if spread_width > 0 else 0
+        annualized_return_ft = expected_return_ft / spread_width if spread_width > 0 else 0
         
         # Debug logging for far touch
         print(f"DEBUG PUT FT: {long_put.strike}/{short_put.strike}")
