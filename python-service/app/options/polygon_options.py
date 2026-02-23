@@ -415,10 +415,14 @@ class PolygonOptionsClient:
         client = await self._ensure_client()
         merged_params = dict(params or {})
 
-        # next_url from Polygon is a full URL with apiKey already included
+        # next_url from Polygon may or may not include the apiKey
         is_full_url = url.startswith("http")
         if not is_full_url:
             merged_params["apiKey"] = self._api_key
+        elif "apiKey" not in url:
+            # Pagination cursor URL missing API key — append it
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}apiKey={self._api_key}"
 
         last_err: Exception | None = None
         for attempt in range(_MAX_RETRIES):
