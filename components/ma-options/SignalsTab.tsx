@@ -347,25 +347,35 @@ export default function SignalsTab() {
       {/* ── Ticker Selector / Tabs ── */}
       <div className="flex items-center gap-2">
         {!running ? (
-          // Before start: show ticker toggles
+          // Before start: checkboxes to enable/disable, click to select for config viewing
           <>
             <span className="text-xs text-gray-500 mr-1">Tickers:</span>
-            {AVAILABLE_TICKERS.map(t => (
-              <button
-                key={t}
-                onClick={() => {
-                  toggleTicker(t);
-                  setActiveTicker(t);
-                }}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                  enabledTickers.includes(t)
-                    ? "bg-blue-900/50 text-blue-300 border border-blue-700"
-                    : "bg-gray-800 text-gray-500 border border-gray-700 hover:text-gray-300"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
+            {AVAILABLE_TICKERS.map(t => {
+              const isActive = activeTicker === t;
+              const isEnabled = enabledTickers.includes(t);
+              return (
+                <div key={t} className="flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    checked={isEnabled}
+                    onChange={() => toggleTicker(t)}
+                    className="w-3 h-3 accent-blue-600 cursor-pointer inline-edit"
+                  />
+                  <button
+                    onClick={() => setActiveTicker(t)}
+                    className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                      isActive
+                        ? "bg-blue-600 text-white"
+                        : isEnabled
+                          ? "bg-blue-900/30 text-blue-400 hover:bg-blue-900/50"
+                          : "text-gray-500 hover:text-gray-300"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                </div>
+              );
+            })}
           </>
         ) : (
           // While running: show ticker tabs for running strategies
@@ -672,12 +682,10 @@ export default function SignalsTab() {
                 step="0.1"
               />
 
-              {/* Signal Gating */}
-              <div className="col-span-2 border-t border-gray-800 pt-1.5 mt-1">
-                <span className="text-gray-500 text-[10px] uppercase tracking-wider">Signal Gating</span>
-              </div>
-              <div className="col-span-2 flex items-center justify-between py-0.5">
-                <label className="text-gray-400">Options Gate</label>
+              {/* Signal Gating + General (no section headers, just a divider) */}
+              <div className="col-span-2 border-t border-gray-800 mt-1" />
+              <div className="flex items-center justify-between py-0.5">
+                <label className="text-gray-400">Opt Gate</label>
                 <button
                   onClick={() => updateConfig(activeTicker, "options_gate_enabled", !activeConfig.options_gate_enabled)}
                   className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -689,11 +697,7 @@ export default function SignalsTab() {
                   {activeConfig.options_gate_enabled ? "ON" : "OFF"}
                 </button>
               </div>
-
-              <div className="col-span-2 border-t border-gray-800 pt-1.5 mt-1">
-                <span className="text-gray-500 text-[10px] uppercase tracking-wider">General</span>
-              </div>
-              <div className="col-span-2 flex items-center justify-between py-0.5">
+              <div className="flex items-center justify-between py-0.5">
                 <label className="text-gray-400">Direction</label>
                 <select
                   value={activeConfig.direction_mode}
@@ -705,8 +709,7 @@ export default function SignalsTab() {
                   <option value="short_only">Short Only</option>
                 </select>
               </div>
-
-              <div className="col-span-2 flex items-center justify-between py-0.5">
+              <div className="flex items-center justify-between py-0.5">
                 <label className="text-gray-400">Auto Entry</label>
                 <button
                   onClick={() => updateConfig(activeTicker, "auto_entry", !activeConfig.auto_entry)}
@@ -719,9 +722,8 @@ export default function SignalsTab() {
                   {activeConfig.auto_entry ? "ON" : "OFF"}
                 </button>
               </div>
-
-              <div className="col-span-2 flex items-center justify-between py-0.5">
-                <label className="text-gray-400">Delayed Data</label>
+              <div className="flex items-center justify-between py-0.5">
+                <label className="text-gray-400">Delayed</label>
                 <button
                   onClick={() => updateConfig(activeTicker, "use_delayed_data", !activeConfig.use_delayed_data)}
                   className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -730,7 +732,7 @@ export default function SignalsTab() {
                       : "bg-blue-900/50 text-blue-400 border border-blue-700"
                   }`}
                 >
-                  {activeConfig.use_delayed_data ? "15min delay" : "LIVE"}
+                  {activeConfig.use_delayed_data ? "15m delay" : "LIVE"}
                 </button>
               </div>
             </div>
