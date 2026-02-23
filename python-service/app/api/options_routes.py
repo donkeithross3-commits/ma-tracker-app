@@ -582,6 +582,47 @@ async def _polygon_price_spreads(
 
 
 # ============================================================================
+# Data Source Health Check
+# ============================================================================
+
+@router.get("/polygon-health")
+async def polygon_health_check(ticker: str = Query("SPY")):
+    """Pre-open health check for Polygon data source.
+
+    Tests API auth, stock snapshot freshness, options chain reachability,
+    and round-trip latency. Run before market open to verify data is flowing.
+
+    Stock snapshots clear at 3:30 AM EST and start updating ~4:00 AM EST.
+    Options data shows previous-day values until the 9:30 AM open.
+    """
+    ticker = validate_ticker(ticker)
+    polygon = get_polygon_client()
+
+    if not polygon or not polygon.is_configured:
+        return {
+            "polygon_configured": False,
+            "overall": "fail",
+            "error": "POLYGON_API_KEY not set",
+        }
+
+    try:
+        result = await polygon.health_check(ticker)
+        # Add IB agent status for comparison
+        registry = get_registry()
+        ib_status = registry.get_status()
+        result["ib_agents_connected"] = ib_status.get("providers_connected", 0)
+        result["polygon_primary_enabled"] = POLYGON_PRIMARY
+        return result
+    except Exception as e:
+        logger.error("Polygon health check error: %s", e)
+        return {
+            "polygon_configured": True,
+            "overall": "fail",
+            "error": str(e),
+        }
+
+
+# ============================================================================
 # WebSocket Relay Routes - Forward requests to remote IB data providers
 # ============================================================================
 

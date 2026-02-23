@@ -53,6 +53,124 @@ class PolygonOptionsClient:
 
     # ── Stock quotes ─────────────────────────────────────────
 
+    async def health_check(self, ticker: str = "SPY") -> dict:
+        """Pre-open health check — validates API key, data freshness, and latency.
+
+        Tests:
+        1. API authentication (any successful call)
+        2. Stock snapshot freshness (updated timestamp)
+        3. Options chain reachability (at least 1 contract returned)
+        4. Round-trip latency for each call
+
+        Returns a dict with per-check results suitable for dashboard display.
+        Stock snapshots clear at 3:30 AM EST and start updating ~4:00 AM EST.
+        Options quotes reflect previous-day values until 9:30 AM open.
+        """
+        import time as _time
+
+        results: dict[str, Any] = {
+            "polygon_configured": self.is_configured,
+            "ticker": ticker,
+            "checks": {},
+            "overall": "fail",
+        }
+
+        # 1. Stock snapshot — also proves auth
+        t0 = _time.monotonic()
+        try:
+            data = await self._get(
+                f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker.upper()}"
+            )
+            latency_ms = (_time.monotonic() - t0) * 1000
+            snap = data.get("ticker", {})
+            updated_ns = snap.get("updated", 0)
+            # Polygon returns nanosecond epoch for 'updated'
+            if updated_ns > 1e15:  # nanoseconds
+                updated_dt = datetime.utcfromtimestamp(updated_ns / 1e9)
+            elif updated_ns > 1e12:  # milliseconds
+                updated_dt = datetime.utcfromtimestamp(updated_ns / 1e3)
+            else:
+                updated_dt = datetime.utcfromtimestamp(updated_ns) if updated_ns else None
+
+            age_s = (datetime.utcnow() - updated_dt).total_seconds() if updated_dt else None
+            prev_close = (snap.get("prevDay") or {}).get("c", 0)
+            last_trade_price = (snap.get("lastTrade") or {}).get("p", 0)
+
+            results["checks"]["stock_snapshot"] = {
+                "ok": True,
+                "latency_ms": round(latency_ms, 1),
+                "updated": updated_dt.isoformat() + "Z" if updated_dt else None,
+                "age_seconds": round(age_s, 0) if age_s is not None else None,
+                "prev_close": prev_close,
+                "last_trade": last_trade_price,
+                "has_pre_market": bool(last_trade_price and last_trade_price != prev_close),
+            }
+        except Exception as exc:
+            latency_ms = (_time.monotonic() - t0) * 1000
+            results["checks"]["stock_snapshot"] = {
+                "ok": False,
+                "latency_ms": round(latency_ms, 1),
+                "error": str(exc),
+            }
+
+        # 2. Previous day bar (always available, lightweight)
+        t0 = _time.monotonic()
+        try:
+            prev = await self._get(
+                f"/v2/aggs/ticker/{ticker.upper()}/prev"
+            )
+            latency_ms = (_time.monotonic() - t0) * 1000
+            prev_results = prev.get("results", [])
+            results["checks"]["prev_day"] = {
+                "ok": bool(prev_results),
+                "latency_ms": round(latency_ms, 1),
+                "close": prev_results[0].get("c") if prev_results else None,
+                "volume": prev_results[0].get("v") if prev_results else None,
+            }
+        except Exception as exc:
+            latency_ms = (_time.monotonic() - t0) * 1000
+            results["checks"]["prev_day"] = {
+                "ok": False,
+                "latency_ms": round(latency_ms, 1),
+                "error": str(exc),
+            }
+
+        # 3. Options chain snapshot (1 page, small limit)
+        t0 = _time.monotonic()
+        try:
+            opts = await self._get(
+                f"/v3/snapshot/options/{ticker.upper()}",
+                params={"limit": 5},
+            )
+            latency_ms = (_time.monotonic() - t0) * 1000
+            opt_results = opts.get("results", [])
+            has_greeks = any(
+                (r.get("greeks") or {}).get("delta") is not None
+                for r in opt_results
+            )
+            results["checks"]["options_chain"] = {
+                "ok": bool(opt_results),
+                "latency_ms": round(latency_ms, 1),
+                "contracts_returned": len(opt_results),
+                "has_greeks": has_greeks,
+            }
+        except Exception as exc:
+            latency_ms = (_time.monotonic() - t0) * 1000
+            results["checks"]["options_chain"] = {
+                "ok": False,
+                "latency_ms": round(latency_ms, 1),
+                "error": str(exc),
+            }
+
+        # Overall verdict
+        all_ok = all(c.get("ok") for c in results["checks"].values())
+        results["overall"] = "pass" if all_ok else "degraded"
+        # If stock snapshot failed, it's a hard fail (auth broken)
+        if not results["checks"].get("stock_snapshot", {}).get("ok"):
+            results["overall"] = "fail"
+
+        return results
+
     async def get_stock_quote(self, ticker: str) -> dict:
         """Fetch real-time stock snapshot.
 
