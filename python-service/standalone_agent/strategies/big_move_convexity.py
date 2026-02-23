@@ -396,7 +396,10 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         from big_move_convexity.dpal.polygon_ws import PolygonWebSocketProvider
         from big_move_convexity.dpal.polygon_ws_client import PolygonWSClient
 
-        self._polygon_provider = PolygonWebSocketProvider()
+        polygon_api_key = os.environ.get("POLYGON_API_KEY", "")
+        if not polygon_api_key:
+            logger.error("POLYGON_API_KEY not set — Polygon WS will not connect")
+        self._polygon_provider = PolygonWebSocketProvider(api_key=polygon_api_key)
 
         # Wire trade/quote callbacks to bar accumulator (sync — called from dispatch_message)
         def _on_equity_quote(quote):
