@@ -1,8 +1,17 @@
 {
   "date": "2026-02-23",
   "title": "Feb 23, 2026",
-  "summary": "Parkinson's-friendly Account tab: no truncation in Comfort mode, Trade column never cut off, fewer columns by default, and tremor-safe confirm debounce.",
+  "summary": "Option quote on order entry, Parkinson's-friendly Account tab, and tremor-safe confirm debounce.",
   "features": [
+    {
+      "id": "option-quote-order-entry",
+      "title": "Option Quote on Order Entry",
+      "summary": "When entering an order for an option position, the trade ticket shows the option's latest bid/ask/mid and a refresh button.",
+      "description": "On the Account tab, when you open the order entry ticket for an option position, the ticket now shows:\n\n**Underlying quote** — Unchanged: the latest quote for the underlying (with refresh and \"Use as price\" for stock tickets).\n\n**Option quote** — For option tickets only: the latest bid, ask, and mid for the specific option you're trading. A dedicated refresh button lets you refresh this option quote on demand while you set quantity and limit price.\n\n**Use mid as price** — When an option quote is loaded, a button sets the limit price to the option mid so you can quickly align with the current market.",
+      "category": "positions",
+      "image": "",
+      "screenshot": null
+    },
     {
       "id": "positions-no-truncation",
       "title": "Positions Table: No Ellipses in Comfort Mode",

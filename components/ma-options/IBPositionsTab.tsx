@@ -860,6 +860,14 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     multiplier?: string;
     conId?: number;
   } | null>(null);
+  // Option quote for the trade ticket (when trading an option): bid/ask/mid + refresh on demand
+  const [ticketOptionQuote, setTicketOptionQuote] = useState<{
+    bid: number;
+    ask: number;
+    mid: number;
+    last?: number;
+  } | { error: string } | null>(null);
+  const [ticketOptionQuoteRefreshing, setTicketOptionQuoteRefreshing] = useState(false);
 
   // ---- Dev stress test toggle (positions table + ticket) ----
   const [devStressTest, setDevStressTest] = useState(false);
@@ -985,8 +993,54 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setStockOrderKey(null);
     setStockOrderResult(null);
     setTicketContractMeta(null);
+    setTicketOptionQuote(null);
+    setTicketOptionQuoteRefreshing(false);
     stockOrderPriceInitRef.current = false;
   }, []);
+
+  /** Fetch option quote for the current trade ticket (when ticket is OPT). */
+  const fetchTicketOptionQuote = useCallback(async () => {
+    const ticker = stockOrderTicker?.toUpperCase();
+    if (!ticker || !ticketExpiry || ticketStrike == null || !ticketRight) return;
+    setTicketOptionQuoteRefreshing(true);
+    setTicketOptionQuote(null);
+    try {
+      const res = await fetch("/api/ib-connection/fetch-prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contracts: [{ ticker, strike: ticketStrike, expiry: ticketExpiry, right: ticketRight }],
+        }),
+        credentials: "include",
+      });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        setTicketOptionQuote({ error: "Could not get option quote" });
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        setTicketOptionQuote({ error: data?.error || "Failed to fetch option quote" });
+        return;
+      }
+      const first = data?.contracts?.[0];
+      if (first && typeof first.bid === "number" && typeof first.ask === "number") {
+        const mid = (first.bid + first.ask) / 2;
+        setTicketOptionQuote({
+          bid: first.bid,
+          ask: first.ask,
+          mid: first.mid ?? mid,
+          last: first.last,
+        });
+      } else {
+        setTicketOptionQuote({ error: "No option quote returned" });
+      }
+    } catch (e) {
+      setTicketOptionQuote({ error: e instanceof Error ? e.message : "Failed to fetch option quote" });
+    } finally {
+      setTicketOptionQuoteRefreshing(false);
+    }
+  }, [stockOrderTicker, ticketExpiry, ticketStrike, ticketRight]);
 
   // Auto-fill limit price when a fresh quote arrives for the open order ticket
   useEffect(() => {
@@ -999,6 +1053,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
       stockOrderPriceInitRef.current = true;
     }
   }, [quotes, stockOrderTicker, stockOrderKey]);
+
+  // When trade ticket opens for an option, fetch the option quote once
+  useEffect(() => {
+    if (!stockOrderKey || ticketSecType !== "OPT" || !stockOrderTicker || !ticketExpiry || ticketStrike == null || !ticketRight) return;
+    setTicketOptionQuote(null);
+    fetchTicketOptionQuote();
+  }, [stockOrderKey, ticketSecType, stockOrderTicker, ticketExpiry, ticketStrike, ticketRight, fetchTicketOptionQuote]);
 
   const submitStockOrder = useCallback(async () => {
     if (!stockOrderKey) return;
@@ -2740,42 +2801,111 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   </span>
                 )}
               </span>
-              {/* Live spot price + refresh + snap-to-price */}
-              <div className="flex items-center gap-2">
-                {spotPrice != null && (
-                  <span className="text-2xl font-bold text-green-400">${spotPrice.toFixed(2)}</span>
-                )}
-                {spotError && (
-                  <span className="text-base text-red-400">No quote</span>
-                )}
-                {!liveQuote && !stockOrderQuoteRefreshing && (
-                  <span className="text-base text-gray-500">fetching...</span>
-                )}
-                <button
-                  type="button"
-                  disabled={stockOrderQuoteRefreshing}
-                  onClick={async () => {
-                    setStockOrderQuoteRefreshing(true);
-                    await fetchQuote(tickerForQuote, ticketContractMeta ?? undefined);
-                    setStockOrderQuoteRefreshing(false);
-                  }}
-                  className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-700 hover:bg-gray-600 focus:bg-gray-600 text-white text-lg disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  title="Refresh quote"
-                  aria-label="Refresh quote"
-                >
-                  {stockOrderQuoteRefreshing ? "..." : "\u21BB"}
-                </button>
-                {spotPrice != null && stockOrderType !== "MOC" && (
+              {/* For option tickets: option quote is primary (big), underlying secondary. For stock: underlying only. */}
+              {isOpt ? (
+                <>
+                  {/* Option quote — primary market data when trading an option */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500">Option:</span>
+                    {ticketOptionQuote && "bid" in ticketOptionQuote && (
+                      <>
+                        <span className="text-2xl font-bold text-cyan-400">${ticketOptionQuote.mid.toFixed(2)}</span>
+                        <span className="text-base text-gray-400">
+                          (Bid ${ticketOptionQuote.bid.toFixed(2)} / Ask ${ticketOptionQuote.ask.toFixed(2)})
+                        </span>
+                        {stockOrderType !== "MOC" && (
+                          <button
+                            type="button"
+                            onClick={() => setStockOrderLmtPrice(ticketOptionQuote.mid.toFixed(2))}
+                            className="min-h-[40px] px-3 rounded-lg bg-cyan-800 hover:bg-cyan-700 text-cyan-200 text-sm font-medium"
+                            title="Set limit price to option mid"
+                          >
+                            Use mid as price
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {ticketOptionQuote && "error" in ticketOptionQuote && (
+                      <span className="text-base text-red-400">{ticketOptionQuote.error}</span>
+                    )}
+                    {!ticketOptionQuote && !ticketOptionQuoteRefreshing && (
+                      <span className="text-xl text-gray-500">fetching option…</span>
+                    )}
+                    <button
+                      type="button"
+                      disabled={ticketOptionQuoteRefreshing}
+                      onClick={() => fetchTicketOptionQuote()}
+                      className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-700 hover:bg-gray-600 focus:bg-gray-600 text-white text-lg disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                      title="Refresh option quote"
+                      aria-label="Refresh option quote"
+                    >
+                      {ticketOptionQuoteRefreshing ? "..." : "\u21BB"}
+                    </button>
+                  </div>
+                  {/* Underlying — secondary when trading an option */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500">Underlying:</span>
+                    {spotPrice != null && (
+                      <span className="text-base text-gray-400">${spotPrice.toFixed(2)}</span>
+                    )}
+                    {spotError && <span className="text-xs text-red-400">No quote</span>}
+                    {!liveQuote && !stockOrderQuoteRefreshing && (
+                      <span className="text-xs text-gray-500">fetching…</span>
+                    )}
+                    <button
+                      type="button"
+                      disabled={stockOrderQuoteRefreshing}
+                      onClick={async () => {
+                        setStockOrderQuoteRefreshing(true);
+                        await fetchQuote(tickerForQuote, ticketContractMeta ?? undefined);
+                        setStockOrderQuoteRefreshing(false);
+                      }}
+                      className="min-h-[36px] min-w-[36px] rounded-lg bg-gray-700/80 hover:bg-gray-600 text-white text-sm disabled:opacity-40"
+                      title="Refresh underlying quote"
+                      aria-label="Refresh underlying quote"
+                    >
+                      {stockOrderQuoteRefreshing ? "..." : "\u21BB"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                /* Stock/futures: underlying is the only quote */
+                <div className="flex items-center gap-2">
+                  {spotPrice != null && (
+                    <span className="text-2xl font-bold text-green-400">${spotPrice.toFixed(2)}</span>
+                  )}
+                  {spotError && (
+                    <span className="text-base text-red-400">No quote</span>
+                  )}
+                  {!liveQuote && !stockOrderQuoteRefreshing && (
+                    <span className="text-base text-gray-500">fetching...</span>
+                  )}
                   <button
                     type="button"
-                    onClick={() => setStockOrderLmtPrice(spotPrice.toFixed(2))}
-                    className="min-h-[40px] px-3 rounded-lg bg-green-800 hover:bg-green-700 text-green-200 text-sm font-medium"
-                    title="Set limit price to spot"
+                    disabled={stockOrderQuoteRefreshing}
+                    onClick={async () => {
+                      setStockOrderQuoteRefreshing(true);
+                      await fetchQuote(tickerForQuote, ticketContractMeta ?? undefined);
+                      setStockOrderQuoteRefreshing(false);
+                    }}
+                    className="min-h-[40px] min-w-[40px] rounded-lg bg-gray-700 hover:bg-gray-600 focus:bg-gray-600 text-white text-lg disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                    title="Refresh quote"
+                    aria-label="Refresh quote"
                   >
-                    Use as price
+                    {stockOrderQuoteRefreshing ? "..." : "\u21BB"}
                   </button>
-                )}
-              </div>
+                  {spotPrice != null && stockOrderType !== "MOC" && (
+                    <button
+                      type="button"
+                      onClick={() => setStockOrderLmtPrice(spotPrice.toFixed(2))}
+                      className="min-h-[40px] px-3 rounded-lg bg-green-800 hover:bg-green-700 text-green-200 text-sm font-medium"
+                      title="Set limit price to spot"
+                    >
+                      Use as price
+                    </button>
+                  )}
+                </div>
+              )}
               {(data?.accounts?.length ?? 0) > 1 && (
                 <select
                   value={stockOrderAccount}
