@@ -22,8 +22,12 @@ const POSITIONS_COLUMNS: ColumnDef[] = [
   { key: "trade", label: "Trade" },
 ];
 const POSITIONS_DEFAULTS = POSITIONS_COLUMNS.map((c) => c.key);
+/** Comfort mode: fewer columns by default so each gets more space (no truncation). */
+const POSITIONS_COMFORT_DEFAULTS = ["symbol", "pos", "pnl", "trade"];
 const POSITIONS_LOCKED = ["symbol", "trade"];
-/** Weights for position table columns (percent-like); sum normalized to 100% for visible columns. */
+/** Min width for Trade column (two 44px buttons + gap) so it's never cut off. */
+const TRADE_COL_MIN_WIDTH = "7.5rem";
+/** Weights for position table columns (percent-like); sum normalized to 100% for visible columns. Trade uses fixed width. */
 const POSITIONS_COL_WEIGHTS: Record<string, number> = {
   account: 10,
   symbol: 18,
@@ -371,12 +375,14 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   const { data: session } = useSession();
   const userAlias = session?.user?.alias ?? null;
   const { isConnected, lastMessage: connectionMessage } = useIBConnection();
-  const { prefs, loaded: prefsLoaded, updatePrefs, getVisibleColumns, setVisibleColumns } = useUIPreferences();
+  const { prefs, loaded: prefsLoaded, updatePrefs, getVisibleColumns, setVisibleColumns, isComfort } = useUIPreferences();
 
-  /* ── Column visibility: positions table ── */
+  /* ── Column visibility: positions table ──
+   * Comfort mode: default to fewer columns (symbol, pos, pnl, trade) so each gets more space and we avoid truncation. */
   const savedPosCols = getVisibleColumns("ibPositions");
   const posVisibleKeys = useMemo(() => {
-    const base = savedPosCols ?? POSITIONS_DEFAULTS;
+    const defaultCols = isComfort ? POSITIONS_COMFORT_DEFAULTS : POSITIONS_DEFAULTS;
+    const base = savedPosCols ?? defaultCols;
     // Always include locked columns even if saved prefs predate them
     const missing = POSITIONS_LOCKED.filter((k) => !base.includes(k));
     if (missing.length === 0) return base;
@@ -384,7 +390,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     return [...base, ...missing].sort(
       (a, b) => masterOrder.indexOf(a) - masterOrder.indexOf(b),
     );
-  }, [savedPosCols]);
+  }, [savedPosCols, isComfort]);
   const posVisibleSet = useMemo(() => new Set(posVisibleKeys), [posVisibleKeys]);
   const handlePosColsChange = useCallback((keys: string[]) => setVisibleColumns("ibPositions", keys), [setVisibleColumns]);
 
@@ -1910,8 +1916,13 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
 
             {/* Right: two columns of detail boxes for selected tickers only */}
             <div className="flex-1 min-w-0 flex flex-col">
-              <div className="flex justify-end mb-1">
-                <ColumnChooser columns={POSITIONS_COLUMNS} visible={posVisibleKeys} defaults={POSITIONS_DEFAULTS} onChange={handlePosColsChange} locked={POSITIONS_LOCKED} />
+              <div className="flex flex-col items-end gap-0.5 mb-1">
+                <ColumnChooser columns={POSITIONS_COLUMNS} visible={posVisibleKeys} defaults={isComfort ? POSITIONS_COMFORT_DEFAULTS : POSITIONS_DEFAULTS} onChange={handlePosColsChange} locked={POSITIONS_LOCKED} />
+                {isComfort && (
+                  <p className="text-xs text-gray-500 text-right max-w-sm">
+                    Fewer columns by default so each stays readable. Use the chooser above to add more.
+                  </p>
+                )}
               </div>
               {Object.keys(requestSignalError).length > 0 && (
                 <div className="mb-2 text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-2 py-1 space-y-0.5">
@@ -2243,14 +2254,34 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             );
                           })()}
                         </div>
-                        <div className="min-w-0 overflow-hidden d-table-wrap" style={{ "--visible-cols": posVisibleKeys.length } as React.CSSProperties}>
-                          <table className="w-full text-sm table-fixed d-table">
+                        <div
+                          className={`min-w-0 d-table-wrap ${isComfort ? "overflow-x-auto" : "overflow-hidden"}`}
+                          style={{ "--visible-cols": posVisibleKeys.length, ...(isComfort ? { minWidth: 0 } : {}) } as React.CSSProperties}
+                        >
+                          <table
+                            className="w-full text-sm table-fixed d-table"
+                            style={isComfort ? { minWidth: "32rem" } : undefined}
+                          >
                             <colgroup>
                               {(() => {
-                                const weightSum = posVisibleKeys.reduce((s, k) => s + (POSITIONS_COL_WEIGHTS[k] ?? 10), 0);
-                                return posVisibleKeys.map((key) => (
-                                  <col key={key} style={{ width: `${((POSITIONS_COL_WEIGHTS[key] ?? 10) / weightSum) * 100}%` }} />
-                                ));
+                                const hasTrade = posVisibleKeys.includes("trade");
+                                const keysWithoutTrade = posVisibleKeys.filter((k) => k !== "trade");
+                                const weightSumRest = keysWithoutTrade.reduce((s, k) => s + (POSITIONS_COL_WEIGHTS[k] ?? 10), 0);
+                                const weightSumAll = posVisibleKeys.reduce((s, k) => s + (POSITIONS_COL_WEIGHTS[k] ?? 10), 0);
+                                return posVisibleKeys.map((key) =>
+                                  key === "trade" ? (
+                                    <col key={key} style={{ width: TRADE_COL_MIN_WIDTH, minWidth: TRADE_COL_MIN_WIDTH }} />
+                                  ) : (
+                                    <col
+                                      key={key}
+                                      style={{
+                                        width: hasTrade && weightSumRest > 0
+                                          ? `calc((100% - ${TRADE_COL_MIN_WIDTH}) * ${(POSITIONS_COL_WEIGHTS[key] ?? 10) / weightSumRest})`
+                                          : `${((POSITIONS_COL_WEIGHTS[key] ?? 10) / weightSumAll) * 100}%`,
+                                      }}
+                                    />
+                                  ),
+                                );
                               })()}
                             </colgroup>
                             <thead>
@@ -2263,7 +2294,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                 {posVisibleSet.has("last") && <th className="text-right py-2 px-2 whitespace-nowrap">Last</th>}
                                 {posVisibleSet.has("mktVal") && <th className="text-right py-2 px-2 whitespace-nowrap">Mkt val</th>}
                                 {posVisibleSet.has("pnl") && <th className="text-right py-2 px-2 whitespace-nowrap">P&L</th>}
-                                {posVisibleSet.has("trade") && <th className="text-center py-2 px-1 whitespace-nowrap">Trade</th>}
+                                {posVisibleSet.has("trade") && <th className="text-center py-2 px-1 whitespace-nowrap overflow-visible shrink-0">Trade</th>}
                               </tr>
                             </thead>
                             <tbody>
@@ -2279,12 +2310,12 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                     className="border-b border-gray-700/50 hover:bg-gray-700/30"
                                   >
                                     {posVisibleSet.has("account") && (
-                                      <td className="py-2 px-2 text-gray-300 text-sm truncate whitespace-nowrap" title={getAccountLabel(row.account, userAlias)}>
+                                      <td className={`py-2 px-2 text-gray-300 text-sm whitespace-nowrap ${isComfort ? "overflow-visible" : "truncate"}`} title={getAccountLabel(row.account, userAlias)}>
                                         {getAccountLabel(row.account, userAlias)}
                                       </td>
                                     )}
                                     {posVisibleSet.has("symbol") && (
-                                      <td className="py-2 px-2 text-gray-100 text-sm font-medium truncate whitespace-nowrap" title={displaySymbol(row)}>
+                                      <td className={`py-2 px-2 text-gray-100 text-sm font-medium whitespace-nowrap ${isComfort ? "overflow-visible" : "truncate"}`} title={displaySymbol(row)}>
                                         {displaySymbol(row)}
                                       </td>
                                     )}
@@ -2299,22 +2330,22 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       </td>
                                     )}
                                     {posVisibleSet.has("avgCost") && (
-                                      <td className="py-2 px-2 text-right text-gray-100 tabular-nums text-sm whitespace-nowrap" title={formatAvgCost(row.avgCost)}>
+                                      <td className={`py-2 px-2 text-right text-gray-100 tabular-nums text-sm whitespace-nowrap ${isComfort ? "overflow-visible" : ""}`} title={formatAvgCost(row.avgCost)}>
                                         {formatAvgCost(row.avgCost)}
                                       </td>
                                     )}
                                     {posVisibleSet.has("last") && (
-                                      <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-200 whitespace-nowrap" title={isLegLoading ? undefined : rowPrice != null ? rowPrice.toFixed(2) : "—"}>
+                                      <td className={`py-2 px-2 text-right tabular-nums text-sm text-gray-200 whitespace-nowrap ${isComfort ? "overflow-visible" : ""}`} title={isLegLoading ? undefined : rowPrice != null ? rowPrice.toFixed(2) : "—"}>
                                         {isLegLoading ? "…" : rowPrice != null ? rowPrice.toFixed(2) : "—"}
                                       </td>
                                     )}
                                     {posVisibleSet.has("mktVal") && (
-                                      <td className="py-2 px-2 text-right tabular-nums text-sm text-gray-100 whitespace-nowrap" title={rowMktVal != null ? formatCostBasis(rowMktVal) : undefined}>
+                                      <td className={`py-2 px-2 text-right tabular-nums text-sm text-gray-100 whitespace-nowrap ${isComfort ? "overflow-visible" : ""}`} title={rowMktVal != null ? formatCostBasis(rowMktVal) : undefined}>
                                         {rowMktVal != null ? formatCostBasis(rowMktVal) : "—"}
                                       </td>
                                     )}
                                     {posVisibleSet.has("pnl") && (
-                                      <td className={`py-2 px-2 text-right tabular-nums text-sm font-medium whitespace-nowrap ${
+                                      <td className={`py-2 px-2 text-right tabular-nums text-sm font-medium whitespace-nowrap ${isComfort ? "overflow-visible" : ""} ${
                                         rowPnl != null && rowPnl > 0
                                           ? "text-green-400"
                                           : rowPnl != null && rowPnl < 0
@@ -2325,7 +2356,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                                       </td>
                                     )}
                                     {posVisibleSet.has("trade") && (
-                                      <td className="py-1.5 px-1 text-center whitespace-nowrap">
+                                      <td className="py-1.5 px-1 text-center whitespace-nowrap overflow-visible shrink-0">
                                         <div className="flex items-center justify-center gap-1">
                                           <button
                                             type="button"
@@ -2365,21 +2396,21 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                             {groupHasAnyPrice && (
                               <tfoot>
                                 <tr className="bg-gray-700/30 border-t border-gray-500 font-semibold text-sm">
-                                  <td colSpan={["account","symbol","type","pos","avgCost"].filter(k => posVisibleSet.has(k)).length || 1} className="py-2 px-2 text-right text-gray-300 whitespace-nowrap">Totals</td>
+                                  <td colSpan={["account","symbol","type","pos","avgCost"].filter(k => posVisibleSet.has(k)).length || 1} className={`py-2 px-2 text-right text-gray-300 whitespace-nowrap ${isComfort ? "overflow-visible" : ""}`}>Totals</td>
                                   {posVisibleSet.has("last") && <td className="py-2 px-2"></td>}
                                   {posVisibleSet.has("mktVal") && (
-                                    <td className="py-2 px-2 text-right tabular-nums text-white whitespace-nowrap" title={formatCostBasis(groupMktVal)}>
+                                    <td className={`py-2 px-2 text-right tabular-nums text-white whitespace-nowrap ${isComfort ? "overflow-visible" : ""}`} title={formatCostBasis(groupMktVal)}>
                                       {formatCostBasis(groupMktVal)}
                                     </td>
                                   )}
                                   {posVisibleSet.has("pnl") && (
-                                    <td className={`py-2 px-2 text-right tabular-nums font-bold whitespace-nowrap ${
+                                    <td className={`py-2 px-2 text-right tabular-nums font-bold whitespace-nowrap ${isComfort ? "overflow-visible" : ""} ${
                                       groupPnl != null && groupPnl >= 0 ? "text-green-400" : "text-red-400"
                                     }`} title={groupPnl != null ? formatPnl(groupPnl) : undefined}>
                                       {groupPnl != null ? formatPnl(groupPnl) : "—"}
                                     </td>
                                   )}
-                                  {posVisibleSet.has("trade") && <td className="py-2 px-1"></td>}
+                                  {posVisibleSet.has("trade") && <td className="py-2 px-1 shrink-0"></td>}
                                 </tr>
                               </tfoot>
                             )}

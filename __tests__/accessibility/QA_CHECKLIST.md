@@ -62,6 +62,7 @@ Test both Normal (compact) and Comfort modes.
 - [ ] **Cancel order**: Cancel requires confirmation modal
 - [ ] **Clear labels**: Action (BUY/SELL), quantity, contract, price all readable at a glance
 - [ ] **Large buttons**: Submit/confirm buttons are 52px+ with large text
+- [ ] **Debounce**: Rapid double-click on Confirm/Send or "Yes, cancel order" only submits once (500ms cooldown)
 
 ## 7. Cross-Platform
 

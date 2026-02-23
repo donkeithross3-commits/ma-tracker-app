@@ -237,6 +237,8 @@ const handleColsChange = useCallback(
 | `ibPositions`        | IBPositionsTab (positions)       | M&A Options Account| symbol, trade        |
 | `ibOrders`           | IBPositionsTab (working orders)  | M&A Options Account| symbol, action       |
 
+**ibPositions in Comfort mode:** Defaults to 4 columns (symbol, pos, pnl, trade); Trade column has fixed min-width so buttons are never cut off; table scrolls horizontally (no ellipses). Column chooser shows a hint: "Fewer columns by default so each stays readable. Use the chooser above to add more."
+
 ## Strategy Sub-Columns (Shared)
 
 `StrategyColumns.tsx` exports shared header/cell components used by both
@@ -335,3 +337,8 @@ These components have specific `isComfort` branching beyond what the global CSS 
     text-4xl fonts. This is the gold standard for what comfort mode should feel like.
     When designing new interactive overlays (order entry, risk dialogs), use the trade
     ticket sizing as the reference, not the compact KRJ table sizing.
+
+14. **Critical actions (confirm, cancel order) use tremor-safe debounce.** Use
+    `useDebouncedCriticalClick(callback, 500)` from `lib/use-debounced-critical-click.ts`
+    for any button that must not fire twice on a double-tap (e.g. order confirm, destructive confirm).
+    See `docs/parkinsons-ui.md` § Developer Building Blocks.

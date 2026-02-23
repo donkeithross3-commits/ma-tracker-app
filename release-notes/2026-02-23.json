@@ -1,0 +1,34 @@
+{
+  "date": "2026-02-23",
+  "title": "Feb 23, 2026",
+  "summary": "Parkinson's-friendly Account tab: no truncation in Comfort mode, Trade column never cut off, fewer columns by default, and tremor-safe confirm debounce.",
+  "features": [
+    {
+      "id": "positions-no-truncation",
+      "title": "Positions Table: No Ellipses in Comfort Mode",
+      "summary": "In Comfort mode the positions table shows full text and scrolls horizontally instead of truncating with \"...\".",
+      "description": "For users with Comfort Mode on, the Account tab positions table no longer truncates column headers or data with ellipses.\n\n**Smart defaults:** Positions default to 4 columns (Symbol, Pos, P&L, Trade) so each column gets more space. A hint under the column chooser explains: \"Fewer columns by default so each stays readable. Use the chooser above to add more.\"\n\n**Scroll instead of clip:** The table has a minimum width in Comfort mode; if the card is narrower, the table scrolls horizontally so you can see all content. Cell text uses overflow-visible in Comfort so nothing is cut off.\n\n**Trade column always visible:** The Trade column (Trade + Risk Manager buttons) has a fixed minimum width (7.5rem) so the buttons are never cut off, in any mode.",
+      "category": "positions",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "tremor-debounce",
+      "title": "Tremor-Safe Confirm Buttons",
+      "summary": "Order confirm and cancel-order buttons ignore accidental double-taps within 500ms.",
+      "description": "Critical action buttons (\"Send order\" and \"Yes, cancel order\") now use a 500ms cooldown so a tremor-induced double-tap only fires once. The first click runs immediately; repeated clicks within 500ms are ignored.\n\nImplemented via a reusable hook, useDebouncedCriticalClick, so future confirm dialogs can use the same pattern. Aligns with PD UI research recommending 300–500ms debounce on order-entry buttons.",
+      "category": "positions",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "comfort-touch-motion",
+      "title": "Comfort Mode: Touch and Motion",
+      "summary": "Comfort mode adds touch-action to remove tap delay and shortens transitions on interactive elements.",
+      "description": "Two small improvements when Comfort Mode is on:\n\n**Touch:** Buttons and tabs use touch-action: manipulation so touch devices don't add a 300ms tap delay. Helps users who use a tablet or touchscreen.\n\n**Motion:** When the OS has not set \"Reduce motion,\" Comfort mode still shortens transitions on buttons, tabs, checkboxes, and menu items to 0.08s. Reduces motion sensitivity without requiring the system preference.",
+      "category": "general",
+      "image": "",
+      "screenshot": null
+    }
+  ]
+}

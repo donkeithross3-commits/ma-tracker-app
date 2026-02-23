@@ -62,6 +62,11 @@ describe("CSS accessibility rules", () => {
     expect(globalsCss).toContain('[data-density="comfort"]');
   });
 
+  it("globals.css contains comfort mode touch-action for PD (remove tap delay)", () => {
+    expect(globalsCss).toContain("touch-action: manipulation");
+    expect(globalsCss).toContain('[data-density="comfort"]');
+  });
+
   it("globals.css contains container query rules for ticker cards", () => {
     expect(globalsCss).toContain("@container");
     expect(globalsCss).toContain(".tc-stats-row");

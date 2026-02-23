@@ -9,6 +9,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { useDebouncedCriticalClick } from "@/lib/use-debounced-critical-click";
 
 export type OrderConfirmationModalProps =
   | {
@@ -57,6 +58,9 @@ export function OrderConfirmationModal(props: OrderConfirmationModalProps) {
     await onConfirm();
     setStep("preview");
   };
+
+  // PD-friendly: prevent tremor double-tap from firing confirm twice (500ms cooldown)
+  const handleConfirmDebounced = useDebouncedCriticalClick(handleConfirm, 500);
 
   if (props.variant === "place") {
     const {
@@ -156,7 +160,7 @@ export function OrderConfirmationModal(props: OrderConfirmationModalProps) {
               <>
                 <Button
                   type="button"
-                  onClick={handleConfirm}
+                  onClick={handleConfirmDebounced}
                   disabled={isSubmitting}
                   className={`w-full min-h-[52px] text-lg font-bold text-white ${actionColor} focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900`}
                 >
@@ -203,7 +207,7 @@ export function OrderConfirmationModal(props: OrderConfirmationModalProps) {
         <DialogFooter className="flex flex-col gap-3 sm:flex-col">
           <Button
             type="button"
-            onClick={handleConfirm}
+            onClick={handleConfirmDebounced}
             disabled={isSubmitting}
             className="w-full min-h-[52px] text-lg font-bold bg-amber-600 hover:bg-amber-500 text-white focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-gray-900"
           >

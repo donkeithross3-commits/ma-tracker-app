@@ -248,6 +248,13 @@
     align-items: center;
   }
 
+  /* ─── Touch: remove 300ms tap delay (PD / motor impairment) ─── */
+  [data-density="comfort"] button:not(.no-density),
+  [data-density="comfort"] a[role="button"]:not(.no-density),
+  [data-density="comfort"] [role="tab"]:not(.no-density) {
+    touch-action: manipulation;
+  }
+
   /* ─── Small text promotion: text-xs → text-sm ─── */
   [data-density="comfort"] .text-xs:not(.no-density) {
     font-size: 0.875rem !important;  /* promote xs to sm */
@@ -306,6 +313,20 @@
   /* Disable spinner animations */
   .animate-spin {
     animation: none !important;
+  }
+}
+
+/* Comfort mode: shorten transitions on interactive elements when OS has not set reduced motion.
+   Reduces motion sensitivity for PD users without requiring the system preference. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-density="comfort"] button:not(.no-density),
+  [data-density="comfort"] input,
+  [data-density="comfort"] [role="tab"],
+  [data-density="comfort"] [role="checkbox"],
+  [data-density="comfort"] [role="menuitem"],
+  [data-density="comfort"] [role="menuitemcheckbox"],
+  [data-density="comfort"] [role="menuitemradio"] {
+    transition-duration: 0.08s !important;
   }
 }
 
