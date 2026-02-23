@@ -834,20 +834,28 @@ async def _polygon_fetch_chain(
     strike_gte = deal_price * (1 - pct_lower / 100.0)
     strike_lte = deal_price * (1 + pct_upper / 100.0)
 
-    # 3. Expiration range: today through close date + buffer
+    # 3. Expiration range: respect days_before_close parameter
     today = datetime.utcnow().strftime("%Y-%m-%d")
+    exp_gte = today
     exp_lte = None
+    days_before_close = scan.daysBeforeClose if scan else 0
     if request.expectedCloseDate:
         try:
             close_dt = datetime.strptime(request.expectedCloseDate, "%Y-%m-%d")
-            exp_lte = (close_dt + timedelta(days=30)).strftime("%Y-%m-%d")
+            # Upper bound: 2 expirations after close (approx +45 days)
+            exp_lte = (close_dt + timedelta(days=45)).strftime("%Y-%m-%d")
+            # Lower bound: if days_before_close is set, earliest expiry = close - N days
+            if days_before_close > 0:
+                earliest = (close_dt - timedelta(days=days_before_close)).strftime("%Y-%m-%d")
+                # Don't go earlier than today
+                exp_gte = max(today, earliest)
         except ValueError:
             pass
 
     # 4. Fetch chain
     raw_contracts = await polygon.get_option_chain(
         underlying=request.ticker,
-        expiration_date_gte=today,
+        expiration_date_gte=exp_gte,
         expiration_date_lte=exp_lte,
         strike_gte=strike_gte,
         strike_lte=strike_lte,
