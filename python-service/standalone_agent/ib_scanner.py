@@ -156,6 +156,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._positions_done = Event()
         self._managed_accounts: List[str] = []
         self._positions_lock = Lock()
+        # Fallback: reqAccountUpdates-based position fetch
+        self._acct_positions: List[dict] = []
+        self._acct_download_done = Event()
 
         # Orders: for place_order / cancel_order (order_id -> Event, order_id -> result dict)
         self._order_events: Dict[int, Event] = {}
@@ -219,6 +222,26 @@ class IBMergerArbScanner(EWrapper, EClient):
         """Called once after initial position dump; signals snapshot complete."""
         self._positions_done.set()
 
+    def updatePortfolio(self, contract: Contract, position: float, marketPrice: float,
+                        marketValue: float, averageCost: float, unrealizedPNL: float,
+                        realizedPNL: float, accountName: str):
+        """Called by reqAccountUpdates for each position — fallback for reqPositions."""
+        if position != 0:
+            self._acct_positions.append({
+                "account": accountName,
+                "contract": self._contract_to_dict(contract),
+                "position": float(position),
+                "avgCost": float(averageCost) if averageCost is not None else 0,
+                "marketPrice": float(marketPrice) if marketPrice is not None else 0,
+                "marketValue": float(marketValue) if marketValue is not None else 0,
+                "unrealizedPNL": float(unrealizedPNL) if unrealizedPNL is not None else 0,
+                "realizedPNL": float(realizedPNL) if realizedPNL is not None else 0,
+            })
+
+    def accountDownloadEnd(self, accountName: str):
+        """Called when reqAccountUpdates finishes for an account."""
+        self._acct_download_done.set()
+
     def _contract_to_dict(self, contract: Contract) -> dict:
         """Serialize Contract for JSON response."""
         return {
@@ -281,6 +304,7 @@ class IBMergerArbScanner(EWrapper, EClient):
     def get_positions_snapshot(self, timeout_sec: float = 15.0) -> List[dict]:
         """Request positions, wait for positionEnd(), return list and cancel subscription.
         Thread-safe: only one snapshot at a time (concurrent callers block).
+        Falls back to reqAccountUpdates if reqPositions times out.
         Returns [] without calling TWS when TWS is in Read-Only API mode."""
         if self.read_only_session:
             return []
@@ -288,10 +312,46 @@ class IBMergerArbScanner(EWrapper, EClient):
             self._positions_list = []
             self._positions_done.clear()
             self.reqPositions()
-            if not self._positions_done.wait(timeout=timeout_sec):
-                self.logger.warning("get_positions_snapshot: timeout waiting for positionEnd")
+            # Use a shorter initial timeout; fall back to reqAccountUpdates if it fails
+            got_positions = self._positions_done.wait(timeout=min(timeout_sec, 5.0))
             self.cancelPositions()
-            return list(self._positions_list)
+            if got_positions:
+                return list(self._positions_list)
+            # reqPositions timed out — fall back to reqAccountUpdates
+            self.logger.warning(
+                "get_positions_snapshot: reqPositions timed out, falling back to reqAccountUpdates"
+            )
+            return self._get_positions_via_account_updates(timeout_sec=timeout_sec - 5.0)
+
+    def _get_positions_via_account_updates(self, timeout_sec: float = 10.0) -> List[dict]:
+        """Fallback: fetch positions via reqAccountUpdates for each managed account.
+        Uses updatePortfolio callback instead of position/positionEnd.
+        This is more reliable on some TWS versions where reqPositions silently fails."""
+        all_positions: List[dict] = []
+        per_account_timeout = max(timeout_sec / max(len(self._managed_accounts), 1), 3.0)
+        for account in self._managed_accounts:
+            self._acct_positions = []
+            self._acct_download_done.clear()
+            try:
+                self.reqAccountUpdates(True, account)
+                if not self._acct_download_done.wait(timeout=per_account_timeout):
+                    self.logger.warning(
+                        "reqAccountUpdates timeout for account %s", account
+                    )
+                # Stop the subscription
+                self.reqAccountUpdates(False, account)
+                all_positions.extend(self._acct_positions)
+            except Exception as e:
+                self.logger.error("reqAccountUpdates failed for %s: %s", account, e)
+                try:
+                    self.reqAccountUpdates(False, account)
+                except Exception:
+                    pass
+        if all_positions:
+            self.logger.info(
+                "reqAccountUpdates fallback returned %d positions", len(all_positions)
+            )
+        return all_positions
 
     def get_open_orders_snapshot(self, timeout_sec: float = 10.0, force_refresh: bool = False) -> List[dict]:
         """Return all known live orders.
