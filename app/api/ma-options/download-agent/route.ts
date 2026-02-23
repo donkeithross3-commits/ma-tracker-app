@@ -138,6 +138,9 @@ IB_PROVIDER_KEY=${agentKey.key}
 
 # WebSocket relay URL (don't change unless instructed)
 # RELAY_URL=wss://dr3-dashboard.com/ws/data-provider
+
+# Polygon.io API key (for BMC strategy real-time market data)
+# POLYGON_API_KEY=
 `;
 
     archive.append(configContent, { name: "config.env" });

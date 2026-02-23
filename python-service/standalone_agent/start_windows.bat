@@ -355,7 +355,10 @@ for %%f in ("%EXTRACT_SRC%\*") do (
     )
 )
 
-REM Copy directories (python_bundle, ibapi, etc.)
+REM Copy directories (strategies, python_bundle, ibapi)
+if exist "%EXTRACT_SRC%\strategies" (
+    xcopy /s /e /y /q "%EXTRACT_SRC%\strategies" "%SCRIPT_DIR%strategies\" >nul 2>nul
+)
 if exist "%EXTRACT_SRC%\python_bundle" (
     xcopy /s /e /y /q "%EXTRACT_SRC%\python_bundle" "%SCRIPT_DIR%python_bundle\" >nul 2>nul
 )
