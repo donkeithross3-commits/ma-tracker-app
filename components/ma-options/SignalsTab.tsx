@@ -106,6 +106,8 @@ export default function SignalsTab() {
   const [error, setError] = useState<string | null>(null);
   const [config, setConfig] = useState<BMCConfig>({ ...DEFAULT_CONFIG });
   const [configDirty, setConfigDirty] = useState(false);
+  const configDirtyRef = useRef(false);
+  const configLoadedRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Poll signal state ──
@@ -118,6 +120,24 @@ export default function SignalsTab() {
       setRunning(data.running ?? false);
       if (data.signal) {
         setSignal(data.signal);
+      }
+      // Load running config from agent (skip if user has unsaved edits)
+      if (data.config && !configDirtyRef.current) {
+        const c = data.config;
+        setConfig({
+          signal_threshold: c.signal_threshold ?? DEFAULT_CONFIG.signal_threshold,
+          min_signal_strength: c.min_signal_strength ?? DEFAULT_CONFIG.min_signal_strength,
+          cooldown_minutes: c.cooldown_minutes ?? DEFAULT_CONFIG.cooldown_minutes,
+          decision_interval_seconds: c.decision_interval_seconds ?? DEFAULT_CONFIG.decision_interval_seconds,
+          max_contracts: c.max_contracts ?? DEFAULT_CONFIG.max_contracts,
+          contract_budget_usd: c.contract_budget_usd ?? DEFAULT_CONFIG.contract_budget_usd,
+          scan_start: c.scan_start ?? DEFAULT_CONFIG.scan_start,
+          scan_end: c.scan_end ?? DEFAULT_CONFIG.scan_end,
+          auto_entry: c.auto_entry ?? DEFAULT_CONFIG.auto_entry,
+          direction_mode: c.direction_mode ?? DEFAULT_CONFIG.direction_mode,
+          use_delayed_data: c.use_delayed_data ?? DEFAULT_CONFIG.use_delayed_data,
+        });
+        configLoadedRef.current = true;
       }
       setError(null);
     } catch {
@@ -166,6 +186,7 @@ export default function SignalsTab() {
       if (data.error) setError(data.error);
       else {
         setConfigDirty(false);
+        configDirtyRef.current = false;
         setError(null);
       }
     } catch (e: any) {
@@ -178,6 +199,7 @@ export default function SignalsTab() {
   const updateConfig = (key: keyof BMCConfig, value: any) => {
     setConfig(prev => ({ ...prev, [key]: value }));
     setConfigDirty(true);
+    configDirtyRef.current = true;
   };
 
   // ── Derived values ──
@@ -367,39 +389,39 @@ export default function SignalsTab() {
               <ConfigField
                 label="Signal Threshold"
                 value={config.signal_threshold}
-                onChange={v => updateConfig("signal_threshold", parseFloat(v) || 0.5)}
+                onChange={v => updateConfig("signal_threshold", parseFloat(v))}
                 type="number"
                 step="0.05"
               />
               <ConfigField
                 label="Min Strength"
                 value={config.min_signal_strength}
-                onChange={v => updateConfig("min_signal_strength", parseFloat(v) || 0.3)}
+                onChange={v => updateConfig("min_signal_strength", parseFloat(v))}
                 type="number"
                 step="0.05"
               />
               <ConfigField
                 label="Cooldown (min)"
                 value={config.cooldown_minutes}
-                onChange={v => updateConfig("cooldown_minutes", parseInt(v) || 15)}
+                onChange={v => updateConfig("cooldown_minutes", parseInt(v, 10))}
                 type="number"
               />
               <ConfigField
                 label="Interval (sec)"
                 value={config.decision_interval_seconds}
-                onChange={v => updateConfig("decision_interval_seconds", parseInt(v) || 300)}
+                onChange={v => updateConfig("decision_interval_seconds", parseInt(v, 10))}
                 type="number"
               />
               <ConfigField
                 label="Max Contracts"
                 value={config.max_contracts}
-                onChange={v => updateConfig("max_contracts", parseInt(v) || 5)}
+                onChange={v => updateConfig("max_contracts", parseInt(v, 10))}
                 type="number"
               />
               <ConfigField
                 label="Budget ($)"
                 value={config.contract_budget_usd}
-                onChange={v => updateConfig("contract_budget_usd", parseFloat(v) || 150)}
+                onChange={v => updateConfig("contract_budget_usd", parseFloat(v))}
                 type="number"
               />
               <ConfigField
@@ -519,15 +541,66 @@ function ConfigField({
   label,
   value,
   onChange,
+  onCommit,
   type = "text",
   step,
 }: {
   label: string;
   value: string | number;
   onChange: (v: string) => void;
+  onCommit?: () => void;
   type?: string;
   step?: string;
 }) {
+  // For number fields, use a local string state so the user can freely
+  // type (including clearing the field) without the value snapping back.
+  const isNumber = type === "number";
+  const [localValue, setLocalValue] = useState(String(value));
+  const prevValue = useRef(value);
+
+  // Sync from parent when the parent value changes (e.g. loaded from agent)
+  if (value !== prevValue.current) {
+    prevValue.current = value;
+    setLocalValue(String(value));
+  }
+
+  if (isNumber) {
+    return (
+      <div className="flex items-center justify-between py-1">
+        <label className="text-gray-400">{label}</label>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={localValue}
+          step={step}
+          onChange={e => {
+            setLocalValue(e.target.value);
+            // Only push valid numbers to parent (but allow empty for editing)
+            const parsed = step?.includes(".") || String(value).includes(".")
+              ? parseFloat(e.target.value)
+              : parseInt(e.target.value, 10);
+            if (!isNaN(parsed)) {
+              onChange(String(parsed));
+            }
+          }}
+          onBlur={() => {
+            // On blur, if empty or invalid, revert to parent value
+            const parsed = step?.includes(".") || String(value).includes(".")
+              ? parseFloat(localValue)
+              : parseInt(localValue, 10);
+            if (isNaN(parsed)) {
+              setLocalValue(String(value));
+            } else {
+              setLocalValue(String(parsed));
+            }
+            onCommit?.();
+          }}
+          className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-0.5 text-right text-gray-200 text-xs inline-edit"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-between py-1">
       <label className="text-gray-400">{label}</label>

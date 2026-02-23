@@ -1909,6 +1909,7 @@ async def relay_bmc_signal(user_id: str = ""):
                         "source": "cached_telemetry",
                         "running": telemetry.get("running", False),
                         "signal": strat.get("strategy_state", {}),
+                        "config": strat.get("config"),
                     }
             # BMC not found in strategies — may not be loaded
             return {
@@ -1934,6 +1935,7 @@ async def relay_bmc_signal(user_id: str = ""):
                     "source": "direct_query",
                     "running": response_data.get("running", False),
                     "signal": strat.get("strategy_state", {}),
+                    "config": strat.get("config"),
                 }
         return {"source": "direct_query", "running": False, "signal": None}
     except Exception as e:
