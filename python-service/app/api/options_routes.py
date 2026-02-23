@@ -656,6 +656,77 @@ async def polygon_health_check(ticker: str = Query("SPY")):
 
 
 # ============================================================================
+# Polygon diagnostics
+# ============================================================================
+
+@router.get("/polygon/test-option-price")
+async def test_option_price(
+    ticker: str = Query("AL"),
+    expiry: str = Query("2026-05-15"),
+    strike: float = Query(55),
+    right: str = Query("C"),
+):
+    """Debug endpoint: test Polygon option pricing for a single contract.
+
+    Returns raw chain data and matching result so we can see exactly what
+    Polygon returns and where the match fails.
+
+    Example: /options/polygon/test-option-price?ticker=AL&expiry=2026-05-15&strike=55&right=C
+    """
+    ticker = validate_ticker(ticker)
+    polygon = get_polygon_client()
+    if not polygon or not polygon.is_configured:
+        return {"error": "POLYGON_API_KEY not set"}
+
+    import time as _time
+    t0 = _time.monotonic()
+
+    # Normalize expiry to YYYY-MM-DD for Polygon API
+    exp_fmt = (
+        f"{expiry[:4]}-{expiry[4:6]}-{expiry[6:8]}"
+        if len(expiry) == 8
+        else expiry
+    )
+
+    try:
+        chain = await polygon.get_option_chain(
+            underlying=ticker,
+            expiration_date=exp_fmt,
+            strike_gte=strike - 0.5,
+            strike_lte=strike + 0.5,
+        )
+    except Exception as exc:
+        return {
+            "error": f"Polygon API call failed: {exc}",
+            "ticker": ticker,
+            "expiry_sent": exp_fmt,
+            "latency_ms": round((_time.monotonic() - t0) * 1000, 1),
+        }
+
+    latency_ms = round((_time.monotonic() - t0) * 1000, 1)
+
+    # Try matching the specific contract
+    match = None
+    for c in chain:
+        if c["strike"] == strike and c["right"] == right:
+            match = c
+            break
+
+    return {
+        "ticker": ticker,
+        "expiry_sent": exp_fmt,
+        "strike_requested": strike,
+        "right_requested": right,
+        "latency_ms": latency_ms,
+        "chain_count": len(chain),
+        "chain_strikes": sorted(set((c["strike"], c["right"]) for c in chain)),
+        "match_found": match is not None,
+        "match": match,
+        "raw_first_contract": chain[0] if chain else None,
+    }
+
+
+# ============================================================================
 # WebSocket Relay Routes - Forward requests to remote IB data providers
 # ============================================================================
 
@@ -1413,6 +1484,14 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
         if polygon and polygon.is_configured:
             try:
                 specs = [c.dict() for c in request.contracts]
+                tickers_summary = {}
+                for s in specs:
+                    t = s.get("ticker", "?")
+                    tickers_summary[t] = tickers_summary.get(t, 0) + 1
+                logger.info(
+                    "relay_fetch_prices: %d contracts, tickers=%s",
+                    len(specs), tickers_summary,
+                )
                 results = await polygon.get_option_prices(specs)
                 timer.stage("polygon_prices")
 

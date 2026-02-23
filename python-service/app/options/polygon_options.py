@@ -279,9 +279,10 @@ class PolygonOptionsClient:
                     strike_gte=min_strike,
                     strike_lte=max_strike,
                 )
-            except PolygonError:
+            except PolygonError as exc:
                 logger.warning(
-                    "Polygon: failed to fetch prices for %s exp=%s", ticker, expiry
+                    "Polygon: failed to fetch prices for %s exp=%s: %s",
+                    ticker, expiry, exc,
                 )
                 continue
 
@@ -506,7 +507,7 @@ class PolygonOptionsClient:
             "mid": mid,
             "last": 0,  # Polygon option snapshots don't include last trade
             "volume": day.get("volume", 0) or 0,
-            "open_interest": day.get("open_interest", 0) or 0,
+            "open_interest": snap.get("open_interest", 0) or day.get("open_interest", 0) or 0,
             "implied_vol": greeks.get("implied_volatility"),
             "delta": greeks.get("delta"),
             "gamma": greeks.get("gamma"),
