@@ -145,6 +145,11 @@ export async function POST(request: NextRequest) {
     if (totalFetched > 0) {
       const sampleKeys = Array.from(priceData.keys()).slice(0, 3);
       console.log(`[REFRESH PRICES] Sample price keys: ${sampleKeys.join(", ")}`);
+      // Log first contract's actual bid/ask to confirm data integrity
+      const firstContract = fetchResult?.contracts?.find((c: any) => c);
+      if (firstContract) {
+        console.log(`[REFRESH PRICES] Sample data: bid=${firstContract.bid} ask=${firstContract.ask} mid=${firstContract.mid} vol=${firstContract.volume} oi=${firstContract.openInterest}`);
+      }
     }
     if (totalFetched < contractsNeeded.size) {
       const neededKeys = Array.from(contractsNeeded.keys());
@@ -239,6 +244,11 @@ export async function POST(request: NextRequest) {
           lastUpdated: updated.lastUpdated?.toISOString() || "",
           legs: updatedLegs,
         });
+        // Log actual leg values being returned to frontend
+        const leg0 = updatedLegs[0];
+        if (leg0) {
+          console.log(`[REFRESH PRICES] ${ticker} response leg0: bid=${leg0.bid} ask=${leg0.ask} mid=${leg0.mid} vol=${leg0.volume} oi=${leg0.openInterest}`);
+        }
       } else {
         // Record the failure with specific missing contracts
         failures.push({

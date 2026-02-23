@@ -193,11 +193,17 @@ export async function POST(request: NextRequest) {
     );
 
     if (relayResult.success && relayResult.data) {
-      console.log(`✓ Got data via WebSocket relay for ${ticker}`);
-      
       const chainData = relayResult.data;
       const contracts = chainData.contracts || [];
       const expirations = chainData.expirations || [];
+
+      // Diagnostic: log first contract bid/ask to verify data reaches route
+      const nonZero = contracts.filter((c: any) => c.bid > 0 || c.ask > 0).length;
+      const first = contracts[0];
+      console.log(
+        `[CHAIN] ✓ Relay for ${ticker}: ${contracts.length} contracts, ${nonZero} with bid/ask, ` +
+        `first: ${first ? `${first.strike}${first.right} bid=${first.bid} ask=${first.ask}` : 'none'}`
+      );
       
       // Calculate days to close
       const today = new Date();
