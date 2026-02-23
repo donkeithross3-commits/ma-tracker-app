@@ -585,6 +585,39 @@ async def _polygon_price_spreads(
 # Data Source Health Check
 # ============================================================================
 
+@router.get("/polygon-quote")
+async def polygon_quote(ticker: str = Query("SPY")):
+    """Fetch a stock quote directly from Polygon REST API (no IB fallback).
+
+    Used by the dashboard "Polygon: Test SPY" button to verify Polygon connectivity.
+    """
+    import time
+
+    ticker = validate_ticker(ticker)
+    polygon = get_polygon_client()
+
+    if not polygon or not polygon.is_configured:
+        return {"success": False, "error": "POLYGON_API_KEY not set"}
+
+    t0 = time.perf_counter()
+    try:
+        data = await polygon.get_stock_quote(ticker)
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        return {
+            "success": True,
+            "ticker": ticker,
+            "bid": data.get("bid"),
+            "ask": data.get("ask"),
+            "last": data.get("price"),
+            "timestamp": data.get("timestamp"),
+            "latency_ms": latency_ms,
+        }
+    except Exception as e:
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        logger.error("Polygon quote error for %s: %s", ticker, e)
+        return {"success": False, "error": str(e), "latency_ms": latency_ms}
+
+
 @router.get("/polygon-health")
 async def polygon_health_check(ticker: str = Query("SPY")):
     """Pre-open health check for Polygon data source.

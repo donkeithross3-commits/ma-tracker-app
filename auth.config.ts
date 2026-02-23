@@ -35,8 +35,7 @@ export const authConfig: NextAuthConfig = {
       // Internal API endpoints (called by Python service or agent, not browser)
       const isInternalAPI = pathname === "/api/ma-options/validate-agent-key" ||
                             pathname === "/api/ma-options/agent-version" ||
-                            pathname === "/api/ma-options/download-agent-update" ||
-                            pathname === "/api/ma-options/polygon-health"
+                            pathname === "/api/ma-options/download-agent-update"
       // Admin seed (protected by query secret, not session)
       const isAdminEndpoint = pathname === "/api/admin/seed-whitelist"
       

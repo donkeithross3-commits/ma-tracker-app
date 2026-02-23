@@ -19,6 +19,8 @@ export default function IBConnectionStatus() {
   const { isConnected, isChecking, lastMessage, checkConnection } = useIBConnection();
   const [futuresQuote, setFuturesQuote] = useState<FuturesQuote | null>(null);
   const [isFetchingFutures, setIsFetchingFutures] = useState(false);
+  const [polygonQuote, setPolygonQuote] = useState<FuturesQuote | null>(null);
+  const [isFetchingPolygon, setIsFetchingPolygon] = useState(false);
   const [showAgentModal, setShowAgentModal] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -38,6 +40,25 @@ export default function IBConnectionStatus() {
       });
     } finally {
       setIsFetchingFutures(false);
+    }
+  };
+
+  const testPolygonQuote = async () => {
+    setIsFetchingPolygon(true);
+    setPolygonQuote(null);
+    try {
+      const response = await fetch("/api/ma-options/test-polygon-quote", {
+        credentials: "include",
+      });
+      const data = await response.json();
+      setPolygonQuote(data);
+    } catch (error) {
+      setPolygonQuote({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to fetch",
+      });
+    } finally {
+      setIsFetchingPolygon(false);
     }
   };
 
@@ -109,9 +130,9 @@ export default function IBConnectionStatus() {
               onClick={testFuturesQuote}
               disabled={isFetchingFutures}
               className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs disabled:opacity-50"
-              title="Test connection by fetching ES futures quote"
+              title="Test IB connection by fetching ES futures quote"
             >
-              {isFetchingFutures ? "..." : "Test ES Quote"}
+              {isFetchingFutures ? "..." : "IB: Test ES"}
             </button>
           )}
 
@@ -130,11 +151,40 @@ export default function IBConnectionStatus() {
               </span>
             </div>
           )}
-          
-          {/* Error inline */}
+
+          {/* ES Error inline */}
           {futuresQuote && !futuresQuote.success && (
             <span className="text-red-400 text-[10px]">
               {futuresQuote.error || "Quote failed"}
+            </span>
+          )}
+
+          <button
+            onClick={testPolygonQuote}
+            disabled={isFetchingPolygon}
+            className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs disabled:opacity-50"
+            title="Test Polygon connectivity by fetching SPY quote"
+          >
+            {isFetchingPolygon ? "..." : "Polygon: Test SPY"}
+          </button>
+
+          {/* SPY Polygon Quote inline when available */}
+          {polygonQuote && polygonQuote.success && (
+            <div className="flex items-center gap-2 text-gray-300 bg-gray-800 rounded px-2 py-0.5 text-[11px]">
+              <span className="font-medium text-blue-400">SPY</span>
+              <span>Bid: <span className="text-green-400">{polygonQuote.bid?.toFixed(2)}</span></span>
+              <span>Ask: <span className="text-red-400">{polygonQuote.ask?.toFixed(2)}</span></span>
+              <span>Last: <span className="text-yellow-400">{polygonQuote.last?.toFixed(2)}</span></span>
+              <span className="text-gray-500 text-[10px]">
+                {polygonQuote.timestamp ? new Date(polygonQuote.timestamp).toLocaleTimeString() : ""}
+              </span>
+            </div>
+          )}
+
+          {/* Polygon Error inline */}
+          {polygonQuote && !polygonQuote.success && (
+            <span className="text-red-400 text-[10px]">
+              {polygonQuote.error || "Polygon quote failed"}
             </span>
           )}
         </div>
