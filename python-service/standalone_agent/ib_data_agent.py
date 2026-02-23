@@ -48,6 +48,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Quiet down chatty loggers
+logging.getLogger("ibapi.wrapper").setLevel(logging.WARNING)
+logging.getLogger("ibapi.client").setLevel(logging.WARNING)
+
 # Configuration from environment (trim whitespace; config.env may have spaces)
 def _env(key: str, default: str = "") -> str:
     v = os.environ.get(key) or default
