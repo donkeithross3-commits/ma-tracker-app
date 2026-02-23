@@ -4,9 +4,10 @@ Options Scanner API Routes
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, field_validator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 import logging
+import os
 import re
 import uuid
 import asyncio
@@ -26,11 +27,16 @@ from ..options.models import (
     SpreadPrice,
     ScanParameters,
 )
+from ..options.polygon_options import get_polygon_client, PolygonError
 from ..scanner import MergerArbAnalyzer, DealInput
 from ..utils.timing import RequestTimer
 from .ws_relay import send_request_to_provider, get_registry, PendingRequest
 
 logger = logging.getLogger(__name__)
+
+# When true, relay endpoints try Polygon REST first and fall back to IB relay.
+# Set POLYGON_PRIMARY=false to disable (e.g. if Polygon key expires).
+POLYGON_PRIMARY = os.environ.get("POLYGON_PRIMARY", "true").lower() != "false"
 
 router = APIRouter(prefix="/options", tags=["options"])
 
@@ -114,17 +120,35 @@ async def reconnect_ib():
 @router.get("/check-availability")
 async def check_availability(ticker: str = Query(...)) -> AvailabilityCheckResponse:
     """
-    Check if listed options exist for a ticker
+    Check if listed options exist for a ticker.
+    Tries Polygon first (no IB dependency), falls back to local IB client.
     """
     ticker = validate_ticker(ticker)
+
+    # ── Polygon primary path ──
+    if POLYGON_PRIMARY:
+        polygon = get_polygon_client()
+        if polygon and polygon.is_configured:
+            try:
+                data = await polygon.check_options_available(ticker)
+                if data["available"]:
+                    return AvailabilityCheckResponse(
+                        available=True,
+                        expirationCount=data["expirationCount"],
+                    )
+                # Polygon says unavailable — could be data lag, try IB too
+            except PolygonError as exc:
+                logger.warning("Polygon check-availability failed for %s: %s", ticker, exc)
+
+    # ── IB fallback ──
     try:
-        logger.info(f"Checking option availability for {ticker}")
-        
+        logger.info(f"Checking option availability for {ticker} via IB")
+
         # Get IB client
         ib_client = IBClient()
         if not ib_client.is_connected():
             ib_client.connect()
-        
+
         scanner = ib_client.get_scanner()
         if not scanner:
             return AvailabilityCheckResponse(
@@ -132,7 +156,7 @@ async def check_availability(ticker: str = Query(...)) -> AvailabilityCheckRespo
                 expirationCount=0,
                 error="IB TWS not connected"
             )
-        
+
         # Resolve contract
         contract_id = scanner.resolve_contract(ticker)
         if not contract_id:
@@ -141,15 +165,15 @@ async def check_availability(ticker: str = Query(...)) -> AvailabilityCheckRespo
                 expirationCount=0,
                 error=f"Could not resolve ticker {ticker}"
             )
-        
+
         # Get available expirations
         expirations = scanner.get_available_expirations(ticker, contract_id)
-        
+
         return AvailabilityCheckResponse(
             available=len(expirations) > 0,
             expirationCount=len(expirations)
         )
-    
+
     except Exception as e:
         logger.error(f"Error checking availability: {e}")
         return AvailabilityCheckResponse(
@@ -405,41 +429,46 @@ async def generate_strategies(request: GenerateStrategiesRequest) -> GenerateStr
 @router.post("/price-spreads")
 async def price_spreads(request: PriceSpreadsRequest) -> PriceSpreadsResponse:
     """
-    Get current pricing for multiple spreads
+    Get current pricing for multiple spreads — Polygon primary, IB fallback.
     """
+    # ── Polygon primary path ──
+    if POLYGON_PRIMARY:
+        polygon = get_polygon_client()
+        if polygon and polygon.is_configured:
+            try:
+                return await _polygon_price_spreads(polygon, request)
+            except PolygonError as exc:
+                logger.warning("Polygon price-spreads failed, falling back to IB: %s", exc)
+
+    # ── IB fallback ──
     try:
-        logger.info(f"Pricing {len(request.spreads)} spreads")
-        
-        # Get IB client
+        logger.info(f"Pricing {len(request.spreads)} spreads via IB")
+
         ib_client = IBClient()
         if not ib_client.is_connected():
             ib_client.connect()
-        
+
         scanner = ib_client.get_scanner()
         if not scanner:
             raise HTTPException(status_code=503, detail="IB TWS not connected")
-        
+
         prices = []
-        
+
         for spread in request.spreads:
             try:
-                # Fetch current prices for each leg
                 leg_prices = []
                 net_premium = 0.0
-                
+
                 for leg in spread.legs:
-                    # Parse option symbol to get strike, expiry, right
-                    # Assuming symbol format: TICKER YYMMDD C/P STRIKE
                     parts = leg.symbol.split()
                     if len(parts) >= 4:
                         ticker = parts[0]
                         expiry = parts[1]
                         right = parts[2]
                         strike = float(parts[3])
-                        
-                        # Fetch option data
+
                         option_data = scanner.get_option_data(ticker, expiry, strike, right)
-                        
+
                         if option_data:
                             leg_prices.append(OptionContract(
                                 symbol=option_data.symbol,
@@ -457,36 +486,99 @@ async def price_spreads(request: PriceSpreadsRequest) -> PriceSpreadsResponse:
                                 bid_size=option_data.bid_size,
                                 ask_size=option_data.ask_size
                             ))
-                            
-                            # Calculate net premium
+
                             if leg.side == 'BUY':
                                 net_premium -= option_data.mid_price
                             else:
                                 net_premium += option_data.mid_price
-                
+
                 prices.append(SpreadPrice(
                     spreadId=spread.spreadId,
                     premium=abs(net_premium),
                     timestamp=datetime.now().isoformat(),
                     legs=leg_prices if leg_prices else None
                 ))
-            
+
             except Exception as e:
                 logger.error(f"Error pricing spread {spread.spreadId}: {e}")
-                # Add with zero premium on error
                 prices.append(SpreadPrice(
                     spreadId=spread.spreadId,
                     premium=0.0,
                     timestamp=datetime.now().isoformat()
                 ))
-        
+
         return PriceSpreadsResponse(prices=prices)
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error pricing spreads: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _polygon_price_spreads(
+    polygon, request: PriceSpreadsRequest
+) -> PriceSpreadsResponse:
+    """Price spreads via Polygon REST API."""
+    prices = []
+
+    for spread in request.spreads:
+        try:
+            leg_specs = []
+            for leg in spread.legs:
+                parts = leg.symbol.split()
+                if len(parts) >= 4:
+                    leg_specs.append({
+                        "ticker": parts[0],
+                        "expiry": parts[1],
+                        "right": parts[2],
+                        "strike": float(parts[3]),
+                    })
+
+            results = await polygon.get_option_prices(leg_specs)
+
+            leg_contracts = []
+            net_premium = 0.0
+            for i, r in enumerate(results):
+                if r:
+                    mid = r.get("mid", 0)
+                    leg_contracts.append(OptionContract(
+                        symbol=r["ticker"],
+                        strike=r["strike"],
+                        expiry=r["expiry"],
+                        right=r["right"],
+                        bid=r["bid"],
+                        ask=r["ask"],
+                        mid=mid,
+                        last=r.get("last", 0),
+                        volume=0,
+                        open_interest=0,
+                        implied_vol=None,
+                        delta=None,
+                        bid_size=0,
+                        ask_size=0,
+                    ))
+                    side = spread.legs[i].side if i < len(spread.legs) else "BUY"
+                    if side == "BUY":
+                        net_premium -= mid
+                    else:
+                        net_premium += mid
+
+            prices.append(SpreadPrice(
+                spreadId=spread.spreadId,
+                premium=abs(net_premium),
+                timestamp=datetime.utcnow().isoformat() + "Z",
+                legs=leg_contracts if leg_contracts else None,
+            ))
+        except Exception as e:
+            logger.error(f"Polygon: error pricing spread {spread.spreadId}: {e}")
+            prices.append(SpreadPrice(
+                spreadId=spread.spreadId,
+                premium=0.0,
+                timestamp=datetime.utcnow().isoformat() + "Z",
+            ))
+
+    return PriceSpreadsResponse(prices=prices)
 
 
 # ============================================================================
@@ -496,26 +588,41 @@ async def price_spreads(request: PriceSpreadsRequest) -> PriceSpreadsResponse:
 @router.post("/relay/fetch-chain")
 async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
     """
-    Fetch option chain through WebSocket relay to remote IB data provider.
-    This is used when IB TWS runs on a different machine than this server.
+    Fetch option chain — Polygon primary, IB relay fallback.
+
+    Polygon path: ~200-800ms (REST snapshot, no IB agent required).
+    IB path: 60-180s (sequential per-contract queries via relay).
     """
     timer = RequestTimer("relay_fetch_chain")
+
+    # ── Polygon primary path ──
+    if POLYGON_PRIMARY:
+        polygon = get_polygon_client()
+        if polygon and polygon.is_configured:
+            try:
+                chain_resp = await _polygon_fetch_chain(polygon, request, timer)
+                return chain_resp
+            except PolygonError as exc:
+                logger.warning(
+                    "Polygon fetch-chain failed for %s, falling back to IB: %s",
+                    request.ticker, exc,
+                )
+                timer.stage("polygon_fallback")
+
+    # ── IB relay fallback ──
     try:
-        logger.info(f"Relay: Fetching chain for {request.ticker} via WebSocket provider")
-        
-        # Check if any provider is connected
+        logger.info(f"Relay: Fetching chain for {request.ticker} via IB WebSocket provider")
+
         registry = get_registry()
         status = registry.get_status()
-        
+
         if status["providers_connected"] == 0:
             raise HTTPException(
                 status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
+                detail="No data source available. Polygon failed and no IB agent connected."
             )
         timer.stage("registry_check")
-        
-        # Send request through WebSocket relay
-        # Pass userId so requests are routed to the user's own agent when available
+
         response_data = await send_request_to_provider(
             request_type="fetch_chain",
             payload={
@@ -524,49 +631,134 @@ async def relay_fetch_chain(request: FetchChainRequest) -> FetchChainResponse:
                 "expectedCloseDate": request.expectedCloseDate,
                 "scanParams": request.scanParams.dict() if request.scanParams else {}
             },
-            timeout=180.0,  # EA and similar can have 90+ options (90*1s); need headroom
+            timeout=180.0,
             user_id=request.userId
         )
         timer.stage("provider_roundtrip")
-        
-        # Check for errors in response
+
         if "error" in response_data:
             raise HTTPException(status_code=500, detail=response_data["error"])
-        
-        # Convert response to FetchChainResponse format
-        contracts = []
-        for c in response_data.get("contracts", []):
-            contracts.append(OptionContract(
-                symbol=c.get("symbol", request.ticker),
-                strike=c["strike"],
-                expiry=c["expiry"],
-                right=c["right"],
-                bid=c["bid"],
-                ask=c["ask"],
-                mid=c.get("mid", (c["bid"] + c["ask"]) / 2 if c["bid"] and c["ask"] else 0),
-                last=c.get("last", 0),
-                volume=c.get("volume", 0),
-                open_interest=c.get("open_interest", 0),
-                implied_vol=c.get("implied_vol"),
-                delta=c.get("delta"),
-                bid_size=c.get("bid_size", 0),
-                ask_size=c.get("ask_size", 0)
-            ))
+
+        contracts = _parse_ib_contracts(response_data.get("contracts", []), request.ticker)
         timer.stage("deserialize")
-        timer.finish(extra={"ticker": request.ticker, "contracts": len(contracts)})
-        
+        timer.finish(extra={"ticker": request.ticker, "contracts": len(contracts), "source": "ib"})
+
         return FetchChainResponse(
             ticker=response_data.get("ticker", request.ticker),
             spotPrice=response_data.get("spotPrice", 0),
             expirations=response_data.get("expirations", []),
             contracts=contracts
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Relay fetch chain error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _polygon_fetch_chain(
+    polygon, request: FetchChainRequest, timer: RequestTimer
+) -> FetchChainResponse:
+    """Fetch chain from Polygon REST API."""
+    # 1. Get spot price
+    quote = await polygon.get_stock_quote(request.ticker)
+    spot_price = quote["price"]
+    timer.stage("polygon_stock_quote")
+
+    # 2. Compute strike range from scan params or defaults
+    deal_price = request.dealPrice or spot_price
+    scan = request.scanParams
+    if scan:
+        pct_lower = max(
+            scan.callLongStrikeLower or 25,
+            scan.putShortStrikeLower or 10,
+        )
+        pct_upper = max(
+            scan.callShortStrikeUpper or 10,
+            scan.putLongStrikeUpper or 25,
+        )
+    else:
+        pct_lower, pct_upper = 25, 25
+
+    strike_gte = deal_price * (1 - pct_lower / 100.0)
+    strike_lte = deal_price * (1 + pct_upper / 100.0)
+
+    # 3. Expiration range: today through close date + buffer
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    exp_lte = None
+    if request.expectedCloseDate:
+        try:
+            close_dt = datetime.strptime(request.expectedCloseDate, "%Y-%m-%d")
+            exp_lte = (close_dt + timedelta(days=30)).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # 4. Fetch chain
+    raw_contracts = await polygon.get_option_chain(
+        underlying=request.ticker,
+        expiration_date_gte=today,
+        expiration_date_lte=exp_lte,
+        strike_gte=strike_gte,
+        strike_lte=strike_lte,
+    )
+    timer.stage("polygon_chain")
+
+    # 5. Build response
+    expirations = sorted({c["expiry"] for c in raw_contracts if c.get("expiry")})
+    contracts = [
+        OptionContract(
+            symbol=c.get("symbol", request.ticker),
+            strike=c["strike"],
+            expiry=c["expiry"],
+            right=c["right"],
+            bid=c["bid"],
+            ask=c["ask"],
+            mid=c.get("mid", 0),
+            last=c.get("last", 0),
+            volume=c.get("volume", 0),
+            open_interest=c.get("open_interest", 0),
+            implied_vol=c.get("implied_vol"),
+            delta=c.get("delta"),
+            bid_size=c.get("bid_size", 0),
+            ask_size=c.get("ask_size", 0),
+        )
+        for c in raw_contracts
+    ]
+
+    timer.finish(extra={
+        "ticker": request.ticker, "contracts": len(contracts), "source": "polygon",
+    })
+
+    return FetchChainResponse(
+        ticker=request.ticker,
+        spotPrice=spot_price,
+        expirations=expirations,
+        contracts=contracts,
+    )
+
+
+def _parse_ib_contracts(raw: list[dict], default_ticker: str) -> list[OptionContract]:
+    """Parse IB relay contract dicts into OptionContract models."""
+    contracts = []
+    for c in raw:
+        contracts.append(OptionContract(
+            symbol=c.get("symbol", default_ticker),
+            strike=c["strike"],
+            expiry=c["expiry"],
+            right=c["right"],
+            bid=c["bid"],
+            ask=c["ask"],
+            mid=c.get("mid", (c["bid"] + c["ask"]) / 2 if c["bid"] and c["ask"] else 0),
+            last=c.get("last", 0),
+            volume=c.get("volume", 0),
+            open_interest=c.get("open_interest", 0),
+            implied_vol=c.get("implied_vol"),
+            delta=c.get("delta"),
+            bid_size=c.get("bid_size", 0),
+            ask_size=c.get("ask_size", 0)
+        ))
+    return contracts
 
 
 @router.get("/relay/test-futures")
@@ -1132,40 +1324,75 @@ class FetchPricesResponse(BaseModel):
 @router.post("/relay/fetch-prices")
 async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse:
     """
-    Fetch prices for specific contracts through WebSocket relay.
+    Fetch prices for specific contracts — Polygon primary, IB relay fallback.
     Used by the Monitor tab to refresh watched spread prices.
     """
     timer = RequestTimer("relay_fetch_prices")
+
+    # ── Polygon primary path ──
+    if POLYGON_PRIMARY:
+        polygon = get_polygon_client()
+        if polygon and polygon.is_configured:
+            try:
+                specs = [c.dict() for c in request.contracts]
+                results = await polygon.get_option_prices(specs)
+                timer.stage("polygon_prices")
+
+                contracts = []
+                for r in results:
+                    if r:
+                        contracts.append(ContractPrice(
+                            ticker=r["ticker"],
+                            strike=r["strike"],
+                            expiry=r["expiry"],
+                            right=r["right"],
+                            bid=r["bid"],
+                            ask=r["ask"],
+                            mid=r["mid"],
+                            last=r.get("last", 0),
+                        ))
+                    else:
+                        contracts.append(None)
+
+                timer.finish(extra={
+                    "contracts_requested": len(request.contracts),
+                    "contracts_returned": sum(1 for c in contracts if c),
+                    "source": "polygon",
+                })
+                return FetchPricesResponse(success=True, contracts=contracts)
+
+            except PolygonError as exc:
+                logger.warning(
+                    "Polygon fetch-prices failed, falling back to IB: %s", exc
+                )
+                timer.stage("polygon_fallback")
+
+    # ── IB relay fallback ──
     try:
-        logger.info(f"Relay: Fetching prices for {len(request.contracts)} contracts")
-        
-        # Check if any provider is connected
+        logger.info(f"Relay: Fetching prices for {len(request.contracts)} contracts via IB")
+
         registry = get_registry()
         status = registry.get_status()
-        
+
         if status["providers_connected"] == 0:
             raise HTTPException(
                 status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
+                detail="No data source available. Polygon failed and no IB agent connected."
             )
-        
-        # Send request through WebSocket relay
-        # Pass userId so requests are routed to the user's own agent when available
+
         response_data = await send_request_to_provider(
             request_type="fetch_prices",
             payload={
                 "contracts": [c.dict() for c in request.contracts]
             },
-            timeout=60.0,  # 60 seconds should be plenty for price fetches
+            timeout=60.0,
             user_id=request.userId
         )
         timer.stage("provider_roundtrip")
-        
-        # Check for errors in response
+
         if "error" in response_data:
             raise HTTPException(status_code=500, detail=response_data["error"])
-        
-        # Convert response
+
         contracts = []
         for c in response_data.get("contracts", []):
             if c:
@@ -1182,13 +1409,17 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
             else:
                 contracts.append(None)
         timer.stage("deserialize")
-        timer.finish(extra={"contracts_requested": len(request.contracts), "contracts_returned": len(contracts)})
-        
+        timer.finish(extra={
+            "contracts_requested": len(request.contracts),
+            "contracts_returned": len(contracts),
+            "source": "ib",
+        })
+
         return FetchPricesResponse(
             success=True,
             contracts=contracts
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1233,26 +1464,48 @@ class StockQuoteResponse(BaseModel):
 @router.post("/relay/stock-quote")
 async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
     """
-    Fetch current stock quote through WebSocket relay.
-    Uses the fetch_underlying request type which is already implemented in the local agent.
+    Fetch current stock quote — Polygon primary, IB relay fallback.
+    Futures (secType=FUT) always use IB (Polygon doesn't cover futures).
     """
+    is_futures = request.secType and request.secType.upper() == "FUT"
+
+    # ── Polygon primary path (stocks only) ──
+    if POLYGON_PRIMARY and not is_futures:
+        polygon = get_polygon_client()
+        if polygon and polygon.is_configured:
+            try:
+                data = await polygon.get_stock_quote(request.ticker)
+                price = data.get("price", 0)
+                if price and price > 0:
+                    return StockQuoteResponse(
+                        ticker=request.ticker.upper(),
+                        price=price,
+                        bid=data.get("bid"),
+                        ask=data.get("ask"),
+                        timestamp=data.get("timestamp", datetime.utcnow().isoformat() + "Z"),
+                    )
+                # Price is 0/None — might be outside market hours, try IB
+                logger.info("Polygon returned zero price for %s, trying IB", request.ticker)
+            except PolygonError as exc:
+                logger.warning(
+                    "Polygon stock quote failed for %s, falling back to IB: %s",
+                    request.ticker, exc,
+                )
+
+    # ── IB relay fallback ──
     try:
-        logger.info(f"Relay: Fetching stock quote for {request.ticker}")
-        
-        # Check if any provider is connected
+        logger.info(f"Relay: Fetching stock quote for {request.ticker} via IB")
+
         registry = get_registry()
         status = registry.get_status()
-        
+
         if status["providers_connected"] == 0:
             raise HTTPException(
                 status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
+                detail="No data source available. Polygon failed and no IB agent connected."
             )
-        
-        # Send request through WebSocket relay
-        # Pass userId so requests are routed to the user's own agent when available
+
         payload: dict = {"ticker": request.ticker.upper()}
-        # Forward optional contract metadata for futures/non-stock instruments
         if request.secType:
             payload["secType"] = request.secType
         if request.exchange:
@@ -1263,30 +1516,29 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
             payload["multiplier"] = request.multiplier
         if request.conId:
             payload["conId"] = request.conId
-        
+
         response_data = await send_request_to_provider(
             request_type="fetch_underlying",
             payload=payload,
-            timeout=15.0,  # Stock quote should be quick
+            timeout=15.0,
             user_id=request.userId
         )
-        
-        # Check for errors in response
+
         if "error" in response_data:
             raise HTTPException(status_code=500, detail=response_data["error"])
-        
+
         price = response_data.get("price")
         if price is None:
             raise HTTPException(status_code=404, detail=f"Could not get price for {request.ticker}")
-        
+
         return StockQuoteResponse(
             ticker=request.ticker.upper(),
             price=price,
             bid=response_data.get("bid"),
             ask=response_data.get("ask"),
-            timestamp=datetime.utcnow().isoformat() + "Z"  # Explicit UTC timestamp
+            timestamp=datetime.utcnow().isoformat() + "Z"
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1297,20 +1549,34 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
 @router.post("/relay/sell-scan")
 async def relay_sell_scan(request: SellScanRequest):
     """
-    Fetch near-the-money calls or puts for expirations in the next 0-15 business days
-    (for selling). Routes to the user's IB agent.
+    Fetch near-the-money calls or puts — Polygon primary, IB relay fallback.
     """
+    right = (request.right or "C").upper()
+    if right not in ("C", "P"):
+        raise HTTPException(status_code=400, detail="right must be C or P")
+
+    # ── Polygon primary path ──
+    if POLYGON_PRIMARY:
+        polygon = get_polygon_client()
+        if polygon and polygon.is_configured:
+            try:
+                data = await polygon.get_sell_scan(request.ticker, right=right)
+                return data
+            except PolygonError as exc:
+                logger.warning(
+                    "Polygon sell-scan failed for %s, falling back to IB: %s",
+                    request.ticker, exc,
+                )
+
+    # ── IB relay fallback ──
     try:
-        right = (request.right or "C").upper()
-        if right not in ("C", "P"):
-            raise HTTPException(status_code=400, detail="right must be C or P")
-        logger.info(f"Relay: Sell scan for {request.ticker} {right}")
+        logger.info(f"Relay: Sell scan for {request.ticker} {right} via IB")
         registry = get_registry()
         status = registry.get_status()
         if status["providers_connected"] == 0:
             raise HTTPException(
                 status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
+                detail="No data source available. Polygon failed and no IB agent connected."
             )
         response_data = await send_request_to_provider(
             request_type="sell_scan",
