@@ -702,6 +702,11 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.next_order_id = orderId  # Order ids must come from TWS sequence
         self.connection_lost = False
         self.last_heartbeat = time.time()
+        # Reset read-only flag on fresh connect/reconnect handshake.
+        # nextValidId is the first callback after a successful TWS connection.
+        if self.read_only_session:
+            self.logger.info("Clearing read_only_session flag on fresh TWS handshake")
+            self.read_only_session = False
         if self.connection_start_time is None:
             self.connection_start_time = time.time()
         print(f"Connection healthy - ready with next order ID: {orderId}")
@@ -755,7 +760,14 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self.logger.info(f"Connection restored (code {errorCode}): {errorString}")
                 self.connection_lost = False
                 self.last_heartbeat = time.time()
-                # Re-sync order ID sequence and live order book after reconnect (skip if Read-Only)
+                # Reset read-only flag on reconnect — the flag may have been set by a
+                # transient IB error or a previous TWS session. If TWS is still truly
+                # read-only, the flag will be re-set when the first order/position
+                # request triggers the "read only" error again.
+                if self.read_only_session:
+                    self.logger.info("Clearing read_only_session flag on reconnect")
+                    self.read_only_session = False
+                # Re-sync order ID sequence and live order book after reconnect
                 if not self.read_only_session:
                     try:
                         self.reqIds(-1)  # Refresh nextValidId
