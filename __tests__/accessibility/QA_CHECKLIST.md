@@ -48,17 +48,13 @@ Test both Normal (compact) and Comfort modes.
 ## 5. ARIA and Screen Reader
 
 - [ ] **Comfort Mode toggle**: role="switch", announces "Comfort Mode" and checked state
-- [ ] **Trade Lock toggle**: role="switch", announces armed/locked state
 - [ ] **Icon-only buttons**: Gear (Risk Manager), Refresh, Close all announce their label
 - [ ] **Step indicator**: "1. Preview → 2. Confirm" announced via aria-live
 - [ ] **Dialogs**: role="dialog" with aria-modal="true"
 
 ## 6. Order Entry Flow (Safety)
 
-- [ ] **Trade Lock default**: Trade lock starts in "locked" (off) state
-- [ ] **Cannot accidentally order**: With trade lock off, submit button is disabled/blocked
-- [ ] **Arm to trade**: Toggling trade lock to "armed" enables submit
-- [ ] **Confirmation modal**: 2-step: Preview → Confirm, each has Back/Cancel
+- [ ] **Confirmation modal**: Single review screen with order details and one "Send order" button; Cancel visible
 - [ ] **Cancel order**: Cancel requires confirmation modal
 - [ ] **Clear labels**: Action (BUY/SELL), quantity, contract, price all readable at a glance
 - [ ] **Large buttons**: Submit/confirm buttons are 52px+ with large text

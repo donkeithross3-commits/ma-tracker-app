@@ -872,8 +872,6 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   // ---- Dev stress test toggle (positions table + ticket) ----
   const [devStressTest, setDevStressTest] = useState(false);
 
-  // ---- Trade Lock: must be "armed" before orders can be submitted ----
-  const [tradeLockArmed, setTradeLockArmed] = useState(false);
 
   // ---- Confirmation modal state (2-step Preview -> Confirm) ----
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
@@ -1694,34 +1692,6 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         )}
         <span className="font-semibold text-white tabular-nums">
           Cost basis: {formatCostBasis(totalCostBasis)}
-        </span>
-      </div>
-
-      {/* ─── Trade Lock toggle ─── */}
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={tradeLockArmed}
-          aria-label={tradeLockArmed ? "Trade lock is armed — orders can be submitted" : "Trade lock is on — orders are blocked"}
-          onClick={() => setTradeLockArmed((v) => !v)}
-          className={`relative inline-flex h-10 w-20 shrink-0 cursor-pointer items-center rounded-full border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-            tradeLockArmed
-              ? "bg-green-600 border-green-500 focus:ring-green-400"
-              : "bg-gray-700 border-gray-500 focus:ring-gray-400"
-          }`}
-        >
-          <span
-            className={`inline-block h-7 w-7 rounded-full bg-white shadow transition-transform ${
-              tradeLockArmed ? "translate-x-11" : "translate-x-1"
-            }`}
-          />
-        </button>
-        <span className={`text-base font-semibold select-none ${tradeLockArmed ? "text-green-400" : "text-gray-400"}`}>
-          {tradeLockArmed ? "Trading Armed" : "Trade Lock ON"}
-        </span>
-        <span className="text-sm text-gray-500">
-          {tradeLockArmed ? "Orders can be submitted" : "Arm to enable order submission"}
         </span>
       </div>
 
@@ -3254,16 +3224,9 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   )}
                 </div>
               )}
-              {/* Trade Lock gate */}
-              {!tradeLockArmed && (
-                <div className="p-4 rounded-xl bg-gray-800 border border-gray-600 text-gray-300 text-base text-center">
-                  Trade Lock is <span className="font-bold text-amber-400">ON</span>. Arm the trade lock to place orders.
-                </div>
-              )}
               <button
                 type="button"
                 onClick={() => {
-                  if (!tradeLockArmed) return;
                   const qty = parseFloat(stockOrderQty);
                   if (!qty || qty <= 0) { setStockOrderResult({ error: "Enter a valid quantity" }); return; }
                   if (stockOrderType !== "MOC" && (!stockOrderLmtPrice || parseFloat(stockOrderLmtPrice) <= 0)) {
@@ -3275,19 +3238,19 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
                   setStockOrderResult(null);
                   setConfirmModalOpen(true);
                 }}
-                disabled={stockOrderSubmitting || !stockOrderQty || parseFloat(stockOrderQty) <= 0 || !tradeLockArmed}
+                disabled={stockOrderSubmitting || !stockOrderQty || parseFloat(stockOrderQty) <= 0}
                 className={`w-full min-h-[80px] rounded-2xl text-2xl font-extrabold transition-colors disabled:opacity-40 ${
                   stockOrderAction === "BUY"
                     ? "bg-blue-600 hover:bg-blue-500 text-white"
                     : "bg-red-600 hover:bg-red-500 text-white"
                 }`}
-                aria-label={tradeLockArmed ? `${stockOrderAction} ${stockOrderQty || "0"} ${unitLabel}` : "Trade lock is on — arm it to place orders"}
+                aria-label={`${stockOrderAction} ${stockOrderQty || "0"} ${unitLabel}`}
               >
                 {stockOrderSubmitting
                   ? "Sending order…"
                   : `${stockOrderAction} ${stockOrderQty || "0"} ${unitLabel}`}
               </button>
-              {/* Order confirmation modal (2-step Preview -> Confirm) */}
+              {/* Order confirmation modal (single review + confirm) */}
               <OrderConfirmationModal
                 variant="place"
                 open={confirmModalOpen}

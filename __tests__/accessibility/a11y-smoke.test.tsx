@@ -134,22 +134,6 @@ describe("ARIA attributes on key components", () => {
     expect(closeBtn).toBeTruthy();
   });
 
-  it("trade lock toggle should have role=switch with descriptive aria-label", () => {
-    const { container } = render(
-      <button
-        role="switch"
-        aria-checked={false}
-        aria-label="Trade lock is on — orders are blocked"
-        onClick={() => {}}
-      >
-        <span className="toggle-thumb" />
-      </button>
-    );
-
-    const toggle = screen.getByRole("switch");
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-    expect(toggle.getAttribute("aria-label")).toContain("Trade lock");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -199,22 +183,14 @@ describe("Button sizing for Parkinson's accessibility", () => {
 // ---------------------------------------------------------------------------
 
 describe("Order confirmation modal accessibility", () => {
-  it("confirmation modal buttons are large and have clear labels", () => {
+  it("confirmation modal has large Send and Cancel buttons", () => {
     const { container } = render(
       <div role="dialog" aria-modal="true">
-        <div aria-live="polite">
-          <span>1. Preview</span>
-          <span aria-hidden="true">&#8594;</span>
-          <span>2. Confirm</span>
-        </div>
         <button className="min-h-[52px] text-lg font-bold">
           BUY 100 — Send order
         </button>
         <button className="min-h-[52px] text-lg">
-          Back
-        </button>
-        <button className="min-h-[44px] text-base">
-          Cancel order
+          Cancel
         </button>
       </div>
     );
@@ -222,13 +198,8 @@ describe("Order confirmation modal accessibility", () => {
     const dialog = screen.getByRole("dialog");
     expect(dialog).toBeTruthy();
 
-    // Step indicator uses aria-live for screen readers
-    const liveRegion = container.querySelector("[aria-live]") as HTMLElement;
-    expect(liveRegion).toBeTruthy();
-    expect(liveRegion.getAttribute("aria-live")).toBe("polite");
-
-    // All buttons meet minimum size
     const buttons = container.querySelectorAll("button");
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
     for (const btn of buttons) {
       const hasMinH = /min-h-\[(\d+)px\]/.exec(btn.className);
       expect(hasMinH).toBeTruthy();

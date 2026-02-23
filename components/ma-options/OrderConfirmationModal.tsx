@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -36,30 +35,20 @@ export type OrderConfirmationModalProps =
     };
 
 /**
- * 2-step order confirmation modal (Preview -> Confirm).
+ * Single-screen order confirmation: review details and send with one click.
  *
- * PD-friendly design:
- * - No time-based countdowns or drag/slide-to-confirm
- * - Large buttons (min-h-[52px]) with clear labels
- * - Always-visible Cancel/Back on every step
- * - Clear escape paths (click overlay, press Escape, or Cancel button)
+ * PD-friendly: large buttons, clear labels, debounced confirm to avoid double-tap.
+ * Escape: click overlay, Escape, or Cancel button.
  */
 export function OrderConfirmationModal(props: OrderConfirmationModalProps) {
   const { open, onClose, onConfirm, isSubmitting = false } = props;
-  const [step, setStep] = useState<"preview" | "confirm">("preview");
 
-  // Reset step when modal opens/closes
-  const handleClose = () => {
-    setStep("preview");
-    onClose();
-  };
+  const handleClose = () => onClose();
 
   const handleConfirm = async () => {
     await onConfirm();
-    setStep("preview");
   };
 
-  // PD-friendly: prevent tremor double-tap from firing confirm twice (500ms cooldown)
   const handleConfirmDebounced = useDebouncedCriticalClick(handleConfirm, 500);
 
   if (props.variant === "place") {
@@ -79,23 +68,9 @@ export function OrderConfirmationModal(props: OrderConfirmationModalProps) {
       <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
         <DialogContent className="bg-gray-900 text-gray-100 border-gray-700 max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-xl">
-              {step === "preview" ? "Review order" : "Confirm order"}
-            </DialogTitle>
+            <DialogTitle className="text-xl">Review order</DialogTitle>
           </DialogHeader>
 
-          {/* Step indicator */}
-          <div className="flex items-center gap-2 text-sm text-gray-400" aria-live="polite">
-            <span className={step === "preview" ? "text-white font-semibold" : ""}>
-              1. Preview
-            </span>
-            <span aria-hidden="true">&#8594;</span>
-            <span className={step === "confirm" ? "text-white font-semibold" : ""}>
-              2. Confirm
-            </span>
-          </div>
-
-          {/* Order details (shown on both steps) */}
           <div className="space-y-3 py-2 text-base">
             <div className="bg-gray-800 rounded-lg px-4 py-3">
               <div className="text-gray-400 mb-1 text-sm">Contract</div>
@@ -131,59 +106,23 @@ export function OrderConfirmationModal(props: OrderConfirmationModalProps) {
             )}
           </div>
 
-          {step === "confirm" && (
-            <div className="rounded-lg border-2 border-amber-600/60 bg-amber-900/20 px-4 py-3 text-base text-amber-200">
-              Are you sure you want to {action.toLowerCase()} {quantity} {contractSummary}?
-            </div>
-          )}
-
           <DialogFooter className="flex flex-col gap-3 sm:flex-col">
-            {step === "preview" ? (
-              <>
-                <Button
-                  type="button"
-                  onClick={() => setStep("confirm")}
-                  className={`w-full min-h-[52px] text-lg font-bold text-white ${actionColor} focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900`}
-                >
-                  Preview &#8594; Confirm
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleClose}
-                  className="w-full min-h-[52px] text-lg border-gray-600 text-gray-200 hover:bg-gray-800 focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 focus:ring-offset-gray-900"
-                >
-                  Cancel
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  type="button"
-                  onClick={handleConfirmDebounced}
-                  disabled={isSubmitting}
-                  className={`w-full min-h-[52px] text-lg font-bold text-white ${actionColor} focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900`}
-                >
-                  {isSubmitting ? "Sending…" : `${action} ${quantity} — Send order`}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setStep("preview")}
-                  className="w-full min-h-[52px] text-lg border-gray-600 text-gray-200 hover:bg-gray-800 focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 focus:ring-offset-gray-900"
-                >
-                  &#8592; Back
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleClose}
-                  className="w-full min-h-[44px] text-base border-gray-700 text-gray-400 hover:bg-gray-800 hover:text-gray-200 focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 focus:ring-offset-gray-900"
-                >
-                  Cancel order
-                </Button>
-              </>
-            )}
+            <Button
+              type="button"
+              onClick={handleConfirmDebounced}
+              disabled={isSubmitting}
+              className={`w-full min-h-[52px] text-lg font-bold text-white ${actionColor} focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900`}
+            >
+              {isSubmitting ? "Sending…" : `${action} ${quantity} — Send order`}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClose}
+              className="w-full min-h-[52px] text-lg border-gray-600 text-gray-200 hover:bg-gray-800 focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 focus:ring-offset-gray-900"
+            >
+              Cancel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
