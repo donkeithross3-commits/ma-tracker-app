@@ -572,7 +572,7 @@ export default function SignalsTab() {
                 >
                   {loading ? "Starting..." : `Start ${enabledTickers.length > 1 ? enabledTickers.join("+") : enabledTickers[0] || ""}`}
                 </button>
-              ) : activeConfigDirty ? (
+              ) : activeConfigDirty && runningTickers.includes(activeTicker) ? (
                 <button
                   onClick={() => handleConfigUpdate(activeTicker)}
                   disabled={loading}
@@ -580,6 +580,8 @@ export default function SignalsTab() {
                 >
                   {loading ? "Applying..." : "Apply"}
                 </button>
+              ) : running && !runningTickers.includes(activeTicker) ? (
+                <span className="text-xs text-gray-500 italic">not started</span>
               ) : null}
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
