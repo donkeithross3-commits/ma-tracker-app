@@ -39,6 +39,33 @@ if _BMC_PATH not in sys.path:
 
 from execution_engine import ExecutionStrategy, OrderAction, OrderSide, OrderType
 
+
+def _run_async_in_thread(coro):
+    """Run an async coroutine from a sync context that may already have a running loop.
+
+    Spawns a short-lived thread with its own event loop to avoid the
+    'Cannot run the event loop while another loop is running' error
+    in Python 3.12+.
+    """
+    result = [None]
+    exception = [None]
+
+    def _target():
+        loop = asyncio.new_event_loop()
+        try:
+            result[0] = loop.run_until_complete(coro)
+        except Exception as exc:
+            exception[0] = exc
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout=30)
+    if exception[0] is not None:
+        raise exception[0]
+    return result[0]
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -354,12 +381,12 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             len(self._model.feature_names),
         )
 
-        # Run daily bootstrap (synchronously — we're in on_start)
+        # Run daily bootstrap — use a helper thread because on_start is called
+        # from within the agent's running asyncio event loop (Python 3.12+
+        # forbids nested run_until_complete on the same thread).
         bootstrap = DailyBootstrap()
         try:
-            loop = asyncio.new_event_loop()
-            bootstrap_result = loop.run_until_complete(bootstrap.bootstrap(self._data_store))
-            loop.close()
+            bootstrap_result = _run_async_in_thread(bootstrap.bootstrap(self._data_store))
             logger.info("Daily bootstrap complete: %s", bootstrap_result)
         except Exception:
             logger.warning("Daily bootstrap failed — features may be incomplete", exc_info=True)
@@ -396,12 +423,11 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             except Exception:
                 logger.debug("Error in equity quote callback", exc_info=True)
 
-        # Subscribe to SPY equity via the provider
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(
+        # Subscribe to SPY equity via the provider (via helper thread to
+        # avoid nested event loop conflict with the agent's main loop).
+        _run_async_in_thread(
             self._polygon_provider.subscribe_equity("SPY", _on_equity_quote)
         )
-        loop.close()
 
         # Create client
         self._polygon_client = PolygonWSClient(
