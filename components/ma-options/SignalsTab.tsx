@@ -189,10 +189,11 @@ export default function SignalsTab() {
   const [error, setError] = useState<string | null>(null);
 
   // Which tickers are enabled for starting
-  const [enabledTickers, setEnabledTickers] = useState<string[]>(["SPY"]);
+  const [enabledTickers, setEnabledTickers] = useState<string[]>(["SPY", "SLV"]);
   // Per-ticker configs (for editing before start or hot-reload)
   const [configs, setConfigs] = useState<Record<string, BMCConfig>>({
     SPY: makeDefaultConfig("SPY"),
+    SLV: makeDefaultConfig("SLV"),
   });
   const [configDirty, setConfigDirty] = useState<Record<string, boolean>>({});
   const configDirtyRef = useRef<Record<string, boolean>>({});
@@ -568,7 +569,7 @@ export default function SignalsTab() {
               <span className="bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded text-xs font-bold">{activeTicker}</span>
               Configuration
             </h3>
-            <div className="space-y-2 text-xs">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
               <ConfigField
                 label="Signal Threshold"
                 value={activeConfig.signal_threshold}
@@ -619,10 +620,10 @@ export default function SignalsTab() {
               />
 
               {/* Option Selection */}
-              <div className="border-t border-gray-800 pt-2 mt-2">
+              <div className="col-span-2 border-t border-gray-800 pt-1.5 mt-1">
                 <span className="text-gray-500 text-[10px] uppercase tracking-wider">Option Selection</span>
               </div>
-              <div className="flex items-center justify-between py-1">
+              <div className="col-span-2 flex items-center justify-between py-0.5">
                 <label className="text-gray-400">Preferred DTE</label>
                 <input
                   type="text"
@@ -656,11 +657,6 @@ export default function SignalsTab() {
                 type="number"
                 step="0.1"
               />
-
-              {/* Signal Gating */}
-              <div className="border-t border-gray-800 pt-2 mt-2">
-                <span className="text-gray-500 text-[10px] uppercase tracking-wider">Signal Gating</span>
-              </div>
               <ConfigField
                 label="Straddle Rich Max"
                 value={activeConfig.straddle_richness_max}
@@ -675,7 +671,12 @@ export default function SignalsTab() {
                 type="number"
                 step="0.1"
               />
-              <div className="flex items-center justify-between py-1">
+
+              {/* Signal Gating */}
+              <div className="col-span-2 border-t border-gray-800 pt-1.5 mt-1">
+                <span className="text-gray-500 text-[10px] uppercase tracking-wider">Signal Gating</span>
+              </div>
+              <div className="col-span-2 flex items-center justify-between py-0.5">
                 <label className="text-gray-400">Options Gate</label>
                 <button
                   onClick={() => updateConfig(activeTicker, "options_gate_enabled", !activeConfig.options_gate_enabled)}
@@ -689,10 +690,10 @@ export default function SignalsTab() {
                 </button>
               </div>
 
-              <div className="border-t border-gray-800 pt-2 mt-2">
+              <div className="col-span-2 border-t border-gray-800 pt-1.5 mt-1">
                 <span className="text-gray-500 text-[10px] uppercase tracking-wider">General</span>
               </div>
-              <div className="flex items-center justify-between py-1">
+              <div className="col-span-2 flex items-center justify-between py-0.5">
                 <label className="text-gray-400">Direction</label>
                 <select
                   value={activeConfig.direction_mode}
@@ -705,7 +706,7 @@ export default function SignalsTab() {
                 </select>
               </div>
 
-              <div className="flex items-center justify-between py-1">
+              <div className="col-span-2 flex items-center justify-between py-0.5">
                 <label className="text-gray-400">Auto Entry</label>
                 <button
                   onClick={() => updateConfig(activeTicker, "auto_entry", !activeConfig.auto_entry)}
@@ -719,7 +720,7 @@ export default function SignalsTab() {
                 </button>
               </div>
 
-              <div className="flex items-center justify-between py-1">
+              <div className="col-span-2 flex items-center justify-between py-0.5">
                 <label className="text-gray-400">Delayed Data</label>
                 <button
                   onClick={() => updateConfig(activeTicker, "use_delayed_data", !activeConfig.use_delayed_data)}
@@ -850,7 +851,7 @@ function ConfigField({
 
   if (isNumber) {
     return (
-      <div className="flex items-center justify-between py-1">
+      <div className="flex items-center justify-between py-0.5">
         <label className="text-gray-400">{label}</label>
         <input
           type="text"
