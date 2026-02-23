@@ -80,7 +80,7 @@ _DEFAULTS: dict[str, Any] = {
     "ticker": "SPY",                  # underlying ticker for this instance
     "signal_threshold": 0.5,
     "min_signal_strength": 0.3,
-    "direction_mode": "both",          # "long_only" | "both"
+    "direction_mode": "both",          # "long_only" | "short_only" | "both"
     "cooldown_minutes": 15,
     "decision_interval_seconds": 60,   # 1 minute
     "max_contracts": 5,

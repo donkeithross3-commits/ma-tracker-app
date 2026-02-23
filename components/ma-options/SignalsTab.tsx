@@ -123,33 +123,48 @@ const DEFAULT_CONFIG: BMCConfig = {
 
 // Per-ticker config overrides (mirrors _TICKER_PROFILES in Python)
 const TICKER_DEFAULTS: Record<string, Partial<BMCConfig>> = {
-  SPY: {},
+  SPY: {
+    scan_start: "13:30",
+    scan_end: "15:55",
+    contract_budget_usd: 150,
+    direction_mode: "both",
+  },
   SLV: {
     preferred_dte: [0, 1, 2, 3, 4, 5],
     max_spread: 0.20,
     premium_min: 0.05,
     premium_max: 1.50,
-    scan_start: "08:30",
+    scan_start: "09:35",
     scan_end: "13:30",
     contract_budget_usd: 50,
+    direction_mode: "both",
     straddle_richness_max: 2.5,
     straddle_richness_ideal: 1.5,
   },
   QQQ: {
     preferred_dte: [0, 1],
     max_spread: 0.05,
+    scan_start: "13:30",
+    scan_end: "15:55",
+    contract_budget_usd: 150,
   },
   IWM: {
     preferred_dte: [0, 1],
     max_spread: 0.10,
     premium_min: 0.05,
     premium_max: 2.00,
+    scan_start: "13:30",
+    scan_end: "15:55",
+    contract_budget_usd: 100,
   },
   GLD: {
     preferred_dte: [0, 1, 2, 3, 4, 5],
     max_spread: 0.15,
     premium_min: 0.05,
     premium_max: 2.00,
+    scan_start: "09:35",
+    scan_end: "13:30",
+    contract_budget_usd: 50,
     straddle_richness_max: 2.0,
     straddle_richness_ideal: 1.2,
   },
@@ -549,8 +564,9 @@ export default function SignalsTab() {
         {/* ── Config Panel ── */}
         <div className="space-y-3">
           <div className="bg-gray-900 border border-gray-800 rounded p-3">
-            <h3 className="text-sm font-medium text-gray-300 mb-2">
-              Configuration {activeTicker && <span className="text-blue-400">({activeTicker})</span>}
+            <h3 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+              <span className="bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded text-xs font-bold">{activeTicker}</span>
+              Configuration
             </h3>
             <div className="space-y-2 text-xs">
               <ConfigField
@@ -685,6 +701,7 @@ export default function SignalsTab() {
                 >
                   <option value="both">Both</option>
                   <option value="long_only">Long Only</option>
+                  <option value="short_only">Short Only</option>
                 </select>
               </div>
 
