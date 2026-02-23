@@ -311,21 +311,26 @@ async def generate_strategies(request: GenerateStrategiesRequest) -> GenerateStr
         
         chain_contracts = request.chainData.get('contracts', [])
         for contract in chain_contracts:
+            # Use `or` instead of dict.get default — Polygon sends keys with null
+            # values (e.g. implied_vol: null), and .get('key', default) returns
+            # None when the key exists but is null.
             options.append(OptionData(
-                symbol=contract.get('symbol', request.ticker),
+                symbol=contract.get('symbol') or request.ticker,
                 strike=contract['strike'],
                 expiry=contract['expiry'],
                 right=contract['right'],
-                bid=contract['bid'],
-                ask=contract['ask'],
-                last=contract.get('last', 0),
-                volume=contract.get('volume', 0),
-                open_interest=contract.get('open_interest', 0),
-                implied_vol=contract.get('implied_vol', 0.30),
-                delta=contract.get('delta', 0),
+                bid=contract.get('bid') or 0,
+                ask=contract.get('ask') or 0,
+                last=contract.get('last') or 0,
+                volume=contract.get('volume') or 0,
+                open_interest=contract.get('open_interest') or 0,
+                implied_vol=contract.get('implied_vol') or 0.30,
+                delta=contract.get('delta') or 0,
                 gamma=0,
                 theta=0,
-                vega=0
+                vega=0,
+                bid_size=contract.get('bid_size') or 0,
+                ask_size=contract.get('ask_size') or 0,
             ))
         
         # Analyze opportunities with custom parameters
