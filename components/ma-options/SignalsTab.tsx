@@ -277,6 +277,25 @@ export default function SignalsTab() {
     }
   };
 
+  // ── Stop BMC ──
+  const handleStop = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ma-options/execution/stop", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.error) setError(data.error);
+      else setRunning(false);
+    } catch (e: any) {
+      setError(e.message || "Failed to stop");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ── Update config for a specific ticker ──
   const handleConfigUpdate = async (ticker: string) => {
     setLoading(true);
@@ -572,17 +591,29 @@ export default function SignalsTab() {
                 >
                   {loading ? "Starting..." : `Start ${enabledTickers.length > 1 ? enabledTickers.join("+") : enabledTickers[0] || ""}`}
                 </button>
-              ) : activeConfigDirty && runningTickers.includes(activeTicker) ? (
-                <button
-                  onClick={() => handleConfigUpdate(activeTicker)}
-                  disabled={loading}
-                  className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-xs font-medium rounded"
-                >
-                  {loading ? "Applying..." : "Apply"}
-                </button>
-              ) : running && !runningTickers.includes(activeTicker) ? (
-                <span className="text-xs text-gray-500 italic">not started</span>
-              ) : null}
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  {activeConfigDirty && runningTickers.includes(activeTicker) && (
+                    <button
+                      onClick={() => handleConfigUpdate(activeTicker)}
+                      disabled={loading}
+                      className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-xs font-medium rounded"
+                    >
+                      {loading ? "Applying..." : "Apply"}
+                    </button>
+                  )}
+                  {!runningTickers.includes(activeTicker) && (
+                    <span className="text-xs text-gray-500 italic">not started</span>
+                  )}
+                  <button
+                    onClick={handleStop}
+                    disabled={loading}
+                    className="px-3 py-1 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-xs font-medium rounded"
+                  >
+                    Stop
+                  </button>
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
               <ConfigField
