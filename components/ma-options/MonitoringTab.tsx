@@ -192,14 +192,10 @@ export default function MonitoringTab() {
     try {
       const spreadIds = spreads.map((s) => s.id);
       const uniqueTickers = [...new Set(spreads.map(s => s.dealTicker))];
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/1e2c4934-9031-43dd-950a-350ecf67fcc4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonitoringTab.tsx:71',message:'REFRESH: Request sent',data:{spreadCount:spreads.length,spreadIds:spreadIds,tickers:uniqueTickers},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'UI_UPDATE'})}).catch(()=>{});
-      // #endregion
-      
+
       // Update status after 2 seconds
       const statusTimer1 = setTimeout(() => {
-        setRefreshStatus(`Fetching ${uniqueTickers.length} tickers from IB TWS...`);
+        setRefreshStatus(`Fetching ${uniqueTickers.length} tickers...`);
       }, 2000);
       
       // Update status after 30 seconds
@@ -218,11 +214,7 @@ export default function MonitoringTab() {
 
       if (response.ok) {
         const data = await response.json();
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/1e2c4934-9031-43dd-950a-350ecf67fcc4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonitoringTab.tsx:100',message:'REFRESH: Response received',data:{updatesCount:data.updates?.length||0,updates:data.updates,metadata:data.metadata},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'UI_UPDATE'})}).catch(()=>{});
-        // #endregion
-        
+
         // Update spreads with new prices
         setSpreads((prevSpreads) =>
           prevSpreads.map((spread) => {
@@ -230,15 +222,13 @@ export default function MonitoringTab() {
             if (update) {
               const pnlDollar = update.currentPremium - spread.entryPremium;
               const pnlPercent = (pnlDollar / spread.entryPremium) * 100;
-              
-              // #region agent log
-              fetch('http://127.0.0.1:7243/ingest/1e2c4934-9031-43dd-950a-350ecf67fcc4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonitoringTab.tsx:112',message:'REFRESH: Updating spread in state',data:{spreadId:spread.id,ticker:spread.dealTicker,oldPremium:spread.currentPremium,newPremium:update.currentPremium,oldLastUpdated:spread.lastUpdated,newLastUpdated:update.lastUpdated},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'UI_UPDATE'})}).catch(()=>{});
-              // #endregion
-              
+
               return {
                 ...spread,
                 currentPremium: update.currentPremium,
                 lastUpdated: update.lastUpdated,
+                underlyingPrice: update.underlyingPrice ?? spread.underlyingPrice,
+                legs: update.legs ?? spread.legs,
                 pnlDollar,
                 pnlPercent,
               };
@@ -246,7 +236,7 @@ export default function MonitoringTab() {
             return spread;
           })
         );
-        
+
         // Track failures for per-row indicators
         const failures = data.failures as SpreadUpdateFailure[] || [];
         if (failures.length > 0) {
@@ -276,10 +266,6 @@ export default function MonitoringTab() {
         
         // Keep status visible longer if there were failures
         setTimeout(() => setRefreshStatus(""), failures.length > 0 ? 8000 : 3000);
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/1e2c4934-9031-43dd-950a-350ecf67fcc4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonitoringTab.tsx:140',message:'REFRESH: State update complete',data:{spreadsUpdated:data.updates?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'UI_UPDATE'})}).catch(()=>{});
-        // #endregion
       } else {
         setRefreshStatus("❌ Refresh failed");
         setTimeout(() => setRefreshStatus(""), 3000);
@@ -346,6 +332,8 @@ export default function MonitoringTab() {
                 ...spread,
                 currentPremium: update.currentPremium,
                 lastUpdated: update.lastUpdated,
+                underlyingPrice: update.underlyingPrice ?? spread.underlyingPrice,
+                legs: update.legs ?? spread.legs,
                 pnlDollar,
                 pnlPercent,
               };

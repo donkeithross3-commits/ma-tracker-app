@@ -142,7 +142,22 @@ export async function POST(request: NextRequest) {
     }
     
     console.log(`[REFRESH PRICES] Fetched ${totalFetched}/${contractsNeeded.size} prices`);
-    
+    if (totalFetched > 0) {
+      const sampleKeys = Array.from(priceData.keys()).slice(0, 3);
+      console.log(`[REFRESH PRICES] Sample price keys: ${sampleKeys.join(", ")}`);
+    }
+    if (totalFetched < contractsNeeded.size) {
+      const neededKeys = Array.from(contractsNeeded.keys());
+      const priceKeys = new Set(priceData.keys());
+      const missing = neededKeys.filter(k => {
+        const norm = k.replace(/-/g, '').replace(/(\d+)_(\d{8})/, '$1_$2');
+        return !priceKeys.has(k.replace(/(\d{4})-(\d{2})-(\d{2})/, '$1$2$3'));
+      });
+      if (missing.length > 0) {
+        console.log(`[REFRESH PRICES] Missing contracts: ${missing.slice(0, 5).join(", ")}`);
+      }
+    }
+
     // Fetch underlying stock prices for all unique tickers
     const uniqueTickers = [...new Set(spreads.map(s => s.scannerDeal?.ticker).filter(Boolean))] as string[];
     const stockPrices = new Map<string, number>();
@@ -191,6 +206,10 @@ export async function POST(request: NextRequest) {
           leg.bid = price.bid;
           leg.ask = price.ask;
           leg.mid = price.mid;
+          if (price.volume !== undefined) leg.volume = price.volume;
+          if (price.openInterest !== undefined) leg.openInterest = price.openInterest;
+          if (price.bidSize !== undefined) leg.bidSize = price.bidSize;
+          if (price.askSize !== undefined) leg.askSize = price.askSize;
           const legPremium = price.mid * leg.quantity;
           netPremium += (leg.side === "BUY" ? legPremium : -legPremium);
         } else {
@@ -218,6 +237,7 @@ export async function POST(request: NextRequest) {
           currentPremium: updated.currentPremium?.toNumber() || 0,
           underlyingPrice: updated.underlyingPrice?.toNumber() || null,
           lastUpdated: updated.lastUpdated?.toISOString() || "",
+          legs: updatedLegs,
         });
       } else {
         // Record the failure with specific missing contracts

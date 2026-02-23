@@ -291,9 +291,21 @@ class PolygonOptionsClient:
                 key = (contract["strike"], contract["right"])
                 by_key[key] = contract
 
+            logger.info(
+                "Polygon chain for %s exp=%s: %d contracts, strikes=%s",
+                ticker, exp_fmt, len(chain),
+                sorted(set(k[0] for k in by_key.keys()))[:10],
+            )
+
             for orig_idx, spec in items:
                 key = (spec.get("strike", 0), spec.get("right", ""))
                 match = by_key.get(key)
+                if not match:
+                    logger.warning(
+                        "Polygon: no match for %s strike=%s right=%s (available: %s)",
+                        ticker, spec.get("strike"), spec.get("right"),
+                        sorted(set(k[0] for k in by_key.keys())),
+                    )
                 if match:
                     results[orig_idx] = {
                         "ticker": spec.get("ticker", ticker),
@@ -304,6 +316,10 @@ class PolygonOptionsClient:
                         "ask": match["ask"],
                         "mid": match["mid"],
                         "last": match.get("last", 0),
+                        "volume": match.get("volume", 0),
+                        "openInterest": match.get("open_interest", 0),
+                        "bidSize": match.get("bid_size", 0),
+                        "askSize": match.get("ask_size", 0),
                     }
 
         return results
@@ -471,7 +487,7 @@ class PolygonOptionsClient:
 
         bid = last_quote.get("bid", 0) or 0
         ask = last_quote.get("ask", 0) or 0
-        mid = (bid + ask) / 2 if (bid and ask) else 0
+        mid = (bid + ask) / 2 if (bid + ask) > 0 else 0
 
         contract_type = (details.get("contract_type", "") or "").lower()
         right = "C" if contract_type == "call" else "P"

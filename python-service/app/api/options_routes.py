@@ -1390,6 +1390,10 @@ class ContractPrice(BaseModel):
     ask: float
     mid: float
     last: float
+    volume: int = 0
+    openInterest: int = 0
+    bidSize: int = 0
+    askSize: int = 0
 
 class FetchPricesResponse(BaseModel):
     success: bool
@@ -1424,16 +1428,30 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
                             ask=r["ask"],
                             mid=r["mid"],
                             last=r.get("last", 0),
+                            volume=int(r.get("volume", 0) or 0),
+                            openInterest=int(r.get("openInterest", 0) or 0),
+                            bidSize=int(r.get("bidSize", 0) or 0),
+                            askSize=int(r.get("askSize", 0) or 0),
                         ))
                     else:
                         contracts.append(None)
 
+                valid_count = sum(1 for c in contracts if c)
                 timer.finish(extra={
                     "contracts_requested": len(request.contracts),
-                    "contracts_returned": sum(1 for c in contracts if c),
+                    "contracts_returned": valid_count,
                     "source": "polygon",
                 })
-                return FetchPricesResponse(success=True, contracts=contracts)
+                # If Polygon returned zero valid contracts, fall through to IB
+                if valid_count == 0:
+                    logger.warning(
+                        "Polygon returned 0 valid contracts out of %d requested, "
+                        "falling back to IB",
+                        len(request.contracts),
+                    )
+                    timer.stage("polygon_all_zero_fallback")
+                else:
+                    return FetchPricesResponse(success=True, contracts=contracts)
 
             except PolygonError as exc:
                 logger.warning(

@@ -206,6 +206,10 @@ export async function POST(request: NextRequest) {
           leg.bid = price.bid;
           leg.ask = price.ask;
           leg.mid = price.mid;
+          if (price.volume !== undefined) leg.volume = price.volume;
+          if (price.openInterest !== undefined) leg.openInterest = price.openInterest;
+          if (price.bidSize !== undefined) leg.bidSize = price.bidSize;
+          if (price.askSize !== undefined) leg.askSize = price.askSize;
           const legPremium = price.mid * leg.quantity;
           netPremium += (leg.side === "BUY" ? legPremium : -legPremium);
         } else {
