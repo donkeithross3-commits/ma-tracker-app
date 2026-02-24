@@ -298,42 +298,44 @@ export default function SheetPortfolioPage() {
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* Market data status + refresh */}
+            <div className="flex items-center gap-1.5 border border-gray-700 rounded px-2.5 py-1">
+              <span className={`inline-block w-2 h-2 rounded-full ${lastRefresh ? "bg-green-500" : "bg-gray-600"}`} title={lastRefresh ? "Polygon connected" : "No market data yet"} />
+              <span className="text-xs text-gray-400">
+                {lastRefresh
+                  ? `Mkt data ${lastRefresh.toLocaleTimeString()}`
+                  : "Mkt data loading\u2026"}
+              </span>
+              <button
+                onClick={fetchLivePrices}
+                disabled={refreshing}
+                className="ml-1 p-0.5 text-cyan-400 hover:text-cyan-300 disabled:opacity-40 transition-colors"
+                title="Refresh market data now"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
+                </svg>
+              </button>
+            </div>
             <button
               onClick={handleIngest}
               disabled={ingesting}
-              className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 rounded transition-colors"
+              className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 disabled:bg-gray-700 disabled:text-gray-500 border border-gray-700 rounded transition-colors"
             >
-              {ingesting ? "Ingesting..." : "Re-ingest Now"}
+              {ingesting ? "Ingesting..." : "Re-ingest Sheet"}
             </button>
-            <button
-              onClick={fetchLivePrices}
-              disabled={refreshing}
-              className="px-2 py-1.5 text-sm border border-cyan-700 text-cyan-400 hover:bg-cyan-400/10 disabled:opacity-50 rounded transition-colors"
-              title="Refresh live prices"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-            </button>
-            {lastRefresh && (
-              <span className="text-xs text-cyan-400/70">
-                {Date.now() - lastRefresh.getTime() < 120_000
-                  ? "Live"
-                  : `${lastRefresh.toLocaleTimeString()}`}
-              </span>
-            )}
             {ingestResult && (
               <span className="text-xs text-gray-400">{ingestResult}</span>
             )}
