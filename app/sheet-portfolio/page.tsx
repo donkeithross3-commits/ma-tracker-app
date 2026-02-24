@@ -412,8 +412,8 @@ export default function SheetPortfolioPage() {
                   ) : (
                     <span className="text-yellow-500">{health.status}</span>
                   )}
-                  {health.last_success_date &&
-                    ` \u00B7 Last ingest: ${health.last_success_date}`}
+                  {health.last_success_at &&
+                    ` \u00B7 Last ingest: ${new Date(health.last_success_at).toLocaleString()}`}
                   {health.last_success_rows > 0 &&
                     ` (${health.last_success_rows} rows)`}
                 </span>
