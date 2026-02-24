@@ -9,6 +9,7 @@
       "summary": "When entering an order for an option position, the trade ticket shows the option's latest bid/ask/mid and a refresh button.",
       "description": "On the Account tab, when you open the order entry ticket for an option position, the ticket now shows:\n\n**Underlying quote** — Unchanged: the latest quote for the underlying (with refresh and \"Use as price\" for stock tickets).\n\n**Option quote** — For option tickets only: the latest bid, ask, and mid for the specific option you're trading. A dedicated refresh button lets you refresh this option quote on demand while you set quantity and limit price.\n\n**Use mid as price** — When an option quote is loaded, a button sets the limit price to the option mid so you can quickly align with the current market.",
       "category": "positions",
+      "project": "ma-options",
       "image": "",
       "screenshot": null
     },
@@ -18,6 +19,7 @@
       "summary": "In Comfort mode the positions table shows full text and scrolls horizontally instead of truncating with \"...\".",
       "description": "For users with Comfort Mode on, the Account tab positions table no longer truncates column headers or data with ellipses.\n\n**Smart defaults:** Positions default to 4 columns (Symbol, Pos, P&L, Trade) so each column gets more space. A hint under the column chooser explains: \"Fewer columns by default so each stays readable. Use the chooser above to add more.\"\n\n**Scroll instead of clip:** The table has a minimum width in Comfort mode; if the card is narrower, the table scrolls horizontally so you can see all content. Cell text uses overflow-visible in Comfort so nothing is cut off.\n\n**Trade column always visible:** The Trade column (Trade + Risk Manager buttons) has a fixed minimum width (7.5rem) so the buttons are never cut off, in any mode.",
       "category": "positions",
+      "project": "ma-options",
       "image": "",
       "screenshot": null
     },
@@ -27,6 +29,7 @@
       "summary": "Order confirm and cancel-order buttons ignore accidental double-taps within 500ms.",
       "description": "Critical action buttons (\"Send order\" and \"Yes, cancel order\") now use a 500ms cooldown so a tremor-induced double-tap only fires once. The first click runs immediately; repeated clicks within 500ms are ignored.\n\nImplemented via a reusable hook, useDebouncedCriticalClick, so future confirm dialogs can use the same pattern. Aligns with PD UI research recommending 300–500ms debounce on order-entry buttons.",
       "category": "positions",
+      "project": "ma-options",
       "image": "",
       "screenshot": null
     },
@@ -36,6 +39,7 @@
       "summary": "Comfort mode adds touch-action to remove tap delay and shortens transitions on interactive elements.",
       "description": "Two small improvements when Comfort Mode is on:\n\n**Touch:** Buttons and tabs use touch-action: manipulation so touch devices don't add a 300ms tap delay. Helps users who use a tablet or touchscreen.\n\n**Motion:** When the OS has not set \"Reduce motion,\" Comfort mode still shortens transitions on buttons, tabs, checkboxes, and menu items to 0.08s. Reduces motion sensitivity without requiring the system preference.",
       "category": "general",
+      "project": "general",
       "image": "",
       "screenshot": null
     },
@@ -45,6 +49,7 @@
       "summary": "62 unit tests covering all five post-Polygon-migration bug fixes in the options scanner.",
       "description": "Added a comprehensive test suite for the M&A options scanner business logic, covering the five bugs that shipped silently after the Polygon migration:\n\n**Bug #1 — Polygon null values:** Tests that `implied_vol: null` from Polygon falls back to 0.30 instead of crashing.\n\n**Bug #2 — Put spread IRR:** Tests that the HPR denominator is spread width (collateral), not max loss. A credit=8/width=10 spread returns 80%, not 400%.\n\n**Bug #3 — Short-dated annualization:** Tests that a 5-day option reports holding-period return, not a compounded annualized figure in the thousands of percent.\n\n**Bug #4 — Pre-close price interpolation:** Tests that a 1-day option on a 180-day deal barely converges (price ~90.06), not jumping to the deal price of 100.\n\n**Bug #5 — Expiration filtering:** Tests that `daysBeforeClose=60` on a July close yields `exp_gte = May 16`, not today.\n\nAll tests are pure unit tests (no network, no IB connection) using freezegun for deterministic dates.",
       "category": "general",
+      "project": "ma-options",
       "image": "",
       "screenshot": null
     }

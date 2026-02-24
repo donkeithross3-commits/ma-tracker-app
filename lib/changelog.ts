@@ -48,6 +48,8 @@ export interface ChangelogFeature {
   image?: string;
   /** Config consumed by the screenshot tool — not needed at render time */
   screenshot?: ScreenshotConfig;
+  /** Project this feature belongs to: "krj" | "ma-options" | "sheet-portfolio" | "general" */
+  project?: string;
 }
 
 export interface Release {
@@ -116,4 +118,20 @@ export function getReleaseDates(): string[] {
     .map((f) => f.replace(".json", ""))
     .sort()
     .reverse();
+}
+
+/**
+ * Filter releases so users only see features for projects they have access to.
+ * Features with project "general" or no project field are always included.
+ * Releases where ALL features are filtered out are excluded entirely.
+ */
+export function filterReleasesByAccess(releases: Release[], projectAccess: string[]): Release[] {
+  return releases
+    .map((release) => ({
+      ...release,
+      features: release.features.filter(
+        (f) => !f.project || f.project === "general" || projectAccess.includes(f.project)
+      ),
+    }))
+    .filter((release) => release.features.length > 0);
 }

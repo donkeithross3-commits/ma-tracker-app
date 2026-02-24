@@ -3,6 +3,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { getRelease, getCategoryStyle } from "@/lib/changelog";
 import { auth } from "@/auth";
+import { DEFAULT_PROJECT_ACCESS } from "@/lib/permissions";
 import { UserMenu } from "@/components/UserMenu";
 import { ArrowLeft, Newspaper } from "lucide-react";
 import fs from "fs";
@@ -20,6 +21,13 @@ export default async function ReleaseDetailPage({ params }: Props) {
   const release = getRelease(date);
 
   if (!release) notFound();
+
+  const projectAccess = session?.user?.projectAccess ?? DEFAULT_PROJECT_ACCESS;
+  release.features = release.features.filter(
+    (f) => !f.project || f.project === "general" || projectAccess.includes(f.project)
+  );
+
+  if (release.features.length === 0) notFound();
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">

@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials"
 import * as bcrypt from "bcryptjs"
 import { prisma } from "@/lib/db"
 import { authConfig } from "@/auth.config"
+import { DEFAULT_PROJECT_ACCESS } from "@/lib/permissions"
 
 /**
  * Full auth configuration with Prisma for server-side operations.
@@ -70,6 +71,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               role: "analyst",
               isActive: true,
               mustChangePassword: true, // Force password change on first login
+              projectAccess: DEFAULT_PROJECT_ACCESS,
             }
           })
           
@@ -106,6 +108,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           alias: user.alias || undefined,
           role: user.role,
           mustChangePassword: user.mustChangePassword,
+          projectAccess: user.projectAccess,
         }
       }
     })
@@ -118,16 +121,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.alias = user.alias
         token.role = user.role
         token.mustChangePassword = user.mustChangePassword
+        token.projectAccess = user.projectAccess ?? DEFAULT_PROJECT_ACCESS
       }
       // Allow updating the token when session is updated (after password change)
       if (trigger === "update") {
-        // Re-fetch user to get updated mustChangePassword status
+        // Re-fetch user to get updated mustChangePassword and projectAccess
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id as string },
-          select: { mustChangePassword: true }
+          select: { mustChangePassword: true, projectAccess: true }
         })
         if (dbUser) {
           token.mustChangePassword = dbUser.mustChangePassword
+          token.projectAccess = dbUser.projectAccess
         }
       }
       return token
@@ -138,6 +143,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.alias = token.alias as string | undefined
         session.user.role = token.role as string
         session.user.mustChangePassword = token.mustChangePassword as boolean
+        session.user.projectAccess = (token.projectAccess as string[] | undefined) ?? DEFAULT_PROJECT_ACCESS
       }
       return session
     }

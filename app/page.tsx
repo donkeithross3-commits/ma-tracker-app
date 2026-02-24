@@ -1,21 +1,55 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { UserMenu } from "@/components/UserMenu";
+import { hasProjectAccess, DEFAULT_PROJECT_ACCESS } from "@/lib/permissions";
 
 export default async function Home() {
   const session = await auth();
-  
+  const projectAccess: string[] =
+    (session?.user as Record<string, unknown> | undefined)?.projectAccess as string[] ??
+    DEFAULT_PROJECT_ACCESS;
+
+  const projects = [
+    {
+      key: "krj",
+      href: "/krj",
+      title: "KRJ Dashboard",
+      description: "Weekly market signals",
+      badge: "Production",
+      badgeClasses: "bg-green-500/20 text-green-400",
+      hoverBorder: "hover:border-blue-500",
+    },
+    {
+      key: "ma-options",
+      href: "/ma-options",
+      title: "M&A Options Scanner",
+      description: "Merger arbitrage options analysis tool",
+      badge: "Beta Testing",
+      badgeClasses: "bg-yellow-500/20 text-yellow-400",
+      hoverBorder: "hover:border-yellow-500",
+    },
+    {
+      key: "sheet-portfolio",
+      href: "/sheet-portfolio",
+      title: "Event Driven Portfolio",
+      description: "Event-driven M&A portfolio from production Google Sheet",
+      badge: "Beta Testing",
+      badgeClasses: "bg-purple-500/20 text-purple-400",
+      hoverBorder: "hover:border-purple-500",
+    },
+  ] as const;
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white">
       <div className="container mx-auto px-4 py-16">
         {/* User Menu in top right */}
         <div className="absolute top-4 right-4">
-          <UserMenu 
-            variant="dark" 
+          <UserMenu
+            variant="dark"
             initialUser={session?.user ? { name: session.user.name, email: session.user.email } : undefined}
           />
         </div>
-        
+
         <header className="text-center mb-16">
           <h1 className="text-5xl font-bold mb-4">DR3 Dashboard</h1>
           <p className="text-xl text-slate-300">Trading Analytics &amp; Tools</p>
@@ -23,56 +57,52 @@ export default async function Home() {
 
         <main className="max-w-2xl mx-auto">
           <div className="grid gap-6">
-            <Link
-              href="/krj"
-              className="block p-8 bg-slate-800 border border-slate-700 rounded-xl hover:border-blue-500 hover:bg-slate-700 transition-all"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-semibold mb-2">KRJ Dashboard</h2>
-                  <p className="text-slate-400">
-                    Weekly market signals
-                  </p>
-                </div>
-                <span className="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full">
-                  Production
-                </span>
-              </div>
-            </Link>
+            {projects.map((project) => {
+              const accessible = hasProjectAccess(projectAccess, project.key);
 
-            <Link
-              href="/ma-options"
-              className="block p-8 bg-slate-800 border border-slate-700 rounded-xl hover:border-yellow-500 hover:bg-slate-700 transition-all"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-semibold mb-2">M&amp;A Options Scanner</h2>
-                  <p className="text-slate-400">
-                    Merger arbitrage options analysis tool
-                  </p>
+              const content = (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-semibold mb-2">{project.title}</h2>
+                    <p className={accessible ? "text-slate-400" : "text-slate-500"}>
+                      {project.description}
+                    </p>
+                    {!accessible && (
+                      <p className="text-xs text-slate-500 mt-2 flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                        </svg>
+                        Access Required
+                      </p>
+                    )}
+                  </div>
+                  <span className={`text-xs ${project.badgeClasses} px-3 py-1 rounded-full`}>
+                    {project.badge}
+                  </span>
                 </div>
-                <span className="text-xs bg-yellow-500/20 text-yellow-400 px-3 py-1 rounded-full">
-                  Beta Testing
-                </span>
-              </div>
-            </Link>
+              );
 
-            <Link
-              href="/sheet-portfolio"
-              className="block p-8 bg-slate-800 border border-slate-700 rounded-xl hover:border-purple-500 hover:bg-slate-700 transition-all"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-semibold mb-2">Event Driven Portfolio</h2>
-                  <p className="text-slate-400">
-                    Event-driven M&amp;A portfolio from production Google Sheet
-                  </p>
+              if (accessible) {
+                return (
+                  <Link
+                    key={project.key}
+                    href={project.href}
+                    className={`block p-8 bg-slate-800 border border-slate-700 rounded-xl ${project.hoverBorder} hover:bg-slate-700 transition-all`}
+                  >
+                    {content}
+                  </Link>
+                );
+              }
+
+              return (
+                <div
+                  key={project.key}
+                  className="block p-8 bg-slate-800 border border-slate-700 rounded-xl opacity-50 cursor-not-allowed"
+                >
+                  {content}
                 </div>
-                <span className="text-xs bg-purple-500/20 text-purple-400 px-3 py-1 rounded-full">
-                  Beta Testing
-                </span>
-              </div>
-            </Link>
+              );
+            })}
           </div>
         </main>
 

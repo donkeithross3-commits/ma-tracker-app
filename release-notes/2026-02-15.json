@@ -9,6 +9,7 @@
       "summary": "Show or hide any column on the KRJ signals table \u2014 your selection is saved automatically",
       "description": "A new columns icon in the KRJ toolbar opens a dropdown where you can toggle any column on or off. Your column selection is saved to your account and persists across sessions and devices.\n\nThis is especially useful as new signal types are added (like the optimized signal columns). You choose exactly what you want to see, and the table adapts. A \u201cReset to defaults\u201d option at the bottom restores the original column set.\n\nThe column chooser is built as a reusable component \u2014 expect it on other tables soon.",
       "category": "signals",
+      "project": "krj",
       "image": "/changelog/2026-02-15/column-chooser.png",
       "screenshot": {
         "path": "/krj",
@@ -33,6 +34,7 @@
       "summary": "Toggle between compact and comfort density \u2014 larger text and touch targets for accessibility",
       "description": "A new Comfort Mode toggle in the user menu switches the UI between two density levels.\n\nCompact mode (the default for most pages) preserves the existing high-density trader layout. Comfort mode increases font sizes, button targets (44px minimum), and spacing for easier interaction.\n\nIn comfort mode, the KRJ signals table uses fluid scaling: font sizes and padding automatically adjust based on the viewport width and number of visible columns. Fewer columns means each one gets more room. The table fills the screen intelligently without requiring manual adjustments.\n\nYour preference is saved to your account and applies across all pages.",
       "category": "general",
+      "project": "general",
       "image": "/changelog/2026-02-15/comfort-mode.png",
       "screenshot": {
         "path": "/krj",
@@ -56,6 +58,7 @@
       "summary": "New optimized signal variants available via the column chooser (hidden by default)",
       "description": "Two new signal columns have been added to the KRJ column registry:\n\n- **Optimized Signal** \u2014 current week signal using optimized thresholds\n- **Last Week Opt Signal** \u2014 prior week optimized signal\n\nThese columns are hidden by default to keep the table clean. Toggle them on via the column chooser when you want to compare optimized vs. standard signals.\n\nThe columns will show data automatically as optimized signal calculations are rolled out in the CSV pipeline.",
       "category": "signals",
+      "project": "krj",
       "image": "/changelog/2026-02-15/optimized-signals.png",
       "screenshot": {
         "path": "/krj",
@@ -81,6 +84,7 @@
       "summary": "Selected position boxes now reliably survive page refresh and tab switches",
       "description": "Fixed a race condition that could cause your selected position boxes on the Account tab to reset when you refreshed the page or switched tabs.\n\nThe root cause was two competing save operations (selected tickers and manual tickers) that could overwrite each other. Both now use a centralized preferences context that batches changes into a single write, eliminating the race.\n\nYour position box selections are now reliably saved and restored across sessions.",
       "category": "positions",
+      "project": "ma-options",
       "image": "/changelog/2026-02-15/position-persistence.png",
       "screenshot": null
     },
@@ -90,6 +94,7 @@
       "summary": "New centralized preferences context eliminates per-component save races",
       "description": "Under the hood, a new UIPreferencesProvider context wraps the entire app. It loads all user preferences once on startup and provides them to every component via a React hook.\n\nInstead of each component independently fetching and saving preferences (which caused race conditions), all preference updates flow through the context. Changes are debounced and batched into a single API call.\n\nThis infrastructure supports the column chooser, comfort mode, and all future UI configurability features without adding new database tables or API endpoints.",
       "category": "general",
+      "project": "general",
       "image": "",
       "screenshot": null
     }

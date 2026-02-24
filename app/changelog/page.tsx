@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { getAllReleases, getCategoryStyle } from "@/lib/changelog";
+import { getAllReleases, getCategoryStyle, filterReleasesByAccess } from "@/lib/changelog";
 import { auth } from "@/auth";
+import { DEFAULT_PROJECT_ACCESS } from "@/lib/permissions";
 import { UserMenu } from "@/components/UserMenu";
 import { Newspaper, ChevronRight } from "lucide-react";
 
@@ -8,7 +9,8 @@ export const dynamic = "force-dynamic";
 
 export default async function ChangelogPage() {
   const session = await auth();
-  const releases = getAllReleases();
+  const allReleases = getAllReleases();
+  const releases = filterReleasesByAccess(allReleases, session?.user?.projectAccess ?? DEFAULT_PROJECT_ACCESS);
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">

@@ -9,6 +9,7 @@
       "summary": "Agent tries both TWS ports (7497 paper, 7496 live) so it connects without editing config.",
       "description": "The IB Data Agent now tries the configured port first, then the other standard TWS port if the connection fails. You can start paper TWS (7497) or live TWS (7496) and run the agent without setting IB_PORT or IB_MODE in config.env.\n\nPort mapping follows official TWS defaults: 7497 = paper, 7496 = live. Config parsing also trims whitespace so values from config.env are read correctly.",
       "category": "options",
+      "project": "ma-options",
       "image": "",
       "screenshot": null
     },
@@ -18,6 +19,7 @@
       "summary": "Leave Read-Only checked in TWS for quote-only use; market data and positions docs clarified.",
       "description": "Documentation and behavior now reflect that TWS Read-Only API mode only blocks order placement and order information — not market data (reqMktData) or positions. You can leave Read-Only **checked** when you only need quotes and want maximum safety against accidental API orders. Uncheck it when you need to place or manage orders; the socket port (7496 vs 7497) still determines which account (live vs paper) is used.",
       "category": "options",
+      "project": "ma-options",
       "image": "",
       "screenshot": null
     },
@@ -27,6 +29,7 @@
       "summary": "When TWS is in Read-Only mode, the agent stops calling positions and orders so IB errors stop.",
       "description": "If the agent receives an error from IB indicating Read-Only API mode (e.g. \"order information is not available\" or \"read only\"), it sets an internal flag and from then on:\n\n- Does not call reqPositions or reqOpenOrders (returns empty lists)\n- Does not call reqOpenOrders on reconnect\n- Place, modify, and cancel order requests return a clear message: \"TWS is in Read-Only API mode. Uncheck Read-Only in TWS API Settings to place orders.\"\n\nMarket data (quotes) and contract lookups continue to work. The status response includes **read_only_session** and the dashboard can show \"IB TWS connected (Read-Only — quotes only, no positions/orders)\" so users know why positions/orders are empty.",
       "category": "options",
+      "project": "ma-options",
       "image": "",
       "screenshot": null
     },
@@ -36,6 +39,7 @@
       "summary": "When the KRJ user opens the M&A Options Scanner, the Account tab is selected by default.",
       "description": "The option scanner page (Curate / Monitor / Account tabs) now defaults to the **Account** tab for the KRJ user (alias \"KRJ\") and to the **Monitor** tab for all other users. This is driven by the user's alias from session preferences, with no config change required.",
       "category": "options",
+      "project": "ma-options",
       "image": "",
       "screenshot": null
     },
@@ -45,6 +49,7 @@
       "summary": "The displacement signal combines per-stock relative strength z-scores with macro regime context to switch between momentum and mean-reversion modes.",
       "description": "The displacement signal measures how far each stock has moved from its benchmark (QQQ for NDX-100 stocks, SPY for all others) using a z-score of 1-month and 3-month excess returns normalized against a trailing 252-day window. The composite z-score is the average of both horizons.\n\nThe signal direction depends on the macro regime state, which is detected by a walk-forward Gaussian Mixture Model fitted on 19 market features (oscillator percentiles, volatility, correlation, yield curve shape). The GMM discovers 4 regimes from 7 years of daily data (2019\u2013present, ~1,400 days, 520+ stocks).\n\n**Within a stable regime (age > 10 days): momentum mode.** Phase 3 research measured per-stock rank persistence (lag-1 autocorrelation) across all four regimes and found consistently high values: 0.81\u20130.84 mean. Leaders keep leading. The signal rides the displacement direction \u2014 positive z \u2192 LONG, negative z \u2192 SHORT.\n\n**At regime transitions (age \u2264 10 days): mean-reversion mode.** Spearman rank correlation was measured across all 256 observed regime transitions in the sample:\n\n- +1 day: 0.84 (leadership unchanged)\n- +5 days: 0.59 (decaying fast)\n- +21 days: -0.02 (complete shuffle)\n\nWithin 21 days of a regime change, old rankings become uncorrelated with new rankings. Pre-transition leaders are no better than random picks. The signal fades the displacement \u2014 positive z \u2192 SHORT (old outperformer likely to fade), negative z \u2192 LONG (old underperformer likely to recover).\n\nThe 10-day threshold is the active reversal window: rank correlation is still 0.59 at +5d but essentially zero at +21d. Stocks with |z| < 0.5 always get a NEUTRAL signal regardless of regime. Confidence scales linearly with displacement magnitude (capped at |z| = 3) and is multiplied by regime probability.\n\nThe model does not differentiate between which regimes transition to which \u2014 all transitions are treated equally. The momentum/mean-reversion switch is binary, not graduated.",
       "category": "signals",
+      "project": "krj",
       "image": "",
       "screenshot": null
     }

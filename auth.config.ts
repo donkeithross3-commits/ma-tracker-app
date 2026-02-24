@@ -53,7 +53,35 @@ export const authConfig: NextAuthConfig = {
       if (auth?.user?.mustChangePassword && !isChangePasswordPage && !isChangePasswordAPI) {
         return Response.redirect(new URL("/account/change-password?required=true", request.url))
       }
-      
+
+      // --- Project-level access check ---
+      // Inline path-to-project mapping (cannot import lib/permissions.ts in Edge runtime)
+      let projectKey: string | null = null
+      if (pathname === "/krj" || pathname.startsWith("/krj/")) {
+        projectKey = "krj"
+      } else if (
+        pathname === "/ma-options" || pathname.startsWith("/ma-options/") ||
+        pathname === "/deals" || pathname.startsWith("/deals/") ||
+        pathname === "/portfolio" || pathname.startsWith("/portfolio/") ||
+        pathname === "/edgar" || pathname.startsWith("/edgar/") ||
+        pathname === "/intelligence" || pathname.startsWith("/intelligence/") ||
+        pathname === "/staging" || pathname.startsWith("/staging/") ||
+        pathname === "/rumored-deals" || pathname.startsWith("/rumored-deals/")
+      ) {
+        projectKey = "ma-options"
+      } else if (pathname === "/sheet-portfolio" || pathname.startsWith("/sheet-portfolio/")) {
+        projectKey = "sheet-portfolio"
+      }
+
+      if (projectKey) {
+        // Default to all projects for backward compatibility (existing users without projectAccess)
+        const projectAccess: string[] =
+          auth?.user?.projectAccess ?? ["krj", "ma-options", "sheet-portfolio"]
+        if (!projectAccess.includes(projectKey)) {
+          return Response.redirect(new URL("/", request.url))
+        }
+      }
+
       return true
     },
   },

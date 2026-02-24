@@ -7,6 +7,7 @@ declare module "next-auth" {
       alias?: string
       role: string
       mustChangePassword?: boolean
+      projectAccess: string[]
     } & DefaultSession["user"]
   }
 
@@ -14,6 +15,7 @@ declare module "next-auth" {
     alias?: string
     role?: string
     mustChangePassword?: boolean
+    projectAccess?: string[]
   }
 }
 
@@ -23,5 +25,6 @@ declare module "next-auth/jwt" {
     alias?: string
     role: string
     mustChangePassword?: boolean
+    projectAccess: string[]
   }
 }

@@ -19,6 +19,7 @@ model User {
   mustChangePassword Boolean             @default(false) @map("must_change_password")
   lastLoginAt        DateTime?           @map("last_login_at")
   createdAt          DateTime            @default(now()) @map("created_at")
+  projectAccess      String[]            @default(["krj", "ma-options", "sheet-portfolio"]) @map("project_access")
   updatedAt          DateTime            @updatedAt @map("updated_at")
   apiPriceFetches    ApiPriceFetch[]
   auditLogs          AuditLog[]

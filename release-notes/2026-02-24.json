@@ -9,6 +9,7 @@
       "summary": "The Event Driven Portfolio now shows real-time Polygon stock prices that auto-refresh every 60 seconds.",
       "description": "The portfolio dashboard (/sheet-portfolio) now fetches live stock prices from Polygon instead of relying on stale Google Sheet data.\n\n**Live price overlay:** The Crrnt Px column shows real-time prices in cyan when available, falling back to the sheet price if Polygon is unreachable.\n\n**Market data status pill:** A status indicator in the header shows a green health dot, the exact timestamp of the last market data fetch (e.g. \"Mkt data 2:25:13 PM\"), and an inline refresh button to fetch on demand in fast markets.\n\n**Auto-refresh:** Prices poll every 60 seconds with a document.hidden guard so backgrounded tabs don't waste API calls.\n\n**Recalculated yields:** Gross Yield and Current Yield columns recalculate on-the-fly using live prices, shown in cyan to distinguish from stale sheet values.\n\n**Live price change:** The Px Chng column shows Polygon's change percentage with green/red coloring.\n\n**Graceful degradation:** If Polygon is unavailable, all columns fall back to stale sheet values with no errors shown. The sheet Re-ingest button remains available for manual Google Sheet refreshes.",
       "category": "portfolio",
+      "project": "sheet-portfolio",
       "image": "",
       "screenshot": null
     },
@@ -18,6 +19,7 @@
       "summary": "The homepage card formerly labeled \"Sheet Portfolio\" is now \"Event Driven Portfolio\".",
       "description": "The homepage dashboard card has been renamed from \"Sheet Portfolio\" to \"Event Driven Portfolio\" to better reflect the tool's purpose as an event-driven M&A portfolio tracker.",
       "category": "portfolio",
+      "project": "sheet-portfolio",
       "image": "",
       "screenshot": null
     },
@@ -27,6 +29,7 @@
       "summary": "Each deal detail page now has a direct BamSEC link for quick access to SEC filings.",
       "description": "The deal detail page header now shows a BamSEC link alongside the Yahoo Quote link. Clicking it opens the target company's SEC filings on BamSEC (e.g. bamsec.com/companies/924901/veris-residential-inc for VRE).\n\nThe link is resolved automatically by looking up the ticker's CIK number from SEC data and constructing the BamSEC URL. If the ticker can't be resolved, the link gracefully doesn't appear.",
       "category": "portfolio",
+      "project": "sheet-portfolio",
       "image": "",
       "screenshot": null
     }
