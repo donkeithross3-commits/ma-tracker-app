@@ -18,6 +18,8 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - NODE_ENV=production
+      # Next.js standalone binds to HOSTNAME; must be 0.0.0.0 for port forwarding
+      - HOSTNAME=0.0.0.0
       # Dashboard must reach Python service on host (relay, IB status, options, etc.)
       - PYTHON_SERVICE_URL=http://host.docker.internal:8000
       # Portfolio service runs in its own container on the frontend network
