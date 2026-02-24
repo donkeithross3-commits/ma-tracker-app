@@ -399,8 +399,8 @@ export default function DealDetailPage() {
   const targetPrice = livePrice?.price ?? sheetTargetPrice;
   const targetPriceIsLive = livePrice?.price != null;
   const dealPrice = d?.total_price_per_share ?? dash?.deal_price;
-  const spread = d?.current_spread;
-  const spreadChange = d?.spread_change;
+  const spread = d?.current_spread ?? d?.deal_spread ?? dash?.gross_yield;
+  const spreadChange = d?.spread_change ?? dash?.price_change;
 
   const hasCvrs = d?.has_cvrs && d.has_cvrs.toLowerCase() !== "no";
   const cvrs = d?.cvrs && Array.isArray(d.cvrs) ? d.cvrs : [];
