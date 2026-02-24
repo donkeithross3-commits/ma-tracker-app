@@ -11,7 +11,7 @@ const PYTHON_SERVICE_URL =
 /**
  * Check if a WebSocket data provider is connected and fetch data through it
  */
-async function fetchViaWebSocketRelay(
+async function fetchViaRelay(
   ticker: string,
   dealPrice: number,
   expectedCloseDate: string,
@@ -19,27 +19,8 @@ async function fetchViaWebSocketRelay(
   userId?: string | null
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    // Check provider status via the relay endpoint
-    const statusResponse = await fetch(`${PYTHON_SERVICE_URL}/options/relay/ib-status`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    });
-
-    if (!statusResponse.ok) {
-      return { success: false, error: "Could not check provider status" };
-    }
-
-    const status = await statusResponse.json();
-    
-    if (!status.connected || !status.providers || status.providers.length === 0) {
-      return { success: false, error: "No data provider connected" };
-    }
-
-    console.log(`WebSocket provider available, fetching chain for ${ticker}...`);
-
-    // Send request through the relay
-    // The Python service will route this to the connected provider via WebSocket
-    // Include userId so requests can be routed to the user's own agent when available
+    // Call relay/fetch-chain directly — it tries Polygon first, IB fallback
+    // No need to pre-check IB status since Polygon is the primary data source
     const response = await fetch(`${PYTHON_SERVICE_URL}/options/relay/fetch-chain`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -48,22 +29,22 @@ async function fetchViaWebSocketRelay(
         dealPrice,
         expectedCloseDate,
         scanParams: scanParams || {},
-        userId: userId || undefined,  // Pass user context for agent routing
+        userId: userId || undefined,
       }),
     });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      return { 
-        success: false, 
-        error: errorData.detail || `Relay request failed: ${response.status}` 
+      return {
+        success: false,
+        error: errorData.detail || `Relay request failed: ${response.status}`
       };
     }
 
     const data = await response.json();
     return { success: true, data };
   } catch (error) {
-    console.log(`WebSocket relay error: ${error}`);
+    console.log(`Relay fetch error: ${error}`);
     return { success: false, error: String(error) };
   }
 }
@@ -181,10 +162,8 @@ export async function POST(request: NextRequest) {
     const closeDateObj = new Date(expectedCloseDate);
     const formattedCloseDate = closeDateObj.toISOString().split('T')[0];
 
-    // PRIORITY 0: Try WebSocket relay (remote IB data provider)
-    // This is the preferred method when IB TWS runs on a different machine
-    // Pass userId so requests are routed to the user's own agent when available
-    const relayResult = await fetchViaWebSocketRelay(
+    // PRIORITY 0: Try relay (Polygon primary, IB fallback)
+    const relayResult = await fetchViaRelay(
       ticker,
       dealPrice,
       formattedCloseDate,
@@ -230,8 +209,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Log relay failure reason for debugging
-    if (relayResult.error && relayResult.error !== "No data provider connected") {
-      console.log(`WebSocket relay failed for ${ticker}: ${relayResult.error}`);
+    if (relayResult.error) {
+      console.log(`Relay failed for ${ticker}: ${relayResult.error}`);
     }
 
     // PRIORITY 1: Check for recent data from price agents

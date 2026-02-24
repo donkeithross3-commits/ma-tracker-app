@@ -106,7 +106,8 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       });
 
       if (!chainResponse.ok) {
-        throw new Error("Failed to fetch option chain");
+        const errorData = await chainResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to fetch option chain");
       }
 
       const chainResult: OptionChainResponse = await chainResponse.json();
