@@ -229,6 +229,36 @@ async def get_deal_risk_changes(ticker: str):
 
 
 # ---------------------------------------------------------------------------
+# GET /risk/reports
+# ---------------------------------------------------------------------------
+@router.get("/reports")
+async def get_morning_reports():
+    """List recent morning reports."""
+    pool = _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, report_date, subject_line, total_deals, discrepancy_count, event_count, flagged_count, email_sent, whatsapp_sent, created_at FROM morning_reports ORDER BY report_date DESC LIMIT 30"
+        )
+        return [_row_to_dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/reports/latest
+# ---------------------------------------------------------------------------
+@router.get("/reports/latest")
+async def get_latest_morning_report():
+    """Get the latest morning report with full content."""
+    pool = _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM morning_reports ORDER BY report_date DESC LIMIT 1"
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="No morning report found")
+        return _row_to_dict(row)
+
+
+# ---------------------------------------------------------------------------
 # POST /risk/assess
 # ---------------------------------------------------------------------------
 @router.post("/assess")
@@ -247,29 +277,9 @@ async def trigger_assessment(ticker: Optional[str] = Query(None)):
             ticker = ticker.upper()
             context = await engine.collect_deal_context(ticker)
             result = await engine.assess_single_deal(context)
-            # Store as a mini-run
-            async with pool.acquire() as conn:
-                run_id = uuid.uuid4()
-                await conn.execute(
-                    """INSERT INTO risk_assessment_runs (id, run_date, assessed_deals, flagged_deals, changed_deals)
-                    VALUES ($1, CURRENT_DATE, 1, 0, 0)""",
-                    run_id
-                )
-                if isinstance(result, dict) and "assessment" in result:
-                    assessment = result["assessment"]
-                    await conn.execute(
-                        """INSERT INTO deal_risk_assessments
-                        (id, run_id, ticker, assessment_date, overall_risk_score, risk_factors, summary, raw_response)
-                        VALUES ($1, $2, $3, CURRENT_DATE, $4, $5, $6, $7)""",
-                        uuid.uuid4(), run_id, ticker,
-                        assessment.get("overall_risk_score"),
-                        json.dumps(assessment.get("risk_factors", {})),
-                        assessment.get("summary"),
-                        json.dumps(assessment)
-                    )
-            return result
+            return {"ticker": ticker, "assessment": result}
         else:
-            result = await engine.run_morning_assessment()
+            result = await engine.run_morning_assessment(triggered_by="manual")
             return result
     except HTTPException:
         raise

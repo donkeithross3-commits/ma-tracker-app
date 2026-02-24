@@ -1,7 +1,12 @@
-"""Risk Assessment Engine — runs morning risk analysis for all active deals."""
+"""Risk Assessment Engine — runs morning risk analysis for all active deals.
+
+Grade-based system: Low/Medium/High for 5 sheet-aligned factors,
+0-10 supplemental scores for 3 factors the sheet does not assess.
+"""
 
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import date, datetime
@@ -30,12 +35,13 @@ def _get_pool():
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Constants
 # ---------------------------------------------------------------------------
-RISK_FACTORS = [
-    "regulatory", "vote", "financing", "legal",
-    "timing", "mac", "market", "competing_bid",
-]
+GRADE_ORDER = {"Low": 1, "Medium": 2, "High": 3}
+
+GRADED_FACTORS = ["vote", "financing", "legal", "regulatory", "mac"]
+
+SUPPLEMENTAL_FACTORS = ["market", "timing", "competing_bid"]
 
 
 def _score_to_level(score: float | None) -> str:
@@ -51,6 +57,95 @@ def _score_to_level(score: float | None) -> str:
     if score < 8:
         return "high"
     return "critical"
+
+
+def extract_grade(text: str | None) -> str | None:
+    """Extract Low/Medium/High from free-form sheet text.
+
+    Examples:
+        "Medium, significant regulatory approvals required" -> "Medium"
+        "Low"                                               -> "Low"
+        "HIGH - multiple lawsuits"                          -> "High"
+        None or unrecognized                                -> None
+    """
+    if not text:
+        return None
+    text_lower = text.strip().lower()
+    for grade in ("high", "medium", "low"):
+        if text_lower.startswith(grade) or re.search(rf'\b{grade}\b', text_lower):
+            return grade.capitalize()
+    return None
+
+
+def detect_discrepancies(ai_result: dict, sheet_data: dict) -> list[dict]:
+    """Compare AI grades/estimates against Google Sheet values.
+
+    Returns a list of discrepancy dicts, each with:
+        factor, ai_value, sheet_value, discrepancy_type, detail
+    """
+    discrepancies = []
+
+    grades = ai_result.get("grades", {})
+
+    # Grade mismatches for vote / financing / legal
+    grade_mapping = {
+        "vote": "vote_risk",
+        "financing": "finance_risk",
+        "legal": "legal_risk",
+    }
+    for factor, sheet_key in grade_mapping.items():
+        ai_grade = grades.get(factor, {}).get("grade")
+        sheet_text = sheet_data.get(sheet_key)
+        sheet_grade = extract_grade(sheet_text)
+
+        if ai_grade and sheet_grade and ai_grade != sheet_grade:
+            ai_order = GRADE_ORDER.get(ai_grade, 0)
+            sheet_order = GRADE_ORDER.get(sheet_grade, 0)
+            direction = "higher" if ai_order > sheet_order else "lower"
+            discrepancies.append({
+                "factor": factor,
+                "ai_value": ai_grade,
+                "sheet_value": sheet_grade,
+                "discrepancy_type": "grade_mismatch",
+                "detail": f"AI rates {factor} as {ai_grade} but sheet says {sheet_grade} (AI is {direction} risk)",
+            })
+
+    # Investability disagreement
+    ai_investable = ai_result.get("investable_assessment", "").strip()
+    sheet_investable = (sheet_data.get("investable") or "").strip().lower()
+    if ai_investable and sheet_investable:
+        # Sheet typically says "Yes", "No", or something descriptive
+        sheet_says_yes = sheet_investable in ("yes", "y", "true", "investable")
+        ai_says_yes = ai_investable == "Yes"
+        if sheet_says_yes and not ai_says_yes:
+            discrepancies.append({
+                "factor": "investability",
+                "ai_value": ai_investable,
+                "sheet_value": sheet_data.get("investable"),
+                "discrepancy_type": "investability_disagreement",
+                "detail": f"Sheet says investable but AI says {ai_investable}",
+            })
+
+    # Probability divergence (>5% gap)
+    ai_prob = ai_result.get("probability_of_success")
+    sheet_prob = sheet_data.get("prob_success")
+    if ai_prob is not None and sheet_prob is not None:
+        try:
+            ai_prob_f = float(ai_prob)
+            sheet_prob_f = float(sheet_prob)
+            gap = abs(ai_prob_f - sheet_prob_f)
+            if gap > 5.0:
+                discrepancies.append({
+                    "factor": "probability",
+                    "ai_value": ai_prob_f,
+                    "sheet_value": sheet_prob_f,
+                    "discrepancy_type": "probability_divergence",
+                    "detail": f"AI estimates {ai_prob_f:.1f}% vs sheet {sheet_prob_f:.1f}% (gap: {gap:.1f}%)",
+                })
+        except (ValueError, TypeError):
+            pass
+
+    return discrepancies
 
 
 # ---------------------------------------------------------------------------
@@ -150,12 +245,24 @@ class RiskAssessmentEngine:
             if attrs:
                 context["deal_attributes"] = dict(attrs)
 
-        # Live price: use sheet row's current_price for now (Polygon integration later)
+        # Live price: use sheet row's current_price for now
         if row and row.get("current_price") is not None:
             context["live_price"] = {
                 "price": float(row["current_price"]),
                 "change": float(row["price_change"]) if row.get("price_change") is not None else None,
             }
+
+        # Build sheet comparison data for the prompt
+        sheet_comparison = {}
+        if row:
+            sheet_comparison["vote_risk"] = row.get("vote_risk")
+            sheet_comparison["finance_risk"] = row.get("finance_risk")
+            sheet_comparison["legal_risk"] = row.get("legal_risk")
+            sheet_comparison["investable"] = row.get("investable")
+        if details:
+            sheet_comparison["prob_success"] = details.get("probability_of_success")
+        if sheet_comparison:
+            context["sheet_comparison"] = sheet_comparison
 
         return context
 
@@ -207,26 +314,53 @@ class RiskAssessmentEngine:
         return parsed
 
     # ------------------------------------------------------------------
-    # Change detection
+    # Change detection (grade + score based)
     # ------------------------------------------------------------------
     async def detect_changes(self, ticker: str, today: dict, yesterday: dict | None) -> list[dict]:
-        """Compare today's scores to yesterday's and return significant changes.
+        """Compare today's assessment to yesterday's and return significant changes.
 
-        A change is significant if the magnitude (absolute difference) >= 0.5.
+        Checks both graded factors (grade level changes) and supplemental scores
+        (magnitude >= 0.5).
         """
         if not yesterday:
             return []
 
         changes = []
-        for factor in RISK_FACTORS:
-            new_score = None
-            old_score = None
 
-            # Today: parsed AI response has factor as a dict with 'score'
-            factor_data = today.get(factor)
-            if isinstance(factor_data, dict):
-                new_score = factor_data.get("score")
-            # Yesterday: stored in DB columns like regulatory_score
+        # Check graded factors for grade-level changes
+        grades = today.get("grades", {})
+        for factor in GRADED_FACTORS:
+            new_grade = grades.get(factor, {}).get("grade")
+            old_grade = yesterday.get(f"{factor}_grade")
+
+            if not new_grade or not old_grade:
+                continue
+
+            new_order = GRADE_ORDER.get(new_grade, 0)
+            old_order = GRADE_ORDER.get(old_grade, 0)
+
+            if new_order != old_order:
+                if new_order > old_order:
+                    direction = "worsened"
+                else:
+                    direction = "improved"
+
+                changes.append({
+                    "factor": factor,
+                    "old_score": old_order,
+                    "new_score": new_order,
+                    "old_level": old_grade,
+                    "new_level": new_grade,
+                    "direction": direction,
+                    "magnitude": abs(new_order - old_order),
+                    "explanation": grades.get(factor, {}).get("detail", ""),
+                })
+
+        # Check supplemental scores for numeric changes
+        supplementals = today.get("supplemental_scores", {})
+        for factor in SUPPLEMENTAL_FACTORS:
+            factor_data = supplementals.get(factor, {})
+            new_score = factor_data.get("score")
             old_score = yesterday.get(f"{factor}_score")
 
             if new_score is None or old_score is None:
@@ -242,10 +376,6 @@ class RiskAssessmentEngine:
                 else:
                     direction = "improved"
 
-                detail = ""
-                if isinstance(factor_data, dict):
-                    detail = factor_data.get("detail", "")
-
                 changes.append({
                     "factor": factor,
                     "old_score": old_score,
@@ -254,7 +384,7 @@ class RiskAssessmentEngine:
                     "new_level": _score_to_level(new_score),
                     "direction": direction,
                     "magnitude": round(magnitude, 2),
-                    "explanation": detail,
+                    "explanation": factor_data.get("detail", ""),
                 })
 
         return changes
@@ -306,6 +436,7 @@ class RiskAssessmentEngine:
         changed = 0
         total_tokens = 0
         total_cost = 0.0
+        total_discrepancies = 0
 
         for ticker in tickers:
             try:
@@ -315,42 +446,51 @@ class RiskAssessmentEngine:
                 # Run AI assessment
                 assessment = await self.assess_single_deal(context)
 
+                # Detect discrepancies against sheet
+                sheet_data = context.get("sheet_comparison", {})
+                discrepancies = detect_discrepancies(assessment, sheet_data)
+
                 # Detect changes from previous assessment
                 prev = context.get("previous_assessment")
-                changes = await self.detect_changes(ticker, assessment, prev)
+                score_changes = await self.detect_changes(ticker, assessment, prev)
 
                 # Store assessment
                 assessment_id = await self._store_assessment(
-                    run_id, run_date, ticker, assessment, context,
+                    run_id, run_date, ticker, assessment, context, discrepancies,
                 )
 
                 # Store changes
-                for change in changes:
+                for change in score_changes:
                     await self._store_change(assessment_id, run_date, ticker, change)
 
                 meta = assessment.get("_meta", {})
                 total_tokens += meta.get("tokens_used", 0)
                 total_cost += meta.get("cost_usd", 0)
+                total_discrepancies += len(discrepancies)
 
                 if assessment.get("needs_attention"):
                     flagged += 1
-                if changes:
+                if score_changes:
                     changed += 1
 
                 assessed += 1
                 results.append({
                     "ticker": ticker,
                     "status": "success",
-                    "overall_score": assessment.get("overall_risk_score"),
                     "needs_attention": assessment.get("needs_attention", False),
-                    "changes": len(changes),
+                    "discrepancies": len(discrepancies),
+                    "changes": len(score_changes),
+                    "grades": {
+                        f: assessment.get("grades", {}).get(f, {}).get("grade")
+                        for f in GRADED_FACTORS
+                    },
                 })
                 logger.info(
-                    "Assessed %s: score=%.1f, attention=%s, changes=%d",
+                    "Assessed %s: attention=%s, discrepancies=%d, changes=%d",
                     ticker,
-                    assessment.get("overall_risk_score", 0),
                     assessment.get("needs_attention", False),
-                    len(changes),
+                    len(discrepancies),
+                    len(score_changes),
                 )
 
             except Exception as e:
@@ -362,10 +502,13 @@ class RiskAssessmentEngine:
         summary = None
         if assessed > 0:
             try:
-                summary = await self._generate_run_summary(run_id, run_date, results)
+                summary = await self._generate_run_summary(run_id, run_date, results, total_discrepancies)
             except Exception as e:
                 logger.error("Failed to generate run summary: %s", e)
-                summary = f"Assessed {assessed}/{total_deals} deals. {flagged} flagged, {changed} changed, {failed} failed."
+                summary = (
+                    f"Assessed {assessed}/{total_deals} deals. "
+                    f"{flagged} flagged, {changed} changed, {total_discrepancies} discrepancies, {failed} failed."
+                )
 
         # Update run record
         async with self.pool.acquire() as conn:
@@ -388,8 +531,8 @@ class RiskAssessmentEngine:
             )
 
         logger.info(
-            "Risk run %s completed: %d/%d assessed, %d flagged, %d changed, %d failed",
-            run_id, assessed, total_deals, flagged, changed, failed,
+            "Risk run %s completed: %d/%d assessed, %d flagged, %d changed, %d discrepancies, %d failed",
+            run_id, assessed, total_deals, flagged, changed, total_discrepancies, failed,
         )
 
         return {
@@ -401,6 +544,7 @@ class RiskAssessmentEngine:
             "failed_deals": failed,
             "flagged_deals": flagged,
             "changed_deals": changed,
+            "total_discrepancies": total_discrepancies,
             "total_tokens": total_tokens,
             "total_cost_usd": round(total_cost, 4),
             "summary": summary,
@@ -410,9 +554,8 @@ class RiskAssessmentEngine:
     # ------------------------------------------------------------------
     # Run summary generation
     # ------------------------------------------------------------------
-    async def _generate_run_summary(self, run_id, run_date, results: list) -> str:
+    async def _generate_run_summary(self, run_id, run_date, results: list, total_discrepancies: int = 0) -> str:
         """Generate an executive summary of the run using Claude."""
-        # Fetch all assessments and changes for context
         assessments = await self._fetch_run_assessments(run_id)
         changes = await self._fetch_run_changes(run_date)
 
@@ -420,22 +563,30 @@ class RiskAssessmentEngine:
 
 Results: {len(results)} deals assessed.
 - Flagged for attention: {sum(1 for r in results if r.get('needs_attention'))}
-- With score changes: {sum(1 for r in results if r.get('changes', 0) > 0)}
+- With grade/score changes: {sum(1 for r in results if r.get('changes', 0) > 0)}
+- Total discrepancies vs sheet: {total_discrepancies}
 - Failed: {sum(1 for r in results if r['status'] == 'failed')}
 
 Assessments:
 """
         for a in assessments:
+            grades_str = ""
+            for f in GRADED_FACTORS:
+                g = a.get(f"{f}_grade")
+                if g:
+                    grades_str += f" {f}={g}"
             summary_prompt += (
-                f"- {a['ticker']}: overall={a['overall_risk_score']} "
-                f"({a['overall_risk_level']}), attention={a['needs_attention']}\n"
+                f"- {a['ticker']}:{grades_str}, "
+                f"investable={a.get('investable_assessment', 'N/A')}, "
+                f"attention={a['needs_attention']}, "
+                f"discrepancies={a.get('discrepancy_count', 0)}\n"
             )
 
         if changes:
-            summary_prompt += "\nSignificant changes:\n"
+            summary_prompt += "\nSignificant changes from yesterday:\n"
             for c in changes:
                 summary_prompt += (
-                    f"- {c['ticker']} {c['factor']}: {c['old_score']}->{c['new_score']} "
+                    f"- {c['ticker']} {c['factor']}: {c['old_level']}->{c['new_level']} "
                     f"({c['direction']})\n"
                 )
 
@@ -443,7 +594,8 @@ Assessments:
 Write a concise 3-5 sentence executive summary. Focus on:
 1. Overall portfolio risk posture
 2. Deals needing attention and why
-3. Notable changes from yesterday
+3. Notable discrepancies between our AI grades and the Google Sheet
+4. Significant changes from yesterday
 Keep it actionable and direct."""
 
         response = self.anthropic.messages.create(
@@ -458,23 +610,25 @@ Keep it actionable and direct."""
     # ------------------------------------------------------------------
     # Storage
     # ------------------------------------------------------------------
-    async def _store_assessment(self, run_id, run_date, ticker, assessment, context=None) -> uuid.UUID:
+    async def _store_assessment(
+        self, run_id, run_date, ticker, assessment, context=None, discrepancies=None,
+    ) -> uuid.UUID:
         """Insert a single deal assessment into the database. Returns the assessment ID."""
         assessment_id = uuid.uuid4()
 
-        # Extract scores from the AI response
-        overall_score = assessment.get("overall_risk_score")
-        overall_level = _score_to_level(overall_score)
-        overall_summary = assessment.get("overall_risk_summary")
+        # Extract grades
+        grades = assessment.get("grades", {})
+        vote_g = grades.get("vote", {})
+        fin_g = grades.get("financing", {})
+        legal_g = grades.get("legal", {})
+        reg_g = grades.get("regulatory", {})
+        mac_g = grades.get("mac", {})
 
-        reg = assessment.get("regulatory", {})
-        vote = assessment.get("vote", {})
-        fin = assessment.get("financing", {})
-        legal = assessment.get("legal", {})
-        timing = assessment.get("timing", {})
-        mac = assessment.get("mac", {})
-        market = assessment.get("market", {})
-        comp = assessment.get("competing_bid", {})
+        # Extract supplemental scores
+        supplementals = assessment.get("supplemental_scores", {})
+        market_s = supplementals.get("market", {})
+        timing_s = supplementals.get("timing", {})
+        comp_s = supplementals.get("competing_bid", {})
 
         # Deal metrics from context
         row = (context or {}).get("sheet_row", {})
@@ -483,6 +637,10 @@ Keep it actionable and direct."""
         gross_yield = row.get("gross_yield")
         current_yield = row.get("current_yield")
         countdown_days = row.get("countdown_days")
+
+        # Sheet comparison values
+        sheet_comp = (context or {}).get("sheet_comparison", {})
+        details = (context or {}).get("deal_details", {})
 
         # Flags
         has_new_filing = len((context or {}).get("recent_filings", [])) > 0
@@ -493,70 +651,118 @@ Keep it actionable and direct."""
         )
 
         meta = assessment.get("_meta", {})
+        disc_list = discrepancies or []
 
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """INSERT INTO deal_risk_assessments (
                     id, assessment_date, ticker,
-                    overall_risk_score, overall_risk_level, overall_risk_summary,
-                    regulatory_score, regulatory_detail,
-                    vote_score, vote_detail,
-                    financing_score, financing_detail,
-                    legal_score, legal_detail,
-                    timing_score, timing_detail,
-                    mac_score, mac_detail,
+                    -- Grades
+                    vote_grade, vote_detail, vote_confidence,
+                    financing_grade, financing_detail, financing_confidence,
+                    legal_grade, legal_detail, legal_confidence,
+                    regulatory_grade, regulatory_detail, regulatory_confidence,
+                    mac_grade, mac_detail, mac_confidence,
+                    -- Supplemental scores
                     market_score, market_detail,
+                    timing_score, timing_detail,
                     competing_bid_score, competing_bid_detail,
+                    -- Investability
+                    investable_assessment, investable_reasoning,
+                    -- Our estimates
+                    our_prob_success, our_prob_higher_offer,
+                    our_break_price, our_implied_downside,
+                    -- Sheet values at assessment time
+                    sheet_vote_risk, sheet_finance_risk, sheet_legal_risk,
+                    sheet_investable, sheet_prob_success,
+                    -- Discrepancies and events
+                    discrepancies, discrepancy_count,
+                    -- Deal summary
+                    deal_summary, key_risks, watchlist_items,
+                    -- Deal metrics
                     deal_price, current_price,
                     gross_spread_pct, annualized_yield_pct,
                     days_to_close, probability_of_success,
+                    -- Flags
                     has_new_filing, has_new_halt,
                     has_spread_change, has_risk_change,
                     needs_attention, attention_reason,
+                    -- Raw data
                     input_data, ai_response,
                     model_used, tokens_used, processing_time_ms,
                     run_id
                 ) VALUES (
                     $1, $2, $3,
                     $4, $5, $6,
-                    $7, $8,
-                    $9, $10,
-                    $11, $12,
-                    $13, $14,
-                    $15, $16,
-                    $17, $18,
+                    $7, $8, $9,
+                    $10, $11, $12,
+                    $13, $14, $15,
+                    $16, $17, $18,
                     $19, $20,
                     $21, $22,
                     $23, $24,
                     $25, $26,
                     $27, $28,
                     $29, $30,
-                    $31, $32,
-                    $33, $34,
-                    $35, $36,
-                    $37, $38, $39,
-                    $40
+                    $31, $32, $33,
+                    $34, $35,
+                    $36, $37,
+                    $38, $39, $40,
+                    $41, $42,
+                    $43, $44,
+                    $45, $46,
+                    $47, $48,
+                    $49, $50,
+                    $51, $52,
+                    $53, $54,
+                    $55, $56, $57,
+                    $58
                 )""",
                 assessment_id, run_date, ticker,
-                overall_score, overall_level, overall_summary,
-                reg.get("score"), reg.get("detail"),
-                vote.get("score"), vote.get("detail"),
-                fin.get("score"), fin.get("detail"),
-                legal.get("score"), legal.get("detail"),
-                timing.get("score"), timing.get("detail"),
-                mac.get("score"), mac.get("detail"),
-                market.get("score"), market.get("detail"),
-                comp.get("score"), comp.get("detail"),
+                # Grades
+                vote_g.get("grade"), vote_g.get("detail"), vote_g.get("confidence"),
+                fin_g.get("grade"), fin_g.get("detail"), fin_g.get("confidence"),
+                legal_g.get("grade"), legal_g.get("detail"), legal_g.get("confidence"),
+                reg_g.get("grade"), reg_g.get("detail"), reg_g.get("confidence"),
+                mac_g.get("grade"), mac_g.get("detail"), mac_g.get("confidence"),
+                # Supplemental scores
+                market_s.get("score"), market_s.get("detail"),
+                timing_s.get("score"), timing_s.get("detail"),
+                comp_s.get("score"), comp_s.get("detail"),
+                # Investability
+                assessment.get("investable_assessment"),
+                assessment.get("investable_reasoning"),
+                # Our estimates
+                assessment.get("probability_of_success"),
+                assessment.get("probability_of_higher_offer"),
+                assessment.get("break_price_estimate"),
+                assessment.get("implied_downside_estimate"),
+                # Sheet values
+                sheet_comp.get("vote_risk"),
+                sheet_comp.get("finance_risk"),
+                sheet_comp.get("legal_risk"),
+                sheet_comp.get("investable"),
+                float(sheet_comp["prob_success"]) if sheet_comp.get("prob_success") is not None else None,
+                # Discrepancies
+                json.dumps(disc_list) if disc_list else None,
+                len(disc_list),
+                # Deal summary
+                assessment.get("deal_summary"),
+                json.dumps(assessment.get("key_risks")) if assessment.get("key_risks") else None,
+                json.dumps(assessment.get("watchlist_items")) if assessment.get("watchlist_items") else None,
+                # Deal metrics
                 float(deal_price) if deal_price is not None else None,
                 float(current_price) if current_price is not None else None,
                 float(gross_yield) if gross_yield is not None else None,
                 float(current_yield) if current_yield is not None else None,
                 countdown_days,
                 assessment.get("probability_of_success"),
+                # Flags
                 has_new_filing, has_new_halt,
                 has_spread_change, False,  # has_risk_change set after change detection
                 assessment.get("needs_attention", False),
                 assessment.get("attention_reason"),
+                # Raw data
                 json.dumps({"ticker": ticker, "context_keys": list((context or {}).keys())}),
                 json.dumps(assessment),
                 meta.get("model", self.MODEL),

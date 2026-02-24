@@ -141,6 +141,27 @@ function flagBadge(val: string | null | undefined) {
   return <span className="text-blue-400">{val}</span>;
 }
 
+interface CoveredCallResult {
+  ticker: string;
+  current_price: number;
+  deal_price: number;
+  strike: number;
+  expiry: string;
+  premium: number;
+  annualized_yield: number;
+  downside_cushion: number;
+  effective_basis: number;
+  if_called_return: number;
+  implied_vol: number | null;
+  days_to_expiry: number;
+  open_interest: number;
+  volume: number;
+  bid: number;
+  ask: number;
+  breakeven: number;
+  notes: string | null;
+}
+
 interface RiskAssessment {
   assessment_date: string;
   overall_risk_score: number | null;
@@ -149,113 +170,109 @@ interface RiskAssessment {
   probability_of_success: number | null;
   needs_attention: boolean;
   attention_reason: string | null;
-  regulatory_score: number | null;
-  regulatory_detail: string | null;
-  vote_score: number | null;
+  // Grade-based factors (new)
+  vote_grade: string | null;
+  vote_confidence: number | null;
   vote_detail: string | null;
-  financing_score: number | null;
+  financing_grade: string | null;
+  financing_confidence: number | null;
   financing_detail: string | null;
-  legal_score: number | null;
+  legal_grade: string | null;
+  legal_confidence: number | null;
   legal_detail: string | null;
-  timing_score: number | null;
-  timing_detail: string | null;
-  mac_score: number | null;
+  regulatory_grade: string | null;
+  regulatory_confidence: number | null;
+  regulatory_detail: string | null;
+  mac_grade: string | null;
+  mac_confidence: number | null;
   mac_detail: string | null;
+  // Supplemental scores
   market_score: number | null;
   market_detail: string | null;
+  timing_score: number | null;
+  timing_detail: string | null;
   competing_bid_score: number | null;
   competing_bid_detail: string | null;
+  // New fields
+  investable_assessment: string | null;
+  deal_summary: string | null;
+  key_risks: string[] | null;
+  discrepancies: Array<{ field: string; sheet_value: string; ai_value: string; explanation: string }> | null;
+  overnight_events: Array<{ type: string; ticker: string; headline: string; severity: string }> | null;
+  discrepancy_count: number;
+  event_count: number;
+  // Legacy scores for backward compat
+  regulatory_score: number | null;
+  vote_score: number | null;
+  financing_score: number | null;
+  legal_score: number | null;
+  timing_score: number | null;
+  mac_score: number | null;
 }
 
-const RISK_FACTORS = [
-  { key: "regulatory", label: "Regulatory", short: "REG" },
-  { key: "vote", label: "Vote", short: "VOT" },
-  { key: "financing", label: "Financing", short: "FIN" },
-  { key: "legal", label: "Legal", short: "LEG" },
-  { key: "timing", label: "Timing", short: "TIM" },
-  { key: "mac", label: "MAC", short: "MAC" },
-  { key: "market", label: "Market", short: "MKT" },
-  { key: "competing_bid", label: "Competing Bid", short: "BID" },
+const GRADE_FACTORS = [
+  { key: "vote", label: "Vote Risk" },
+  { key: "financing", label: "Financing Risk" },
+  { key: "legal", label: "Legal Risk" },
+  { key: "regulatory", label: "Regulatory Risk" },
+  { key: "mac", label: "MAC Risk" },
 ] as const;
 
-function RiskRadarChart({ assessment }: { assessment: RiskAssessment }) {
-  const cx = 128, cy = 128, r = 100;
-  const n = RISK_FACTORS.length;
+const SUPPLEMENTAL_FACTORS = [
+  { key: "market", label: "Market" },
+  { key: "timing", label: "Timing" },
+  { key: "competing_bid", label: "Competing Bid" },
+] as const;
 
-  const points = RISK_FACTORS.map((f, i) => {
-    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
-    const score = (assessment as unknown as Record<string, unknown>)[`${f.key}_score`] as number ?? 0;
-    const ratio = score / 10;
-    return {
-      x: cx + r * ratio * Math.cos(angle),
-      y: cy + r * ratio * Math.sin(angle),
-      labelX: cx + (r + 16) * Math.cos(angle),
-      labelY: cy + (r + 16) * Math.sin(angle),
-    };
-  });
-
-  const polygonPoints = points.map(p => `${p.x},${p.y}`).join(" ");
-  const gridLevels = [2, 4, 6, 8, 10];
-
-  const overall = assessment.overall_risk_score ?? 0;
-  let fillColor = "rgba(74, 222, 128, 0.15)";
-  if (overall >= 8) fillColor = "rgba(248, 113, 113, 0.2)";
-  else if (overall >= 6) fillColor = "rgba(251, 146, 60, 0.2)";
-  else if (overall >= 4) fillColor = "rgba(250, 204, 21, 0.15)";
-  else if (overall >= 2) fillColor = "rgba(163, 230, 53, 0.15)";
-
-  let strokeColor = "#4ade80";
-  if (overall >= 8) strokeColor = "#f87171";
-  else if (overall >= 6) strokeColor = "#fb923c";
-  else if (overall >= 4) strokeColor = "#facc15";
-  else if (overall >= 2) strokeColor = "#a3e635";
-
-  return (
-    <svg viewBox="0 0 256 256" className="w-full h-full">
-      {gridLevels.map(level => {
-        const gridPoints = Array.from({length: n}, (_, i) => {
-          const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
-          const ratio = level / 10;
-          return `${cx + r * ratio * Math.cos(angle)},${cy + r * ratio * Math.sin(angle)}`;
-        }).join(" ");
-        return <polygon key={level} points={gridPoints} fill="none" stroke="#374151" strokeWidth="0.5" />;
-      })}
-      {RISK_FACTORS.map((_, i) => {
-        const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
-        return <line key={i} x1={cx} y1={cy} x2={cx + r * Math.cos(angle)} y2={cy + r * Math.sin(angle)} stroke="#374151" strokeWidth="0.5" />;
-      })}
-      <polygon points={polygonPoints} fill={fillColor} stroke={strokeColor} strokeWidth="1.5" />
-      {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="3" fill={strokeColor} />
-      ))}
-      {points.map((p, i) => (
-        <text key={i} x={p.labelX} y={p.labelY} textAnchor="middle" dominantBaseline="middle" className="fill-gray-400" fontSize="8">
-          {RISK_FACTORS[i].short}
-        </text>
-      ))}
-    </svg>
-  );
+function gradeStyle(grade: string | null): { text: string; bg: string; border: string } {
+  if (!grade) return { text: "text-gray-500", bg: "bg-gray-500/10", border: "border-gray-500/30" };
+  const g = grade.toUpperCase();
+  if (g === "LOW") return { text: "text-green-400", bg: "bg-green-400/10", border: "border-green-400/30" };
+  if (g === "MEDIUM" || g === "MED") return { text: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/30" };
+  if (g === "HIGH") return { text: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/30" };
+  return { text: "text-gray-400", bg: "bg-gray-400/10", border: "border-gray-400/30" };
 }
 
-function RiskScoreBadge({ score, level }: { score: number | null; level: string | null }) {
-  if (score === null) return <span className="text-gray-600 text-2xl font-mono">-</span>;
-  let color = "text-green-400 bg-green-400/10 border-green-400/30";
-  if (score >= 8) color = "text-red-400 bg-red-400/10 border-red-400/30";
-  else if (score >= 6) color = "text-orange-400 bg-orange-400/10 border-orange-400/30";
-  else if (score >= 4) color = "text-yellow-400 bg-yellow-400/10 border-yellow-400/30";
-  else if (score >= 2) color = "text-lime-400 bg-lime-400/10 border-lime-400/30";
+function GradeBadge({ grade, label }: { grade: string | null; label: string }) {
+  const style = gradeStyle(grade);
   return (
-    <div className={`px-3 py-2 rounded border text-center ${color}`}>
-      <div className="text-2xl font-mono font-bold">{score.toFixed(1)}</div>
-      <div className="text-xs uppercase tracking-wider">{level}</div>
+    <div className={`px-3 py-2 rounded border text-center ${style.bg} ${style.border}`}>
+      <div className={`text-lg font-bold ${style.text}`}>{grade || "-"}</div>
+      <div className="text-xs text-gray-500 uppercase tracking-wider">{label}</div>
     </div>
   );
 }
 
-function FactorCard({ factor, assessment }: { factor: typeof RISK_FACTORS[number]; assessment: RiskAssessment }) {
-  const score = (assessment as unknown as Record<string, unknown>)[`${factor.key}_score`] as number | null;
-  const detail = (assessment as unknown as Record<string, unknown>)[`${factor.key}_detail`] as string | null;
+function GradeFactorCard({ label, grade, confidence, detail }: {
+  label: string;
+  grade: string | null;
+  confidence: number | null;
+  detail: string | null;
+}) {
+  if (!grade) return null;
+  const style = gradeStyle(grade);
 
+  return (
+    <div className="bg-gray-800/50 rounded p-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-medium text-gray-400">{label}</span>
+        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>{grade}</span>
+      </div>
+      {confidence != null && (
+        <div className="w-full bg-gray-700 rounded-full h-1 mb-1.5" title={`Confidence: ${(confidence * 100).toFixed(0)}%`}>
+          <div className="h-1 rounded-full bg-blue-400" style={{ width: `${confidence * 100}%` }} />
+        </div>
+      )}
+      {detail && <p className="text-xs text-gray-500 line-clamp-2">{detail}</p>}
+    </div>
+  );
+}
+
+function SupplementalScoreCard({ label, score, detail }: {
+  label: string;
+  score: number | null;
+  detail: string | null;
+}) {
   if (score === null) return null;
 
   let barColor = "bg-green-400";
@@ -267,8 +284,8 @@ function FactorCard({ factor, assessment }: { factor: typeof RISK_FACTORS[number
   return (
     <div className="bg-gray-800/50 rounded p-2">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium text-gray-400">{factor.label}</span>
-        <span className="text-xs font-mono font-bold text-gray-200">{score.toFixed(1)}</span>
+        <span className="text-xs font-medium text-gray-400">{label}</span>
+        <span className="text-xs font-mono font-bold text-gray-200">{score.toFixed(1)}/10</span>
       </div>
       <div className="w-full bg-gray-700 rounded-full h-1 mb-1.5">
         <div className={`h-1 rounded-full ${barColor}`} style={{ width: `${(score / 10) * 100}%` }} />
@@ -305,6 +322,9 @@ export default function DealDetailPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [riskAssessment, setRiskAssessment] = useState<RiskAssessment | null>(null);
   const [assessing, setAssessing] = useState(false);
+  const [coveredCalls, setCoveredCalls] = useState<CoveredCallResult[]>([]);
+  const [coveredCallsLoading, setCoveredCallsLoading] = useState(false);
+  const [coveredCallsIv, setCoveredCallsIv] = useState<number | null>(null);
 
   useEffect(() => {
     if (!ticker) return;
@@ -326,6 +346,31 @@ export default function DealDetailPage() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [ticker]);
+
+  // Fetch covered call opportunities after main data loads
+  useEffect(() => {
+    if (!ticker || loading) return;
+    // Only fetch if deal detail says optionable
+    const optionable = data?.detail?.optionable;
+    if (optionable && optionable.toLowerCase() === "no") return;
+
+    setCoveredCallsLoading(true);
+    fetch(`/api/sheet-portfolio/risk/covered-calls?ticker=${encodeURIComponent(ticker)}`)
+      .then(async (resp) => {
+        if (resp.ok) {
+          const body = await resp.json();
+          const results: CoveredCallResult[] = body.results || [];
+          setCoveredCalls(results);
+          // Extract implied vol from the first result (all share same underlying)
+          if (results.length > 0 && results[0].implied_vol != null) {
+            setCoveredCallsIv(results[0].implied_vol);
+          }
+        }
+      })
+      .catch(() => { /* silently fail -- card just won't show */ })
+      .finally(() => setCoveredCallsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticker, loading]);
 
   const fetchLivePrice = useCallback(async () => {
     if (!ticker) return;
@@ -653,11 +698,13 @@ export default function DealDetailPage() {
             <>
               {/* Overall summary */}
               <div className="flex items-center gap-3 mb-3 p-2 bg-gray-800/50 rounded">
-                <RiskScoreBadge score={riskAssessment.overall_risk_score} level={riskAssessment.overall_risk_level} />
                 <div className="flex-1">
-                  <p className="text-sm text-gray-300">{riskAssessment.overall_risk_summary}</p>
+                  <p className="text-sm text-gray-300">{riskAssessment.overall_risk_summary || riskAssessment.deal_summary}</p>
                   {riskAssessment.needs_attention && riskAssessment.attention_reason && (
                     <p className="text-xs text-red-400 mt-1">&#9873; {riskAssessment.attention_reason}</p>
+                  )}
+                  {riskAssessment.investable_assessment && (
+                    <p className="text-xs text-blue-400 mt-1">Investable: {riskAssessment.investable_assessment}</p>
                   )}
                 </div>
                 {riskAssessment.probability_of_success != null && (
@@ -668,18 +715,88 @@ export default function DealDetailPage() {
                 )}
               </div>
 
-              {/* Radar chart + factor cards */}
-              <div className="flex gap-3">
-                <div className="w-64 h-64 shrink-0">
-                  <RiskRadarChart assessment={riskAssessment} />
-                </div>
-
-                <div className="flex-1 grid grid-cols-2 gap-2">
-                  {RISK_FACTORS.map(f => (
-                    <FactorCard key={f.key} factor={f} assessment={riskAssessment} />
-                  ))}
-                </div>
+              {/* Grade badges row */}
+              <div className="grid grid-cols-5 gap-2 mb-3">
+                {GRADE_FACTORS.map(f => {
+                  const grade = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_grade`] as string | null;
+                  return <GradeBadge key={f.key} grade={grade} label={f.label} />;
+                })}
               </div>
+
+              {/* Factor detail cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 mb-3">
+                {GRADE_FACTORS.map(f => {
+                  const grade = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_grade`] as string | null;
+                  const confidence = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_confidence`] as number | null;
+                  const detail = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_detail`] as string | null;
+                  return <GradeFactorCard key={f.key} label={f.label} grade={grade} confidence={confidence} detail={detail} />;
+                })}
+              </div>
+
+              {/* Supplemental scores */}
+              {(riskAssessment.market_score != null || riskAssessment.timing_score != null || riskAssessment.competing_bid_score != null) && (
+                <div className="mb-3">
+                  <h4 className="text-xs font-medium text-gray-500 mb-1.5">Supplemental Scores</h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    {SUPPLEMENTAL_FACTORS.map(f => {
+                      const score = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_score`] as number | null;
+                      const detail = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_detail`] as string | null;
+                      return <SupplementalScoreCard key={f.key} label={f.label} score={score} detail={detail} />;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Key risks */}
+              {riskAssessment.key_risks && riskAssessment.key_risks.length > 0 && (
+                <div className="mb-3 p-2 bg-gray-800/50 rounded">
+                  <h4 className="text-xs font-medium text-gray-500 mb-1">Key Risks</h4>
+                  <ul className="text-xs text-gray-400 space-y-0.5">
+                    {riskAssessment.key_risks.map((risk, i) => (
+                      <li key={i} className="flex items-start gap-1">
+                        <span className="text-red-400 shrink-0">-</span>
+                        <span>{risk}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Discrepancies */}
+              {riskAssessment.discrepancies && riskAssessment.discrepancies.length > 0 && (
+                <div className="mb-3 p-2 bg-yellow-400/5 border border-yellow-600/20 rounded">
+                  <h4 className="text-xs font-medium text-yellow-400 mb-1">Discrepancies ({riskAssessment.discrepancies.length})</h4>
+                  <div className="space-y-1">
+                    {riskAssessment.discrepancies.map((disc, i) => (
+                      <div key={i} className="text-xs">
+                        <span className="text-gray-400 font-medium">{disc.field}:</span>{" "}
+                        <span className="text-gray-500">Sheet: {disc.sheet_value}</span>{" "}
+                        <span className="text-yellow-400">AI: {disc.ai_value}</span>
+                        {disc.explanation && <span className="text-gray-600 ml-1">- {disc.explanation}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Overnight events */}
+              {riskAssessment.overnight_events && riskAssessment.overnight_events.length > 0 && (
+                <div className="p-2 bg-blue-400/5 border border-blue-600/20 rounded">
+                  <h4 className="text-xs font-medium text-blue-400 mb-1">Overnight Events ({riskAssessment.overnight_events.length})</h4>
+                  <div className="space-y-1">
+                    {riskAssessment.overnight_events.map((evt, i) => (
+                      <div key={i} className="text-xs flex items-center gap-1.5">
+                        <span className={`px-1 py-0.5 rounded text-[10px] font-medium ${
+                          evt.severity === "high" ? "bg-red-400/10 text-red-400" :
+                          evt.severity === "medium" ? "bg-yellow-400/10 text-yellow-400" :
+                          "bg-gray-700 text-gray-400"
+                        }`}>{evt.type}</span>
+                        <span className="text-gray-300">{evt.headline}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="text-gray-600 text-sm py-6 text-center">
@@ -690,6 +807,73 @@ export default function DealDetailPage() {
             </div>
           )}
         </div>
+
+        {/* Options Opportunities */}
+        {(coveredCalls.length > 0 || coveredCallsLoading) && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mt-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-gray-300">Options Opportunities</h3>
+                {coveredCallsIv != null && (
+                  <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                    coveredCallsIv > 0.4
+                      ? "bg-orange-400/10 text-orange-400 border border-orange-400/30"
+                      : "bg-gray-800 text-gray-400 border border-gray-700"
+                  }`}>
+                    IV: {(coveredCallsIv * 100).toFixed(1)}%
+                  </span>
+                )}
+              </div>
+              <Link
+                href={`/ma-options?ticker=${ticker}`}
+                className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
+              >
+                Full Scanner →
+              </Link>
+            </div>
+
+            {coveredCallsLoading ? (
+              <div className="text-gray-600 text-sm py-4 text-center">Loading covered call data...</div>
+            ) : coveredCalls.length > 0 ? (
+              (() => {
+                // Pick the best covered call by annualized yield
+                const best = coveredCalls.reduce((a, b) => a.annualized_yield > b.annualized_yield ? a : b);
+                return (
+                  <div className="bg-gray-800/50 rounded p-3">
+                    <div className="text-xs text-gray-500 mb-2">Best Covered Call</div>
+                    <div className="grid grid-cols-4 gap-3 text-sm">
+                      <div>
+                        <div className="text-gray-500 text-xs">Strike</div>
+                        <div className="font-mono text-gray-100">${best.strike.toFixed(2)}</div>
+                        <div className="text-xs text-gray-500">{best.expiry}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500 text-xs">Premium</div>
+                        <div className="font-mono text-green-400">${best.premium.toFixed(2)}</div>
+                        <div className="text-xs text-gray-500">Bid ${best.bid.toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500 text-xs">Ann. Yield</div>
+                        <div className="font-mono text-green-400">{(best.annualized_yield * 100).toFixed(1)}%</div>
+                        <div className="text-xs text-gray-500">{best.days_to_expiry}d to exp</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500 text-xs">Cushion</div>
+                        <div className="font-mono text-blue-400">{(best.downside_cushion * 100).toFixed(1)}%</div>
+                        <div className="text-xs text-gray-500">downside</div>
+                      </div>
+                    </div>
+                    {coveredCalls.length > 1 && (
+                      <div className="mt-2 text-xs text-gray-500">
+                        {coveredCalls.length - 1} more covered call{coveredCalls.length > 2 ? "s" : ""} available
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
+            ) : null}
+          </div>
+        )}
 
         {/* Dividends + CVRs side by side */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">

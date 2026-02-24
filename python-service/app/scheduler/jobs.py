@@ -171,11 +171,170 @@ async def job_morning_detail_refresh():
     return result
 
 
-@run_job("morning_risk_report", "Morning AI Risk Report")
-async def job_morning_risk_report():
-    """Placeholder: generate AI-powered risk report at 7:00 AM ET weekdays."""
-    logger.info("[morning_risk_report] placeholder — not yet implemented")
-    return {"status": "placeholder"}
+@run_job("overnight_event_scan", "Overnight Event Scan")
+async def job_overnight_event_scan():
+    """Scan for overnight events (5:25 AM ET weekdays)."""
+    from app.risk.overnight import scan_overnight_events
+
+    pool = _get_pool()
+    # Get active tickers
+    async with pool.acquire() as conn:
+        snapshot = await conn.fetchrow(
+            "SELECT id FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
+        )
+        if not snapshot:
+            return {"status": "skipped", "reason": "no snapshot"}
+        rows = await conn.fetch(
+            "SELECT DISTINCT ticker FROM sheet_rows WHERE snapshot_id = $1 AND ticker IS NOT NULL AND is_excluded IS NOT TRUE",
+            snapshot["id"],
+        )
+    tickers = [r["ticker"] for r in rows]
+    events = await scan_overnight_events(pool, tickers)
+
+    # Store events in a temporary location for the pipeline
+    # Use the _core module to stash pipeline state
+    import app.scheduler.core as core
+    core._overnight_events = events
+
+    return {"status": "success", "event_count": len(events), "tickers": len(tickers)}
+
+
+@run_job("morning_risk_assessment", "Morning AI Risk Assessment")
+async def job_morning_risk_assessment():
+    """Run AI risk assessment on all deals (5:30 AM ET weekdays)."""
+    import os
+    from app.risk.engine import RiskAssessmentEngine
+
+    pool = _get_pool()
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"status": "error", "reason": "ANTHROPIC_API_KEY not set"}
+
+    engine = RiskAssessmentEngine(pool, api_key)
+    result = await engine.run_morning_assessment(triggered_by="scheduler")
+    return result
+
+
+@run_job("morning_report_compile", "Morning Report Compile")
+async def job_morning_report_compile():
+    """Compile the morning report from assessment results (5:55 AM ET weekdays)."""
+    import json
+    from app.risk.report_formatter import format_morning_report
+
+    pool = _get_pool()
+    import app.scheduler.core as core
+    overnight_events = getattr(core, "_overnight_events", [])
+
+    async with pool.acquire() as conn:
+        # Get the latest run
+        run = await conn.fetchrow(
+            "SELECT * FROM risk_assessment_runs WHERE run_date = CURRENT_DATE ORDER BY started_at DESC LIMIT 1"
+        )
+        if not run:
+            return {"status": "skipped", "reason": "no assessment run today"}
+
+        # Get all assessments for this run
+        assessments = await conn.fetch(
+            "SELECT * FROM deal_risk_assessments WHERE run_id = $1 ORDER BY ticker",
+            run["id"],
+        )
+
+    run_data = dict(run)
+    assessment_list = [dict(a) for a in assessments]
+
+    report = format_morning_report(run_data, assessment_list, overnight_events)
+
+    # Store the report
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO morning_reports
+               (report_date, run_id, executive_summary, html_body, whatsapp_summary,
+                subject_line, total_deals, discrepancy_count, event_count, flagged_count)
+               VALUES (CURRENT_DATE, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+               ON CONFLICT (report_date) DO UPDATE SET
+                 run_id = EXCLUDED.run_id,
+                 executive_summary = EXCLUDED.executive_summary,
+                 html_body = EXCLUDED.html_body,
+                 whatsapp_summary = EXCLUDED.whatsapp_summary,
+                 subject_line = EXCLUDED.subject_line,
+                 total_deals = EXCLUDED.total_deals,
+                 discrepancy_count = EXCLUDED.discrepancy_count,
+                 event_count = EXCLUDED.event_count,
+                 flagged_count = EXCLUDED.flagged_count""",
+            run["id"],
+            report["executive_summary"],
+            report["html_body"],
+            report["whatsapp_summary"],
+            report["subject_line"],
+            len(assessment_list),
+            sum(1 for a in assessment_list if a.get("discrepancy_count", 0) > 0),
+            len(overnight_events),
+            sum(1 for a in assessment_list if a.get("needs_attention")),
+        )
+
+    # Stash for delivery step
+    core._compiled_report = report
+
+    return {"status": "success", "subject": report["subject_line"]}
+
+
+@run_job("morning_report_deliver", "Morning Report Deliver")
+async def job_morning_report_deliver():
+    """Send the compiled morning report (6:00 AM ET weekdays)."""
+    from app.services.messaging import get_messaging_service
+
+    pool = _get_pool()
+    import app.scheduler.core as core
+    report = getattr(core, "_compiled_report", None)
+
+    if not report:
+        # Try to load from DB
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM morning_reports WHERE report_date = CURRENT_DATE"
+            )
+            if not row:
+                return {"status": "skipped", "reason": "no compiled report"}
+            report = {
+                "subject_line": row["subject_line"],
+                "html_body": row["html_body"],
+                "whatsapp_summary": row["whatsapp_summary"],
+            }
+
+    messaging = get_messaging_service()
+    results = {}
+
+    # Send email
+    email_results = await messaging._send_to_email_recipients(
+        report["subject_line"],
+        report["html_body"],
+    )
+    results["email"] = email_results
+
+    # Send WhatsApp
+    if report.get("whatsapp_summary"):
+        wa_results = await messaging._send_to_whatsapp_recipients(
+            report["whatsapp_summary"],
+        )
+        results["whatsapp"] = wa_results
+
+    # Update delivery tracking
+    async with pool.acquire() as conn:
+        email_ok = any(r.get("success") for r in email_results) if email_results else False
+        wa_ok = any(r.get("success") for r in results.get("whatsapp", [])) if results.get("whatsapp") else False
+        await conn.execute(
+            """UPDATE morning_reports SET
+                 email_sent = $1, email_sent_at = CASE WHEN $1 THEN NOW() ELSE email_sent_at END,
+                 whatsapp_sent = $2, whatsapp_sent_at = CASE WHEN $2 THEN NOW() ELSE whatsapp_sent_at END
+               WHERE report_date = CURRENT_DATE""",
+            email_ok, wa_ok,
+        )
+
+    # Clean up pipeline state
+    core._overnight_events = None
+    core._compiled_report = None
+
+    return {"status": "success", "results": results}
 
 
 @run_job("edgar_filing_check", "EDGAR Filing Check")
@@ -365,7 +524,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         "cron",
         id="morning_sheet_ingest",
         day_of_week="mon-fri",
-        hour=6, minute=30,
+        hour=5, minute=15,
         replace_existing=True,
     )
 
@@ -374,16 +533,43 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         "cron",
         id="morning_detail_refresh",
         day_of_week="mon-fri",
-        hour=6, minute=35,
+        hour=5, minute=20,
         replace_existing=True,
     )
 
     scheduler.add_job(
-        job_morning_risk_report,
+        job_overnight_event_scan,
         "cron",
-        id="morning_risk_report",
+        id="overnight_event_scan",
         day_of_week="mon-fri",
-        hour=7, minute=0,
+        hour=5, minute=25,
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        job_morning_risk_assessment,
+        "cron",
+        id="morning_risk_assessment",
+        day_of_week="mon-fri",
+        hour=5, minute=30,
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        job_morning_report_compile,
+        "cron",
+        id="morning_report_compile",
+        day_of_week="mon-fri",
+        hour=5, minute=55,
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        job_morning_report_deliver,
+        "cron",
+        id="morning_report_deliver",
+        day_of_week="mon-fri",
+        hour=6, minute=0,
         replace_existing=True,
     )
 
