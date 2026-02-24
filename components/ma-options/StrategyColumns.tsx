@@ -43,7 +43,7 @@ export interface StrategyMetrics {
   liquidityScore: number;
 }
 
-export type StrategyType = "spread" | "put_spread" | "call" | "put";
+export type StrategyType = "spread" | "put_spread" | "call" | "put" | "covered_call" | "call_vertical" | "put_vertical" | "long_call" | "long_put";
 
 /**
  * Get color class for profit/return values
@@ -325,7 +325,7 @@ export function StrategyTableHeader({
   strategyType?: StrategyType;
   visibleCols?: Set<string>;
 }) {
-  if (strategyType === "put_spread") {
+  if (strategyType === "put_spread" || strategyType === "put_vertical" || strategyType === "covered_call") {
     return <CreditStrategyTableHeader onSort={onSort} sortKey={sortKey} visibleCols={visibleCols} />;
   }
   return <DebitStrategyTableHeader onSort={onSort} sortKey={sortKey} visibleCols={visibleCols} />;
@@ -478,7 +478,7 @@ export function StrategyMetricsCells({
   strategyType?: StrategyType;
   visibleCols?: Set<string>;
 }) {
-  if (strategyType === "put_spread") {
+  if (strategyType === "put_spread" || strategyType === "put_vertical" || strategyType === "covered_call") {
     return <CreditStrategyMetricsCells metrics={metrics} visibleCols={visibleCols} />;
   }
   return <DebitStrategyMetricsCells metrics={metrics} visibleCols={visibleCols} />;

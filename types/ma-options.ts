@@ -32,9 +32,43 @@ export interface StrategyLeg {
   askSize: number;
 }
 
+export interface CoveredCallResult {
+  ticker: string;
+  current_price: number;
+  deal_price: number;
+  strike: number;
+  expiry: string;
+  premium: number;
+  annualized_yield: number;
+  downside_cushion: number;
+  effective_basis: number;
+  if_called_return: number;
+  static_return: number;
+  implied_vol: number | null;
+  days_to_expiry: number;
+  open_interest: number;
+  volume: number;
+  bid: number;
+  ask: number;
+  breakeven: number;
+  notes: string | null;
+}
+
+export interface CoveredCallsResponse {
+  results: CoveredCallResult[];
+  scanned: number;
+  total_opportunities: number;
+  filters: {
+    ticker: string | null;
+    min_yield: number;
+    min_liquidity: number;
+  };
+  errors: Array<{ ticker: string; error: string }> | null;
+}
+
 export interface CandidateStrategy {
   id: string; // Temporary UUID for UI key
-  strategyType: string; // "call_vertical", "put_vertical", "long_call", "long_put"
+  strategyType: string; // "call_vertical", "put_vertical", "long_call", "long_put", "covered_call"
   expiration: Date;
   legs: StrategyLeg[];
   netPremium: number;

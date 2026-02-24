@@ -1006,6 +1006,88 @@ class MergerArbAnalyzer:
             annualized_return_ft=annualized_return_ft
         )
 
+    def analyze_covered_call(self, call_option: OptionData, current_price: float) -> Optional[TradeOpportunity]:
+        """Analyze a covered call strategy (own 100 shares + sell 1 call).
+
+        Strike selection: at or slightly above deal price (within ±2% buffer).
+        Expiration: 14+ days out, not more than deal close date + 30 day buffer.
+        Filters: bid > $0.01, open_interest >= 10.
+        """
+        # --- Filters ---
+        if call_option.bid <= 0.01:
+            return None
+        if call_option.open_interest < 10:
+            return None
+
+        # Expiration filters
+        expiry_date = datetime.strptime(call_option.expiry, "%Y%m%d")
+        days_to_expiry = (expiry_date - datetime.now()).days
+        if days_to_expiry < 14:
+            return None
+        # Don't go past deal close + 30 day buffer
+        max_expiry_days = self.deal.days_to_close + 30
+        if days_to_expiry > max_expiry_days:
+            return None
+
+        # Strike selection: at or slightly above deal price (±2% buffer)
+        deal_price = self.deal.total_deal_value
+        strike_lower = deal_price * 0.98
+        strike_upper = deal_price * 1.02
+        if call_option.strike < strike_lower or call_option.strike > strike_upper:
+            return None
+
+        # --- Calculations ---
+        premium = call_option.bid  # Use bid (what we'd actually receive)
+        effective_basis = current_price - premium
+        downside_cushion = (current_price - effective_basis) / current_price if current_price > 0 else 0
+
+        # Static return: premium / current_price (return if stock stays flat, option expires OTM)
+        static_return = premium / current_price if current_price > 0 else 0
+
+        # If-called return: (strike - current_price + premium) / current_price
+        # This is the return if the stock is at or above the strike at expiry
+        if_called_profit = (call_option.strike - current_price) + premium
+        if_called_return = if_called_profit / current_price if current_price > 0 else 0
+
+        # Annualized yield (based on if-called scenario)
+        years_to_expiry = max(days_to_expiry, 1) / 365
+        annualized_yield = if_called_return / years_to_expiry if years_to_expiry > 0 else 0
+
+        # Skip if negative if-called return (stock too far above strike already without enough premium)
+        if if_called_return <= 0:
+            return None
+
+        # Breakeven = current_price - premium
+        breakeven = effective_basis
+
+        # Probability estimate: prob stock stays above breakeven
+        vol = call_option.implied_vol if call_option.implied_vol and call_option.implied_vol > 0 else 0.30
+        prob_profit = self.calculate_probability_above(
+            current_price, breakeven, vol, years_to_expiry
+        )
+        prob_success = prob_profit * self.deal.confidence
+
+        return TradeOpportunity(
+            strategy='covered_call',
+            contracts=[call_option],
+            entry_cost=current_price,  # Cost = buying 100 shares
+            max_profit=if_called_profit,
+            breakeven=breakeven,
+            expected_return=if_called_return,
+            annualized_return=annualized_yield,
+            probability_of_profit=prob_success,
+            edge_vs_market=static_return,  # Use static return as edge metric
+            notes=(
+                f"Sell {call_option.symbol} {call_option.strike} Call @ ${premium:.2f} bid | "
+                f"Static: {static_return:.2%}, If-called: {if_called_return:.2%}, "
+                f"Ann: {annualized_yield:.2%} | "
+                f"Basis: ${effective_basis:.2f}, Cushion: {downside_cushion:.2%}"
+            ),
+            entry_cost_ft=current_price,  # Same for covered call (shares at market)
+            expected_return_ft=if_called_return,  # Same (bid is already conservative)
+            annualized_return_ft=annualized_yield,
+        )
+
     def analyze_call_spread(self, long_call: OptionData, short_call: OptionData,
                            current_price: float) -> Optional[TradeOpportunity]:
         """Analyze a call spread"""
@@ -1306,6 +1388,22 @@ class MergerArbAnalyzer:
             print(f"DEBUG CALL: Adding top {len(top_3)} single calls from {expiry}")
             opportunities.extend(top_3)
 
+        # Analyze COVERED CALLS - sell calls at/near deal price against long stock
+        covered_calls_by_expiry = defaultdict(list)
+        for option in calls_only:
+            opp = self.analyze_covered_call(option, current_price)
+            if opp:
+                covered_calls_by_expiry[option.expiry].append(opp)
+
+        # Add top 3 covered calls from each expiration (sorted by annualized return)
+        cc_count = 0
+        for expiry, expiry_ccs in covered_calls_by_expiry.items():
+            expiry_ccs.sort(key=lambda x: x.annualized_return, reverse=True)
+            top_3 = expiry_ccs[:3]
+            opportunities.extend(top_3)
+            cc_count += len(top_3)
+        print(f"DEBUG CC: Added {cc_count} covered calls across {len(covered_calls_by_expiry)} expirations")
+
         # Group options by expiration - spreads MUST use same expiration
         options_by_expiry = defaultdict(list)
         for option in options:
@@ -1415,6 +1513,7 @@ class MergerArbAnalyzer:
         # Frontend will display them in separate sections
         print(f"DEBUG: Returning {len(opportunities)} total opportunities")
         print(f"DEBUG: Single calls: {len([o for o in opportunities if o.strategy == 'call'])}")
+        print(f"DEBUG: Covered calls: {len([o for o in opportunities if o.strategy == 'covered_call'])}")
         print(f"DEBUG: Call spreads: {len([o for o in opportunities if o.strategy == 'spread'])}")
         print(f"DEBUG: Put spreads: {len([o for o in opportunities if o.strategy == 'put_spread'])}")
 

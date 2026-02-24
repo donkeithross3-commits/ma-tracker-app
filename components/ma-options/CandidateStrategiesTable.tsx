@@ -141,6 +141,14 @@ export default function CandidateStrategiesTable({
         annualizedYield: candidate.annualizedYield,
         annualizedYieldFarTouch: candidate.annualizedYieldFarTouch,
       };
+    } else if (candidate.strategyType === 'covered_call') {
+      // Covered call: credit strategy, return original Python-computed values
+      return {
+        maxProfit: candidate.maxProfit,
+        maxProfitFarTouch: candidate.maxProfit,
+        annualizedYield: candidate.annualizedYield,
+        annualizedYieldFarTouch: candidate.annualizedYieldFarTouch,
+      };
     } else {
       return {
         maxProfit: candidate.maxProfit,
@@ -251,6 +259,11 @@ export default function CandidateStrategiesTable({
       'put_spread': 'Put Spread',
       'call': 'Long Call',
       'put': 'Long Put',
+      'covered_call': 'Covered Call',
+      'call_vertical': 'Call Spread',
+      'put_vertical': 'Put Spread',
+      'long_call': 'Long Call',
+      'long_put': 'Long Put',
     };
     return typeMap[type] || type;
   };

@@ -428,6 +428,108 @@ class PolygonOptionsClient:
             "contracts": flat_contracts,
         }
 
+    # ── IV / Volume helpers ────────────────────────────────────
+
+    @staticmethod
+    def get_atm_iv(chain: list[dict], current_price: float) -> float | None:
+        """Extract ATM implied volatility from an already-fetched chain.
+
+        Finds the call closest to *current_price* that has a non-None implied_vol.
+        Returns the IV as a float (e.g. 0.35 for 35%) or None if unavailable.
+        """
+        if not chain or current_price <= 0:
+            return None
+
+        calls = [c for c in chain if c.get("right") == "C" and c.get("implied_vol") is not None]
+        if not calls:
+            # Fall back to puts
+            calls = [c for c in chain if c.get("right") == "P" and c.get("implied_vol") is not None]
+        if not calls:
+            return None
+
+        closest = min(calls, key=lambda c: abs(c["strike"] - current_price))
+        return closest["implied_vol"]
+
+    async def get_current_atm_iv(self, ticker: str) -> dict:
+        """Quick lookup of the current ATM IV for a ticker.
+
+        Returns dict with ``ticker``, ``price``, ``atm_iv``, and ``timestamp``.
+        """
+        quote = await self.get_stock_quote(ticker)
+        price = quote["price"]
+        if not price or price <= 0:
+            return {"ticker": ticker, "price": 0, "atm_iv": None, "timestamp": quote["timestamp"]}
+
+        # Fetch near-ATM chain (tight strike range, nearest 2 expirations)
+        spread = max(2.0, price * 0.02)
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        max_date = (datetime.utcnow() + timedelta(days=45)).strftime("%Y-%m-%d")
+
+        chain = await self.get_option_chain(
+            underlying=ticker,
+            expiration_date_gte=today,
+            expiration_date_lte=max_date,
+            strike_gte=price - spread,
+            strike_lte=price + spread,
+            contract_type="call",
+            limit=50,
+        )
+
+        atm_iv = self.get_atm_iv(chain, price)
+        return {
+            "ticker": ticker,
+            "price": price,
+            "atm_iv": atm_iv,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+
+    async def get_volume_analysis(self, ticker: str) -> dict:
+        """Analyse call/put volume and detect unusual activity.
+
+        Returns dict with ``total_call_volume``, ``total_put_volume``,
+        ``put_call_ratio``, ``unusual_volume`` (bool), and ``unusual_detail``.
+        """
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        max_date = (datetime.utcnow() + timedelta(days=60)).strftime("%Y-%m-%d")
+
+        chain = await self.get_option_chain(
+            underlying=ticker,
+            expiration_date_gte=today,
+            expiration_date_lte=max_date,
+        )
+
+        call_vol = 0
+        put_vol = 0
+        unusual_contracts: list[str] = []
+
+        for c in chain:
+            vol = c.get("volume", 0) or 0
+            oi = c.get("open_interest", 0) or 0
+            if c.get("right") == "C":
+                call_vol += vol
+            else:
+                put_vol += vol
+
+            # Flag contracts where daily volume exceeds open interest
+            if oi > 0 and vol > oi * 2:
+                unusual_contracts.append(
+                    f"{c.get('right')}{c.get('strike')} exp={c.get('expiry')} vol={vol} oi={oi}"
+                )
+
+        total_vol = call_vol + put_vol
+        pc_ratio = put_vol / call_vol if call_vol > 0 else 0.0
+        unusual = bool(unusual_contracts)
+
+        return {
+            "ticker": ticker,
+            "total_call_volume": call_vol,
+            "total_put_volume": put_vol,
+            "put_call_ratio": round(pc_ratio, 4),
+            "unusual_volume": unusual,
+            "unusual_detail": "; ".join(unusual_contracts[:10]) if unusual else None,
+            "chain_depth": len(chain),
+        }
+
     # ── Internal ─────────────────────────────────────────────
 
     async def _ensure_client(self) -> httpx.AsyncClient:

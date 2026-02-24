@@ -6,6 +6,7 @@ import type {
   OptionChainResponse,
   CandidateStrategy,
   OptionContract,
+  CoveredCallResult,
 } from "@/types/ma-options";
 import AddDealForm from "./AddDealForm";
 import ScannerDealSelector from "./ScannerDealSelector";
@@ -31,6 +32,14 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
   // Editable deal price for real-time metric recalculation
   const [editableDealPrice, setEditableDealPrice] = useState<number | null>(null);
   
+  // Strategy mode: "spreads" (default) or "covered_calls"
+  const [strategyMode, setStrategyMode] = useState<"spreads" | "covered_calls">("spreads");
+
+  // Covered calls state
+  const [coveredCalls, setCoveredCalls] = useState<CoveredCallResult[]>([]);
+  const [coveredCallsLoading, setCoveredCallsLoading] = useState(false);
+  const [coveredCallsError, setCoveredCallsError] = useState<string | null>(null);
+
   // Watch spread modal state
   const [watchModalOpen, setWatchModalOpen] = useState(false);
   const [pendingStrategy, setPendingStrategy] = useState<CandidateStrategy | null>(null);
@@ -51,6 +60,8 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
     setChainData(null);
     setCandidates([]);
     setError(null);
+    setCoveredCalls([]);
+    setCoveredCallsError(null);
   };
 
   const handleDealAdded = (deal: ScannerDeal) => {
@@ -170,6 +181,27 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLoadCoveredCalls = async () => {
+    if (!selectedDeal) return;
+    setCoveredCallsLoading(true);
+    setCoveredCallsError(null);
+    try {
+      const resp = await fetch(
+        `/api/sheet-portfolio/risk/covered-calls?ticker=${encodeURIComponent(selectedDeal.ticker)}`
+      );
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${resp.status}`);
+      }
+      const body = await resp.json();
+      setCoveredCalls(body.results || []);
+    } catch (err) {
+      setCoveredCallsError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setCoveredCallsLoading(false);
     }
   };
 
@@ -329,8 +361,133 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
         />
       )}
 
+      {/* Strategy Mode Selector */}
+      {selectedDeal && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Strategy:</span>
+          <button
+            onClick={() => setStrategyMode("spreads")}
+            className={`px-3 py-1.5 text-xs rounded transition-colors ${
+              strategyMode === "spreads"
+                ? "bg-blue-600 text-white"
+                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+            }`}
+          >
+            Spreads
+          </button>
+          <button
+            onClick={() => {
+              setStrategyMode("covered_calls");
+              if (coveredCalls.length === 0 && !coveredCallsLoading) {
+                handleLoadCoveredCalls();
+              }
+            }}
+            className={`px-3 py-1.5 text-xs rounded transition-colors ${
+              strategyMode === "covered_calls"
+                ? "bg-blue-600 text-white"
+                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+            }`}
+          >
+            Covered Calls
+          </button>
+        </div>
+      )}
+
+      {/* Covered Calls Results */}
+      {strategyMode === "covered_calls" && selectedDeal && (
+        <div className="bg-gray-900 border border-gray-700 rounded p-4">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-lg font-semibold text-gray-100">
+              Covered Calls — {selectedDeal.ticker}
+            </h3>
+            <button
+              onClick={handleLoadCoveredCalls}
+              disabled={coveredCallsLoading}
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                coveredCallsLoading
+                  ? "bg-gray-700 text-gray-500 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700 text-white"
+              }`}
+            >
+              {coveredCallsLoading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          {coveredCallsError && (
+            <div className="bg-red-900/20 border border-red-700 rounded p-3 text-sm text-red-400 mb-3">
+              {coveredCallsError}
+            </div>
+          )}
+
+          {coveredCallsLoading ? (
+            <div className="text-center py-8 text-gray-500 text-sm">Loading covered call opportunities...</div>
+          ) : coveredCalls.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-800">
+                  <tr className="border-b border-gray-700">
+                    <th className="text-left py-2 px-2 text-gray-400">Strike</th>
+                    <th className="text-left py-2 px-2 text-gray-400">Expiry</th>
+                    <th className="text-right py-2 px-2 text-gray-400">Premium</th>
+                    <th className="text-right py-2 px-2 text-gray-400">Bid/Ask</th>
+                    <th className="text-right py-2 px-2 text-gray-400">Ann. Yield</th>
+                    <th className="text-right py-2 px-2 text-gray-400">Cushion</th>
+                    <th className="text-right py-2 px-2 text-gray-400">Eff. Basis</th>
+                    <th className="text-right py-2 px-2 text-gray-400">If-Called</th>
+                    <th className="text-right py-2 px-2 text-gray-400">IV</th>
+                    <th className="text-right py-2 px-2 text-gray-400">DTE</th>
+                    <th className="text-right py-2 px-2 text-gray-400">Vol / OI</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coveredCalls.map((cc, i) => (
+                    <tr key={i} className="border-b border-gray-800 hover:bg-gray-800">
+                      <td className="py-1.5 px-2 text-gray-100 font-mono">${cc.strike.toFixed(2)}</td>
+                      <td className="py-1.5 px-2 text-gray-300">{cc.expiry}</td>
+                      <td className="py-1.5 px-2 text-right text-green-400 font-mono">${cc.premium.toFixed(2)}</td>
+                      <td className="py-1.5 px-2 text-right text-gray-400 font-mono">
+                        ${cc.bid.toFixed(2)} / ${cc.ask.toFixed(2)}
+                      </td>
+                      <td className={`py-1.5 px-2 text-right font-mono font-semibold ${
+                        cc.annualized_yield > 0.15 ? "text-green-400" : cc.annualized_yield > 0.05 ? "text-yellow-400" : "text-gray-400"
+                      }`}>
+                        {(cc.annualized_yield * 100).toFixed(1)}%
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-blue-400 font-mono">
+                        {(cc.downside_cushion * 100).toFixed(1)}%
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-gray-100 font-mono">
+                        ${cc.effective_basis.toFixed(2)}
+                      </td>
+                      <td className={`py-1.5 px-2 text-right font-mono ${
+                        cc.if_called_return > 0 ? "text-green-400" : "text-red-400"
+                      }`}>
+                        {(cc.if_called_return * 100).toFixed(1)}%
+                      </td>
+                      <td className={`py-1.5 px-2 text-right font-mono ${
+                        cc.implied_vol != null && cc.implied_vol > 0.4 ? "text-orange-400" : "text-gray-400"
+                      }`}>
+                        {cc.implied_vol != null ? `${(cc.implied_vol * 100).toFixed(1)}%` : "-"}
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-gray-400 font-mono">{cc.days_to_expiry}</td>
+                      <td className="py-1.5 px-2 text-right text-gray-400 font-mono text-[10px]">
+                        {cc.volume} / {cc.open_interest}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500 text-sm">
+              No covered call opportunities found. Try selecting a different deal or refreshing.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Error Display */}
-      {error && (
+      {error && strategyMode === "spreads" && (
         <div className={`border rounded p-4 text-sm ${
           error.includes("IB TWS not connected") 
             ? "bg-orange-900/20 border-orange-700 text-orange-400" 
@@ -357,16 +514,16 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
         </div>
       )}
 
-      {/* Option Chain Viewer */}
-      {chainData && selectedDeal && (
-        <OptionChainViewer 
-          chainData={chainData} 
+      {/* Option Chain Viewer (spreads mode only) */}
+      {strategyMode === "spreads" && chainData && selectedDeal && (
+        <OptionChainViewer
+          chainData={chainData}
           onWatchSingleLeg={handleWatchSingleLeg}
         />
       )}
 
-      {/* Candidate Strategies */}
-      {candidates.length > 0 && selectedDeal && editableDealPrice !== null && (
+      {/* Candidate Strategies (spreads mode only) */}
+      {strategyMode === "spreads" && candidates.length > 0 && selectedDeal && editableDealPrice !== null && (
         <CandidateStrategiesTable
           candidates={candidates}
           onWatch={handleWatchSpread}
