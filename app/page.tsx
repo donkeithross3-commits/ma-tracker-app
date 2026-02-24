@@ -56,6 +56,23 @@ export default async function Home() {
                 </span>
               </div>
             </Link>
+
+            <Link
+              href="/sheet-portfolio"
+              className="block p-8 bg-slate-800 border border-slate-700 rounded-xl hover:border-purple-500 hover:bg-slate-700 transition-all"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-semibold mb-2">Sheet Portfolio</h2>
+                  <p className="text-slate-400">
+                    Event-driven M&amp;A portfolio from production Google Sheet
+                  </p>
+                </div>
+                <span className="text-xs bg-purple-500/20 text-purple-400 px-3 py-1 rounded-full">
+                  Beta Testing
+                </span>
+              </div>
+            </Link>
           </div>
         </main>
 
