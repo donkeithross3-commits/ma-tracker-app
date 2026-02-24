@@ -1257,21 +1257,25 @@ class IBDataAgent:
     async def run(self):
         """Main run loop"""
         self.running = True
-        
-        # Startup: connect to TWS with retry (waits for TWS to be available)
-        logger.info("Waiting for IB TWS connection (will retry with backoff)...")
-        if not await self._connect_to_ib_with_retry(max_attempts=0):
-            logger.error("Cannot start agent — shutting down")
-            return
 
-        # Register instant account-event callback (bridges IB thread → asyncio → WS)
-        loop = asyncio.get_running_loop()
-        self.scanner.set_account_event_callback(self._make_account_event_callback(loop))
+        # Try IB once at startup (non-blocking — agent works without IB via Polygon)
+        logger.info("Attempting IB TWS connection...")
+        ib_ok = await self._connect_to_ib_with_retry(max_attempts=2)
+        if ib_ok:
+            logger.info("IB TWS connected — full IB + Polygon data available")
+            # Register instant account-event callback (bridges IB thread → asyncio → WS)
+            loop = asyncio.get_running_loop()
+            self.scanner.set_account_event_callback(self._make_account_event_callback(loop))
+        else:
+            logger.warning(
+                "IB TWS not available — agent will connect to relay without IB. "
+                "Polygon data is still available. IB will auto-reconnect when TWS starts."
+            )
 
-        # Launch background TWS health monitor
+        # Launch background TWS health monitor (handles reconnection if IB was down or drops)
         tws_health_task = asyncio.create_task(self._tws_health_loop())
         logger.info("TWS health monitor started (auto-reconnect enabled)")
-        
+
         while self.running:
             try:
                 if not await self.connect_to_relay():
