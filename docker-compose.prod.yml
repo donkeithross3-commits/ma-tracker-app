@@ -28,6 +28,7 @@ services:
       - ./ma-tracker-app/.env.local
     networks:
       - frontend
+      - default
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
@@ -52,8 +53,11 @@ services:
       - ./ma-tracker-app/python-service/.env
     environment:
       - CORS_ALLOWED_ORIGINS=https://dr3-dashboard.com,http://localhost:3000
+      # Override localhost with Docker network hostname for postgres container
+      - DATABASE_URL=postgresql://ma_user:ma_password_2025@postgres:5432/ma_tracker
     networks:
       - frontend
+      - default
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
