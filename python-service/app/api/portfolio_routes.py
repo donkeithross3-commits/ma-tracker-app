@@ -2,6 +2,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from datetime import date, datetime
+import json
 import logging
 import re
 
@@ -311,9 +312,9 @@ async def get_deal(ticker: str):
                     "long_vertical_call_spread": _s("long_vertical_call_spread"),
                     "long_covered_call": _s("long_covered_call"),
                     "short_put_vertical_spread": _s("short_put_vertical_spread"),
-                    "cvrs": detail["cvrs"],
-                    "dividends": detail["dividends"],
-                    "price_history": detail["price_history"],
+                    "cvrs": json.loads(detail["cvrs"]) if isinstance(detail["cvrs"], str) else (detail["cvrs"] or []),
+                    "dividends": json.loads(detail["dividends"]) if isinstance(detail["dividends"], str) else (detail["dividends"] or []),
+                    "price_history": json.loads(detail["price_history"]) if isinstance(detail["price_history"], str) else (detail["price_history"] or []),
                     "fetched_at": str(detail["fetched_at"]),
                 }
             else:
