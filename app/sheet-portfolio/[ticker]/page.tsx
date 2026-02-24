@@ -184,7 +184,7 @@ function RiskRadarChart({ assessment }: { assessment: RiskAssessment }) {
 
   const points = RISK_FACTORS.map((f, i) => {
     const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
-    const score = (assessment as Record<string, unknown>)[`${f.key}_score`] as number ?? 0;
+    const score = (assessment as unknown as Record<string, unknown>)[`${f.key}_score`] as number ?? 0;
     const ratio = score / 10;
     return {
       x: cx + r * ratio * Math.cos(angle),
@@ -253,8 +253,8 @@ function RiskScoreBadge({ score, level }: { score: number | null; level: string 
 }
 
 function FactorCard({ factor, assessment }: { factor: typeof RISK_FACTORS[number]; assessment: RiskAssessment }) {
-  const score = (assessment as Record<string, unknown>)[`${factor.key}_score`] as number | null;
-  const detail = (assessment as Record<string, unknown>)[`${factor.key}_detail`] as string | null;
+  const score = (assessment as unknown as Record<string, unknown>)[`${factor.key}_score`] as number | null;
+  const detail = (assessment as unknown as Record<string, unknown>)[`${factor.key}_detail`] as string | null;
 
   if (score === null) return null;
 

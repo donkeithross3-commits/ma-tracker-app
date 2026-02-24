@@ -61,9 +61,24 @@ async def startup():
     _pool = await asyncpg.create_pool(db_url, min_size=2, max_size=10)
     logger.info("Portfolio DB pool created (min: 2, max: 10)")
 
-    # Inject pool into portfolio_routes
+    # Inject pool into route modules
     from .api.portfolio_routes import set_pool
+    from .api.scheduler_routes import set_pool as set_scheduler_pool
+    from .api.risk_routes import set_pool as set_risk_pool
     set_pool(_pool)
+    set_scheduler_pool(_pool)
+    set_risk_pool(_pool)
+
+    # Initialise scheduler
+    from .scheduler.core import get_scheduler
+    from .scheduler import core as scheduler_core
+    from .scheduler.jobs import register_default_jobs
+
+    scheduler_core.pool = _pool
+    scheduler = get_scheduler()
+    register_default_jobs(scheduler)
+    scheduler.start()
+    logger.info("APScheduler started with %d jobs", len(scheduler.get_jobs()))
 
     logger.info("Portfolio service ready on port 8001")
 
@@ -71,6 +86,19 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     global _pool
+
+    # Shut down scheduler before closing the pool
+    from .scheduler.core import get_scheduler
+    from .scheduler import core as scheduler_core
+    try:
+        scheduler = get_scheduler()
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+            logger.info("APScheduler shut down")
+    except Exception:
+        logger.warning("Error shutting down scheduler", exc_info=True)
+    scheduler_core.pool = None
+
     if _pool:
         await _pool.close()
         _pool = None
@@ -94,6 +122,10 @@ async def health():
         return {"status": "unhealthy", "reason": str(e)}
 
 
-# Mount portfolio router
+# Mount routers
 from .api.portfolio_routes import router as portfolio_router  # noqa: E402
+from .api.scheduler_routes import router as scheduler_router  # noqa: E402
+from .api.risk_routes import router as risk_router  # noqa: E402
 app.include_router(portfolio_router)
+app.include_router(scheduler_router)
+app.include_router(risk_router)

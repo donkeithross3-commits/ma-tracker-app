@@ -11,12 +11,17 @@ COPY app/__init__.py app/__init__.py
 COPY app/portfolio_main.py app/portfolio_main.py
 COPY app/api/__init__.py app/api/__init__.py
 COPY app/api/portfolio_routes.py app/api/portfolio_routes.py
+COPY app/api/scheduler_routes.py app/api/scheduler_routes.py
 COPY app/portfolio/ app/portfolio/
 COPY app/options/__init__.py app/options/__init__.py
 COPY app/options/polygon_options.py app/options/polygon_options.py
-COPY app/services/__init__.py app/services/__init__.py
-COPY app/services/ticker_lookup.py app/services/ticker_lookup.py
-COPY app/services/alert_service.py app/services/alert_service.py
+COPY app/services/ app/services/
+COPY app/scheduler/ app/scheduler/
+COPY app/edgar/__init__.py app/edgar/__init__.py
+COPY app/edgar/alerts.py app/edgar/alerts.py
+COPY app/edgar/models.py app/edgar/models.py
+COPY app/risk/ app/risk/
+COPY app/api/risk_routes.py app/api/risk_routes.py
 
 EXPOSE 8001
 

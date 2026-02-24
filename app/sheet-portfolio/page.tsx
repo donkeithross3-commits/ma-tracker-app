@@ -35,6 +35,16 @@ interface Deal {
   is_excluded?: boolean;
 }
 
+interface RiskData {
+  ticker: string;
+  overall_risk_score: number | null;
+  overall_risk_level: string | null;
+  overall_risk_summary: string | null;
+  needs_attention: boolean;
+  has_risk_change: boolean;
+  attention_reason: string | null;
+}
+
 interface HealthStatus {
   status: string;
   last_success_date: string | null;
@@ -77,6 +87,24 @@ function formatDate(d: string | null) {
   return `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0].slice(2)}`;
 }
 
+function riskScoreCell(risk: RiskData | undefined) {
+  if (!risk || risk.overall_risk_score === null) return <span className="text-gray-600">-</span>;
+  const score = risk.overall_risk_score;
+  let color = "text-green-400 bg-green-400/10";
+  if (score >= 8) color = "text-red-400 bg-red-400/10";
+  else if (score >= 6) color = "text-orange-400 bg-orange-400/10";
+  else if (score >= 4) color = "text-yellow-400 bg-yellow-400/10";
+  else if (score >= 2) color = "text-lime-400 bg-lime-400/10";
+
+  return (
+    <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${color}`} title={risk.overall_risk_summary || ""}>
+      {score.toFixed(1)}
+      {risk.needs_attention && <span className="ml-1 text-red-400" title={risk.attention_reason || "Needs attention"}>&#9873;</span>}
+      {risk.has_risk_change && <span className="ml-0.5 text-yellow-400">&#9651;</span>}
+    </span>
+  );
+}
+
 // Check if countdown_raw is the 11/3/1773 artifact
 function isCountdownArtifact(raw: string | null): boolean {
   if (!raw) return false;
@@ -94,6 +122,7 @@ export default function SheetPortfolioPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [filter, setFilter] = useState<string>("");
   const [showExcluded, setShowExcluded] = useState(false);
+  const [riskData, setRiskData] = useState<Record<string, RiskData>>({});
   const [livePrices, setLivePrices] = useState<Record<string, { price: number; change: number; change_pct: number }>>({});
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -104,9 +133,10 @@ export default function SheetPortfolioPage() {
       const dealsUrl = showExcluded
         ? "/api/sheet-portfolio/deals?include_excluded=true"
         : "/api/sheet-portfolio/deals";
-      const [dealsResp, healthResp] = await Promise.all([
+      const [dealsResp, healthResp, riskResp] = await Promise.all([
         fetch(dealsUrl),
         fetch("/api/sheet-portfolio/health"),
+        fetch("/api/sheet-portfolio/risk"),
       ]);
       if (dealsResp.ok) {
         setDeals(await dealsResp.json());
@@ -115,6 +145,14 @@ export default function SheetPortfolioPage() {
       }
       if (healthResp.ok) {
         setHealth(await healthResp.json());
+      }
+      if (riskResp.ok) {
+        const riskArr: RiskData[] = await riskResp.json();
+        const riskMap: Record<string, RiskData> = {};
+        for (const r of riskArr) {
+          riskMap[r.ticker] = r;
+        }
+        setRiskData(riskMap);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch data");
@@ -432,6 +470,9 @@ export default function SheetPortfolioPage() {
                         {sortIcon(col.key)}
                       </th>
                     ))}
+                    <th className="py-2 px-2 font-medium text-center whitespace-nowrap">
+                      Risk
+                    </th>
                     {showExcluded && (
                       <th className="py-2 px-1 font-medium text-center w-8"></th>
                     )}
@@ -596,6 +637,10 @@ export default function SheetPortfolioPage() {
                           ) : deal.cvr_flag?.toLowerCase() === "no" ? (
                             <span className="text-gray-600">No</span>
                           ) : null}
+                        </td>
+                        {/* Risk Score */}
+                        <td className="py-1.5 px-2 text-center">
+                          {riskScoreCell(riskData[deal.ticker])}
                         </td>
                         {/* Exclude toggle */}
                         {showExcluded && (
