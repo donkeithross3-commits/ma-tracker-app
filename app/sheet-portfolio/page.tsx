@@ -37,12 +37,18 @@ interface Deal {
 
 interface RiskData {
   ticker: string;
-  overall_risk_score: number | null;
-  overall_risk_level: string | null;
-  overall_risk_summary: string | null;
+  vote_grade: string | null;
+  financing_grade: string | null;
+  legal_grade: string | null;
+  regulatory_grade: string | null;
+  mac_grade: string | null;
+  investable_assessment: string | null;
   needs_attention: boolean;
   has_risk_change: boolean;
   attention_reason: string | null;
+  discrepancy_count: number;
+  event_count: number;
+  deal_summary: string | null;
 }
 
 interface HealthStatus {
@@ -51,6 +57,12 @@ interface HealthStatus {
   last_success_rows: number;
   last_success_at: string | null;
   recent_failures: number;
+}
+
+interface DiffEntry {
+  ticker: string;
+  diff_type: "added" | "modified" | "removed";
+  changed_fields: Record<string, { old: string; new: string }>;
 }
 
 type SortKey = keyof Deal | "__default__";
@@ -87,20 +99,48 @@ function formatDate(d: string | null) {
   return `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0].slice(2)}`;
 }
 
+function gradeColor(grade: string | null): string {
+  if (!grade) return "text-gray-600";
+  const g = grade.toUpperCase();
+  if (g === "LOW") return "text-green-400";
+  if (g === "MEDIUM" || g === "MED") return "text-yellow-400";
+  if (g === "HIGH") return "text-red-400";
+  return "text-gray-400";
+}
+
 function riskScoreCell(risk: RiskData | undefined) {
-  if (!risk || risk.overall_risk_score === null) return <span className="text-gray-600">-</span>;
-  const score = risk.overall_risk_score;
-  let color = "text-green-400 bg-green-400/10";
-  if (score >= 8) color = "text-red-400 bg-red-400/10";
-  else if (score >= 6) color = "text-orange-400 bg-orange-400/10";
-  else if (score >= 4) color = "text-yellow-400 bg-yellow-400/10";
-  else if (score >= 2) color = "text-lime-400 bg-lime-400/10";
+  if (!risk) return <span className="text-gray-600">-</span>;
+  const hasAnyGrade = risk.vote_grade || risk.financing_grade || risk.legal_grade || risk.regulatory_grade || risk.mac_grade;
+  if (!hasAnyGrade) return <span className="text-gray-600">-</span>;
+
+  const grades = [
+    { label: "V", grade: risk.vote_grade },
+    { label: "F", grade: risk.financing_grade },
+    { label: "L", grade: risk.legal_grade },
+    { label: "R", grade: risk.regulatory_grade },
+    { label: "M", grade: risk.mac_grade },
+  ];
+
+  const abbrev = (g: string | null) => {
+    if (!g) return "?";
+    const u = g.toUpperCase();
+    if (u === "LOW") return "L";
+    if (u === "MEDIUM" || u === "MED") return "M";
+    if (u === "HIGH") return "H";
+    return "?";
+  };
 
   return (
-    <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${color}`} title={risk.overall_risk_summary || ""}>
-      {score.toFixed(1)}
-      {risk.needs_attention && <span className="ml-1 text-red-400" title={risk.attention_reason || "Needs attention"}>&#9873;</span>}
-      {risk.has_risk_change && <span className="ml-0.5 text-yellow-400">&#9651;</span>}
+    <span className="text-xs font-mono whitespace-nowrap" title={risk.deal_summary || ""}>
+      {grades.map((g, i) => (
+        <span key={i} className={gradeColor(g.grade)}>
+          {g.label}:{abbrev(g.grade)}
+          {i < grades.length - 1 ? " " : ""}
+        </span>
+      ))}
+      {risk.discrepancy_count > 0 && <span className="ml-1" title={`${risk.discrepancy_count} discrepancies`}>&#9888;&#65039;</span>}
+      {risk.event_count > 0 && <span className="ml-0.5" title={`${risk.event_count} overnight events`}>&#9889;</span>}
+      {risk.needs_attention && <span className="ml-0.5 text-red-400" title={risk.attention_reason || "Needs attention"}>&#9873;</span>}
     </span>
   );
 }
@@ -126,6 +166,7 @@ export default function SheetPortfolioPage() {
   const [livePrices, setLivePrices] = useState<Record<string, { price: number; change: number; change_pct: number }>>({});
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [diffMap, setDiffMap] = useState<Record<string, DiffEntry>>({});
 
   const fetchData = useCallback(async () => {
     try {
@@ -133,10 +174,11 @@ export default function SheetPortfolioPage() {
       const dealsUrl = showExcluded
         ? "/api/sheet-portfolio/deals?include_excluded=true"
         : "/api/sheet-portfolio/deals";
-      const [dealsResp, healthResp, riskResp] = await Promise.all([
+      const [dealsResp, healthResp, riskResp, diffResp] = await Promise.all([
         fetch(dealsUrl),
         fetch("/api/sheet-portfolio/health"),
         fetch("/api/sheet-portfolio/risk"),
+        fetch("/api/sheet-portfolio/diff").catch(() => null),
       ]);
       if (dealsResp.ok) {
         setDeals(await dealsResp.json());
@@ -153,6 +195,14 @@ export default function SheetPortfolioPage() {
           riskMap[r.ticker] = r;
         }
         setRiskData(riskMap);
+      }
+      if (diffResp && diffResp.ok) {
+        const diffData = await diffResp.json();
+        const map: Record<string, DiffEntry> = {};
+        for (const d of diffData.diffs || []) {
+          map[d.ticker] = d;
+        }
+        setDiffMap(map);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch data");
@@ -210,19 +260,53 @@ export default function SheetPortfolioPage() {
     setIngesting(true);
     setIngestResult(null);
     try {
+      // Phase 1: Dashboard ingest
       const resp = await fetch("/api/sheet-portfolio/ingest?force=true", {
         method: "POST",
       });
       const data = await resp.json();
-      if (resp.ok) {
-        setIngestResult(
-          data.skipped
-            ? "Skipped (no changes)"
-            : `Ingested ${data.row_count} rows (${data.excluded_count || 0} excluded)`
-        );
-        fetchData();
-      } else {
+      if (!resp.ok) {
         setIngestResult(`Error: ${data.error || data.detail}`);
+        setIngesting(false);
+        return;
+      }
+
+      const rowCount = data.skipped ? 0 : data.row_count;
+      if (data.skipped) {
+        setIngestResult("Skipped (no changes)");
+      } else {
+        setIngestResult(`Ingested ${rowCount} rows — refreshing deal details...`);
+      }
+
+      // Refresh table immediately with dashboard data
+      await fetchData();
+
+      // Phase 2: Detail ingest (all deal tabs)
+      try {
+        const detailResp = await fetch("/api/sheet-portfolio/ingest-details", {
+          method: "POST",
+        });
+        if (detailResp.ok) {
+          const detailData = await detailResp.json();
+          const detailCount = detailData.succeeded || 0;
+          // Refresh again to pick up detail data
+          await fetchData();
+          setIngestResult(
+            data.skipped
+              ? `Skipped dashboard (no changes) + ${detailCount} deal details`
+              : `Ingested ${rowCount} rows + ${detailCount} deal details`
+          );
+        } else {
+          // Detail ingest failed but dashboard was fine
+          setIngestResult(
+            `Ingested ${rowCount} rows (detail refresh failed)`
+          );
+        }
+      } catch {
+        // Detail ingest network error — dashboard still succeeded
+        setIngestResult(
+          `Ingested ${rowCount} rows (detail refresh failed)`
+        );
       }
     } catch (e) {
       setIngestResult(
@@ -372,7 +456,9 @@ export default function SheetPortfolioPage() {
               disabled={ingesting}
               className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 disabled:bg-gray-700 disabled:text-gray-500 border border-gray-700 rounded transition-colors"
             >
-              {ingesting ? "Ingesting..." : "Re-ingest Sheet"}
+              {ingesting
+                ? (ingestResult?.includes("deal details") ? "Refreshing details..." : "Ingesting...")
+                : "Re-ingest Sheet"}
             </button>
             {ingestResult && (
               <span className="text-xs text-gray-400">{ingestResult}</span>
@@ -481,19 +567,31 @@ export default function SheetPortfolioPage() {
                 <tbody>
                   {sortedDeals.map((deal, idx) => {
                     const artifact = isCountdownArtifact(deal.countdown_raw);
+                    const diff = diffMap[deal.ticker];
+                    const diffBorder = diff?.diff_type === "added"
+                      ? "border-l-2 border-green-500/60"
+                      : diff?.diff_type === "modified"
+                      ? "border-l-2 border-amber-500/40"
+                      : "";
                     return (
                       <tr
                         key={`${deal.ticker}-${idx}`}
-                        className={`border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors ${deal.is_excluded ? "opacity-40" : ""}`}
+                        className={`border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors ${deal.is_excluded ? "opacity-40" : ""} ${diffBorder}`}
                       >
                         {/* Ticker */}
                         <td className="py-1.5 px-2 font-mono font-semibold">
-                          <Link
-                            href={`/sheet-portfolio/${deal.ticker}`}
-                            className={`hover:underline ${deal.is_excluded ? "text-gray-500 line-through" : "text-blue-400 hover:text-blue-300"}`}
-                          >
-                            {deal.ticker}
-                          </Link>
+                          <span className="inline-flex items-center gap-1">
+                            <Link
+                              href={`/sheet-portfolio/${deal.ticker}`}
+                              className={`hover:underline ${deal.is_excluded ? "text-gray-500 line-through" : "text-blue-400 hover:text-blue-300"}`}
+                              title={diff?.diff_type === "modified" ? `Changed: ${Object.keys(diff.changed_fields).join(", ")}` : undefined}
+                            >
+                              {deal.ticker}
+                            </Link>
+                            {diff?.diff_type === "added" && (
+                              <span className="text-[10px] px-1 py-0.5 rounded bg-green-500/15 text-green-400 leading-none">NEW</span>
+                            )}
+                          </span>
                         </td>
                         {/* Acquiror */}
                         <td

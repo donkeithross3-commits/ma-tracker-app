@@ -796,11 +796,11 @@ async def ingest_deal_details(
     db_pool: asyncpg.Pool,
     snapshot_id: str,
     deals: List[Dict[str, str]],  # [{"ticker": "EA", "gid": "137229779"}, ...]
-    concurrency: int = 3,
+    concurrency: int = 5,
 ) -> Dict[str, Any]:
     """
     Fetch and store deal details for all deals in a snapshot.
-    Rate-limited to `concurrency` concurrent requests with a 0.5s pause between batches.
+    Rate-limited to `concurrency` concurrent requests with a 0.2s pause between batches.
 
     Returns summary: {total, succeeded, failed, errors: [...]}
     """
@@ -831,7 +831,7 @@ async def ingest_deal_details(
                 logger.warning("Failed to ingest detail for %s: %s", ticker, exc)
             finally:
                 # Be gentle with Google Sheets
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.2)
 
     async with aiohttp.ClientSession() as session:
         tasks = [_process_one(session, deal) for deal in deals]
