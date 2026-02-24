@@ -17,6 +17,9 @@ Environment variables:
     IB_HOST         - IB TWS host (default: 127.0.0.1)
     IB_PORT         - IB TWS port (optional; overrides IB_MODE)
     IB_MODE         - "paper" (7497) or "live" (7496) when IB_PORT not set; TWS default ports
+    IB_CLIENT_ID    - IB API client ID (default: 0). Use a unique value per agent when
+                      running multiple agents against the same TWS. Note: only client_id=0
+                      receives TWS-owned orders via reqAutoOpenOrders(True).
     RELAY_URL       - WebSocket relay URL (default: wss://dr3-dashboard.com/ws/data-provider)
     IB_PROVIDER_KEY - API key for authentication (required)
 """
@@ -65,6 +68,8 @@ if _raw_port and _raw_port.isdigit():
 else:
     _mode = (_env("IB_MODE") or "paper").lower()
     IB_PORT = 7497 if _mode == "paper" else 7496  # TWS default: paper=7497, live=7496
+_raw_client_id = _env("IB_CLIENT_ID")
+IB_CLIENT_ID = int(_raw_client_id) if _raw_client_id and _raw_client_id.isdigit() else 0
 RELAY_URL = _env("RELAY_URL") or "wss://dr3-dashboard.com/ws/data-provider"
 IB_PROVIDER_KEY = _env("IB_PROVIDER_KEY")
 HEARTBEAT_INTERVAL = 10  # seconds
@@ -124,11 +129,10 @@ class IBDataAgent:
     def connect_to_ib(self) -> bool:
         """Connect to IB TWS. Tries configured port first; on failure tries the other (7496/7497)
         so the agent works with either paper or live TWS without config change."""
-        # Use clientId=0 (the "default client") so that:
-        # 1) reqAutoOpenOrders(True) works (IB only allows this for clientId 0)
-        # 2) reqOpenOrders() returns ALL orders (TWS + API) with valid orderIds
-        # 3) Orders from previous sessions can be modified/cancelled
-        client_id = 0
+        # clientId=0 is the "default client" that gets TWS-owned orders via
+        # reqAutoOpenOrders(True). Use IB_CLIENT_ID env var to override when
+        # running multiple agents against the same TWS instance.
+        client_id = IB_CLIENT_ID
         # Try configured port first; then the other TWS port (7496=live, 7497=paper)
         other_port = 7497 if IB_PORT == 7496 else 7496
         ports_to_try = [IB_PORT, other_port]
@@ -1329,7 +1333,7 @@ def main():
     print("=" * 60)
     print("IB Data Agent (Standalone)")
     print("=" * 60)
-    print(f"IB TWS:     {IB_HOST}:{IB_PORT}")
+    print(f"IB TWS:     {IB_HOST}:{IB_PORT} (client_id={IB_CLIENT_ID})")
     print(f"Relay URL:  {RELAY_URL}")
     print(f"API Key:    {'*' * 8 if IB_PROVIDER_KEY else 'NOT SET!'}")
     print("=" * 60)
