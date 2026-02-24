@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PYTHON_SERVICE_URL =
-  process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
+const PORTFOLIO_SERVICE_URL =
+  process.env.PORTFOLIO_SERVICE_URL || process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const includeExcluded = searchParams.get("include_excluded");
     const params = includeExcluded === "true" ? "?include_excluded=true" : "";
-    const resp = await fetch(`${PYTHON_SERVICE_URL}/portfolio/deals${params}`, {
+    const resp = await fetch(`${PORTFOLIO_SERVICE_URL}/portfolio/deals${params}`, {
       cache: "no-store",
     });
     if (!resp.ok) {

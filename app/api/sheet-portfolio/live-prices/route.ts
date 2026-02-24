@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
-const PYTHON_SERVICE_URL =
-  process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
+const PORTFOLIO_SERVICE_URL =
+  process.env.PORTFOLIO_SERVICE_URL || process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
 export async function GET() {
   try {
-    const resp = await fetch(`${PYTHON_SERVICE_URL}/portfolio/live-prices`, {
+    const resp = await fetch(`${PORTFOLIO_SERVICE_URL}/portfolio/live-prices`, {
       cache: "no-store",
     });
     if (!resp.ok) {

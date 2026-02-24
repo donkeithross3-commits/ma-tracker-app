@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PYTHON_SERVICE_URL =
-  process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
+const PORTFOLIO_SERVICE_URL =
+  process.env.PORTFOLIO_SERVICE_URL || process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
 export async function GET(
   _req: NextRequest,
@@ -10,7 +10,7 @@ export async function GET(
   try {
     const { ticker } = await params;
     const resp = await fetch(
-      `${PYTHON_SERVICE_URL}/portfolio/deal/${encodeURIComponent(ticker)}`,
+      `${PORTFOLIO_SERVICE_URL}/portfolio/deal/${encodeURIComponent(ticker)}`,
       { cache: "no-store" }
     );
     if (!resp.ok) {

@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+WORKDIR /service
+
+# Install deps first (layer cache)
+COPY requirements-portfolio.txt .
+RUN pip install --no-cache-dir -r requirements-portfolio.txt
+
+# Copy only the files the portfolio service needs
+COPY app/__init__.py app/__init__.py
+COPY app/portfolio_main.py app/portfolio_main.py
+COPY app/api/__init__.py app/api/__init__.py
+COPY app/api/portfolio_routes.py app/api/portfolio_routes.py
+COPY app/portfolio/ app/portfolio/
+COPY app/options/__init__.py app/options/__init__.py
+COPY app/options/polygon_options.py app/options/polygon_options.py
+COPY app/services/__init__.py app/services/__init__.py
+COPY app/services/ticker_lookup.py app/services/ticker_lookup.py
+COPY app/services/alert_service.py app/services/alert_service.py
+
+EXPOSE 8001
+
+CMD ["uvicorn", "app.portfolio_main:app", "--host", "0.0.0.0", "--port", "8001"]

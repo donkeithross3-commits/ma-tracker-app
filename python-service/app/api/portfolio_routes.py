@@ -10,8 +10,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
 
+_pool = None
+
+
+def set_pool(pool):
+    """Set the connection pool (called by portfolio_main.py for standalone mode)."""
+    global _pool
+    _pool = pool
+
+
 def _get_pool():
-    """Get the database connection pool from the global EdgarDatabase instance."""
+    """Get the database connection pool.
+
+    In standalone mode (portfolio_main.py), uses the pool injected via set_pool().
+    In monolith mode (main.py), falls back to the global EdgarDatabase instance.
+    """
+    if _pool is not None:
+        return _pool
+    # Fallback: running inside the monolith
     from ..main import get_db
     db = get_db()
     if db.pool is None:

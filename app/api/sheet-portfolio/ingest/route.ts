@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 
-const PYTHON_SERVICE_URL =
-  process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
+const PORTFOLIO_SERVICE_URL =
+  process.env.PORTFOLIO_SERVICE_URL || process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
 export async function POST(request: Request) {
   try {
     const url = new URL(request.url);
     const force = url.searchParams.get("force") || "false";
     const resp = await fetch(
-      `${PYTHON_SERVICE_URL}/portfolio/ingest?force=${force}`,
+      `${PORTFOLIO_SERVICE_URL}/portfolio/ingest?force=${force}`,
       { method: "POST", cache: "no-store" }
     );
     if (!resp.ok) {

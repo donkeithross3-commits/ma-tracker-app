@@ -20,10 +20,14 @@ services:
       - NODE_ENV=production
       # Dashboard must reach Python service on host (relay, IB status, options, etc.)
       - PYTHON_SERVICE_URL=http://host.docker.internal:8000
+      # Portfolio service runs in its own container on the frontend network
+      - PORTFOLIO_SERVICE_URL=http://python-portfolio:8001
     # Load environment variables from .env.local
     # Must contain: KRJ_BASIC_USER, KRJ_BASIC_PASS, DATABASE_URL
     env_file:
       - ./ma-tracker-app/.env.local
+    networks:
+      - frontend
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
@@ -35,6 +39,32 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
+        max-file: "3"
+
+  python-portfolio:
+    build:
+      context: ./ma-tracker-app/python-service
+      dockerfile: Dockerfile.portfolio
+    image: python-portfolio:latest
+    container_name: python-portfolio
+    # No host port exposure — only reachable from the frontend network
+    env_file:
+      - ./ma-tracker-app/python-service/.env
+    environment:
+      - CORS_ALLOWED_ORIGINS=https://dr3-dashboard.com,http://localhost:3000
+    networks:
+      - frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
         max-file: "3"
 
   krj-batch:
@@ -60,3 +90,6 @@ services:
         max-size: "5m"
         max-file: "2"
 
+networks:
+  frontend:
+    driver: bridge
