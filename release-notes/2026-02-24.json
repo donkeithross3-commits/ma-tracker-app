@@ -32,6 +32,15 @@
       "project": "sheet-portfolio",
       "image": "",
       "screenshot": null
+    },
+    {
+      "id": "admin-user-management",
+      "title": "Admin User Management Screen",
+      "summary": "New /admin/users page lets the admin toggle project access on/off per user with instant-save switches.",
+      "description": "A new admin-only screen at /admin/users provides a table of all registered users with toggle switches for each project (KRJ Dashboard, M&A Options Scanner, Event Driven Portfolio).\n\n**Instant save:** Toggle switches use optimistic updates -- the UI flips immediately and PUTs to the API in the background. On failure, the toggle reverts and shows an inline error.\n\n**Admin gating:** The middleware blocks non-admin users from /admin/** and /api/admin/** routes, redirecting them to the dashboard. The \"Manage Users\" link in the UserMenu dropdown is only visible to the admin account.\n\n**User details:** The table shows each user's alias, email, role, project access toggles, and active status indicator.",
+      "category": "general",
+      "image": "",
+      "screenshot": null
     }
   ]
 }
