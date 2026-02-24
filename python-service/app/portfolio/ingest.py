@@ -369,7 +369,7 @@ async def _insert_rows(
                 announced_date, close_date, end_date,
                 countdown_days, deal_price, current_price,
                 gross_yield, price_change, current_yield,
-                deal_tab_gid, raw_json, created_at
+                deal_tab_gid, raw_json, is_excluded, created_at
             ) VALUES (
                 $1, $2, $3,
                 $4, $5,
@@ -382,7 +382,7 @@ async def _insert_rows(
                 $23, $24, $25,
                 $26, $27, $28,
                 $29, $30, $31,
-                $32, $33::jsonb, NOW()
+                $32, $33::jsonb, $34, NOW()
             )
             """,
             row_id,
@@ -418,10 +418,185 @@ async def _insert_rows(
             row_data["current_yield"],
             row_data["deal_tab_gid"],
             row_data["raw_json"],
+            row_data.get("is_excluded", False),
         )
         count += 1
 
     return count
+
+
+async def _apply_allowlist(
+    conn: asyncpg.Connection,
+    parsed_rows: List[Dict[str, Any]],
+) -> int:
+    """Cross-reference parsed rows with deal_allowlist.
+
+    - Auto-seeds new tickers with status='active', source='ingest_auto'
+    - Marks rows with excluded tickers via is_excluded=True
+
+    Returns count of excluded rows.
+    """
+    # Fetch current allowlist
+    allowlist_rows = await conn.fetch("SELECT ticker, status FROM deal_allowlist")
+    allowlist = {r["ticker"]: r["status"] for r in allowlist_rows}
+
+    # Auto-seed new tickers
+    current_tickers = {r["ticker"] for r in parsed_rows if r["ticker"]}
+    new_tickers = current_tickers - set(allowlist.keys())
+    for ticker in sorted(new_tickers):
+        await conn.execute(
+            """
+            INSERT INTO deal_allowlist (ticker, status, source, created_at, updated_at)
+            VALUES ($1, 'active', 'ingest_auto', NOW(), NOW())
+            ON CONFLICT (ticker) DO NOTHING
+            """,
+            ticker,
+        )
+        allowlist[ticker] = "active"
+    if new_tickers:
+        logger.info("Auto-seeded %d new tickers to allowlist: %s", len(new_tickers), sorted(new_tickers))
+
+    # Mark excluded rows
+    excluded_count = 0
+    for row_data in parsed_rows:
+        ticker = row_data.get("ticker")
+        if ticker and allowlist.get(ticker) == "excluded":
+            row_data["is_excluded"] = True
+            excluded_count += 1
+        else:
+            row_data["is_excluded"] = False
+
+    if excluded_count:
+        logger.info("Marked %d rows as excluded via allowlist", excluded_count)
+    return excluded_count
+
+
+async def _store_diffs(
+    conn: asyncpg.Connection,
+    snapshot_id: uuid.UUID,
+    parsed_rows: List[Dict[str, Any]],
+) -> int:
+    """Compute and store diffs vs previous snapshot in sheet_diffs table.
+
+    Returns count of diff records created.
+    """
+    # Get previous snapshot
+    prev_snap = await conn.fetchrow(
+        """
+        SELECT id FROM sheet_snapshots
+        WHERE tab_gid = $1 AND id != $2 AND status = 'success'
+        ORDER BY snapshot_date DESC, ingested_at DESC
+        LIMIT 1
+        """,
+        DASHBOARD_GID,
+        snapshot_id,
+    )
+    if not prev_snap:
+        return 0
+
+    prev_rows = await conn.fetch(
+        "SELECT ticker, deal_price_raw, current_price_raw, gross_yield_raw, "
+        "current_yield_raw, category, investable, vote_risk, finance_risk, "
+        "legal_risk, close_date_raw, end_date_raw, countdown_raw, go_shop_raw, cvr_flag "
+        "FROM sheet_rows WHERE snapshot_id = $1 AND ticker IS NOT NULL",
+        prev_snap["id"],
+    )
+    prev_by_ticker = {r["ticker"]: dict(r) for r in prev_rows}
+
+    current_by_ticker = {}
+    compare_fields = [
+        "deal_price_raw", "current_price_raw", "gross_yield_raw",
+        "current_yield_raw", "category", "investable", "vote_risk",
+        "finance_risk", "legal_risk", "close_date_raw", "end_date_raw",
+        "countdown_raw", "go_shop_raw", "cvr_flag",
+    ]
+    for r in parsed_rows:
+        if r.get("ticker"):
+            current_by_ticker[r["ticker"]] = {k: r.get(k) for k in compare_fields}
+
+    current_tickers = set(current_by_ticker.keys())
+    prev_tickers = set(prev_by_ticker.keys())
+    diff_count = 0
+
+    # Added
+    for t in current_tickers - prev_tickers:
+        await conn.execute(
+            """INSERT INTO sheet_diffs (id, snapshot_id, ticker, diff_type, changed_fields, detected_at)
+               VALUES ($1, $2, $3, 'added', '{}'::jsonb, NOW())""",
+            uuid.uuid4(), snapshot_id, t,
+        )
+        diff_count += 1
+
+    # Removed
+    for t in prev_tickers - current_tickers:
+        await conn.execute(
+            """INSERT INTO sheet_diffs (id, snapshot_id, ticker, diff_type, changed_fields, detected_at)
+               VALUES ($1, $2, $3, 'removed', '{}'::jsonb, NOW())""",
+            uuid.uuid4(), snapshot_id, t,
+        )
+        diff_count += 1
+
+    # Modified
+    for t in current_tickers & prev_tickers:
+        changed = {}
+        cur = current_by_ticker[t]
+        prev = prev_by_ticker[t]
+        for k in compare_fields:
+            cv = cur.get(k)
+            pv = prev.get(k)
+            if cv != pv:
+                changed[k] = {"old": pv, "new": cv}
+        if changed:
+            await conn.execute(
+                """INSERT INTO sheet_diffs (id, snapshot_id, ticker, diff_type, changed_fields, detected_at)
+                   VALUES ($1, $2, $3, 'modified', $4::jsonb, NOW())""",
+                uuid.uuid4(), snapshot_id, t, json.dumps(changed, default=str),
+            )
+            diff_count += 1
+
+    if diff_count:
+        logger.info("Stored %d diffs vs previous snapshot", diff_count)
+    return diff_count
+
+
+async def _cleanup_old_snapshots(conn: asyncpg.Connection) -> int:
+    """Delete snapshots older than 30 days, keeping at least 2.
+
+    Returns count of deleted snapshots.
+    """
+    # Count total snapshots
+    total = await conn.fetchval(
+        "SELECT COUNT(*) FROM sheet_snapshots WHERE tab_gid = $1 AND status = 'success'",
+        DASHBOARD_GID,
+    )
+    if total is None or total <= 2:
+        return 0
+
+    # Find cutoff: snapshots older than 30 days, but keep at least 2
+    old_ids = await conn.fetch(
+        """
+        SELECT id FROM sheet_snapshots
+        WHERE tab_gid = $1 AND status = 'success'
+          AND ingested_at < NOW() - INTERVAL '30 days'
+        ORDER BY ingested_at ASC
+        LIMIT $2
+        """,
+        DASHBOARD_GID,
+        max(0, total - 2),
+    )
+
+    deleted = 0
+    for row in old_ids:
+        sid = row["id"]
+        await conn.execute("DELETE FROM sheet_diffs WHERE snapshot_id = $1", sid)
+        await conn.execute("DELETE FROM sheet_deal_details WHERE snapshot_id = $1", sid)
+        await conn.execute("DELETE FROM sheet_rows WHERE snapshot_id = $1", sid)
+        await conn.execute("DELETE FROM sheet_snapshots WHERE id = $1", sid)
+        deleted += 1
+
+    if deleted:
+        logger.info("Cleaned up %d old snapshots (>30 days)", deleted)
+    return deleted
 
 
 async def ingest_dashboard(
@@ -532,6 +707,8 @@ async def ingest_dashboard(
 
     # Step 6: Write to database in a transaction
     snapshot_id = uuid.uuid4()
+    excluded_count = 0
+    diff_count = 0
     async with db_pool.acquire() as conn:
         async with conn.transaction():
             # Delete existing snapshot for same date/gid if hash differs (re-ingest)
@@ -541,6 +718,9 @@ async def ingest_dashboard(
             if existing_id:
                 await _delete_existing_snapshot(conn, existing_id)
 
+            # Apply allowlist: auto-seed new tickers, mark excluded rows
+            excluded_count = await _apply_allowlist(conn, parsed_rows)
+
             # Insert snapshot record
             await _insert_snapshot(
                 conn, snapshot_id, snapshot_date, gid, len(parsed_rows), content_hash
@@ -549,8 +729,18 @@ async def ingest_dashboard(
             # Insert all rows
             inserted = await _insert_rows(conn, snapshot_id, parsed_rows)
 
+            # Compute and store diffs vs previous snapshot
+            diff_count = await _store_diffs(conn, snapshot_id, parsed_rows)
+
+        # Snapshot cleanup (outside transaction to not block ingest on failure)
+        try:
+            await _cleanup_old_snapshots(conn)
+        except Exception:
+            logger.warning("Snapshot cleanup failed (non-critical)", exc_info=True)
+
     logger.info(
-        "Ingest complete: snapshot_id=%s, %d rows inserted", snapshot_id, inserted
+        "Ingest complete: snapshot_id=%s, %d rows inserted, %d excluded, %d diffs",
+        snapshot_id, inserted, excluded_count, diff_count,
     )
 
     return {
@@ -560,6 +750,8 @@ async def ingest_dashboard(
         "skipped": False,
         "content_hash": content_hash,
         "parse_errors": parse_errors,
+        "excluded_count": excluded_count,
+        "diff_count": diff_count,
     }
 
 

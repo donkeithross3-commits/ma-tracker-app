@@ -233,7 +233,9 @@ async def get_deal(ticker: str):
                     "stock_per_share": _f(detail["stock_per_share"]),
                     "stock_pct": _f(detail["stock_pct"]),
                     "stock_ratio": detail["stock_ratio"],
+                    "stress_test_discount": detail["stress_test_discount"],
                     "dividends_other": _f(detail["dividends_other"]),
+                    "dividends_other_pct": _f(detail["dividends_other_pct"]),
                     "total_price_per_share": _f(detail["total_price_per_share"]),
                     "target_current_price": _f(detail["target_current_price"]),
                     "acquiror_current_price": _f(detail["acquiror_current_price"]),
@@ -243,20 +245,27 @@ async def get_deal(ticker: str):
                     "deal_close_time_months": _f(detail["deal_close_time_months"]),
                     "expected_irr": _f(detail["expected_irr"]),
                     "ideal_price": _f(detail["ideal_price"]),
+                    "hypothetical_irr": _f(detail["hypothetical_irr"]),
+                    "hypothetical_irr_spread": _f(detail["hypothetical_irr_spread"]),
                     "announce_date": str(detail["announce_date"]) if detail["announce_date"] else None,
                     "expected_close_date": str(detail["expected_close_date"]) if detail["expected_close_date"] else None,
                     "expected_close_date_note": detail["expected_close_date_note"],
                     "outside_date": str(detail["outside_date"]) if detail["outside_date"] else None,
                     "shareholder_vote": detail["shareholder_vote"],
                     "premium_attractive": detail["premium_attractive"],
+                    "board_approval": detail["board_approval"],
+                    "voting_agreements": detail["voting_agreements"],
+                    "aggressive_shareholders": detail["aggressive_shareholders"],
                     "regulatory_approvals": detail["regulatory_approvals"],
                     "termination_fee": detail["termination_fee"],
                     "termination_fee_pct": _f(detail["termination_fee_pct"]),
                     "target_marketcap": detail["target_marketcap"],
+                    "target_enterprise_value": detail["target_enterprise_value"],
                     "shareholder_risk": detail["shareholder_risk"],
                     "financing_risk": detail["financing_risk"],
                     "legal_risk": detail["legal_risk"],
                     "investable_deal": detail["investable_deal"],
+                    "pays_dividend": detail["pays_dividend"],
                     "has_cvrs": detail["has_cvrs"],
                     "cvrs": detail["cvrs"],
                     "dividends": detail["dividends"],
@@ -278,7 +287,9 @@ async def get_deal(ticker: str):
 # GET /portfolio/deals
 # ---------------------------------------------------------------------------
 @router.get("/deals")
-async def get_deals():
+async def get_deals(
+    include_excluded: bool = Query(False, description="Include excluded (hidden) deals"),
+):
     """Get all deals from the latest snapshot (lightweight, key metrics only)."""
     pool = _get_pool()
 
@@ -290,19 +301,35 @@ async def get_deals():
             if not snapshot:
                 return []
 
-            rows = await conn.fetch(
-                """SELECT ticker, acquiror, category, deal_price, current_price,
-                          gross_yield, current_yield, investable, vote_risk,
-                          finance_risk, legal_risk, deal_price_raw, current_price_raw,
-                          gross_yield_raw, current_yield_raw,
-                          announced_date, close_date, end_date,
-                          countdown_days, price_change, price_change_raw,
-                          go_shop_raw, cvr_flag
-                   FROM sheet_rows
-                   WHERE snapshot_id = $1 AND ticker IS NOT NULL
-                   ORDER BY row_index""",
-                snapshot["id"]
-            )
+            if include_excluded:
+                rows = await conn.fetch(
+                    """SELECT ticker, acquiror, category, deal_price, current_price,
+                              gross_yield, current_yield, investable, vote_risk,
+                              finance_risk, legal_risk, deal_price_raw, current_price_raw,
+                              gross_yield_raw, current_yield_raw,
+                              announced_date, close_date, end_date,
+                              countdown_days, price_change, price_change_raw,
+                              go_shop_raw, cvr_flag, is_excluded
+                       FROM sheet_rows
+                       WHERE snapshot_id = $1 AND ticker IS NOT NULL
+                       ORDER BY row_index""",
+                    snapshot["id"]
+                )
+            else:
+                rows = await conn.fetch(
+                    """SELECT ticker, acquiror, category, deal_price, current_price,
+                              gross_yield, current_yield, investable, vote_risk,
+                              finance_risk, legal_risk, deal_price_raw, current_price_raw,
+                              gross_yield_raw, current_yield_raw,
+                              announced_date, close_date, end_date,
+                              countdown_days, price_change, price_change_raw,
+                              go_shop_raw, cvr_flag, is_excluded
+                       FROM sheet_rows
+                       WHERE snapshot_id = $1 AND ticker IS NOT NULL
+                         AND (is_excluded IS NOT TRUE)
+                       ORDER BY row_index""",
+                    snapshot["id"]
+                )
 
             deals = []
             for r in rows:
@@ -330,11 +357,74 @@ async def get_deals():
                     "countdown_days": r["countdown_days"],
                     "go_shop_raw": r["go_shop_raw"],
                     "cvr_flag": r["cvr_flag"],
+                    "is_excluded": r["is_excluded"] or False,
                 })
             return deals
     except Exception as e:
         logger.error(f"Deals fetch failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to fetch deals: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# GET /portfolio/allowlist
+# ---------------------------------------------------------------------------
+@router.get("/allowlist")
+async def get_allowlist():
+    """Get the full deal allowlist."""
+    pool = _get_pool()
+
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT ticker, status, source, notes, updated_at, created_at FROM deal_allowlist ORDER BY ticker"
+            )
+            return [
+                {
+                    "ticker": r["ticker"],
+                    "status": r["status"],
+                    "source": r["source"],
+                    "notes": r["notes"],
+                    "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        logger.error(f"Allowlist fetch failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch allowlist: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# POST /portfolio/allowlist
+# ---------------------------------------------------------------------------
+@router.post("/allowlist")
+async def set_allowlist_status(
+    ticker: str = Query(..., description="Ticker symbol"),
+    status: str = Query(..., description="Status: 'active' or 'excluded'"),
+    notes: Optional[str] = Query(None, description="Optional notes"),
+):
+    """Set a ticker's allowlist status (active or excluded)."""
+    pool = _get_pool()
+    ticker = ticker.upper()
+
+    if status not in ("active", "excluded"):
+        raise HTTPException(status_code=400, detail="Status must be 'active' or 'excluded'")
+
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO deal_allowlist (ticker, status, source, notes, updated_at, created_at)
+                VALUES ($1, $2, 'manual', $3, NOW(), NOW())
+                ON CONFLICT (ticker) DO UPDATE
+                SET status = $2, source = 'manual', notes = $3, updated_at = NOW()
+                """,
+                ticker, status, notes,
+            )
+            return {"ticker": ticker, "status": status, "notes": notes}
+    except Exception as e:
+        logger.error(f"Allowlist update failed for {ticker}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update allowlist: {str(e)}")
 
 
 # ---------------------------------------------------------------------------

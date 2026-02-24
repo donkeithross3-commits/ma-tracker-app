@@ -3,20 +3,19 @@ import { NextRequest, NextResponse } from "next/server";
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
-export async function GET(req: NextRequest) {
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ ticker: string }> }
+) {
   try {
-    const { searchParams } = new URL(req.url);
-    const includeExcluded = searchParams.get("include_excluded");
-    const params = includeExcluded === "true" ? "?include_excluded=true" : "";
-    const resp = await fetch(`${PYTHON_SERVICE_URL}/portfolio/deals${params}`, {
-      cache: "no-store",
-    });
+    const { ticker } = await params;
+    const resp = await fetch(
+      `${PYTHON_SERVICE_URL}/portfolio/deal/${encodeURIComponent(ticker)}`,
+      { cache: "no-store" }
+    );
     if (!resp.ok) {
       const body = await resp.text();
-      return NextResponse.json(
-        { error: body },
-        { status: resp.status }
-      );
+      return NextResponse.json({ error: body }, { status: resp.status });
     }
     const data = await resp.json();
     return NextResponse.json(data);
