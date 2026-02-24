@@ -193,9 +193,10 @@ class IBDataAgent:
 
     async def _tws_health_loop(self):
         """Background task: detect TWS disconnection and auto-reconnect.
-        
-        Checks every 5s. When disconnected, attempts reconnect with backoff.
-        Re-syncs order book and streaming subscriptions on success.
+
+        Checks every 5s when connected. When disconnected, attempts reconnect
+        with exponential backoff (5s → 60s). Quiet logging after first attempt
+        to avoid spamming the console when TWS isn't running.
         """
         CHECK_INTERVAL = 5.0
         while self.running:
@@ -206,8 +207,12 @@ class IBDataAgent:
             if self.scanner.isConnected() and not self.scanner.connection_lost:
                 continue
             # --- TWS is down ---
+            was_previously_connected = self._tws_last_connected is not None
             if not self._tws_reconnecting:
-                logger.warning("TWS connection lost — starting auto-reconnect...")
+                if was_previously_connected:
+                    logger.warning("TWS connection lost — starting auto-reconnect...")
+                else:
+                    logger.info("TWS not yet available — will retry in background (60s intervals)")
                 self._tws_reconnecting = True
             # Clean up dead socket
             try:
@@ -215,10 +220,12 @@ class IBDataAgent:
             except Exception:
                 pass
             # Attempt reconnect with backoff
-            delay = 5.0
+            # Start at 5s if TWS was previously connected (likely brief outage),
+            # 60s if never connected (TWS not running on this machine)
+            delay = 5.0 if was_previously_connected else 60.0
             MAX_DELAY = 60.0
             while self.running and self._tws_reconnecting:
-                logger.info("Attempting TWS reconnect (delay=%.0fs)...", delay)
+                logger.debug("Attempting TWS reconnect (delay=%.0fs)...", delay)
                 if self.connect_to_ib():
                     logger.info("TWS reconnected successfully!")
                     # Re-register account event callback
