@@ -210,6 +210,58 @@ export interface UpdateSpreadPricesResponse {
   };
 }
 
+// Options Scan Response - unified scan endpoint for deal-specific options page
+export interface OptionsScanContract {
+  symbol: string;
+  strike: number;
+  expiry: string; // "YYYYMMDD"
+  right: string; // "C" or "P"
+  bid: number;
+  ask: number;
+  mid_price: number;
+  volume: number;
+  open_interest: number;
+  implied_vol: number | null;
+}
+
+export interface OpportunityResult {
+  strategy: string;
+  contracts: OptionsScanContract[];
+  entry_cost: number;
+  max_profit: number;
+  breakeven: number;
+  expected_return: number;
+  annualized_return: number;
+  probability_of_profit: number;
+  notes: string;
+  entry_cost_ft: number;
+  expected_return_ft: number;
+  annualized_return_ft: number;
+}
+
+export interface CategoryResult {
+  best: OpportunityResult | null;
+  count: number;
+  all: OpportunityResult[];
+}
+
+export interface OptionsScanResponse {
+  ticker: string;
+  deal_price: number;
+  current_price: number;
+  days_to_close: number;
+  expected_close: string;
+  optionable: boolean;
+  categories: {
+    covered_call?: CategoryResult;
+    call?: CategoryResult;
+    spread?: CategoryResult;
+    put_spread?: CategoryResult;
+  };
+  total_opportunities: number;
+  scan_time_ms: number;
+}
+
 // Scanner Deals - lightweight deal management for options scanner
 export interface ScannerDeal {
   id: string;

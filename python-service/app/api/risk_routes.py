@@ -668,3 +668,196 @@ async def scan_covered_calls(
         },
         "errors": errors if errors else None,
     }
+
+
+# ===========================================================================
+# Unified Options Scan
+# ===========================================================================
+
+
+def _option_data_to_dict(opt: "OptionData") -> dict:
+    """Serialize an OptionData dataclass to a JSON-safe dict."""
+    return {
+        "symbol": opt.symbol,
+        "strike": opt.strike,
+        "expiry": opt.expiry,
+        "right": opt.right,
+        "bid": opt.bid,
+        "ask": opt.ask,
+        "volume": opt.volume,
+        "open_interest": opt.open_interest,
+        "implied_vol": opt.implied_vol,
+    }
+
+
+def _trade_opportunity_to_dict(opp: "TradeOpportunity") -> dict:
+    """Serialize a TradeOpportunity dataclass to a JSON-safe dict."""
+    return {
+        "strategy": opp.strategy,
+        "entry_cost": round(opp.entry_cost, 4),
+        "max_profit": round(opp.max_profit, 4),
+        "breakeven": round(opp.breakeven, 4),
+        "expected_return": round(opp.expected_return, 4),
+        "annualized_return": round(opp.annualized_return, 4),
+        "probability_of_profit": round(opp.probability_of_profit, 4),
+        "edge_vs_market": round(opp.edge_vs_market, 4),
+        "notes": opp.notes,
+        "contracts": [_option_data_to_dict(c) for c in opp.contracts],
+        "entry_cost_ft": round(opp.entry_cost_ft, 4),
+        "expected_return_ft": round(opp.expected_return_ft, 4),
+        "annualized_return_ft": round(opp.annualized_return_ft, 4),
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/options-scan
+# ---------------------------------------------------------------------------
+@router.get("/options-scan")
+async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan")):
+    """Unified options scan: fetches full option chain and runs all strategies
+    (long calls, call spreads, put spreads, covered calls) via MergerArbAnalyzer.
+    """
+    import time as _time
+    from app.options.polygon_options import get_polygon_client, PolygonError
+    from app.scanner import MergerArbAnalyzer, DealInput, OptionData
+
+    t0 = _time.monotonic()
+    ticker = ticker.upper()
+    if not _TICKER_RE.match(ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker format")
+
+    pool = _get_pool()
+    client = get_polygon_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Polygon API not configured (POLYGON_API_KEY missing)")
+
+    # 1. Fetch deal data from sheet_rows
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT ticker, deal_price, current_price, close_date, countdown_days
+               FROM sheet_rows
+               WHERE ticker = $1
+                 AND snapshot_id = (SELECT id FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1)
+               LIMIT 1""",
+            ticker,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found in sheet data")
+
+    deal_price = float(row["deal_price"]) if row["deal_price"] else None
+    current_price = float(row["current_price"]) if row["current_price"] else None
+    countdown_days = row["countdown_days"] if row["countdown_days"] else 90
+
+    if row["close_date"]:
+        close_dt = datetime.combine(row["close_date"], datetime.min.time())
+        expected_close_str = str(row["close_date"])
+    else:
+        close_dt = datetime.now() + timedelta(days=countdown_days)
+        expected_close_str = close_dt.strftime("%Y-%m-%d")
+
+    days_to_close = max((close_dt - datetime.now()).days, 1)
+
+    # If no deal_price, return partial info
+    if not deal_price or not current_price:
+        return {
+            "ticker": ticker,
+            "deal_price": deal_price,
+            "current_price": current_price,
+            "days_to_close": days_to_close,
+            "expected_close": expected_close_str,
+            "optionable": False,
+            "categories": {},
+            "total_opportunities": 0,
+            "scan_time_ms": round((_time.monotonic() - t0) * 1000),
+        }
+
+    # 2. Fetch full option chain from Polygon (calls + puts, wide strike range)
+    strike_lower = deal_price * 0.75
+    strike_upper = deal_price * 1.10
+    min_exp = datetime.now().strftime("%Y-%m-%d")
+    max_exp = (close_dt + timedelta(days=30)).strftime("%Y-%m-%d")
+
+    try:
+        chain = await client.get_option_chain(
+            underlying=ticker,
+            strike_gte=strike_lower,
+            strike_lte=strike_upper,
+            expiration_date_gte=min_exp,
+            expiration_date_lte=max_exp,
+        )
+    except PolygonError as exc:
+        raise HTTPException(status_code=502, detail=f"Polygon API error: {exc}")
+
+    if not chain:
+        return {
+            "ticker": ticker,
+            "deal_price": deal_price,
+            "current_price": current_price,
+            "days_to_close": days_to_close,
+            "expected_close": expected_close_str,
+            "optionable": False,
+            "categories": {},
+            "total_opportunities": 0,
+            "scan_time_ms": round((_time.monotonic() - t0) * 1000),
+        }
+
+    # 3. Convert Polygon contracts to OptionData
+    options: list = []
+    for contract in chain:
+        options.append(OptionData(
+            symbol=contract.get("symbol", ticker),
+            strike=contract.get("strike", 0),
+            expiry=contract.get("expiry", ""),
+            right=contract.get("right", "C"),
+            bid=contract.get("bid", 0),
+            ask=contract.get("ask", 0),
+            last=contract.get("last", 0),
+            volume=contract.get("volume", 0),
+            open_interest=contract.get("open_interest", 0),
+            implied_vol=contract.get("implied_vol") or 0,
+            delta=contract.get("delta") or 0,
+            gamma=contract.get("gamma") or 0,
+            theta=contract.get("theta") or 0,
+            vega=contract.get("vega") or 0,
+            bid_size=contract.get("bid_size", 0),
+            ask_size=contract.get("ask_size", 0),
+        ))
+
+    # 4. Run all strategies via MergerArbAnalyzer
+    deal = DealInput(
+        ticker=ticker,
+        deal_price=deal_price,
+        expected_close_date=close_dt,
+        confidence=0.80,
+    )
+    analyzer = MergerArbAnalyzer(deal)
+    all_opps = analyzer.find_best_opportunities(options, current_price)
+
+    # 5. Group by strategy, pick best per category
+    from collections import defaultdict
+    by_strategy: dict[str, list] = defaultdict(list)
+    for opp in all_opps:
+        by_strategy[opp.strategy].append(opp)
+
+    categories = {}
+    for strategy, opps in by_strategy.items():
+        opps.sort(key=lambda x: x.annualized_return, reverse=True)
+        categories[strategy] = {
+            "best": _trade_opportunity_to_dict(opps[0]),
+            "count": len(opps),
+            "all": [_trade_opportunity_to_dict(o) for o in opps],
+        }
+
+    scan_time_ms = round((_time.monotonic() - t0) * 1000)
+
+    return {
+        "ticker": ticker,
+        "deal_price": deal_price,
+        "current_price": current_price,
+        "days_to_close": days_to_close,
+        "expected_close": expected_close_str,
+        "optionable": True,
+        "categories": categories,
+        "total_opportunities": len(all_opps),
+        "scan_time_ms": scan_time_ms,
+    }

@@ -123,6 +123,23 @@ function fmtDate(val: string | null | undefined): string {
   return `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0].slice(2)}`;
 }
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function fmtExpiry(expiry: string): string {
+  // Parse YYYYMMDD -> "Jun" (month abbreviation)
+  if (expiry.length === 8) {
+    const month = parseInt(expiry.slice(4, 6), 10);
+    if (month >= 1 && month <= 12) return MONTH_ABBR[month - 1];
+  }
+  // Fallback: try ISO date YYYY-MM-DD
+  if (expiry.includes("-")) {
+    const parts = expiry.split("-");
+    const month = parseInt(parts[1], 10);
+    if (month >= 1 && month <= 12) return MONTH_ABBR[month - 1];
+  }
+  return expiry;
+}
+
 function riskBadge(risk: string | null | undefined) {
   if (!risk) return <span className="text-gray-600">-</span>;
   const lower = risk.toLowerCase();
@@ -141,25 +158,35 @@ function flagBadge(val: string | null | undefined) {
   return <span className="text-blue-400">{val}</span>;
 }
 
-interface CoveredCallResult {
+interface OpportunityResult {
+  strategy: string;
+  contracts: Array<{ symbol: string; strike: number; expiry: string; right: string; bid: number; ask: number }>;
+  entry_cost: number;
+  max_profit: number;
+  annualized_return: number;
+  notes: string;
+}
+
+interface OptionsCategoryData {
+  best: OpportunityResult | null;
+  count: number;
+  all: OpportunityResult[];
+}
+
+interface OptionsScanResponse {
   ticker: string;
-  current_price: number;
   deal_price: number;
-  strike: number;
-  expiry: string;
-  premium: number;
-  annualized_yield: number;
-  downside_cushion: number;
-  effective_basis: number;
-  if_called_return: number;
-  implied_vol: number | null;
-  days_to_expiry: number;
-  open_interest: number;
-  volume: number;
-  bid: number;
-  ask: number;
-  breakeven: number;
-  notes: string | null;
+  current_price: number;
+  days_to_close: number;
+  expected_close: string;
+  optionable: boolean;
+  categories: {
+    covered_call?: OptionsCategoryData;
+    call?: OptionsCategoryData;
+    spread?: OptionsCategoryData;
+    put_spread?: OptionsCategoryData;
+  };
+  total_opportunities: number;
 }
 
 interface RiskAssessment {
@@ -322,9 +349,9 @@ export default function DealDetailPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [riskAssessment, setRiskAssessment] = useState<RiskAssessment | null>(null);
   const [assessing, setAssessing] = useState(false);
-  const [coveredCalls, setCoveredCalls] = useState<CoveredCallResult[]>([]);
-  const [coveredCallsLoading, setCoveredCallsLoading] = useState(false);
-  const [coveredCallsIv, setCoveredCallsIv] = useState<number | null>(null);
+  const [optionsScan, setOptionsScan] = useState<OptionsScanResponse | null>(null);
+  const [optionsScanLoading, setOptionsScanLoading] = useState(false);
+  const [optionsScanError, setOptionsScanError] = useState(false);
 
   useEffect(() => {
     if (!ticker) return;
@@ -347,30 +374,22 @@ export default function DealDetailPage() {
       .finally(() => setLoading(false));
   }, [ticker]);
 
-  // Fetch covered call opportunities after main data loads
+  // Fetch options scan data (non-blocking)
   useEffect(() => {
-    if (!ticker || loading) return;
-    // Only fetch if deal detail says optionable
-    const optionable = data?.detail?.optionable;
-    if (optionable && optionable.toLowerCase() === "no") return;
-
-    setCoveredCallsLoading(true);
-    fetch(`/api/sheet-portfolio/risk/covered-calls?ticker=${encodeURIComponent(ticker)}`)
+    if (!ticker) return;
+    setOptionsScanLoading(true);
+    setOptionsScanError(false);
+    fetch(`/api/sheet-portfolio/risk/options-scan?ticker=${encodeURIComponent(ticker)}`)
       .then(async (resp) => {
         if (resp.ok) {
-          const body = await resp.json();
-          const results: CoveredCallResult[] = body.results || [];
-          setCoveredCalls(results);
-          // Extract implied vol from the first result (all share same underlying)
-          if (results.length > 0 && results[0].implied_vol != null) {
-            setCoveredCallsIv(results[0].implied_vol);
-          }
+          setOptionsScan(await resp.json());
+        } else {
+          setOptionsScanError(true);
         }
       })
-      .catch(() => { /* silently fail -- card just won't show */ })
-      .finally(() => setCoveredCallsLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticker, loading]);
+      .catch(() => { setOptionsScanError(true); })
+      .finally(() => setOptionsScanLoading(false));
+  }, [ticker]);
 
   const fetchLivePrice = useCallback(async () => {
     if (!ticker) return;
@@ -665,12 +684,139 @@ export default function DealDetailPage() {
             <Row label="Implied Downside" value={fmtPct(d?.implied_downside)} color={d?.implied_downside != null ? "text-red-400" : undefined} />
             <Row label="Return/Risk Ratio" value={d?.return_risk_ratio != null ? d.return_risk_ratio.toFixed(2) : "-"} />
 
-            <SectionTitle>Options</SectionTitle>
-            <Row label="Optionable" value={d?.optionable ?? "-"} />
-            <Row label="Long Naked Calls" value={d?.long_naked_calls ?? "-"} />
-            <Row label="Long Vert Call Spread" value={d?.long_vertical_call_spread ?? "-"} />
-            <Row label="Long Covered Call" value={d?.long_covered_call ?? "-"} />
-            <Row label="Short Put Vert Spread" value={d?.short_put_vertical_spread ?? "-"} />
+            {/* Options teaser - dynamic from options-scan API */}
+            <div className="mt-3 first:mt-0">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-bold text-gray-300">Options</h3>
+                <div className="flex items-center gap-2">
+                  {optionsScanLoading && (
+                    <svg className="animate-spin h-3 w-3 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  )}
+                  <Link
+                    href={`/sheet-portfolio/${ticker}/options`}
+                    className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
+                  >
+                    View All →
+                  </Link>
+                </div>
+              </div>
+
+              {(() => {
+                // Loading state
+                if (optionsScanLoading && !optionsScan) {
+                  return (
+                    <>
+                      <Row label="Optionable" value={d?.optionable ?? "-"} />
+                      <Row label="Sell Covered Calls" value="-" />
+                      <Row label="Bull Call Spreads" value="-" />
+                      <Row label="Credit Put Spreads" value="-" />
+                      <Row label="Long Calls" value="-" />
+                    </>
+                  );
+                }
+
+                // Error or no data: show static fallback
+                if (optionsScanError || !optionsScan) {
+                  return (
+                    <>
+                      <Row label="Optionable" value={d?.optionable ?? "-"} />
+                      <Row label="Sell Covered Calls" value={d?.long_covered_call ?? "-"} />
+                      <Row label="Bull Call Spreads" value={d?.long_vertical_call_spread ?? "-"} />
+                      <Row label="Credit Put Spreads" value={d?.short_put_vertical_spread ?? "-"} />
+                      <Row label="Long Calls" value={d?.long_naked_calls ?? "-"} />
+                    </>
+                  );
+                }
+
+                // Not optionable
+                if (!optionsScan.optionable) {
+                  return (
+                    <>
+                      <Row label="Optionable" value={<span className="text-red-400">No</span>} />
+                      <Row label="Sell Covered Calls" value="-" />
+                      <Row label="Bull Call Spreads" value="-" />
+                      <Row label="Credit Put Spreads" value="-" />
+                      <Row label="Long Calls" value="-" />
+                    </>
+                  );
+                }
+
+                const { categories } = optionsScan;
+
+                const renderBest = (cat: OptionsCategoryData | undefined, type: "covered_call" | "call" | "spread" | "put_spread") => {
+                  if (!cat?.best) return <span className="text-gray-600">-</span>;
+                  const b = cat.best;
+                  const c0 = b.contracts[0];
+                  const c1 = b.contracts[1];
+                  if (!c0) return <span className="text-gray-600">-</span>;
+                  const expLabel = fmtExpiry(c0.expiry);
+                  const ann = (b.annualized_return * 100).toFixed(1);
+
+                  switch (type) {
+                    case "covered_call":
+                      return (
+                        <span>
+                          <span className="font-mono">{expLabel} {c0.strike}C @ ${c0.bid.toFixed(2)}</span>
+                          <span className="text-green-400 ml-1.5">{ann}% ann.</span>
+                        </span>
+                      );
+                    case "call":
+                      return (
+                        <span>
+                          <span className="font-mono">{expLabel} {c0.strike}C @ ${c0.ask.toFixed(2)}</span>
+                          <span className="text-green-400 ml-1.5">{ann}% ann.</span>
+                        </span>
+                      );
+                    case "spread":
+                      return (
+                        <span>
+                          <span className="font-mono">{expLabel} {c0.strike}/{c1?.strike ?? "?"} @ ${Math.abs(b.entry_cost).toFixed(2)}</span>
+                          <span className="text-green-400 ml-1.5">{ann}% ann.</span>
+                        </span>
+                      );
+                    case "put_spread":
+                      return (
+                        <span>
+                          <span className="font-mono">{expLabel} {c0.strike}/{c1?.strike ?? "?"} cr ${Math.abs(b.entry_cost).toFixed(2)}</span>
+                          <span className="text-green-400 ml-1.5">{ann}% ann.</span>
+                        </span>
+                      );
+                  }
+                };
+
+                return (
+                  <>
+                    <Row label="Optionable" value={<span className="text-green-400">Yes</span>} />
+                    <div className="mt-1.5 space-y-2">
+                      <div>
+                        <div className="text-gray-300 text-xs uppercase tracking-wider mb-0.5">Sell Covered Calls</div>
+                        <div className="text-sm">{renderBest(categories.covered_call, "covered_call")}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-300 text-xs uppercase tracking-wider mb-0.5">Bull Call Spreads</div>
+                        <div className="text-sm">{renderBest(categories.spread, "spread")}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-300 text-xs uppercase tracking-wider mb-0.5">Credit Put Spreads</div>
+                        <div className="text-sm">{renderBest(categories.put_spread, "put_spread")}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-300 text-xs uppercase tracking-wider mb-0.5">Long Calls</div>
+                        <div className="text-sm">{renderBest(categories.call, "call")}</div>
+                      </div>
+                    </div>
+                    {optionsScan.total_opportunities > 0 && (
+                      <div className="mt-2 text-xs text-gray-500">
+                        {optionsScan.total_opportunities} total opportunities found
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           </div>
         </div>
 
@@ -808,72 +954,6 @@ export default function DealDetailPage() {
           )}
         </div>
 
-        {/* Options Opportunities */}
-        {(coveredCalls.length > 0 || coveredCallsLoading) && (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mt-3">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-gray-300">Options Opportunities</h3>
-                {coveredCallsIv != null && (
-                  <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${
-                    coveredCallsIv > 0.4
-                      ? "bg-orange-400/10 text-orange-400 border border-orange-400/30"
-                      : "bg-gray-800 text-gray-400 border border-gray-700"
-                  }`}>
-                    IV: {(coveredCallsIv * 100).toFixed(1)}%
-                  </span>
-                )}
-              </div>
-              <Link
-                href={`/ma-options?ticker=${ticker}`}
-                className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
-              >
-                Full Scanner →
-              </Link>
-            </div>
-
-            {coveredCallsLoading ? (
-              <div className="text-gray-600 text-sm py-4 text-center">Loading covered call data...</div>
-            ) : coveredCalls.length > 0 ? (
-              (() => {
-                // Pick the best covered call by annualized yield
-                const best = coveredCalls.reduce((a, b) => a.annualized_yield > b.annualized_yield ? a : b);
-                return (
-                  <div className="bg-gray-800/50 rounded p-3">
-                    <div className="text-xs text-gray-500 mb-2">Best Covered Call</div>
-                    <div className="grid grid-cols-4 gap-3 text-sm">
-                      <div>
-                        <div className="text-gray-500 text-xs">Strike</div>
-                        <div className="font-mono text-gray-100">${best.strike.toFixed(2)}</div>
-                        <div className="text-xs text-gray-500">{best.expiry}</div>
-                      </div>
-                      <div>
-                        <div className="text-gray-500 text-xs">Premium</div>
-                        <div className="font-mono text-green-400">${best.premium.toFixed(2)}</div>
-                        <div className="text-xs text-gray-500">Bid ${best.bid.toFixed(2)}</div>
-                      </div>
-                      <div>
-                        <div className="text-gray-500 text-xs">Ann. Yield</div>
-                        <div className="font-mono text-green-400">{(best.annualized_yield * 100).toFixed(1)}%</div>
-                        <div className="text-xs text-gray-500">{best.days_to_expiry}d to exp</div>
-                      </div>
-                      <div>
-                        <div className="text-gray-500 text-xs">Cushion</div>
-                        <div className="font-mono text-blue-400">{(best.downside_cushion * 100).toFixed(1)}%</div>
-                        <div className="text-xs text-gray-500">downside</div>
-                      </div>
-                    </div>
-                    {coveredCalls.length > 1 && (
-                      <div className="mt-2 text-xs text-gray-500">
-                        {coveredCalls.length - 1} more covered call{coveredCalls.length > 2 ? "s" : ""} available
-                      </div>
-                    )}
-                  </div>
-                );
-              })()
-            ) : null}
-          </div>
-        )}
 
         {/* Dividends + CVRs side by side */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
