@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 
 interface DashboardData {
@@ -141,6 +141,143 @@ function flagBadge(val: string | null | undefined) {
   return <span className="text-blue-400">{val}</span>;
 }
 
+interface RiskAssessment {
+  assessment_date: string;
+  overall_risk_score: number | null;
+  overall_risk_level: string | null;
+  overall_risk_summary: string | null;
+  probability_of_success: number | null;
+  needs_attention: boolean;
+  attention_reason: string | null;
+  regulatory_score: number | null;
+  regulatory_detail: string | null;
+  vote_score: number | null;
+  vote_detail: string | null;
+  financing_score: number | null;
+  financing_detail: string | null;
+  legal_score: number | null;
+  legal_detail: string | null;
+  timing_score: number | null;
+  timing_detail: string | null;
+  mac_score: number | null;
+  mac_detail: string | null;
+  market_score: number | null;
+  market_detail: string | null;
+  competing_bid_score: number | null;
+  competing_bid_detail: string | null;
+}
+
+const RISK_FACTORS = [
+  { key: "regulatory", label: "Regulatory", short: "REG" },
+  { key: "vote", label: "Vote", short: "VOT" },
+  { key: "financing", label: "Financing", short: "FIN" },
+  { key: "legal", label: "Legal", short: "LEG" },
+  { key: "timing", label: "Timing", short: "TIM" },
+  { key: "mac", label: "MAC", short: "MAC" },
+  { key: "market", label: "Market", short: "MKT" },
+  { key: "competing_bid", label: "Competing Bid", short: "BID" },
+] as const;
+
+function RiskRadarChart({ assessment }: { assessment: RiskAssessment }) {
+  const cx = 128, cy = 128, r = 100;
+  const n = RISK_FACTORS.length;
+
+  const points = RISK_FACTORS.map((f, i) => {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    const score = (assessment as Record<string, unknown>)[`${f.key}_score`] as number ?? 0;
+    const ratio = score / 10;
+    return {
+      x: cx + r * ratio * Math.cos(angle),
+      y: cy + r * ratio * Math.sin(angle),
+      labelX: cx + (r + 16) * Math.cos(angle),
+      labelY: cy + (r + 16) * Math.sin(angle),
+    };
+  });
+
+  const polygonPoints = points.map(p => `${p.x},${p.y}`).join(" ");
+  const gridLevels = [2, 4, 6, 8, 10];
+
+  const overall = assessment.overall_risk_score ?? 0;
+  let fillColor = "rgba(74, 222, 128, 0.15)";
+  if (overall >= 8) fillColor = "rgba(248, 113, 113, 0.2)";
+  else if (overall >= 6) fillColor = "rgba(251, 146, 60, 0.2)";
+  else if (overall >= 4) fillColor = "rgba(250, 204, 21, 0.15)";
+  else if (overall >= 2) fillColor = "rgba(163, 230, 53, 0.15)";
+
+  let strokeColor = "#4ade80";
+  if (overall >= 8) strokeColor = "#f87171";
+  else if (overall >= 6) strokeColor = "#fb923c";
+  else if (overall >= 4) strokeColor = "#facc15";
+  else if (overall >= 2) strokeColor = "#a3e635";
+
+  return (
+    <svg viewBox="0 0 256 256" className="w-full h-full">
+      {gridLevels.map(level => {
+        const gridPoints = Array.from({length: n}, (_, i) => {
+          const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+          const ratio = level / 10;
+          return `${cx + r * ratio * Math.cos(angle)},${cy + r * ratio * Math.sin(angle)}`;
+        }).join(" ");
+        return <polygon key={level} points={gridPoints} fill="none" stroke="#374151" strokeWidth="0.5" />;
+      })}
+      {RISK_FACTORS.map((_, i) => {
+        const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+        return <line key={i} x1={cx} y1={cy} x2={cx + r * Math.cos(angle)} y2={cy + r * Math.sin(angle)} stroke="#374151" strokeWidth="0.5" />;
+      })}
+      <polygon points={polygonPoints} fill={fillColor} stroke={strokeColor} strokeWidth="1.5" />
+      {points.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r="3" fill={strokeColor} />
+      ))}
+      {points.map((p, i) => (
+        <text key={i} x={p.labelX} y={p.labelY} textAnchor="middle" dominantBaseline="middle" className="fill-gray-400" fontSize="8">
+          {RISK_FACTORS[i].short}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
+function RiskScoreBadge({ score, level }: { score: number | null; level: string | null }) {
+  if (score === null) return <span className="text-gray-600 text-2xl font-mono">-</span>;
+  let color = "text-green-400 bg-green-400/10 border-green-400/30";
+  if (score >= 8) color = "text-red-400 bg-red-400/10 border-red-400/30";
+  else if (score >= 6) color = "text-orange-400 bg-orange-400/10 border-orange-400/30";
+  else if (score >= 4) color = "text-yellow-400 bg-yellow-400/10 border-yellow-400/30";
+  else if (score >= 2) color = "text-lime-400 bg-lime-400/10 border-lime-400/30";
+  return (
+    <div className={`px-3 py-2 rounded border text-center ${color}`}>
+      <div className="text-2xl font-mono font-bold">{score.toFixed(1)}</div>
+      <div className="text-xs uppercase tracking-wider">{level}</div>
+    </div>
+  );
+}
+
+function FactorCard({ factor, assessment }: { factor: typeof RISK_FACTORS[number]; assessment: RiskAssessment }) {
+  const score = (assessment as Record<string, unknown>)[`${factor.key}_score`] as number | null;
+  const detail = (assessment as Record<string, unknown>)[`${factor.key}_detail`] as string | null;
+
+  if (score === null) return null;
+
+  let barColor = "bg-green-400";
+  if (score >= 8) barColor = "bg-red-400";
+  else if (score >= 6) barColor = "bg-orange-400";
+  else if (score >= 4) barColor = "bg-yellow-400";
+  else if (score >= 2) barColor = "bg-lime-400";
+
+  return (
+    <div className="bg-gray-800/50 rounded p-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-medium text-gray-400">{factor.label}</span>
+        <span className="text-xs font-mono font-bold text-gray-200">{score.toFixed(1)}</span>
+      </div>
+      <div className="w-full bg-gray-700 rounded-full h-1 mb-1.5">
+        <div className={`h-1 rounded-full ${barColor}`} style={{ width: `${(score / 10) * 100}%` }} />
+      </div>
+      {detail && <p className="text-xs text-gray-500 line-clamp-2">{detail}</p>}
+    </div>
+  );
+}
+
 function Row({ label, value, color }: { label: string; value: React.ReactNode; color?: string }) {
   return (
     <div className="flex justify-between items-start py-1 border-b border-gray-800/40">
@@ -163,22 +300,74 @@ export default function DealDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [livePrice, setLivePrice] = useState<{ price: number; change: number; change_pct: number } | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [riskAssessment, setRiskAssessment] = useState<RiskAssessment | null>(null);
+  const [assessing, setAssessing] = useState(false);
 
   useEffect(() => {
     if (!ticker) return;
     setLoading(true);
-    fetch(`/api/sheet-portfolio/deal/${encodeURIComponent(ticker)}`)
-      .then(async (resp) => {
-        if (!resp.ok) {
-          const body = await resp.json().catch(() => ({ detail: "Unknown error" }));
-          throw new Error(body.detail || body.error || `HTTP ${resp.status}`);
+    Promise.all([
+      fetch(`/api/sheet-portfolio/deal/${encodeURIComponent(ticker)}`),
+      fetch(`/api/sheet-portfolio/risk/${encodeURIComponent(ticker)}`),
+    ])
+      .then(async ([dealResp, riskResp]) => {
+        if (!dealResp.ok) {
+          const body = await dealResp.json().catch(() => ({ detail: "Unknown error" }));
+          throw new Error(body.detail || body.error || `HTTP ${dealResp.status}`);
         }
-        return resp.json();
+        setData(await dealResp.json());
+        if (riskResp.ok) {
+          setRiskAssessment(await riskResp.json());
+        }
       })
-      .then((d) => setData(d))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [ticker]);
+
+  const fetchLivePrice = useCallback(async () => {
+    if (!ticker) return;
+    try {
+      setRefreshing(true);
+      const resp = await fetch("/api/sheet-portfolio/live-prices");
+      if (resp.ok) {
+        const data = await resp.json();
+        const prices = data.prices || {};
+        if (prices[ticker]) {
+          setLivePrice(prices[ticker]);
+        }
+        setLastRefresh(new Date());
+      }
+    } catch {
+      // silently fail -- static sheet prices still show
+    } finally {
+      setRefreshing(false);
+    }
+  }, [ticker]);
+
+  useEffect(() => {
+    fetchLivePrice();
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchLivePrice();
+      }
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [fetchLivePrice]);
+
+  async function handleAssessNow() {
+    setAssessing(true);
+    try {
+      const resp = await fetch(`/api/sheet-portfolio/risk?ticker=${encodeURIComponent(ticker)}`, { method: "POST" });
+      if (resp.ok) {
+        const riskResp = await fetch(`/api/sheet-portfolio/risk/${encodeURIComponent(ticker)}`);
+        if (riskResp.ok) setRiskAssessment(await riskResp.json());
+      }
+    } catch { /* silently fail */ }
+    finally { setAssessing(false); }
+  }
 
   if (loading) {
     return (
@@ -206,7 +395,9 @@ export default function DealDetailPage() {
   const { dashboard: dash, detail: d } = data;
   const acquiror = d?.acquiror ?? dash?.acquiror ?? "";
   const category = d?.category ?? dash?.category ?? "";
-  const targetPrice = d?.target_current_price ?? dash?.current_price;
+  const sheetTargetPrice = d?.target_current_price ?? dash?.current_price;
+  const targetPrice = livePrice?.price ?? sheetTargetPrice;
+  const targetPriceIsLive = livePrice?.price != null;
   const dealPrice = d?.total_price_per_share ?? dash?.deal_price;
   const spread = d?.current_spread;
   const spreadChange = d?.spread_change;
@@ -241,9 +432,38 @@ export default function DealDetailPage() {
               </div>
             </div>
             <div className="flex items-center gap-5 text-right">
+              <div className="flex items-center gap-1.5 border border-gray-700 rounded px-2.5 py-1">
+                <span className={`inline-block w-2 h-2 rounded-full ${lastRefresh ? "bg-green-500" : "bg-gray-600"}`} title={lastRefresh ? "Polygon connected" : "No market data yet"} />
+                <span className="text-xs text-gray-400">
+                  {lastRefresh
+                    ? `Mkt data ${lastRefresh.toLocaleTimeString()}`
+                    : "Mkt data loading\u2026"}
+                </span>
+                <button
+                  onClick={fetchLivePrice}
+                  disabled={refreshing}
+                  className="ml-1 p-0.5 text-cyan-400 hover:text-cyan-300 disabled:opacity-40 transition-colors"
+                  title="Refresh market data now"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                  </svg>
+                </button>
+              </div>
               <div>
                 <div className="text-xs text-gray-500">Target Px</div>
-                <div className="font-mono font-semibold">{fmtPrice(targetPrice)}</div>
+                <div className={`font-mono font-semibold ${targetPriceIsLive ? "text-cyan-400" : ""}`}>{fmtPrice(targetPrice)}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Deal Px</div>
@@ -326,7 +546,7 @@ export default function DealDetailPage() {
             <Row label="Total price/share" value={fmtPrice(d?.total_price_per_share)} color="text-white font-semibold" />
 
             <SectionTitle>Pricing &amp; Returns</SectionTitle>
-            <Row label="Target current price" value={fmtPrice(targetPrice)} />
+            <Row label="Target current price" value={fmtPrice(targetPrice)} color={targetPriceIsLive ? "text-cyan-400" : undefined} />
             <Row label="Deal spread" value={fmtPct(d?.deal_spread)} />
             <Row label="Close time (months)" value={d?.deal_close_time_months != null ? d.deal_close_time_months.toFixed(2) : "-"} />
             <Row label="Expected IRR" value={fmtPct(d?.expected_irr)} color={d?.expected_irr != null ? (d.expected_irr >= 0 ? "text-green-400" : "text-red-400") : undefined} />
@@ -406,6 +626,68 @@ export default function DealDetailPage() {
             <Row label="Long Covered Call" value={d?.long_covered_call ?? "-"} />
             <Row label="Short Put Vert Spread" value={d?.short_put_vertical_spread ?? "-"} />
           </div>
+        </div>
+
+        {/* Risk Assessment */}
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mt-3">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-bold text-gray-300">AI Risk Assessment</h3>
+            <div className="flex items-center gap-2">
+              {riskAssessment?.assessment_date && (
+                <span className="text-xs text-gray-500">
+                  Assessed: {riskAssessment.assessment_date}
+                </span>
+              )}
+              <button
+                onClick={handleAssessNow}
+                disabled={assessing}
+                className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 disabled:bg-gray-700 disabled:text-gray-500 border border-gray-700 rounded transition-colors"
+              >
+                {assessing ? "Assessing..." : "Assess Now"}
+              </button>
+            </div>
+          </div>
+
+          {riskAssessment ? (
+            <>
+              {/* Overall summary */}
+              <div className="flex items-center gap-3 mb-3 p-2 bg-gray-800/50 rounded">
+                <RiskScoreBadge score={riskAssessment.overall_risk_score} level={riskAssessment.overall_risk_level} />
+                <div className="flex-1">
+                  <p className="text-sm text-gray-300">{riskAssessment.overall_risk_summary}</p>
+                  {riskAssessment.needs_attention && riskAssessment.attention_reason && (
+                    <p className="text-xs text-red-400 mt-1">&#9873; {riskAssessment.attention_reason}</p>
+                  )}
+                </div>
+                {riskAssessment.probability_of_success != null && (
+                  <div className="text-right">
+                    <div className="text-xs text-gray-500">Success Prob</div>
+                    <div className="font-mono font-semibold text-green-400">{riskAssessment.probability_of_success.toFixed(0)}%</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Radar chart + factor cards */}
+              <div className="flex gap-3">
+                <div className="w-64 h-64 shrink-0">
+                  <RiskRadarChart assessment={riskAssessment} />
+                </div>
+
+                <div className="flex-1 grid grid-cols-2 gap-2">
+                  {RISK_FACTORS.map(f => (
+                    <FactorCard key={f.key} factor={f} assessment={riskAssessment} />
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-gray-600 text-sm py-6 text-center">
+              No risk assessment available yet.
+              <button onClick={handleAssessNow} disabled={assessing} className="ml-2 text-blue-400 hover:text-blue-300">
+                {assessing ? "Running..." : "Run assessment"}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Dividends + CVRs side by side */}
