@@ -11,14 +11,22 @@ interface Deal {
   current_price: number | null;
   gross_yield: number | null;
   current_yield: number | null;
+  price_change: number | null;
   deal_price_raw: string | null;
   current_price_raw: string | null;
   gross_yield_raw: string | null;
   current_yield_raw: string | null;
+  price_change_raw: string | null;
   investable: string | null;
   vote_risk: string | null;
   finance_risk: string | null;
   legal_risk: string | null;
+  announced_date: string | null;
+  close_date: string | null;
+  end_date: string | null;
+  countdown_days: number | null;
+  go_shop_raw: string | null;
+  cvr_flag: string | null;
 }
 
 interface HealthStatus {
@@ -53,6 +61,14 @@ function yieldCell(raw: string | null, parsed: number | null) {
   return <span className={color}>{pct}%</span>;
 }
 
+function formatDate(d: string | null) {
+  if (!d) return "-";
+  // YYYY-MM-DD -> M/D
+  const parts = d.split("-");
+  if (parts.length !== 3) return d;
+  return `${parseInt(parts[1])}/${parseInt(parts[2])}`;
+}
+
 export default function SheetPortfolioPage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -60,7 +76,7 @@ export default function SheetPortfolioPage() {
   const [error, setError] = useState<string | null>(null);
   const [ingesting, setIngesting] = useState(false);
   const [ingestResult, setIngestResult] = useState<string | null>(null);
-  const [sortCol, setSortCol] = useState<string>("ticker");
+  const [sortCol, setSortCol] = useState<keyof Deal>("ticker");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [filter, setFilter] = useState<string>("");
 
@@ -117,7 +133,7 @@ export default function SheetPortfolioPage() {
     }
   }
 
-  function handleSort(col: string) {
+  function handleSort(col: keyof Deal) {
     if (sortCol === col) {
       setSortDir(sortDir === "asc" ? "desc" : "asc");
     } else {
@@ -139,8 +155,8 @@ export default function SheetPortfolioPage() {
 
   const sortedDeals = [...filteredDeals].sort((a, b) => {
     const dir = sortDir === "asc" ? 1 : -1;
-    const av = a[sortCol as keyof Deal];
-    const bv = b[sortCol as keyof Deal];
+    const av = a[sortCol];
+    const bv = b[sortCol];
     if (av === null && bv === null) return 0;
     if (av === null) return 1;
     if (bv === null) return -1;
@@ -158,10 +174,11 @@ export default function SheetPortfolioPage() {
   const investableDeals = deals.filter(
     (d) => d.investable?.toLowerCase().startsWith("yes")
   );
+  const yieldDenominator = investableDeals.filter((d) => d.current_yield !== null).length;
   const avgYield =
-    investableDeals.length > 0
+    yieldDenominator > 0
       ? investableDeals.reduce((s, d) => s + (d.current_yield || 0), 0) /
-        investableDeals.filter((d) => d.current_yield !== null).length
+        yieldDenominator
       : 0;
 
   return (
@@ -256,45 +273,24 @@ export default function SheetPortfolioPage() {
                 <thead>
                   <tr className="border-b border-gray-800 text-gray-500 text-xs">
                     {[
-                      { key: "ticker", label: "Ticker", align: "left" },
-                      { key: "acquiror", label: "Acquiror", align: "left" },
-                      { key: "category", label: "Category", align: "left" },
-                      {
-                        key: "deal_price",
-                        label: "Deal Px",
-                        align: "right",
-                      },
-                      {
-                        key: "current_price",
-                        label: "Curr Px",
-                        align: "right",
-                      },
-                      {
-                        key: "gross_yield",
-                        label: "Gross Yld",
-                        align: "right",
-                      },
-                      {
-                        key: "current_yield",
-                        label: "Curr Yld",
-                        align: "right",
-                      },
-                      {
-                        key: "investable",
-                        label: "Investable",
-                        align: "left",
-                      },
-                      { key: "vote_risk", label: "Vote", align: "center" },
-                      {
-                        key: "finance_risk",
-                        label: "Finance",
-                        align: "center",
-                      },
-                      { key: "legal_risk", label: "Legal", align: "center" },
+                      { key: "ticker" as keyof Deal, label: "Ticker", align: "left" },
+                      { key: "acquiror" as keyof Deal, label: "Acquiror", align: "left" },
+                      { key: "category" as keyof Deal, label: "Category", align: "left" },
+                      { key: "deal_price" as keyof Deal, label: "Deal Px", align: "right" },
+                      { key: "current_price" as keyof Deal, label: "Curr Px", align: "right" },
+                      { key: "gross_yield" as keyof Deal, label: "Gross Yld", align: "right" },
+                      { key: "current_yield" as keyof Deal, label: "Curr Yld", align: "right" },
+                      { key: "countdown_days" as keyof Deal, label: "Days", align: "right" },
+                      { key: "close_date" as keyof Deal, label: "Close", align: "center" },
+                      { key: "investable" as keyof Deal, label: "Investable", align: "left" },
+                      { key: "cvr_flag" as keyof Deal, label: "CVR", align: "center" },
+                      { key: "vote_risk" as keyof Deal, label: "Vote", align: "center" },
+                      { key: "finance_risk" as keyof Deal, label: "Finance", align: "center" },
+                      { key: "legal_risk" as keyof Deal, label: "Legal", align: "center" },
                     ].map((col) => (
                       <th
                         key={col.key}
-                        className={`py-2 px-2 font-medium cursor-pointer hover:text-gray-300 whitespace-nowrap ${
+                        className={`py-2 px-2 font-medium cursor-pointer hover:text-gray-300 ${
                           col.align === "right"
                             ? "text-right"
                             : col.align === "center"
@@ -310,9 +306,9 @@ export default function SheetPortfolioPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedDeals.map((deal) => (
+                  {sortedDeals.map((deal, idx) => (
                     <tr
-                      key={deal.ticker}
+                      key={`${deal.ticker}-${idx}`}
                       className="border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors"
                     >
                       <td className="py-1.5 px-2 font-mono font-semibold text-blue-400">
@@ -339,6 +335,18 @@ export default function SheetPortfolioPage() {
                           deal.current_yield
                         )}
                       </td>
+                      <td className="py-1.5 px-2 text-right font-mono">
+                        {deal.countdown_days !== null ? (
+                          <span className={deal.countdown_days < 0 ? "text-red-400" : deal.countdown_days < 30 ? "text-yellow-400" : "text-gray-300"}>
+                            {deal.countdown_days}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">-</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 px-2 text-center text-gray-400 text-xs">
+                        {formatDate(deal.close_date)}
+                      </td>
                       <td className="py-1.5 px-2 max-w-[180px] truncate">
                         {deal.investable?.toLowerCase().startsWith("yes") ? (
                           <span className="text-green-400">
@@ -349,6 +357,13 @@ export default function SheetPortfolioPage() {
                             {deal.investable || "-"}
                           </span>
                         )}
+                      </td>
+                      <td className="py-1.5 px-2 text-center text-xs">
+                        {deal.cvr_flag && deal.cvr_flag.toLowerCase() !== "no" ? (
+                          <span className="text-purple-400" title={deal.cvr_flag}>
+                            {deal.cvr_flag.length > 5 ? "Yes*" : deal.cvr_flag}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="py-1.5 px-2 text-center">
                         {riskBadge(deal.vote_risk)}
@@ -368,7 +383,7 @@ export default function SheetPortfolioPage() {
             {sortedDeals.length === 0 && (
               <div className="text-center py-10 text-gray-500">
                 {filter
-                  ? "No deals match your filter"
+                  ? `No deals match your filter (${deals.length} total)`
                   : "No deals found. Try ingesting first."}
               </div>
             )}

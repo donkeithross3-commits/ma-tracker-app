@@ -500,7 +500,7 @@ async def ingest_dashboard(
 
     # Step 4: Parse CSV into DataFrame
     try:
-        df = pd.read_csv(StringIO(csv_content))
+        df = pd.read_csv(StringIO(csv_content), keep_default_na=False, na_values=[""])
     except Exception:
         logger.error("Failed to parse CSV content", exc_info=True)
         raise ValueError("Could not parse CSV content from Google Sheets")

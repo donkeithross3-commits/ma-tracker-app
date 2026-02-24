@@ -194,6 +194,11 @@ def _extract_cvrs(df: pd.DataFrame) -> List[Dict[str, Any]]:
             "deadline": _parse_date(_get_value(df, idx, col_offsets["deadline"])),
             "years": _parse_months(_get_value(df, idx, col_offsets["years"])),
         }
+        # Skip formula residue rows (npv=0, value=0, years negative)
+        if (entry["npv"] is not None and entry["npv"] == 0
+                and (entry["value"] is None or entry["value"] == 0)
+                and (entry["years"] is not None and entry["years"] < 0)):
+            continue
         results.append(entry)
 
     return results
@@ -202,12 +207,14 @@ def _extract_cvrs(df: pd.DataFrame) -> List[Dict[str, Any]]:
 def _extract_dividends(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """Extract dividend schedule.
 
-    Looks for a header row with 'Date', 'Value', 'Paid?' in columns 6+,
-    positioned BELOW the CVR section (roughly row 16+).
+    Supports two layouts:
+    1. Vertical: header row with 'Date', 'Value', 'Paid?' in columns 6+, data in subsequent rows.
+    2. Horizontal: 'Dividends' label followed by numbered columns (1, 2, 3...) with
+       Date/Value/Paid? as row labels and data across columns.
     """
     results: List[Dict[str, Any]] = []
 
-    # Scan for dividend header row (Date / Value / Paid?) starting from row 10+
+    # --- Try vertical layout first ---
     header_row = None
     date_col = None
     for idx in range(10, len(df)):
@@ -230,23 +237,61 @@ def _extract_dividends(df: pd.DataFrame) -> List[Dict[str, Any]]:
         if header_row is not None:
             break
 
-    if header_row is None or date_col is None:
-        return results
+    if header_row is not None and date_col is not None:
+        val_col = date_col + 1
+        paid_col = date_col + 2
 
-    val_col = date_col + 1
-    paid_col = date_col + 2
+        for idx in range(header_row + 1, min(header_row + 50, len(df))):
+            raw_date = _get_value(df, idx, date_col)
+            if raw_date is None:
+                break
 
-    for idx in range(header_row + 1, min(header_row + 50, len(df))):
-        raw_date = _get_value(df, idx, date_col)
-        if raw_date is None:
-            break
+            entry: Dict[str, Any] = {
+                "date": _parse_date(raw_date),
+                "value": _parse_price(_get_value(df, idx, val_col)),
+                "paid": _get_value(df, idx, paid_col),
+            }
+            results.append(entry)
 
-        entry: Dict[str, Any] = {
-            "date": _parse_date(raw_date),
-            "value": _parse_price(_get_value(df, idx, val_col)),
-            "paid": _get_value(df, idx, paid_col),
-        }
-        results.append(entry)
+        if results:
+            return results
+
+    # --- Try horizontal layout ---
+    # Look for "Dividends" label in columns 5-7, then numbered sub-headers (1, 2, 3...)
+    # across columns, with Date/Value/Paid? as row labels below.
+    for idx in range(10, len(df)):
+        for c in range(5, min(df.shape[1], 10)):
+            cell = str(df.iat[idx, c]).strip().lower() if not pd.isna(df.iat[idx, c]) else ""
+            if cell == "dividends":
+                # Found "Dividends" header. Look for Date/Value/Paid? rows below.
+                date_row = None
+                value_row = None
+                paid_row = None
+                for sub_idx in range(idx + 1, min(idx + 6, len(df))):
+                    sub_cell = str(df.iat[sub_idx, c]).strip().lower() if not pd.isna(df.iat[sub_idx, c]) else ""
+                    if sub_cell == "date":
+                        date_row = sub_idx
+                    elif sub_cell == "value":
+                        value_row = sub_idx
+                    elif "paid" in sub_cell:
+                        paid_row = sub_idx
+
+                if date_row is not None and value_row is not None:
+                    # Read across columns starting from c+1
+                    for dc in range(c + 1, df.shape[1]):
+                        raw_date = _get_value(df, date_row, dc)
+                        if raw_date is None:
+                            break
+                        parsed_date = _parse_date(raw_date)
+                        if parsed_date is None:
+                            continue
+                        entry: Dict[str, Any] = {
+                            "date": parsed_date,
+                            "value": _parse_price(_get_value(df, value_row, dc)),
+                            "paid": _get_value(df, paid_row, dc) if paid_row is not None else None,
+                        }
+                        results.append(entry)
+                    return results
 
     return results
 
@@ -261,7 +306,7 @@ def parse_deal_detail(csv_content: str, ticker: str) -> Dict[str, Any]:
 
     Returns dict matching sheet_deal_details columns.
     """
-    df = pd.read_csv(StringIO(csv_content), header=None)
+    df = pd.read_csv(StringIO(csv_content), header=None, keep_default_na=False, na_values=[""])
 
     # Pad to at least 15 columns so column references don't blow up
     while df.shape[1] < 15:

@@ -294,7 +294,10 @@ async def get_deals():
                 """SELECT ticker, acquiror, category, deal_price, current_price,
                           gross_yield, current_yield, investable, vote_risk,
                           finance_risk, legal_risk, deal_price_raw, current_price_raw,
-                          gross_yield_raw, current_yield_raw
+                          gross_yield_raw, current_yield_raw,
+                          announced_date, close_date, end_date,
+                          countdown_days, price_change, price_change_raw,
+                          go_shop_raw, cvr_flag
                    FROM sheet_rows
                    WHERE snapshot_id = $1 AND ticker IS NOT NULL
                    ORDER BY row_index""",
@@ -311,14 +314,22 @@ async def get_deals():
                     "current_price": float(r["current_price"]) if r["current_price"] is not None else None,
                     "gross_yield": float(r["gross_yield"]) if r["gross_yield"] is not None else None,
                     "current_yield": float(r["current_yield"]) if r["current_yield"] is not None else None,
+                    "price_change": float(r["price_change"]) if r["price_change"] is not None else None,
                     "deal_price_raw": r["deal_price_raw"],
                     "current_price_raw": r["current_price_raw"],
                     "gross_yield_raw": r["gross_yield_raw"],
                     "current_yield_raw": r["current_yield_raw"],
+                    "price_change_raw": r["price_change_raw"],
                     "investable": r["investable"],
                     "vote_risk": r["vote_risk"],
                     "finance_risk": r["finance_risk"],
                     "legal_risk": r["legal_risk"],
+                    "announced_date": str(r["announced_date"]) if r["announced_date"] else None,
+                    "close_date": str(r["close_date"]) if r["close_date"] else None,
+                    "end_date": str(r["end_date"]) if r["end_date"] else None,
+                    "countdown_days": r["countdown_days"],
+                    "go_shop_raw": r["go_shop_raw"],
+                    "cvr_flag": r["cvr_flag"],
                 })
             return deals
     except Exception as e:
