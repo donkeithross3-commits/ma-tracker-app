@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS sheet_rows (
     category TEXT,                -- "All-cash", "Cash & Stock", "All-stock", etc
     investable TEXT,              -- Long text or "Yes"/"No"
     go_shop_raw TEXT,             -- "Go Shop ending 12/5/2025" or null
-    vote_risk VARCHAR(20),        -- "Low", "Medium", "High", or null
-    finance_risk VARCHAR(20),
+    vote_risk TEXT,               -- "Low", "Medium", "High", or longer descriptions
+    finance_risk TEXT,            -- Can be long: "High, some concerned over liquidity..."
     legal_risk TEXT,              -- Can be long: "Medium, significant regulatory approvals required"
     cvr_flag TEXT,                -- "Yes", "No", or descriptive text
     link_to_sheet TEXT,           -- Relative GID link or full URL
@@ -135,9 +135,9 @@ CREATE TABLE IF NOT EXISTS sheet_deal_details (
     financing_details TEXT,
 
     -- Risk ratings
-    shareholder_risk VARCHAR(20),
-    financing_risk VARCHAR(20),
-    legal_risk VARCHAR(20),
+    shareholder_risk TEXT,
+    financing_risk TEXT,
+    legal_risk TEXT,
 
     -- Boolean flags
     investable_deal TEXT,
