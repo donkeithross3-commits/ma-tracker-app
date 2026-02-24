@@ -220,23 +220,39 @@ async def get_deal(ticker: str):
                 result["dashboard"] = None
 
             if detail:
+                def _f(val):
+                    """Float-safe conversion for Decimal columns."""
+                    return float(val) if val is not None else None
+
                 result["detail"] = {
-                    "tab_gid": detail["tab_gid"],
+                    "target": detail["target"],
+                    "acquiror": detail["acquiror"],
                     "category": detail["category"],
-                    "cash_per_share": float(detail["cash_per_share"]) if detail["cash_per_share"] is not None else None,
-                    "total_price_per_share": float(detail["total_price_per_share"]) if detail["total_price_per_share"] is not None else None,
-                    "target_current_price": float(detail["target_current_price"]) if detail["target_current_price"] is not None else None,
-                    "deal_spread": float(detail["deal_spread"]) if detail["deal_spread"] is not None else None,
-                    "expected_irr": float(detail["expected_irr"]) if detail["expected_irr"] is not None else None,
+                    "cash_per_share": _f(detail["cash_per_share"]),
+                    "cash_pct": _f(detail["cash_pct"]),
+                    "stock_per_share": _f(detail["stock_per_share"]),
+                    "stock_pct": _f(detail["stock_pct"]),
+                    "stock_ratio": detail["stock_ratio"],
+                    "dividends_other": _f(detail["dividends_other"]),
+                    "total_price_per_share": _f(detail["total_price_per_share"]),
+                    "target_current_price": _f(detail["target_current_price"]),
+                    "acquiror_current_price": _f(detail["acquiror_current_price"]),
+                    "current_spread": _f(detail["current_spread"]),
+                    "spread_change": _f(detail["spread_change"]),
+                    "deal_spread": _f(detail["deal_spread"]),
+                    "deal_close_time_months": _f(detail["deal_close_time_months"]),
+                    "expected_irr": _f(detail["expected_irr"]),
+                    "ideal_price": _f(detail["ideal_price"]),
                     "announce_date": str(detail["announce_date"]) if detail["announce_date"] else None,
                     "expected_close_date": str(detail["expected_close_date"]) if detail["expected_close_date"] else None,
-                    "expected_close_note": detail["expected_close_note"],
+                    "expected_close_date_note": detail["expected_close_date_note"],
                     "outside_date": str(detail["outside_date"]) if detail["outside_date"] else None,
                     "shareholder_vote": detail["shareholder_vote"],
+                    "premium_attractive": detail["premium_attractive"],
                     "regulatory_approvals": detail["regulatory_approvals"],
                     "termination_fee": detail["termination_fee"],
-                    "key_risks_upside": detail["key_risks_upside"],
-                    "financing_details": detail["financing_details"],
+                    "termination_fee_pct": _f(detail["termination_fee_pct"]),
+                    "target_marketcap": detail["target_marketcap"],
                     "shareholder_risk": detail["shareholder_risk"],
                     "financing_risk": detail["financing_risk"],
                     "legal_risk": detail["legal_risk"],
@@ -245,7 +261,6 @@ async def get_deal(ticker: str):
                     "cvrs": detail["cvrs"],
                     "dividends": detail["dividends"],
                     "price_history": detail["price_history"],
-                    "raw_parsed": detail["raw_parsed"],
                     "fetched_at": str(detail["fetched_at"]),
                 }
             else:
