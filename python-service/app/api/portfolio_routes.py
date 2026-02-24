@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from datetime import date, datetime
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +302,18 @@ async def get_deal(ticker: str):
                 }
             else:
                 result["detail"] = None
+
+            # Resolve BamSEC URL via SEC ticker lookup (CIK -> slug)
+            try:
+                from ..services.ticker_lookup import get_ticker_lookup_service
+                svc = get_ticker_lookup_service()
+                info = await svc.lookup_by_ticker(ticker)
+                if info:
+                    cik = str(info["cik"]).lstrip("0")
+                    name_slug = re.sub(r"[^a-z0-9]+", "-", info["company_name"].lower()).strip("-")
+                    result["bamsec_url"] = f"https://www.bamsec.com/companies/{cik}/{name_slug}"
+            except Exception as e:
+                logger.debug(f"BamSEC URL resolution failed for {ticker}: {e}")
 
             return result
     except HTTPException:

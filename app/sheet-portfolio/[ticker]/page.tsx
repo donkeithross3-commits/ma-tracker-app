@@ -103,6 +103,7 @@ interface DealResponse {
   ticker: string;
   dashboard: DashboardData | null;
   detail: DetailData | null;
+  bamsec_url?: string | null;
 }
 
 function fmtPct(val: number | null | undefined): string {
@@ -275,14 +276,16 @@ export default function DealDetailPage() {
                 >
                   Yahoo Quote
                 </a>
-                <a
-                  href={`https://finance.yahoo.com/quote/${ticker}/history/?frequency=1mo`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
-                >
-                  Price History
-                </a>
+                {data?.bamsec_url && (
+                  <a
+                    href={data.bamsec_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
+                  >
+                    BamSEC
+                  </a>
+                )}
               </div>
             </div>
           </div>
