@@ -49,46 +49,52 @@ async def scan_overnight_events(pool, tickers: list[str]) -> list[dict]:
     events = []
 
     async with pool.acquire() as conn:
-        # 1. New EDGAR filings since close
-        filings = await conn.fetch(
-            """SELECT ticker, filing_type, filed_at, headline, description
-               FROM edgar_filings
-               WHERE ticker = ANY($1) AND filed_at > $2
-               ORDER BY filed_at DESC""",
-            tickers, cutoff,
-        )
-        for f in filings:
-            filing_type = f["filing_type"] or "Filing"
-            headline = f["headline"] or f["description"] or "New filing"
-            severity = "high" if filing_type in ("8-K", "SC 13D", "SC TO-T", "DEFM14A") else "medium"
-            events.append({
-                "type": "filing",
-                "ticker": f["ticker"],
-                "detail": f"{filing_type} filed {_fmt_time(f['filed_at'])}: {headline}",
-                "severity": severity,
-                "timestamp": f["filed_at"].isoformat() if f["filed_at"] else None,
-                "metadata": {"filing_type": filing_type, "headline": headline},
-            })
+        # 1. New EDGAR filings since close (portfolio_edgar_filings table)
+        try:
+            filings = await conn.fetch(
+                """SELECT ticker, filing_type, detected_at, description
+                   FROM portfolio_edgar_filings
+                   WHERE ticker = ANY($1) AND detected_at > $2
+                   ORDER BY detected_at DESC""",
+                tickers, cutoff,
+            )
+            for f in filings:
+                filing_type = f["filing_type"] or "Filing"
+                headline = f["description"] or "New filing"
+                severity = "high" if filing_type in ("8-K", "SC 13D", "SC TO-T", "DEFM14A") else "medium"
+                events.append({
+                    "type": "filing",
+                    "ticker": f["ticker"],
+                    "detail": f"{filing_type} filed {_fmt_time(f['detected_at'])}: {headline}",
+                    "severity": severity,
+                    "timestamp": f["detected_at"].isoformat() if f["detected_at"] else None,
+                    "metadata": {"filing_type": filing_type, "headline": headline},
+                })
+        except Exception as e:
+            logger.warning("EDGAR filing scan skipped: %s", e)
 
-        # 2. Trading halts since close
-        halts = await conn.fetch(
-            """SELECT ticker, halt_time, resumption_time, halt_code
-               FROM halt_events
-               WHERE ticker = ANY($1) AND halt_time > $2
-               ORDER BY halt_time DESC""",
-            tickers, cutoff,
-        )
-        for h in halts:
-            code = h["halt_code"] or ""
-            resumed = f", resumed {_fmt_time(h['resumption_time'])}" if h.get("resumption_time") else ""
-            events.append({
-                "type": "halt",
-                "ticker": h["ticker"],
-                "detail": f"Trading halt {_fmt_time(h['halt_time'])} (code {code}){resumed}",
-                "severity": "high",
-                "timestamp": h["halt_time"].isoformat() if h["halt_time"] else None,
-                "metadata": {"halt_code": code},
-            })
+        # 2. Trading halts since close (skip if table doesn't exist)
+        try:
+            halts = await conn.fetch(
+                """SELECT ticker, halt_time, resumption_time, halt_code
+                   FROM halt_events
+                   WHERE ticker = ANY($1) AND halt_time > $2
+                   ORDER BY halt_time DESC""",
+                tickers, cutoff,
+            )
+            for h in halts:
+                code = h["halt_code"] or ""
+                resumed = f", resumed {_fmt_time(h['resumption_time'])}" if h.get("resumption_time") else ""
+                events.append({
+                    "type": "halt",
+                    "ticker": h["ticker"],
+                    "detail": f"Trading halt {_fmt_time(h['halt_time'])} (code {code}){resumed}",
+                    "severity": "high",
+                    "timestamp": h["halt_time"].isoformat() if h["halt_time"] else None,
+                    "metadata": {"halt_code": code},
+                })
+        except Exception as e:
+            logger.warning("Halt scan skipped: %s", e)
 
         # 3. Sheet diffs (PM may have updated grades overnight)
         # changed_fields is JSONB: {"field_name": {"old": "X", "new": "Y"}}

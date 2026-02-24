@@ -203,47 +203,59 @@ class RiskAssessmentEngine:
                 context["previous_assessment"] = dict(prev)
 
             # 4. Recent EDGAR filings (last 30 days)
-            filings = await conn.fetch(
-                """SELECT * FROM edgar_filings
-                   WHERE ticker = $1 AND filed_at > NOW() - INTERVAL '30 days'
-                   ORDER BY filed_at DESC""",
-                ticker,
-            )
-            context["recent_filings"] = [dict(f) for f in filings]
+            try:
+                filings = await conn.fetch(
+                    """SELECT * FROM portfolio_edgar_filings
+                       WHERE ticker = $1 AND detected_at > NOW() - INTERVAL '30 days'
+                       ORDER BY detected_at DESC""",
+                    ticker,
+                )
+                context["recent_filings"] = [dict(f) for f in filings]
+            except Exception:
+                context["recent_filings"] = []
 
             # 5. Recent trading halts (last 7 days)
-            halts = await conn.fetch(
-                """SELECT * FROM halt_events
-                   WHERE ticker = $1 AND halted_at > NOW() - INTERVAL '7 days'
-                   ORDER BY halted_at DESC""",
-                ticker,
-            )
-            context["recent_halts"] = [dict(h) for h in halts]
+            try:
+                halts = await conn.fetch(
+                    """SELECT * FROM halt_events
+                       WHERE ticker = $1 AND halted_at > NOW() - INTERVAL '7 days'
+                       ORDER BY halted_at DESC""",
+                    ticker,
+                )
+                context["recent_halts"] = [dict(h) for h in halts]
+            except Exception:
+                context["recent_halts"] = []
 
             # 6. Recent sheet diffs (last 7 days)
             diffs = await conn.fetch(
                 """SELECT * FROM sheet_diffs
-                   WHERE ticker = $1 AND diff_date > CURRENT_DATE - INTERVAL '7 days'
-                   ORDER BY diff_date DESC""",
+                   WHERE ticker = $1 AND created_at > CURRENT_DATE - INTERVAL '7 days'
+                   ORDER BY created_at DESC""",
                 ticker,
             )
             context["sheet_diffs"] = [dict(d) for d in diffs]
 
             # 7. Existing AI research
-            research = await conn.fetchrow(
-                "SELECT * FROM deal_research WHERE ticker = $1 ORDER BY created_at DESC LIMIT 1",
-                ticker,
-            )
-            if research:
-                context["existing_research"] = dict(research)
+            try:
+                research = await conn.fetchrow(
+                    "SELECT * FROM deal_research WHERE ticker = $1 ORDER BY created_at DESC LIMIT 1",
+                    ticker,
+                )
+                if research:
+                    context["existing_research"] = dict(research)
+            except Exception:
+                pass  # Table may not exist in portfolio DB
 
             # 8. Deal attributes
-            attrs = await conn.fetchrow(
-                "SELECT * FROM deal_attributes WHERE ticker = $1 ORDER BY created_at DESC LIMIT 1",
-                ticker,
-            )
-            if attrs:
-                context["deal_attributes"] = dict(attrs)
+            try:
+                attrs = await conn.fetchrow(
+                    "SELECT * FROM deal_attributes WHERE ticker = $1 ORDER BY created_at DESC LIMIT 1",
+                    ticker,
+                )
+                if attrs:
+                    context["deal_attributes"] = dict(attrs)
+            except Exception:
+                pass  # Table may not exist in portfolio DB
 
         # Live price: use sheet row's current_price for now
         if row and row.get("current_price") is not None:
@@ -646,8 +658,10 @@ Keep it actionable and direct."""
         has_new_filing = len((context or {}).get("recent_filings", [])) > 0
         has_new_halt = len((context or {}).get("recent_halts", [])) > 0
         has_spread_change = any(
-            d.get("field_name") in ("current_price_raw", "gross_yield_raw", "current_yield_raw")
+            any(k in ("current_price_raw", "gross_yield_raw", "current_yield_raw")
+                for k in (d.get("changed_fields") or {}).keys())
             for d in (context or {}).get("sheet_diffs", [])
+            if isinstance(d.get("changed_fields"), dict)
         )
 
         meta = assessment.get("_meta", {})
