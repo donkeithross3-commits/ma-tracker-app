@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.risk.filing_impact import assess_filing_impact
 from app.services.messaging import MessagingService
 
 logger = logging.getLogger(__name__)
@@ -75,11 +76,42 @@ async def check_portfolio_edgar_filings(
 
                 if _is_material(filing):
                     total_alerts += 1
+                    deal_info = {"ticker": ticker, "target_name": ticker}
+
+                    # AI filing impact assessment
+                    impact = None
                     try:
-                        await messaging.send_filing_alert(
-                            filing=filing,
-                            deal={"ticker": ticker, "target_name": ticker},
+                        impact = await assess_filing_impact(pool, filing, ticker)
+                    except Exception:
+                        logger.error(
+                            "[edgar_portfolio] Filing impact assessment failed for %s %s",
+                            ticker, filing.get("accession_number"),
+                            exc_info=True,
                         )
+
+                    try:
+                        if impact and impact.get("action_required"):
+                            await messaging.send_filing_alert(
+                                filing=filing,
+                                deal=deal_info,
+                                channels=["whatsapp", "email"],
+                                impact_summary=impact.get("summary"),
+                                impact_level=impact.get("impact"),
+                            )
+                        elif impact:
+                            await messaging.send_filing_alert(
+                                filing=filing,
+                                deal=deal_info,
+                                channels=["email"],
+                                impact_summary=impact.get("summary"),
+                                impact_level=impact.get("impact"),
+                            )
+                        else:
+                            # Fallback: no AI assessment, send basic alert
+                            await messaging.send_filing_alert(
+                                filing=filing,
+                                deal=deal_info,
+                            )
                     except Exception:
                         logger.error(
                             "[edgar_portfolio] Failed to send alert for %s filing %s",

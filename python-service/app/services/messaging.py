@@ -142,6 +142,9 @@ class MessagingService:
         self,
         report_data: Dict[str, Any],
         channels: Optional[List[str]] = None,
+        *,
+        html_body: Optional[str] = None,
+        whatsapp_summary: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Format and send the daily morning report.
 
@@ -149,6 +152,10 @@ class MessagingService:
             report_data: Must contain keys ``deals``, ``changes``, ``alerts``.
             channels: List of channels to use (``"email"``, ``"whatsapp"``).
                       Defaults to ``["email"]``.
+            html_body: Pre-formatted HTML body. When provided, bypasses template
+                       formatting and uses this directly.
+            whatsapp_summary: Pre-formatted WhatsApp text. When provided, bypasses
+                              the default text builder.
 
         Returns:
             dict mapping channel names to lists of per-recipient results.
@@ -161,24 +168,31 @@ class MessagingService:
         alerts = report_data.get("alerts", [])
 
         if "email" in channels:
-            html = morning_report_email(deals, changes, alerts)
-            subject = f"M&A Morning Report - {len(deals)} Active Deal(s)"
+            if html_body:
+                html = html_body
+                subject = report_data.get("subject_line", f"M&A Morning Report - {len(deals)} Active Deal(s)")
+            else:
+                html = morning_report_email(deals, changes, alerts)
+                subject = f"M&A Morning Report - {len(deals)} Active Deal(s)"
             results["email"] = await self._send_to_email_recipients(subject, html)
 
         if "whatsapp" in channels:
-            # Build a concise text summary for WhatsApp
-            lines = ["\U0001f4ca *M&A Morning Report*", ""]
-            for d in deals:
-                ticker = d.get("ticker", "???")
-                spread = d.get("spread")
-                spread_str = f"{spread:+.2f}%" if spread is not None else "N/A"
-                lines.append(f"*{ticker}* spread: {spread_str}")
-            if changes:
-                lines.append("")
-                lines.append(f"\U0001f504 {len(changes)} overnight change(s)")
-            if alerts:
-                lines.append(f"\u26a0\ufe0f {len(alerts)} risk flag(s)")
-            text = "\n".join(lines)
+            if whatsapp_summary:
+                text = whatsapp_summary
+            else:
+                # Build a concise text summary for WhatsApp
+                lines = ["\U0001f4ca *M&A Morning Report*", ""]
+                for d in deals:
+                    ticker = d.get("ticker", "???")
+                    spread = d.get("spread")
+                    spread_str = f"{spread:+.2f}%" if spread is not None else "N/A"
+                    lines.append(f"*{ticker}* spread: {spread_str}")
+                if changes:
+                    lines.append("")
+                    lines.append(f"\U0001f504 {len(changes)} overnight change(s)")
+                if alerts:
+                    lines.append(f"\u26a0\ufe0f {len(alerts)} risk flag(s)")
+                text = "\n".join(lines)
             results["whatsapp"] = await self._send_to_whatsapp_recipients(text)
 
         return results
@@ -207,16 +221,27 @@ class MessagingService:
         old_spread = details.get("old_spread", 0.0)
         new_spread = details.get("new_spread", 0.0)
         pct_change = details.get("pct_change", 0.0)
+        severity = details.get("severity", "")
+        risk_context = details.get("risk_context", "")
 
         if "whatsapp" in channels:
             text = spread_alert_whatsapp(ticker, old_spread, new_spread, pct_change)
+            # Append severity and risk context if present
+            if severity and severity != "info":
+                text += f"\n*Severity:* {severity.upper()}"
+            if risk_context:
+                text += f"\n*Risk:* {risk_context}"
             results["whatsapp"] = await self._send_to_whatsapp_recipients(text)
 
         if "email" in channels:
             direction = "Widened" if new_spread > old_spread else "Tightened"
-            subject = f"Spread {direction}: {ticker} ({pct_change:+.1f}%)"
+            severity_tag = f" [{severity.upper()}]" if severity and severity != "info" else ""
+            subject = f"Spread {direction}: {ticker} ({pct_change:+.1f}%){severity_tag}"
             # Simple HTML wrapper for the text alert
-            html = _text_to_html(spread_alert_whatsapp(ticker, old_spread, new_spread, pct_change), subject)
+            base_text = spread_alert_whatsapp(ticker, old_spread, new_spread, pct_change)
+            if risk_context:
+                base_text += f"\n\n*Risk Context:* {risk_context}"
+            html = _text_to_html(base_text, subject)
             results["email"] = await self._send_to_email_recipients(subject, html)
 
         return results
@@ -226,6 +251,8 @@ class MessagingService:
         filing: Dict[str, Any],
         deal: Dict[str, Any],
         channels: Optional[List[str]] = None,
+        impact_summary: Optional[str] = None,
+        impact_level: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Format and send a new SEC filing alert.
 
@@ -233,6 +260,8 @@ class MessagingService:
             filing: Filing data dict.
             deal: Associated deal data dict.
             channels: Defaults to ``["email"]``.
+            impact_summary: AI-generated one-line impact summary.
+            impact_level: Impact severity (none/low/moderate/high/critical).
 
         Returns:
             dict mapping channel names to lists of per-recipient results.
@@ -245,7 +274,16 @@ class MessagingService:
             filing_type = filing.get("filing_type", "Filing")
             ticker = deal.get("ticker", "")
             target = deal.get("target_name", ticker)
-            subject = f"New {filing_type} Filing: {target}"
+            impact_tag = f" [{impact_level.upper()}]" if impact_level and impact_level not in ("none", "low") else ""
+            subject = f"New {filing_type} Filing: {target}{impact_tag}"
+            # Append AI impact summary to the email if available
+            if impact_summary:
+                impact_block = (
+                    f'<div style="margin-top:16px;padding:12px;background-color:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;">'
+                    f'<strong>AI Impact Assessment ({impact_level or "unknown"}):</strong> {impact_summary}'
+                    f'</div>'
+                )
+                html = html.replace("</div>\n</body>", f"{impact_block}</div>\n</body>", 1)
             results["email"] = await self._send_to_email_recipients(subject, html)
 
         if "whatsapp" in channels:
@@ -258,9 +296,15 @@ class MessagingService:
                 f"*Target:* {target} ({ticker})\n"
                 f"*Company:* {filing.get('company_name', 'N/A')}\n"
                 f"*Filed:* {filing.get('filing_date', 'N/A')}\n"
-                f"\n"
-                f"\U0001f449 {filing.get('filing_url', '')}"
             )
+            if impact_summary:
+                level_emoji = {
+                    "critical": "\U0001f534",
+                    "high": "\U0001f7e0",
+                    "moderate": "\U0001f7e1",
+                }.get(impact_level or "", "\U0001f7e2")
+                text += f"\n{level_emoji} *AI Impact:* {impact_summary}\n"
+            text += f"\n\U0001f449 {filing.get('filing_url', '')}"
             results["whatsapp"] = await self._send_to_whatsapp_recipients(text)
 
         return results

@@ -21,6 +21,8 @@ COPY app/edgar/__init__.py app/edgar/__init__.py
 COPY app/edgar/alerts.py app/edgar/alerts.py
 COPY app/edgar/models.py app/edgar/models.py
 COPY app/risk/ app/risk/
+COPY app/risk/overnight.py app/risk/overnight.py
+COPY app/risk/report_formatter.py app/risk/report_formatter.py
 COPY app/api/risk_routes.py app/api/risk_routes.py
 
 EXPOSE 8001

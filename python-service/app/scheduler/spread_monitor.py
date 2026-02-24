@@ -119,6 +119,20 @@ class SpreadMonitor:
             logger.warning("[spread_monitor] No live prices returned from Polygon")
             return {"checked": 0, "alerts": 0}
 
+        # Load morning risk context for severity determination
+        risk_context: Dict[str, Dict[str, Any]] = {}
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT ticker, overall_risk_level, needs_attention, attention_reason,
+                           discrepancies, discrepancy_count
+                    FROM deal_risk_assessments
+                    WHERE assessment_date = CURRENT_DATE
+                """)
+                risk_context = {r["ticker"]: dict(r) for r in rows}
+        except Exception:
+            pass  # Gracefully degrade if no assessment today
+
         alert_count = 0
         for deal in deals:
             ticker = deal.get("ticker")
@@ -146,26 +160,50 @@ class SpreadMonitor:
             if delta >= self.threshold_pct:
                 alert_type = "spread_widened" if spread > old_spread else "spread_tightened"
                 pct_change = spread - old_spread
+
+                # Determine severity from risk context
+                risk = risk_context.get(ticker, {})
+                severity = "info"
+                channels = ["whatsapp"]
+
+                if risk.get("needs_attention"):
+                    severity = "critical"
+                    channels = ["whatsapp", "email"]
+                elif risk.get("overall_risk_level") in ("high", "critical"):
+                    severity = "warning"
+                elif delta >= self.threshold_pct * 2:
+                    severity = "warning"
+
+                # Break price proximity escalates to critical
+                if break_price and live_price < break_price:
+                    severity = "critical"
+                    channels = ["whatsapp", "email"]
+
                 logger.info(
-                    "[spread_monitor] Alert: %s %s %.2f%% -> %.2f%% (delta %.2f%%)",
-                    ticker, alert_type, old_spread, spread, pct_change,
+                    "[spread_monitor] Alert: %s %s %.2f%% -> %.2f%% (delta %.2f%%, severity=%s)",
+                    ticker, alert_type, old_spread, spread, pct_change, severity,
                 )
                 try:
                     await self.messaging.send_spread_alert(
                         ticker=ticker,
                         alert_type=alert_type,
                         details={
-                            "old_spread": old_spread,
-                            "new_spread": spread,
-                            "pct_change": pct_change,
+                            "old_spread": round(old_spread, 2),
+                            "new_spread": round(spread, 2),
+                            "pct_change": round(pct_change, 2),
+                            "live_price": live_price,
+                            "severity": severity,
+                            "risk_level": risk.get("overall_risk_level", "unknown"),
+                            "risk_context": risk.get("attention_reason", ""),
                         },
+                        channels=channels,
                     )
                     alert_count += 1
                 except Exception:
                     logger.error("[spread_monitor] Failed to send spread alert for %s", ticker, exc_info=True)
 
-            # Break-price breach alert
-            if break_price and live_price < break_price:
+            # Break-price breach alert (standalone, fires even if delta < threshold)
+            elif break_price and live_price < break_price:
                 logger.info(
                     "[spread_monitor] CRITICAL: %s live price $%.2f < break price $%.2f",
                     ticker, live_price, break_price,
@@ -175,11 +213,13 @@ class SpreadMonitor:
                         ticker=ticker,
                         alert_type="break_price_breach",
                         details={
-                            "old_spread": old_spread,
-                            "new_spread": spread,
-                            "pct_change": spread - old_spread if old_spread else 0,
+                            "old_spread": round(old_spread, 2),
+                            "new_spread": round(spread, 2),
+                            "pct_change": round(spread - old_spread, 2) if old_spread else 0,
                             "live_price": live_price,
                             "break_price": break_price,
+                            "severity": "critical",
+                            "risk_level": risk_context.get(ticker, {}).get("overall_risk_level", "unknown"),
                         },
                         channels=["whatsapp", "email"],
                     )

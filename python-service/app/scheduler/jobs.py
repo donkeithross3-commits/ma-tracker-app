@@ -9,6 +9,7 @@ timing, and recording results to the job_runs table.
 import functools
 import json
 import logging
+import os
 import time
 import traceback
 import uuid
@@ -206,6 +207,152 @@ async def job_weekly_cleanup():
     return {"status": "placeholder"}
 
 
+@run_job("after_hours_summary", "After-Hours Summary")
+async def job_after_hours_summary():
+    """Collect the day's events and optionally send an end-of-day summary (4:15 PM ET weekdays)."""
+    pool = _get_pool()
+
+    # Collect today's activity
+    filings = await pool.fetch(
+        "SELECT * FROM portfolio_edgar_filings WHERE detected_at::date = CURRENT_DATE"
+    )
+    spread_alerts = await pool.fetchval("""
+        SELECT COUNT(*) FROM job_runs
+        WHERE job_id = 'spread_monitor_tick' AND started_at::date = CURRENT_DATE
+        AND result::text LIKE '%alerts%'
+    """)
+    risk_changes = await pool.fetch(
+        "SELECT * FROM risk_factor_changes WHERE change_date = CURRENT_DATE"
+    )
+
+    summary = {
+        "new_filings": len(filings),
+        "spread_alerts": spread_alerts,
+        "risk_changes": len(risk_changes),
+        "quiet_day": not filings and not spread_alerts and not risk_changes,
+    }
+
+    if os.environ.get("SEND_EOD_SUMMARY", "false").lower() == "true" and not summary["quiet_day"]:
+        from app.services.messaging import get_messaging_service
+
+        messaging = get_messaging_service()
+        text = _format_eod_summary(filings, risk_changes)
+        for recipient in messaging.whatsapp_recipients:
+            await messaging.send_whatsapp(recipient, text)
+
+    return summary
+
+
+@run_job("options_opportunity_check", "Intraday Options Opportunity Check")
+async def job_options_opportunity_check():
+    """Compare current IV to morning snapshots; alert on spikes >20% (every 30 min, 10AM-3PM ET)."""
+    from app.options.polygon_options import get_polygon_client
+    from app.services.messaging import get_messaging_service
+
+    pool = _get_pool()
+    client = get_polygon_client()
+    if client is None:
+        return {"status": "skipped", "reason": "Polygon API key not configured"}
+
+    # Fetch today's morning snapshots
+    rows = await pool.fetch(
+        """
+        SELECT ticker, atm_iv
+        FROM deal_options_snapshots
+        WHERE snapshot_date = CURRENT_DATE AND atm_iv IS NOT NULL
+        """
+    )
+    if not rows:
+        return {"status": "skipped", "reason": "no morning snapshots for today"}
+
+    alerts = []
+    checked = 0
+    for row in rows:
+        ticker = row["ticker"]
+        morning_iv = float(row["atm_iv"])
+        if morning_iv <= 0:
+            continue
+
+        try:
+            result = await client.get_current_atm_iv(ticker)
+            current_iv = result.get("atm_iv")
+            if current_iv is None:
+                continue
+
+            checked += 1
+            change_pct = (current_iv - morning_iv) / morning_iv * 100
+            if abs(change_pct) > 20:
+                direction = "SPIKE" if change_pct > 0 else "CRUSH"
+                alerts.append({
+                    "ticker": ticker,
+                    "morning_iv": round(morning_iv, 4),
+                    "current_iv": round(current_iv, 4),
+                    "change_pct": round(change_pct, 1),
+                    "direction": direction,
+                })
+        except Exception as exc:
+            logger.warning("[options_opportunity_check] %s failed: %s", ticker, exc)
+
+    # Send WhatsApp alerts if any spikes detected
+    if alerts:
+        messaging = get_messaging_service()
+        text = _format_iv_alert(alerts)
+        for recipient in messaging.whatsapp_recipients:
+            await messaging.send_whatsapp(recipient, text)
+
+    return {"checked": checked, "alerts": len(alerts), "details": alerts}
+
+
+def _format_iv_alert(alerts: list[dict]) -> str:
+    """Format IV spike/crush alerts for WhatsApp."""
+    now = datetime.now().strftime("%I:%M %p")
+    lines = [f"*IV Alert* ({now})", ""]
+    for a in alerts:
+        emoji = "\u26a0\ufe0f" if a["direction"] == "SPIKE" else "\u2744\ufe0f"
+        lines.append(
+            f"{emoji} *{a['ticker']}*: {a['direction']} {a['change_pct']:+.1f}% "
+            f"({a['morning_iv']:.2%} -> {a['current_iv']:.2%})"
+        )
+    lines.append("")
+    lines.append("\U0001f449 https://dr3-dashboard.com/deals")
+    return "\n".join(lines)
+
+
+def _format_eod_summary(filings: list, risk_changes: list) -> str:
+    """Format a concise WhatsApp end-of-day summary."""
+    now = datetime.now().strftime("%A, %B %d")
+    lines = [f"\U0001f4cb *End-of-Day Summary* — {now}", ""]
+
+    if filings:
+        lines.append(f"\U0001f4c4 *{len(filings)} New Filing(s):*")
+        for f in filings[:5]:  # Cap at 5 to keep message concise
+            ticker = f.get("ticker") or f.get("company_name") or "Unknown"
+            ftype = f.get("filing_type") or "Filing"
+            lines.append(f"  - {ticker}: {ftype}")
+        if len(filings) > 5:
+            lines.append(f"  ... and {len(filings) - 5} more")
+        lines.append("")
+
+    if risk_changes:
+        lines.append(f"\u26a0\ufe0f *{len(risk_changes)} Risk Change(s):*")
+        for rc in risk_changes[:5]:
+            ticker = rc.get("ticker") or "Unknown"
+            factor = rc.get("risk_factor") or rc.get("field") or "risk"
+            old_val = rc.get("old_value") or "?"
+            new_val = rc.get("new_value") or "?"
+            lines.append(f"  - {ticker}: {factor} {old_val} \u2192 {new_val}")
+        if len(risk_changes) > 5:
+            lines.append(f"  ... and {len(risk_changes) - 5} more")
+        lines.append("")
+
+    if not filings and not risk_changes:
+        lines.append("\u2705 Quiet day — no notable events.")
+        lines.append("")
+
+    lines.append("\U0001f449 https://dr3-dashboard.com/deals")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
@@ -257,6 +404,25 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour="9-15",  # 9:30 AM through 3:xx PM (last fire at 15:59)
         minute="*",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        job_after_hours_summary,
+        "cron",
+        id="after_hours_summary",
+        day_of_week="mon-fri",
+        hour=16, minute=15,
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        job_options_opportunity_check,
+        "cron",
+        id="options_opportunity_check",
+        day_of_week="mon-fri",
+        hour="10-15",
+        minute="0,30",
         replace_existing=True,
     )
 
