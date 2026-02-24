@@ -303,13 +303,14 @@ async def get_deals(
 
             if include_excluded:
                 rows = await conn.fetch(
-                    """SELECT ticker, acquiror, category, deal_price, current_price,
+                    """SELECT row_index, ticker, acquiror, category, deal_price, current_price,
                               gross_yield, current_yield, investable, vote_risk,
                               finance_risk, legal_risk, deal_price_raw, current_price_raw,
                               gross_yield_raw, current_yield_raw,
                               announced_date, close_date, end_date,
-                              countdown_days, price_change, price_change_raw,
-                              go_shop_raw, cvr_flag, is_excluded
+                              countdown_days, countdown_raw, price_change, price_change_raw,
+                              go_shop_raw, cvr_flag, is_excluded,
+                              announced_date_raw, close_date_raw, end_date_raw
                        FROM sheet_rows
                        WHERE snapshot_id = $1 AND ticker IS NOT NULL
                        ORDER BY row_index""",
@@ -317,13 +318,14 @@ async def get_deals(
                 )
             else:
                 rows = await conn.fetch(
-                    """SELECT ticker, acquiror, category, deal_price, current_price,
+                    """SELECT row_index, ticker, acquiror, category, deal_price, current_price,
                               gross_yield, current_yield, investable, vote_risk,
                               finance_risk, legal_risk, deal_price_raw, current_price_raw,
                               gross_yield_raw, current_yield_raw,
                               announced_date, close_date, end_date,
-                              countdown_days, price_change, price_change_raw,
-                              go_shop_raw, cvr_flag, is_excluded
+                              countdown_days, countdown_raw, price_change, price_change_raw,
+                              go_shop_raw, cvr_flag, is_excluded,
+                              announced_date_raw, close_date_raw, end_date_raw
                        FROM sheet_rows
                        WHERE snapshot_id = $1 AND ticker IS NOT NULL
                          AND (is_excluded IS NOT TRUE)
@@ -334,6 +336,7 @@ async def get_deals(
             deals = []
             for r in rows:
                 deals.append({
+                    "row_index": r["row_index"],
                     "ticker": r["ticker"],
                     "acquiror": r["acquiror"],
                     "category": r["category"],
@@ -355,9 +358,13 @@ async def get_deals(
                     "close_date": str(r["close_date"]) if r["close_date"] else None,
                     "end_date": str(r["end_date"]) if r["end_date"] else None,
                     "countdown_days": r["countdown_days"],
+                    "countdown_raw": r["countdown_raw"],
                     "go_shop_raw": r["go_shop_raw"],
                     "cvr_flag": r["cvr_flag"],
                     "is_excluded": r["is_excluded"] or False,
+                    "announced_date_raw": r["announced_date_raw"],
+                    "close_date_raw": r["close_date_raw"],
+                    "end_date_raw": r["end_date_raw"],
                 })
             return deals
     except Exception as e:

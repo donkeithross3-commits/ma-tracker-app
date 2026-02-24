@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 
 interface Deal {
+  row_index: number;
   ticker: string;
   acquiror: string;
   category: string;
@@ -24,7 +25,11 @@ interface Deal {
   announced_date: string | null;
   close_date: string | null;
   end_date: string | null;
+  announced_date_raw: string | null;
+  close_date_raw: string | null;
+  end_date_raw: string | null;
   countdown_days: number | null;
+  countdown_raw: string | null;
   go_shop_raw: string | null;
   cvr_flag: string | null;
   is_excluded?: boolean;
@@ -38,6 +43,8 @@ interface HealthStatus {
   recent_failures: number;
 }
 
+type SortKey = keyof Deal | "__default__";
+
 function riskBadge(risk: string | null) {
   if (!risk) return null;
   const lower = risk.toLowerCase();
@@ -46,7 +53,7 @@ function riskBadge(risk: string | null) {
   else if (lower.startsWith("med")) color = "text-yellow-400 bg-yellow-400/10";
   else if (lower.startsWith("high")) color = "text-red-400 bg-red-400/10";
   return (
-    <span className={`text-xs px-1.5 py-0.5 rounded ${color}`}>
+    <span className={`text-xs px-1.5 py-0.5 rounded ${color}`} title={risk}>
       {risk.length > 12 ? risk.slice(0, 12) + "..." : risk}
     </span>
   );
@@ -54,7 +61,7 @@ function riskBadge(risk: string | null) {
 
 function yieldCell(raw: string | null, parsed: number | null) {
   if (raw === "#DIV/0!" || raw === "#VALUE!" || raw === "#N/A") {
-    return <span className="text-gray-500">N/A</span>;
+    return <span className="text-gray-500">{raw}</span>;
   }
   if (parsed === null) return <span className="text-gray-500">-</span>;
   const pct = (parsed * 100).toFixed(2);
@@ -63,11 +70,17 @@ function yieldCell(raw: string | null, parsed: number | null) {
 }
 
 function formatDate(d: string | null) {
-  if (!d) return "-";
-  // YYYY-MM-DD -> M/D
+  if (!d) return "";
+  // YYYY-MM-DD -> M/D/YY
   const parts = d.split("-");
   if (parts.length !== 3) return d;
-  return `${parseInt(parts[1])}/${parseInt(parts[2])}`;
+  return `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0].slice(2)}`;
+}
+
+// Check if countdown_raw is the 11/3/1773 artifact
+function isCountdownArtifact(raw: string | null): boolean {
+  if (!raw) return false;
+  return raw.includes("1773") || raw.includes("/");
 }
 
 export default function SheetPortfolioPage() {
@@ -77,7 +90,7 @@ export default function SheetPortfolioPage() {
   const [error, setError] = useState<string | null>(null);
   const [ingesting, setIngesting] = useState(false);
   const [ingestResult, setIngestResult] = useState<string | null>(null);
-  const [sortCol, setSortCol] = useState<keyof Deal>("ticker");
+  const [sortCol, setSortCol] = useState<SortKey>("__default__");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [filter, setFilter] = useState<string>("");
   const [showExcluded, setShowExcluded] = useState(false);
@@ -138,7 +151,7 @@ export default function SheetPortfolioPage() {
         setIngestResult(
           data.skipped
             ? "Skipped (no changes)"
-            : `Ingested ${data.row_count} rows`
+            : `Ingested ${data.row_count} rows (${data.excluded_count || 0} excluded)`
         );
         fetchData();
       } else {
@@ -169,21 +182,25 @@ export default function SheetPortfolioPage() {
       d.ticker?.toLowerCase().includes(q) ||
       d.acquiror?.toLowerCase().includes(q) ||
       d.category?.toLowerCase().includes(q) ||
-      d.investable?.toLowerCase().includes(q)
+      d.investable?.toLowerCase().includes(q) ||
+      d.go_shop_raw?.toLowerCase().includes(q)
     );
   });
 
-  const sortedDeals = [...filteredDeals].sort((a, b) => {
-    const dir = sortDir === "asc" ? 1 : -1;
-    const av = a[sortCol];
-    const bv = b[sortCol];
-    if (av === null && bv === null) return 0;
-    if (av === null) return 1;
-    if (bv === null) return -1;
-    if (typeof av === "number" && typeof bv === "number")
-      return (av - bv) * dir;
-    return String(av).localeCompare(String(bv)) * dir;
-  });
+  const sortedDeals =
+    sortCol === "__default__"
+      ? filteredDeals // Already in row_index order from API
+      : [...filteredDeals].sort((a, b) => {
+          const dir = sortDir === "asc" ? 1 : -1;
+          const av = a[sortCol as keyof Deal];
+          const bv = b[sortCol as keyof Deal];
+          if (av === null && bv === null) return 0;
+          if (av === null) return 1;
+          if (bv === null) return -1;
+          if (typeof av === "number" && typeof bv === "number")
+            return (av - bv) * dir;
+          return String(av).localeCompare(String(bv)) * dir;
+        });
 
   const sortIcon = (col: string) => {
     if (sortCol !== col) return "";
@@ -194,22 +211,49 @@ export default function SheetPortfolioPage() {
   const investableDeals = deals.filter(
     (d) => d.investable?.toLowerCase().startsWith("yes")
   );
-  const yieldDenominator = investableDeals.filter((d) => d.current_yield !== null).length;
+  const yieldDenominator = investableDeals.filter(
+    (d) => d.current_yield !== null
+  ).length;
   const avgYield =
     yieldDenominator > 0
       ? investableDeals.reduce((s, d) => s + (d.current_yield || 0), 0) /
         yieldDenominator
       : 0;
 
+  // Column definitions matching production Google Sheet order
+  const columns: {
+    key: keyof Deal;
+    label: string;
+    align: "left" | "right" | "center";
+  }[] = [
+    { key: "ticker", label: "Ticker", align: "left" },
+    { key: "acquiror", label: "Acquiror", align: "left" },
+    { key: "announced_date", label: "Anncd", align: "center" },
+    { key: "close_date", label: "Close", align: "center" },
+    { key: "end_date", label: "End Dt", align: "center" },
+    { key: "countdown_days", label: "Cntdwn", align: "right" },
+    { key: "current_price", label: "Crrnt Px", align: "right" },
+    { key: "gross_yield", label: "Grss Yield", align: "right" },
+    { key: "price_change", label: "Px Chng", align: "right" },
+    { key: "current_yield", label: "Crrnt Yield", align: "right" },
+    { key: "category", label: "Category", align: "left" },
+    { key: "investable", label: "Investable", align: "left" },
+    { key: "go_shop_raw", label: "Go Shop or Likely Overbid?", align: "left" },
+    { key: "vote_risk", label: "Vote Risk", align: "center" },
+    { key: "finance_risk", label: "Finance Risk", align: "center" },
+    { key: "legal_risk", label: "Legal Risk", align: "center" },
+    { key: "cvr_flag", label: "CVR", align: "center" },
+  ];
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* Header */}
       <header className="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-[1600px] mx-auto px-3 py-2 flex items-center justify-between">
+        <div className="max-w-[1800px] mx-auto px-3 py-2 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Sheet Portfolio</h1>
+            <h1 className="text-2xl font-bold">M&A Dashboard</h1>
             <p className="text-xs text-gray-500">
-              Google Sheet M&A deal tracker
+              Production sheet replica
               {health && (
                 <span className="ml-2">
                   {health.status === "healthy" ? (
@@ -246,7 +290,7 @@ export default function SheetPortfolioPage() {
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto px-3 py-3">
+      <main className="max-w-[1800px] mx-auto px-3 py-3">
         {loading ? (
           <div className="text-center py-20 text-gray-500">Loading...</div>
         ) : error ? (
@@ -284,8 +328,19 @@ export default function SheetPortfolioPage() {
                     : "border-gray-700 text-gray-500 hover:text-gray-300"
                 }`}
               >
-                {showExcluded ? "Hiding excluded" : "Show excluded"}
+                {showExcluded ? "Showing excluded" : "Show excluded"}
               </button>
+              {sortCol !== "__default__" && (
+                <button
+                  onClick={() => {
+                    setSortCol("__default__");
+                    setSortDir("asc");
+                  }}
+                  className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                  Reset sort
+                </button>
+              )}
               <div className="ml-auto">
                 <input
                   type="text"
@@ -297,30 +352,15 @@ export default function SheetPortfolioPage() {
               </div>
             </div>
 
-            {/* Deals table */}
+            {/* Deals table - matches production Google Sheet column order */}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-800 text-gray-500 text-xs">
-                    {[
-                      { key: "ticker" as keyof Deal, label: "Ticker", align: "left" },
-                      { key: "acquiror" as keyof Deal, label: "Acquiror", align: "left" },
-                      { key: "category" as keyof Deal, label: "Category", align: "left" },
-                      { key: "deal_price" as keyof Deal, label: "Deal Px", align: "right" },
-                      { key: "current_price" as keyof Deal, label: "Curr Px", align: "right" },
-                      { key: "gross_yield" as keyof Deal, label: "Gross Yld", align: "right" },
-                      { key: "current_yield" as keyof Deal, label: "Curr Yld", align: "right" },
-                      { key: "countdown_days" as keyof Deal, label: "Days", align: "right" },
-                      { key: "close_date" as keyof Deal, label: "Close", align: "center" },
-                      { key: "investable" as keyof Deal, label: "Investable", align: "left" },
-                      { key: "cvr_flag" as keyof Deal, label: "CVR", align: "center" },
-                      { key: "vote_risk" as keyof Deal, label: "Vote", align: "center" },
-                      { key: "finance_risk" as keyof Deal, label: "Finance", align: "center" },
-                      { key: "legal_risk" as keyof Deal, label: "Legal", align: "center" },
-                    ].map((col) => (
+                    {columns.map((col) => (
                       <th
                         key={col.key}
-                        className={`py-2 px-2 font-medium cursor-pointer hover:text-gray-300 ${
+                        className={`py-2 px-2 font-medium cursor-pointer hover:text-gray-300 whitespace-nowrap ${
                           col.align === "right"
                             ? "text-right"
                             : col.align === "center"
@@ -339,105 +379,187 @@ export default function SheetPortfolioPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedDeals.map((deal, idx) => (
-                    <tr
-                      key={`${deal.ticker}-${idx}`}
-                      className={`border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors ${deal.is_excluded ? "opacity-40" : ""}`}
-                    >
-                      <td className="py-1.5 px-2 font-mono font-semibold">
-                        <Link
-                          href={`/sheet-portfolio/${deal.ticker}`}
-                          className={`hover:underline ${deal.is_excluded ? "text-gray-500 line-through" : "text-blue-400 hover:text-blue-300"}`}
-                        >
-                          {deal.ticker}
-                        </Link>
-                      </td>
-                      <td className="py-1.5 px-2 text-gray-300 max-w-[200px] truncate">
-                        {deal.acquiror}
-                      </td>
-                      <td className="py-1.5 px-2 text-gray-400">
-                        {deal.category}
-                      </td>
-                      <td className="py-1.5 px-2 text-right font-mono">
-                        {deal.deal_price_raw || "-"}
-                      </td>
-                      <td className="py-1.5 px-2 text-right font-mono">
-                        {deal.current_price_raw || "-"}
-                      </td>
-                      <td className="py-1.5 px-2 text-right font-mono">
-                        {yieldCell(deal.gross_yield_raw, deal.gross_yield)}
-                      </td>
-                      <td className="py-1.5 px-2 text-right font-mono">
-                        {yieldCell(
-                          deal.current_yield_raw,
-                          deal.current_yield
-                        )}
-                      </td>
-                      <td className="py-1.5 px-2 text-right font-mono">
-                        {deal.countdown_days !== null ? (
-                          <span className={deal.countdown_days < 0 ? "text-red-400" : deal.countdown_days < 30 ? "text-yellow-400" : "text-gray-300"}>
-                            {deal.countdown_days}
-                          </span>
-                        ) : (
-                          <span className="text-gray-500">-</span>
-                        )}
-                      </td>
-                      <td className="py-1.5 px-2 text-center text-gray-400 text-xs">
-                        {formatDate(deal.close_date)}
-                      </td>
-                      <td className="py-1.5 px-2 max-w-[180px] truncate">
-                        {deal.investable?.toLowerCase().startsWith("yes") ? (
-                          <span className="text-green-400">
-                            {deal.investable}
-                          </span>
-                        ) : (
-                          <span className="text-gray-500">
-                            {deal.investable || "-"}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-1.5 px-2 text-center text-xs">
-                        {deal.cvr_flag && deal.cvr_flag.toLowerCase() !== "no" ? (
-                          <span className="text-purple-400" title={deal.cvr_flag}>
-                            {deal.cvr_flag.length > 5 ? "Yes*" : deal.cvr_flag}
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="py-1.5 px-2 text-center">
-                        {riskBadge(deal.vote_risk)}
-                      </td>
-                      <td className="py-1.5 px-2 text-center">
-                        {riskBadge(deal.finance_risk)}
-                      </td>
-                      <td className="py-1.5 px-2 text-center">
-                        {riskBadge(deal.legal_risk)}
-                      </td>
-                      {showExcluded && (
-                        <td className="py-1.5 px-1 text-center">
-                          <button
-                            onClick={(e) => {
-                              e.preventDefault();
-                              toggleExclude(deal.ticker, !!deal.is_excluded);
-                            }}
-                            className="text-gray-500 hover:text-gray-300 transition-colors"
-                            title={deal.is_excluded ? "Include deal" : "Exclude deal"}
+                  {sortedDeals.map((deal, idx) => {
+                    const artifact = isCountdownArtifact(deal.countdown_raw);
+                    return (
+                      <tr
+                        key={`${deal.ticker}-${idx}`}
+                        className={`border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors ${deal.is_excluded ? "opacity-40" : ""}`}
+                      >
+                        {/* Ticker */}
+                        <td className="py-1.5 px-2 font-mono font-semibold">
+                          <Link
+                            href={`/sheet-portfolio/${deal.ticker}`}
+                            className={`hover:underline ${deal.is_excluded ? "text-gray-500 line-through" : "text-blue-400 hover:text-blue-300"}`}
                           >
-                            {deal.is_excluded ? (
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd" />
-                                <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
-                              </svg>
-                            ) : (
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline" viewBox="0 0 20 20" fill="currentColor">
-                                <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-                                <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
-                              </svg>
-                            )}
-                          </button>
+                            {deal.ticker}
+                          </Link>
                         </td>
-                      )}
-                    </tr>
-                  ))}
+                        {/* Acquiror */}
+                        <td
+                          className="py-1.5 px-2 text-gray-300 max-w-[180px] truncate"
+                          title={deal.acquiror || ""}
+                        >
+                          {deal.acquiror}
+                        </td>
+                        {/* Anncd */}
+                        <td className="py-1.5 px-2 text-center text-gray-400 text-xs whitespace-nowrap">
+                          {formatDate(deal.announced_date)}
+                        </td>
+                        {/* Close */}
+                        <td className="py-1.5 px-2 text-center text-gray-400 text-xs whitespace-nowrap">
+                          {formatDate(deal.close_date)}
+                        </td>
+                        {/* End Dt */}
+                        <td className="py-1.5 px-2 text-center text-gray-400 text-xs whitespace-nowrap">
+                          {formatDate(deal.end_date)}
+                        </td>
+                        {/* Cntdwn */}
+                        <td className="py-1.5 px-2 text-right font-mono">
+                          {artifact ? (
+                            <span className="bg-red-900/40 text-red-300 px-1 rounded text-xs">
+                              {deal.countdown_raw}
+                            </span>
+                          ) : deal.countdown_days !== null ? (
+                            <span
+                              className={
+                                deal.countdown_days < 0
+                                  ? "text-red-400"
+                                  : deal.countdown_days < 30
+                                  ? "text-yellow-400"
+                                  : "text-gray-300"
+                              }
+                            >
+                              {deal.countdown_days}
+                            </span>
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )}
+                        </td>
+                        {/* Crrnt Px */}
+                        <td className="py-1.5 px-2 text-right font-mono">
+                          {deal.current_price_raw || "-"}
+                        </td>
+                        {/* Grss Yield */}
+                        <td className="py-1.5 px-2 text-right font-mono">
+                          {yieldCell(deal.gross_yield_raw, deal.gross_yield)}
+                        </td>
+                        {/* Px Chng */}
+                        <td className="py-1.5 px-2 text-right font-mono">
+                          {yieldCell(
+                            deal.price_change_raw,
+                            deal.price_change
+                          )}
+                        </td>
+                        {/* Crrnt Yield */}
+                        <td className="py-1.5 px-2 text-right font-mono">
+                          {yieldCell(
+                            deal.current_yield_raw,
+                            deal.current_yield
+                          )}
+                        </td>
+                        {/* Category */}
+                        <td className="py-1.5 px-2 text-gray-400 whitespace-nowrap">
+                          {deal.category}
+                        </td>
+                        {/* Investable */}
+                        <td className="py-1.5 px-2 max-w-[140px] truncate">
+                          {deal.investable?.toLowerCase().startsWith("yes") ? (
+                            <span className="text-green-400">
+                              {deal.investable}
+                            </span>
+                          ) : (
+                            <span className="text-gray-500">
+                              {deal.investable || ""}
+                            </span>
+                          )}
+                        </td>
+                        {/* Go Shop or Likely Overbid? */}
+                        <td
+                          className="py-1.5 px-2 text-gray-400 text-xs max-w-[200px] truncate"
+                          title={deal.go_shop_raw || ""}
+                        >
+                          {deal.go_shop_raw || ""}
+                        </td>
+                        {/* Vote Risk */}
+                        <td className="py-1.5 px-2 text-center">
+                          {riskBadge(deal.vote_risk)}
+                        </td>
+                        {/* Finance Risk */}
+                        <td className="py-1.5 px-2 text-center">
+                          {riskBadge(deal.finance_risk)}
+                        </td>
+                        {/* Legal Risk */}
+                        <td className="py-1.5 px-2 text-center">
+                          {riskBadge(deal.legal_risk)}
+                        </td>
+                        {/* CVR */}
+                        <td className="py-1.5 px-2 text-center text-xs whitespace-nowrap">
+                          {deal.cvr_flag &&
+                          deal.cvr_flag.toLowerCase() !== "no" ? (
+                            <span
+                              className="text-purple-400"
+                              title={deal.cvr_flag}
+                            >
+                              {deal.cvr_flag === "Yes" || deal.cvr_flag === "Yes " ? "Yes" : "Yes*"}
+                            </span>
+                          ) : deal.cvr_flag?.toLowerCase() === "no" ? (
+                            <span className="text-gray-600">No</span>
+                          ) : null}
+                        </td>
+                        {/* Exclude toggle */}
+                        {showExcluded && (
+                          <td className="py-1.5 px-1 text-center">
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                toggleExclude(
+                                  deal.ticker,
+                                  !!deal.is_excluded
+                                );
+                              }}
+                              className="text-gray-500 hover:text-gray-300 transition-colors"
+                              title={
+                                deal.is_excluded
+                                  ? "Include deal"
+                                  : "Exclude deal"
+                              }
+                            >
+                              {deal.is_excluded ? (
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  className="h-4 w-4 inline"
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z"
+                                    clipRule="evenodd"
+                                  />
+                                  <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
+                                </svg>
+                              ) : (
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  className="h-4 w-4 inline"
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                >
+                                  <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                              )}
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
