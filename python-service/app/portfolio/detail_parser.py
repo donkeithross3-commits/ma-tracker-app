@@ -552,6 +552,16 @@ ON CONFLICT (snapshot_id, ticker) DO UPDATE SET
 """
 
 
+def _str_to_date(s: Optional[str]) -> Optional[date]:
+    """Convert 'YYYY-MM-DD' string to date object for asyncpg."""
+    if s is None:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
 async def _store_deal_detail(
     db_pool: asyncpg.Pool,
     snapshot_id: str,
@@ -586,9 +596,9 @@ async def _store_deal_detail(
             d.get("ideal_price"),
             d.get("hypothetical_irr"),
             d.get("hypothetical_irr_spread"),
-            d.get("todays_date"),
-            d.get("announce_date"),
-            d.get("expected_close_date"),
+            _str_to_date(d.get("todays_date")),
+            _str_to_date(d.get("announce_date")),
+            _str_to_date(d.get("expected_close_date")),
             d.get("expected_close_date_note"),
             d.get("shareholder_vote"),
             d.get("premium_attractive"),
@@ -598,7 +608,7 @@ async def _store_deal_detail(
             d.get("regulatory_approvals"),
             d.get("termination_fee"),
             d.get("termination_fee_pct"),
-            d.get("outside_date"),
+            _str_to_date(d.get("outside_date")),
             d.get("target_marketcap"),
             d.get("target_enterprise_value"),
             d.get("shareholder_risk"),

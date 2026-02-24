@@ -18,6 +18,42 @@ def _get_pool():
     return db.pool
 
 
+def _row_to_dict(row) -> dict:
+    """Convert a sheet_rows record into a JSON-serializable dict."""
+    return {
+        "row_index": row["row_index"],
+        "ticker": row["ticker"],
+        "acquiror": row["acquiror"],
+        "announced_date_raw": row["announced_date_raw"],
+        "close_date_raw": row["close_date_raw"],
+        "end_date_raw": row["end_date_raw"],
+        "countdown_raw": row["countdown_raw"],
+        "deal_price_raw": row["deal_price_raw"],
+        "current_price_raw": row["current_price_raw"],
+        "gross_yield_raw": row["gross_yield_raw"],
+        "price_change_raw": row["price_change_raw"],
+        "current_yield_raw": row["current_yield_raw"],
+        "category": row["category"],
+        "investable": row["investable"],
+        "go_shop_raw": row["go_shop_raw"],
+        "vote_risk": row["vote_risk"],
+        "finance_risk": row["finance_risk"],
+        "legal_risk": row["legal_risk"],
+        "cvr_flag": row["cvr_flag"],
+        "link_to_sheet": row["link_to_sheet"],
+        "announced_date": str(row["announced_date"]) if row["announced_date"] else None,
+        "close_date": str(row["close_date"]) if row["close_date"] else None,
+        "end_date": str(row["end_date"]) if row["end_date"] else None,
+        "countdown_days": row["countdown_days"],
+        "deal_price": float(row["deal_price"]) if row["deal_price"] is not None else None,
+        "current_price": float(row["current_price"]) if row["current_price"] is not None else None,
+        "gross_yield": float(row["gross_yield"]) if row["gross_yield"] is not None else None,
+        "price_change": float(row["price_change"]) if row["price_change"] is not None else None,
+        "current_yield": float(row["current_yield"]) if row["current_yield"] is not None else None,
+        "deal_tab_gid": row["deal_tab_gid"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # POST /portfolio/ingest
 # ---------------------------------------------------------------------------
@@ -57,13 +93,11 @@ async def ingest_details_endpoint(
     ticker: Optional[str] = Query(None, description="Ingest details for a single deal ticker"),
 ):
     """Trigger ingest of all per-deal detail tabs for the latest snapshot."""
-    from app.portfolio.ingest import ingest_dashboard
     from app.portfolio.detail_parser import ingest_deal_details
 
     pool = _get_pool()
 
     try:
-        # Get the latest snapshot to find its id and deals
         async with pool.acquire() as conn:
             snapshot = await conn.fetchrow(
                 "SELECT id, snapshot_date FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
@@ -73,24 +107,23 @@ async def ingest_details_endpoint(
 
             snapshot_id = snapshot["id"]
 
-            # Get deals from the snapshot
             if ticker:
-                deals = await conn.fetch(
-                    "SELECT parsed->>'ticker' as ticker FROM sheet_rows WHERE snapshot_id = $1 AND parsed->>'ticker' = $2",
+                rows = await conn.fetch(
+                    "SELECT DISTINCT ticker, deal_tab_gid FROM sheet_rows WHERE snapshot_id = $1 AND ticker = $2 AND deal_tab_gid IS NOT NULL",
                     snapshot_id, ticker.upper()
                 )
             else:
-                deals = await conn.fetch(
-                    "SELECT DISTINCT parsed->>'ticker' as ticker FROM sheet_rows WHERE snapshot_id = $1 AND parsed->>'ticker' IS NOT NULL",
+                rows = await conn.fetch(
+                    "SELECT DISTINCT ticker, deal_tab_gid FROM sheet_rows WHERE snapshot_id = $1 AND ticker IS NOT NULL AND deal_tab_gid IS NOT NULL",
                     snapshot_id
                 )
 
-            deal_tickers = [r["ticker"] for r in deals if r["ticker"]]
+            deals = [{"ticker": r["ticker"], "gid": r["deal_tab_gid"]} for r in rows if r["ticker"] and r["deal_tab_gid"]]
 
-        if not deal_tickers:
-            raise HTTPException(status_code=404, detail="No deals found in the latest snapshot")
+        if not deals:
+            raise HTTPException(status_code=404, detail="No deals with detail tab GIDs found in the latest snapshot")
 
-        result = await ingest_deal_details(pool, snapshot_id, deal_tickers)
+        result = await ingest_deal_details(pool, snapshot_id, deals)
         return result
     except HTTPException:
         raise
@@ -104,7 +137,6 @@ async def ingest_details_endpoint(
 # ---------------------------------------------------------------------------
 @router.get("/snapshot")
 async def get_snapshot(
-    tab: str = Query("dashboard", description="Tab name (default: dashboard)"),
     date: Optional[str] = Query(None, description="Snapshot date (YYYY-MM-DD), default latest"),
 ):
     """Get the latest snapshot data (or by date)."""
@@ -118,35 +150,28 @@ async def get_snapshot(
                 except ValueError:
                     raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
                 snapshot = await conn.fetchrow(
-                    "SELECT id, snapshot_date, row_count, tab FROM sheet_snapshots WHERE snapshot_date = $1 AND tab = $2 ORDER BY ingested_at DESC LIMIT 1",
-                    snapshot_date, tab
+                    "SELECT id, snapshot_date, row_count, tab_name FROM sheet_snapshots WHERE snapshot_date = $1 ORDER BY ingested_at DESC LIMIT 1",
+                    snapshot_date
                 )
             else:
                 snapshot = await conn.fetchrow(
-                    "SELECT id, snapshot_date, row_count, tab FROM sheet_snapshots WHERE tab = $1 ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1",
-                    tab
+                    "SELECT id, snapshot_date, row_count, tab_name FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
                 )
 
             if not snapshot:
                 raise HTTPException(status_code=404, detail="No snapshot found")
 
             rows = await conn.fetch(
-                "SELECT row_number, raw, parsed FROM sheet_rows WHERE snapshot_id = $1 ORDER BY row_number",
+                "SELECT * FROM sheet_rows WHERE snapshot_id = $1 ORDER BY row_index",
                 snapshot["id"]
             )
 
             return {
                 "snapshot_id": str(snapshot["id"]),
                 "snapshot_date": str(snapshot["snapshot_date"]),
+                "tab_name": snapshot["tab_name"],
                 "row_count": snapshot["row_count"],
-                "rows": [
-                    {
-                        "row_number": r["row_number"],
-                        "raw": r["raw"],
-                        "parsed": r["parsed"],
-                    }
-                    for r in rows
-                ],
+                "rows": [_row_to_dict(r) for r in rows],
             }
     except HTTPException:
         raise
@@ -168,20 +193,20 @@ async def get_deal(ticker: str):
         async with pool.acquire() as conn:
             # Get latest snapshot
             snapshot = await conn.fetchrow(
-                "SELECT id FROM sheet_snapshots WHERE tab = 'dashboard' ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
+                "SELECT id FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
             )
             if not snapshot:
                 raise HTTPException(status_code=404, detail="No snapshots found")
 
             # Get dashboard row for this ticker
             dashboard_row = await conn.fetchrow(
-                "SELECT row_number, raw, parsed FROM sheet_rows WHERE snapshot_id = $1 AND parsed->>'ticker' = $2",
+                "SELECT * FROM sheet_rows WHERE snapshot_id = $1 AND ticker = $2",
                 snapshot["id"], ticker
             )
 
             # Get deal details
             detail = await conn.fetchrow(
-                "SELECT ticker, tab_name, raw, parsed, fetched_at FROM sheet_deal_details WHERE snapshot_id = $1 AND ticker = $2 ORDER BY fetched_at DESC LIMIT 1",
+                "SELECT * FROM sheet_deal_details WHERE snapshot_id = $1 AND ticker = $2 ORDER BY fetched_at DESC LIMIT 1",
                 snapshot["id"], ticker
             )
 
@@ -190,19 +215,37 @@ async def get_deal(ticker: str):
 
             result = {"ticker": ticker}
             if dashboard_row:
-                result["dashboard_row"] = {
-                    "row_number": dashboard_row["row_number"],
-                    "raw": dashboard_row["raw"],
-                    "parsed": dashboard_row["parsed"],
-                }
+                result["dashboard"] = _row_to_dict(dashboard_row)
             else:
-                result["dashboard_row"] = None
+                result["dashboard"] = None
 
             if detail:
                 result["detail"] = {
-                    "tab_name": detail["tab_name"],
-                    "raw": detail["raw"],
-                    "parsed": detail["parsed"],
+                    "tab_gid": detail["tab_gid"],
+                    "category": detail["category"],
+                    "cash_per_share": float(detail["cash_per_share"]) if detail["cash_per_share"] is not None else None,
+                    "total_price_per_share": float(detail["total_price_per_share"]) if detail["total_price_per_share"] is not None else None,
+                    "target_current_price": float(detail["target_current_price"]) if detail["target_current_price"] is not None else None,
+                    "deal_spread": float(detail["deal_spread"]) if detail["deal_spread"] is not None else None,
+                    "expected_irr": float(detail["expected_irr"]) if detail["expected_irr"] is not None else None,
+                    "announce_date": str(detail["announce_date"]) if detail["announce_date"] else None,
+                    "expected_close_date": str(detail["expected_close_date"]) if detail["expected_close_date"] else None,
+                    "expected_close_note": detail["expected_close_note"],
+                    "outside_date": str(detail["outside_date"]) if detail["outside_date"] else None,
+                    "shareholder_vote": detail["shareholder_vote"],
+                    "regulatory_approvals": detail["regulatory_approvals"],
+                    "termination_fee": detail["termination_fee"],
+                    "key_risks_upside": detail["key_risks_upside"],
+                    "financing_details": detail["financing_details"],
+                    "shareholder_risk": detail["shareholder_risk"],
+                    "financing_risk": detail["financing_risk"],
+                    "legal_risk": detail["legal_risk"],
+                    "investable_deal": detail["investable_deal"],
+                    "has_cvrs": detail["has_cvrs"],
+                    "cvrs": detail["cvrs"],
+                    "dividends": detail["dividends"],
+                    "price_history": detail["price_history"],
+                    "raw_parsed": detail["raw_parsed"],
                     "fetched_at": str(detail["fetched_at"]),
                 }
             else:
@@ -227,30 +270,40 @@ async def get_deals():
     try:
         async with pool.acquire() as conn:
             snapshot = await conn.fetchrow(
-                "SELECT id FROM sheet_snapshots WHERE tab = 'dashboard' ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
+                "SELECT id FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
             )
             if not snapshot:
                 return []
 
             rows = await conn.fetch(
-                "SELECT parsed FROM sheet_rows WHERE snapshot_id = $1 AND parsed->>'ticker' IS NOT NULL ORDER BY row_number",
+                """SELECT ticker, acquiror, category, deal_price, current_price,
+                          gross_yield, current_yield, investable, vote_risk,
+                          finance_risk, legal_risk, deal_price_raw, current_price_raw,
+                          gross_yield_raw, current_yield_raw
+                   FROM sheet_rows
+                   WHERE snapshot_id = $1 AND ticker IS NOT NULL
+                   ORDER BY row_index""",
                 snapshot["id"]
             )
 
             deals = []
             for r in rows:
-                p = r["parsed"]
-                if not p:
-                    continue
                 deals.append({
-                    "ticker": p.get("ticker"),
-                    "acquiror": p.get("acquiror"),
-                    "category": p.get("category"),
-                    "deal_price": p.get("deal_price"),
-                    "current_price": p.get("current_price"),
-                    "gross_yield": p.get("gross_yield"),
-                    "current_yield": p.get("current_yield"),
-                    "investable": p.get("investable"),
+                    "ticker": r["ticker"],
+                    "acquiror": r["acquiror"],
+                    "category": r["category"],
+                    "deal_price": float(r["deal_price"]) if r["deal_price"] is not None else None,
+                    "current_price": float(r["current_price"]) if r["current_price"] is not None else None,
+                    "gross_yield": float(r["gross_yield"]) if r["gross_yield"] is not None else None,
+                    "current_yield": float(r["current_yield"]) if r["current_yield"] is not None else None,
+                    "deal_price_raw": r["deal_price_raw"],
+                    "current_price_raw": r["current_price_raw"],
+                    "gross_yield_raw": r["gross_yield_raw"],
+                    "current_yield_raw": r["current_yield_raw"],
+                    "investable": r["investable"],
+                    "vote_risk": r["vote_risk"],
+                    "finance_risk": r["finance_risk"],
+                    "legal_risk": r["legal_risk"],
                 })
             return deals
     except Exception as e:
@@ -296,12 +349,12 @@ async def get_diff(
                 except ValueError:
                     raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
                 current_snap = await conn.fetchrow(
-                    "SELECT id, snapshot_date FROM sheet_snapshots WHERE snapshot_date = $1 AND tab = 'dashboard' ORDER BY ingested_at DESC LIMIT 1",
+                    "SELECT id, snapshot_date FROM sheet_snapshots WHERE snapshot_date = $1 ORDER BY ingested_at DESC LIMIT 1",
                     current_date
                 )
             else:
                 current_snap = await conn.fetchrow(
-                    "SELECT id, snapshot_date FROM sheet_snapshots WHERE tab = 'dashboard' ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
+                    "SELECT id, snapshot_date FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
                 )
 
             if not current_snap:
@@ -314,12 +367,12 @@ async def get_diff(
                 except ValueError:
                     raise HTTPException(status_code=400, detail="Invalid prev_date format. Use YYYY-MM-DD")
                 prev_snap = await conn.fetchrow(
-                    "SELECT id, snapshot_date FROM sheet_snapshots WHERE snapshot_date = $1 AND tab = 'dashboard' ORDER BY ingested_at DESC LIMIT 1",
+                    "SELECT id, snapshot_date FROM sheet_snapshots WHERE snapshot_date = $1 ORDER BY ingested_at DESC LIMIT 1",
                     previous_date
                 )
             else:
                 prev_snap = await conn.fetchrow(
-                    "SELECT id, snapshot_date FROM sheet_snapshots WHERE snapshot_date < $1 AND tab = 'dashboard' ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1",
+                    "SELECT id, snapshot_date FROM sheet_snapshots WHERE snapshot_date < $1 ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1",
                     current_snap["snapshot_date"]
                 )
 
@@ -328,16 +381,16 @@ async def get_diff(
 
             # Get rows from both snapshots keyed by ticker
             current_rows = await conn.fetch(
-                "SELECT parsed FROM sheet_rows WHERE snapshot_id = $1 AND parsed->>'ticker' IS NOT NULL",
+                "SELECT * FROM sheet_rows WHERE snapshot_id = $1 AND ticker IS NOT NULL",
                 current_snap["id"]
             )
             prev_rows = await conn.fetch(
-                "SELECT parsed FROM sheet_rows WHERE snapshot_id = $1 AND parsed->>'ticker' IS NOT NULL",
+                "SELECT * FROM sheet_rows WHERE snapshot_id = $1 AND ticker IS NOT NULL",
                 prev_snap["id"]
             )
 
-            current_by_ticker = {r["parsed"]["ticker"]: r["parsed"] for r in current_rows if r["parsed"] and r["parsed"].get("ticker")}
-            prev_by_ticker = {r["parsed"]["ticker"]: r["parsed"] for r in prev_rows if r["parsed"] and r["parsed"].get("ticker")}
+            current_by_ticker = {r["ticker"]: _row_to_dict(r) for r in current_rows}
+            prev_by_ticker = {r["ticker"]: _row_to_dict(r) for r in prev_rows}
 
             current_tickers = set(current_by_ticker.keys())
             prev_tickers = set(prev_by_ticker.keys())
@@ -353,14 +406,17 @@ async def get_diff(
                 diffs.append({"ticker": t, "diff_type": "removed", "changed_fields": {}})
 
             # Modified deals
+            compare_fields = [
+                "deal_price_raw", "current_price_raw", "gross_yield_raw",
+                "current_yield_raw", "category", "investable", "vote_risk",
+                "finance_risk", "legal_risk", "close_date_raw", "end_date_raw",
+                "countdown_raw", "go_shop_raw", "cvr_flag",
+            ]
             for t in sorted(current_tickers & prev_tickers):
                 cur = current_by_ticker[t]
                 prev = prev_by_ticker[t]
                 changed = {}
-                all_keys = set(cur.keys()) | set(prev.keys())
-                for k in all_keys:
-                    if k == "ticker":
-                        continue
+                for k in compare_fields:
                     cv = cur.get(k)
                     pv = prev.get(k)
                     if cv != pv:
