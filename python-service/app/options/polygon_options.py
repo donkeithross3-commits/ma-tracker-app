@@ -196,6 +196,37 @@ class PolygonOptionsClient:
             "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
+    async def get_batch_stock_quotes(self, tickers: list[str]) -> dict[str, dict]:
+        """Fetch real-time stock snapshots for multiple tickers in one call.
+
+        Returns dict keyed by ticker with: ticker, price, change, change_pct, updated.
+        """
+        if not tickers:
+            return {}
+        joined = ",".join(t.upper() for t in tickers)
+        data = await self._get(
+            "/v2/snapshot/locale/us/markets/stocks/tickers",
+            params={"tickers": joined},
+        )
+        results = {}
+        for snap in data.get("tickers", []):
+            t = snap.get("ticker", "")
+            day = snap.get("day", {})
+            last_trade = snap.get("lastTrade", {})
+            prev_day = snap.get("prevDay", {})
+            price = last_trade.get("p", 0) or day.get("c", 0)
+            prev_close = prev_day.get("c", 0)
+            change = price - prev_close if price and prev_close else 0
+            change_pct = (change / prev_close) if prev_close else 0
+            results[t] = {
+                "ticker": t,
+                "price": price,
+                "change": round(change, 4),
+                "change_pct": round(change_pct, 6),
+                "updated": snap.get("updated", 0),
+            }
+        return results
+
     # ── Options chain ────────────────────────────────────────
 
     async def get_option_chain(

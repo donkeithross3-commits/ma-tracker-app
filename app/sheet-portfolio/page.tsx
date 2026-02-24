@@ -94,6 +94,9 @@ export default function SheetPortfolioPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [filter, setFilter] = useState<string>("");
   const [showExcluded, setShowExcluded] = useState(false);
+  const [livePrices, setLivePrices] = useState<Record<string, { price: number; change: number; change_pct: number }>>({});
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -123,6 +126,32 @@ export default function SheetPortfolioPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const fetchLivePrices = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      const resp = await fetch("/api/sheet-portfolio/live-prices");
+      if (resp.ok) {
+        const data = await resp.json();
+        setLivePrices(data.prices || {});
+        setLastRefresh(new Date());
+      }
+    } catch {
+      // silently fail -- stale sheet prices still show
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLivePrices();
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchLivePrices();
+      }
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [fetchLivePrices]);
 
   async function toggleExclude(ticker: string, currentlyExcluded: boolean) {
     const newStatus = currentlyExcluded ? "active" : "excluded";
@@ -277,6 +306,34 @@ export default function SheetPortfolioPage() {
             >
               {ingesting ? "Ingesting..." : "Re-ingest Now"}
             </button>
+            <button
+              onClick={fetchLivePrices}
+              disabled={refreshing}
+              className="px-2 py-1.5 text-sm border border-cyan-700 text-cyan-400 hover:bg-cyan-400/10 disabled:opacity-50 rounded transition-colors"
+              title="Refresh live prices"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+            </button>
+            {lastRefresh && (
+              <span className="text-xs text-cyan-400/70">
+                {Date.now() - lastRefresh.getTime() < 120_000
+                  ? "Live"
+                  : `${lastRefresh.toLocaleTimeString()}`}
+              </span>
+            )}
             {ingestResult && (
               <span className="text-xs text-gray-400">{ingestResult}</span>
             )}
@@ -438,24 +495,55 @@ export default function SheetPortfolioPage() {
                         </td>
                         {/* Crrnt Px */}
                         <td className="py-1.5 px-2 text-right font-mono">
-                          {deal.current_price_raw || "-"}
+                          {livePrices[deal.ticker] ? (
+                            <span className="text-cyan-400" title={`Live: $${livePrices[deal.ticker].price.toFixed(2)}`}>
+                              {livePrices[deal.ticker].price.toFixed(2)}
+                            </span>
+                          ) : (
+                            deal.current_price_raw || "-"
+                          )}
                         </td>
                         {/* Grss Yield */}
                         <td className="py-1.5 px-2 text-right font-mono">
-                          {yieldCell(deal.gross_yield_raw, deal.gross_yield)}
+                          {livePrices[deal.ticker] && deal.deal_price !== null ? (
+                            (() => {
+                              const liveGross = (deal.deal_price - livePrices[deal.ticker].price) / livePrices[deal.ticker].price;
+                              const pct = (liveGross * 100).toFixed(2);
+                              return <span className="text-cyan-400">{pct}%</span>;
+                            })()
+                          ) : (
+                            yieldCell(deal.gross_yield_raw, deal.gross_yield)
+                          )}
                         </td>
                         {/* Px Chng */}
                         <td className="py-1.5 px-2 text-right font-mono">
-                          {yieldCell(
-                            deal.price_change_raw,
-                            deal.price_change
+                          {livePrices[deal.ticker] ? (
+                            <span className={livePrices[deal.ticker].change_pct >= 0 ? "text-green-400" : "text-red-400"}>
+                              {livePrices[deal.ticker].change_pct >= 0 ? "+" : ""}
+                              {livePrices[deal.ticker].change_pct.toFixed(2)}%
+                            </span>
+                          ) : (
+                            yieldCell(
+                              deal.price_change_raw,
+                              deal.price_change
+                            )
                           )}
                         </td>
                         {/* Crrnt Yield */}
                         <td className="py-1.5 px-2 text-right font-mono">
-                          {yieldCell(
-                            deal.current_yield_raw,
-                            deal.current_yield
+                          {livePrices[deal.ticker] && deal.deal_price !== null && deal.countdown_days !== null && deal.countdown_days > 0 ? (
+                            (() => {
+                              const liveGross = (deal.deal_price - livePrices[deal.ticker].price) / livePrices[deal.ticker].price;
+                              const monthsToClose = deal.countdown_days / 30;
+                              const liveCurrentYield = liveGross * (12 / monthsToClose);
+                              const pct = (liveCurrentYield * 100).toFixed(2);
+                              return <span className="text-cyan-400">{pct}%</span>;
+                            })()
+                          ) : (
+                            yieldCell(
+                              deal.current_yield_raw,
+                              deal.current_yield
+                            )
                           )}
                         </td>
                         {/* Category */}

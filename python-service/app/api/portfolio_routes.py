@@ -480,6 +480,36 @@ async def portfolio_health():
 
 
 # ---------------------------------------------------------------------------
+# GET /portfolio/live-prices
+# ---------------------------------------------------------------------------
+@router.get("/live-prices")
+async def get_live_prices():
+    """Fetch live stock prices from Polygon for all active portfolio tickers."""
+    from app.options.polygon_options import get_polygon_client
+    client = get_polygon_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Polygon API not configured")
+    pool = _get_pool()
+    async with pool.acquire() as conn:
+        snapshot = await conn.fetchrow(
+            "SELECT id FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
+        )
+        if not snapshot:
+            return {"prices": {}, "timestamp": datetime.utcnow().isoformat() + "Z"}
+        rows = await conn.fetch(
+            "SELECT DISTINCT ticker FROM sheet_rows WHERE snapshot_id = $1 AND ticker IS NOT NULL AND (is_excluded IS NOT TRUE)",
+            snapshot["id"]
+        )
+        tickers = [r["ticker"] for r in rows]
+    prices = await client.get_batch_stock_quotes(tickers)
+    return {
+        "prices": prices,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "count": len(prices),
+    }
+
+
+# ---------------------------------------------------------------------------
 # GET /portfolio/diff
 # ---------------------------------------------------------------------------
 @router.get("/diff")
