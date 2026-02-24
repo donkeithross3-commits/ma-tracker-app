@@ -177,6 +177,26 @@ function makeDefaultConfig(ticker: string): BMCConfig {
   return { ...DEFAULT_CONFIG, ...TICKER_DEFAULTS[ticker], ticker };
 }
 
+const BMC_CONFIGS_STORAGE_KEY = "bmc-configs";
+
+function loadCachedConfigs(): Record<string, BMCConfig> | null {
+  try {
+    const raw = localStorage.getItem(BMC_CONFIGS_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedConfigs(configs: Record<string, BMCConfig>) {
+  try {
+    localStorage.setItem(BMC_CONFIGS_STORAGE_KEY, JSON.stringify(configs));
+  } catch {
+    // localStorage quota exceeded or unavailable — ignore
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -191,9 +211,14 @@ export default function SignalsTab() {
   // Which tickers are enabled for starting
   const [enabledTickers, setEnabledTickers] = useState<string[]>(["SPY", "SLV"]);
   // Per-ticker configs (for editing before start or hot-reload)
-  const [configs, setConfigs] = useState<Record<string, BMCConfig>>({
-    SPY: makeDefaultConfig("SPY"),
-    SLV: makeDefaultConfig("SLV"),
+  // Initialize from localStorage cache to survive page refreshes
+  const [configs, setConfigs] = useState<Record<string, BMCConfig>>(() => {
+    const cached = loadCachedConfigs();
+    if (cached) return cached;
+    return {
+      SPY: makeDefaultConfig("SPY"),
+      SLV: makeDefaultConfig("SLV"),
+    };
   });
   const [configDirty, setConfigDirty] = useState<Record<string, boolean>>({});
   const configDirtyRef = useRef<Record<string, boolean>>({});
@@ -218,10 +243,14 @@ export default function SignalsTab() {
         for (const strat of data.strategies) {
           const t = strat.ticker;
           if (strat.config && !configDirtyRef.current[t]) {
-            setConfigs(prev => ({
-              ...prev,
-              [t]: configFromAgent(strat.config, t),
-            }));
+            setConfigs(prev => {
+              const updated = {
+                ...prev,
+                [t]: configFromAgent(strat.config, t),
+              };
+              saveCachedConfigs(updated);
+              return updated;
+            });
           }
         }
       } else if (data.signal) {
@@ -234,10 +263,14 @@ export default function SignalsTab() {
           config: data.config,
         }]);
         if (data.config && !configDirtyRef.current[ticker]) {
-          setConfigs(prev => ({
-            ...prev,
-            [ticker]: configFromAgent(data.config, ticker),
-          }));
+          setConfigs(prev => {
+            const updated = {
+              ...prev,
+              [ticker]: configFromAgent(data.config, ticker),
+            };
+            saveCachedConfigs(updated);
+            return updated;
+          });
         }
       }
       setError(null);
