@@ -421,11 +421,35 @@ def parse_deal_detail(csv_content: str, ticker: str) -> Dict[str, Any]:
     row = _find_label_row(df, "Regulatory approvals")
     result["regulatory_approvals"] = _get_value(df, row)
 
+    row = _find_label_row(df, "Revenue mostly US?")
+    if row is None:
+        row = _find_label_row(df, "Revenue mostly US")
+    result["revenue_mostly_us"] = _get_value(df, row)
+
+    row = _find_label_row(df, "Reputable Acquiror?")
+    if row is None:
+        row = _find_label_row(df, "Reputable Acquiror")
+    result["reputable_acquiror"] = _get_value(df, row)
+
+    row = _find_label_row(df, "Target Business Description")
+    result["target_business_description"] = _get_value(df, row)
+
+    row = _find_label_row(df, "MAC Clauses")
+    result["mac_clauses"] = _get_value(df, row)
+
     row = _find_label_row(df, "Termination Fee?")
     if row is None:
         row = _find_label_row(df, "Termination Fee")
     result["termination_fee"] = _get_value(df, row)
     result["termination_fee_pct"] = _parse_percent(_get_value(df, row, 3))
+
+    row = _find_label_row(df, "Closing conditions")
+    result["closing_conditions"] = _get_value(df, row)
+
+    row = _find_label_row(df, "Sellside pushback?")
+    if row is None:
+        row = _find_label_row(df, "Sellside pushback")
+    result["sellside_pushback"] = _get_value(df, row)
 
     row = _find_label_row(df, "Outside Date")
     result["outside_date"] = _parse_date(_get_value(df, row))
@@ -435,6 +459,14 @@ def parse_deal_detail(csv_content: str, ticker: str) -> Dict[str, Any]:
 
     row = _find_label_row(df, "Target Enterprise Value")
     result["target_enterprise_value"] = _get_value(df, row)
+
+    row = _find_label_row(df, "Go Shop or Likely Overbid?")
+    if row is None:
+        row = _find_label_row(df, "Go Shop or Likely Overbid")
+    result["go_shop_or_overbid"] = _get_value(df, row)
+
+    row = _find_label_row(df, "Financing details")
+    result["financing_details"] = _get_value(df, row)
 
     # --- Risk ratings ---
     row = _find_label_row(df, "Shareholder Risk")
@@ -466,6 +498,43 @@ def parse_deal_detail(csv_content: str, ticker: str) -> Dict[str, Any]:
     if row is None:
         row = _find_label_row(df, "CVRs")
     result["has_cvrs"] = _get_value(df, row)
+
+    # --- Probability / risk analysis ---
+    row = _find_label_row(df, "Probability of Success")
+    result["probability_of_success"] = _parse_percent(_get_value(df, row))
+
+    row = _find_label_row(df, "Probability of Higher Offer")
+    result["probability_of_higher_offer"] = _parse_percent(_get_value(df, row))
+
+    row = _find_label_row(df, "Offer Bump Premium")
+    result["offer_bump_premium"] = _parse_percent(_get_value(df, row))
+
+    row = _find_label_row(df, "Break Price")
+    result["break_price"] = _parse_price(_get_value(df, row))
+
+    row = _find_label_row(df, "Implied Downside")
+    result["implied_downside"] = _parse_percent(_get_value(df, row))
+
+    row = _find_label_row(df, "Return/Risk Ratio")
+    if row is None:
+        row = _find_label_row(df, "Return / Risk Ratio")
+    result["return_risk_ratio"] = _parse_months(_get_value(df, row))  # plain number
+
+    # --- Options section ---
+    row = _find_label_row(df, "Optionable")
+    result["optionable"] = _get_value(df, row)
+
+    row = _find_label_row(df, "Long Naked Calls")
+    result["long_naked_calls"] = _get_value(df, row)
+
+    row = _find_label_row(df, "Long Vertical Call Spread")
+    result["long_vertical_call_spread"] = _get_value(df, row)
+
+    row = _find_label_row(df, "Long Covered Call")
+    result["long_covered_call"] = _get_value(df, row)
+
+    row = _find_label_row(df, "Short Put Vertical Spread")
+    result["short_put_vertical_spread"] = _get_value(df, row)
 
     # --- Structured sub-sections ---
     result["price_history"] = _extract_price_history(df)
@@ -520,10 +589,18 @@ INSERT INTO sheet_deal_details (
     todays_date, announce_date, expected_close_date, expected_close_date_note,
     shareholder_vote, premium_attractive, board_approval,
     voting_agreements, aggressive_shareholders,
-    regulatory_approvals, termination_fee, termination_fee_pct,
+    regulatory_approvals, revenue_mostly_us, reputable_acquiror,
+    target_business_description, mac_clauses,
+    termination_fee, termination_fee_pct,
+    closing_conditions, sellside_pushback,
     outside_date, target_marketcap, target_enterprise_value,
+    go_shop_or_overbid, financing_details,
     shareholder_risk, financing_risk, legal_risk,
     investable_deal, pays_dividend, prefs_or_baby_bonds, has_cvrs,
+    probability_of_success, probability_of_higher_offer,
+    offer_bump_premium, break_price, implied_downside, return_risk_ratio,
+    optionable, long_naked_calls, long_vertical_call_spread,
+    long_covered_call, short_put_vertical_spread,
     price_history, cvrs, dividends
 )
 VALUES (
@@ -541,10 +618,18 @@ VALUES (
     $29, $30, $31,
     $32, $33,
     $34, $35, $36,
-    $37, $38, $39,
-    $40, $41, $42,
-    $43, $44, $45, $46,
-    $47, $48, $49
+    $37, $38,
+    $39, $40,
+    $41, $42,
+    $43, $44, $45,
+    $46, $47,
+    $48, $49, $50,
+    $51, $52, $53, $54,
+    $55, $56,
+    $57, $58, $59, $60,
+    $61, $62, $63,
+    $64, $65,
+    $66, $67, $68
 )
 ON CONFLICT (snapshot_id, ticker) DO UPDATE SET
     target = EXCLUDED.target,
@@ -579,11 +664,19 @@ ON CONFLICT (snapshot_id, ticker) DO UPDATE SET
     voting_agreements = EXCLUDED.voting_agreements,
     aggressive_shareholders = EXCLUDED.aggressive_shareholders,
     regulatory_approvals = EXCLUDED.regulatory_approvals,
+    revenue_mostly_us = EXCLUDED.revenue_mostly_us,
+    reputable_acquiror = EXCLUDED.reputable_acquiror,
+    target_business_description = EXCLUDED.target_business_description,
+    mac_clauses = EXCLUDED.mac_clauses,
     termination_fee = EXCLUDED.termination_fee,
     termination_fee_pct = EXCLUDED.termination_fee_pct,
+    closing_conditions = EXCLUDED.closing_conditions,
+    sellside_pushback = EXCLUDED.sellside_pushback,
     outside_date = EXCLUDED.outside_date,
     target_marketcap = EXCLUDED.target_marketcap,
     target_enterprise_value = EXCLUDED.target_enterprise_value,
+    go_shop_or_overbid = EXCLUDED.go_shop_or_overbid,
+    financing_details = EXCLUDED.financing_details,
     shareholder_risk = EXCLUDED.shareholder_risk,
     financing_risk = EXCLUDED.financing_risk,
     legal_risk = EXCLUDED.legal_risk,
@@ -591,6 +684,17 @@ ON CONFLICT (snapshot_id, ticker) DO UPDATE SET
     pays_dividend = EXCLUDED.pays_dividend,
     prefs_or_baby_bonds = EXCLUDED.prefs_or_baby_bonds,
     has_cvrs = EXCLUDED.has_cvrs,
+    probability_of_success = EXCLUDED.probability_of_success,
+    probability_of_higher_offer = EXCLUDED.probability_of_higher_offer,
+    offer_bump_premium = EXCLUDED.offer_bump_premium,
+    break_price = EXCLUDED.break_price,
+    implied_downside = EXCLUDED.implied_downside,
+    return_risk_ratio = EXCLUDED.return_risk_ratio,
+    optionable = EXCLUDED.optionable,
+    long_naked_calls = EXCLUDED.long_naked_calls,
+    long_vertical_call_spread = EXCLUDED.long_vertical_call_spread,
+    long_covered_call = EXCLUDED.long_covered_call,
+    short_put_vertical_spread = EXCLUDED.short_put_vertical_spread,
     price_history = EXCLUDED.price_history,
     cvrs = EXCLUDED.cvrs,
     dividends = EXCLUDED.dividends
@@ -651,11 +755,19 @@ async def _store_deal_detail(
             d.get("voting_agreements"),
             d.get("aggressive_shareholders"),
             d.get("regulatory_approvals"),
+            d.get("revenue_mostly_us"),
+            d.get("reputable_acquiror"),
+            d.get("target_business_description"),
+            d.get("mac_clauses"),
             d.get("termination_fee"),
             d.get("termination_fee_pct"),
+            d.get("closing_conditions"),
+            d.get("sellside_pushback"),
             _str_to_date(d.get("outside_date")),
             d.get("target_marketcap"),
             d.get("target_enterprise_value"),
+            d.get("go_shop_or_overbid"),
+            d.get("financing_details"),
             d.get("shareholder_risk"),
             d.get("financing_risk"),
             d.get("legal_risk"),
@@ -663,6 +775,17 @@ async def _store_deal_detail(
             d.get("pays_dividend"),
             d.get("prefs_or_baby_bonds"),
             d.get("has_cvrs"),
+            d.get("probability_of_success"),
+            d.get("probability_of_higher_offer"),
+            d.get("offer_bump_premium"),
+            d.get("break_price"),
+            d.get("implied_downside"),
+            d.get("return_risk_ratio"),
+            d.get("optionable"),
+            d.get("long_naked_calls"),
+            d.get("long_vertical_call_spread"),
+            d.get("long_covered_call"),
+            d.get("short_put_vertical_spread"),
             json.dumps(d.get("price_history", [])),
             json.dumps(d.get("cvrs", [])),
             json.dumps(d.get("dividends", [])),

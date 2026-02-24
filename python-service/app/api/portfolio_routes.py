@@ -224,6 +224,13 @@ async def get_deal(ticker: str):
                     """Float-safe conversion for Decimal columns."""
                     return float(val) if val is not None else None
 
+                def _s(col):
+                    """Safe string extraction for columns that may not exist yet."""
+                    try:
+                        return detail[col]
+                    except (KeyError, Exception):
+                        return None
+
                 result["detail"] = {
                     "target": detail["target"],
                     "acquiror": detail["acquiror"],
@@ -257,16 +264,36 @@ async def get_deal(ticker: str):
                     "voting_agreements": detail["voting_agreements"],
                     "aggressive_shareholders": detail["aggressive_shareholders"],
                     "regulatory_approvals": detail["regulatory_approvals"],
+                    "revenue_mostly_us": _s("revenue_mostly_us"),
+                    "reputable_acquiror": _s("reputable_acquiror"),
+                    "target_business_description": _s("target_business_description"),
+                    "mac_clauses": _s("mac_clauses"),
                     "termination_fee": detail["termination_fee"],
                     "termination_fee_pct": _f(detail["termination_fee_pct"]),
+                    "closing_conditions": _s("closing_conditions"),
+                    "sellside_pushback": _s("sellside_pushback"),
                     "target_marketcap": detail["target_marketcap"],
                     "target_enterprise_value": detail["target_enterprise_value"],
+                    "go_shop_or_overbid": _s("go_shop_or_overbid"),
+                    "financing_details": _s("financing_details"),
                     "shareholder_risk": detail["shareholder_risk"],
                     "financing_risk": detail["financing_risk"],
                     "legal_risk": detail["legal_risk"],
                     "investable_deal": detail["investable_deal"],
                     "pays_dividend": detail["pays_dividend"],
+                    "prefs_or_baby_bonds": _s("prefs_or_baby_bonds"),
                     "has_cvrs": detail["has_cvrs"],
+                    "probability_of_success": _f(_s("probability_of_success")),
+                    "probability_of_higher_offer": _f(_s("probability_of_higher_offer")),
+                    "offer_bump_premium": _f(_s("offer_bump_premium")),
+                    "break_price": _f(_s("break_price")),
+                    "implied_downside": _f(_s("implied_downside")),
+                    "return_risk_ratio": _f(_s("return_risk_ratio")),
+                    "optionable": _s("optionable"),
+                    "long_naked_calls": _s("long_naked_calls"),
+                    "long_vertical_call_spread": _s("long_vertical_call_spread"),
+                    "long_covered_call": _s("long_covered_call"),
+                    "short_put_vertical_spread": _s("short_put_vertical_spread"),
                     "cvrs": detail["cvrs"],
                     "dividends": detail["dividends"],
                     "price_history": detail["price_history"],
