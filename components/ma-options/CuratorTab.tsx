@@ -13,7 +13,7 @@ import DealInfo, { type ScanParameters } from "./DealInfo";
 import OptionChainViewer from "./OptionChainViewer";
 import CandidateStrategiesTable from "./CandidateStrategiesTable";
 import { WatchSpreadModal } from "./WatchSpreadModal";
-import { useIBConnection } from "./IBConnectionContext";
+
 
 interface CuratorTabProps {
   deals: ScannerDeal[];
@@ -21,7 +21,6 @@ interface CuratorTabProps {
 }
 
 export default function CuratorTab({ deals: initialDeals, onDealsChange }: CuratorTabProps) {
-  const { isConnected: ibConnected } = useIBConnection();
   const [deals, setDeals] = useState<ScannerDeal[]>(initialDeals);
   const [selectedDeal, setSelectedDeal] = useState<ScannerDeal | null>(null);
   const [chainData, setChainData] = useState<OptionChainResponse | null>(null);
@@ -324,7 +323,6 @@ export default function CuratorTab({ deals: initialDeals, onDealsChange }: Curat
           deal={selectedDeal}
           onLoadChain={handleLoadChain}
           loading={loading}
-          ibConnected={ibConnected}
           dealPrice={editableDealPrice}
           onDealPriceChange={setEditableDealPrice}
         />

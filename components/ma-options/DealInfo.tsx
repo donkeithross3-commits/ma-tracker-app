@@ -23,12 +23,11 @@ interface DealInfoProps {
   deal: ScannerDeal;
   onLoadChain: (params: ScanParameters) => void;
   loading: boolean;
-  ibConnected: boolean;
   dealPrice: number;
   onDealPriceChange: (price: number) => void;
 }
 
-export default function DealInfo({ deal, onLoadChain, loading, ibConnected, dealPrice, onDealPriceChange }: DealInfoProps) {
+export default function DealInfo({ deal, onLoadChain, loading, dealPrice, onDealPriceChange }: DealInfoProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   
   // Local string state for the input to preserve decimal points while typing
@@ -82,31 +81,17 @@ export default function DealInfo({ deal, onLoadChain, loading, ibConnected, deal
           >
             {showAdvanced ? "Hide" : "Show"} Parameters
           </button>
-          <div className="relative group">
-            <button
-              onClick={() => {
-                if (!ibConnected) {
-                  alert("⚠️ IB TWS Not Connected\n\nPlease start Interactive Brokers TWS or Gateway and ensure it's accepting API connections on port 7497.\n\nThe connection status indicator is shown in the top-right corner of the page.");
-                  return;
-                }
-                onLoadChain({ ...params, dealPrice });
-              }}
-              disabled={loading || !ibConnected}
-              className={`px-4 py-2 text-white text-sm rounded font-semibold transition-colors ${
-                loading || !ibConnected
-                  ? "bg-gray-700 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700"
-              }`}
-              title={!ibConnected ? "IB TWS must be connected to scan options" : ""}
-            >
-              {loading ? "Loading..." : "Load Option Chain"}
-            </button>
-            {!ibConnected && !loading && (
-              <div className="absolute bottom-full mb-2 right-0 w-64 bg-orange-900 border border-orange-700 text-orange-100 text-xs rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                ⚠️ IB TWS is not connected. Please start Interactive Brokers and check the connection status in the top-right corner.
-              </div>
-            )}
-          </div>
+          <button
+            onClick={() => onLoadChain({ ...params, dealPrice })}
+            disabled={loading}
+            className={`px-4 py-2 text-white text-sm rounded font-semibold transition-colors ${
+              loading
+                ? "bg-gray-700 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700"
+            }`}
+          >
+            {loading ? "Loading..." : "Load Option Chain"}
+          </button>
         </div>
       </div>
 
