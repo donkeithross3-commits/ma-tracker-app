@@ -63,7 +63,7 @@ export default async function Home() {
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-semibold mb-2">Sheet Portfolio</h2>
+                  <h2 className="text-2xl font-semibold mb-2">Event Driven Portfolio</h2>
                   <p className="text-slate-400">
                     Event-driven M&amp;A portfolio from production Google Sheet
                   </p>
