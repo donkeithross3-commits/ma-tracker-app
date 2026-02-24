@@ -54,6 +54,15 @@ export const authConfig: NextAuthConfig = {
         return Response.redirect(new URL("/account/change-password?required=true", request.url))
       }
 
+      // --- Admin route gate ---
+      const isAdminPage = pathname.startsWith("/admin/")
+      const isAdminAPI = pathname.startsWith("/api/admin/") && !isAdminEndpoint
+      if (isAdminPage || isAdminAPI) {
+        if (auth?.user?.email !== "don.keith.ross3@gmail.com") {
+          return Response.redirect(new URL("/", request.url))
+        }
+      }
+
       // --- Project-level access check ---
       // Inline path-to-project mapping (cannot import lib/permissions.ts in Edge runtime)
       let projectKey: string | null = null

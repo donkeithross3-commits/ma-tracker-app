@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { signOut, useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
-import { LogOut, Key, User, ChevronDown, Accessibility } from "lucide-react"
+import { LogOut, Key, User, ChevronDown, Accessibility, Shield } from "lucide-react"
 import { useUIPreferences } from "@/lib/ui-preferences"
 
 interface UserMenuProps {
@@ -101,6 +101,17 @@ export function UserMenu({ variant = "light", initialUser }: UserMenuProps) {
                 <Key className="h-4 w-4" />
                 Change Password
               </a>
+
+              {user.email === "don.keith.ross3@gmail.com" && (
+                <a
+                  href="/admin/users"
+                  className={`flex items-center gap-2 px-4 py-2 text-sm ${textColor} ${hoverColor}`}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Shield className="h-4 w-4" />
+                  Manage Users
+                </a>
+              )}
 
               {/* Comfort Mode toggle */}
               <button
