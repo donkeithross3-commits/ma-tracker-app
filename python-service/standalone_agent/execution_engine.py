@@ -1000,6 +1000,7 @@ class ExecutionEngine:
                     "orders_submitted": s.orders_submitted,
                     "orders_placed": s.orders_placed,
                     "inflight_orders": s.inflight_orders,
+                    "config": s.config,
                     "strategy_state": (
                         s.strategy.get_strategy_state()
                         if hasattr(s.strategy, "get_strategy_state") else {}
