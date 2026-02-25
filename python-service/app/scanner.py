@@ -32,9 +32,14 @@ try:
 except ImportError:
     _HAS_IBAPI = False
     # Stubs so IBMergerArbScanner class definition parses without ibapi
-    class EWrapper: pass  # type: ignore[no-redef]
-    class EClient: pass   # type: ignore[no-redef]
+    class EWrapper: pass   # type: ignore[no-redef]
+    class EClient: pass    # type: ignore[no-redef]
     Contract = None        # type: ignore[assignment,misc]
+    Order = None           # type: ignore[assignment,misc]
+    TickerId = int         # type: ignore[misc]
+    TickAttrib = object    # type: ignore[misc]
+    SetOfString = set      # type: ignore[misc]
+    SetOfFloat = set       # type: ignore[misc]
 from threading import Thread, Event
 import queue
 import asyncio
