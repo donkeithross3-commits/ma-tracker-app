@@ -120,9 +120,10 @@ function BestCard({ opp }: { opp: OpportunityResult }) {
           </div>
         </div>
         <div>
-          <div className="text-gray-500">Entry (Mid)</div>
+          <div className="text-gray-500">Entry (FT)</div>
           <div className="font-mono text-gray-100">
-            {fmtDollar(opp.entry_cost)}
+            {fmtDollar(opp.entry_cost_ft)}
+            <span className="text-gray-600 ml-1 text-[10px]">mid {fmtDollar(opp.entry_cost)}</span>
           </div>
         </div>
         <div>
@@ -132,15 +133,10 @@ function BestCard({ opp }: { opp: OpportunityResult }) {
           </div>
         </div>
         <div>
-          <div className="text-gray-500">Ann. Return (Mid)</div>
-          <div className={`font-mono font-semibold ${profitColor(opp.annualized_return)}`}>
-            {fmtPct(opp.annualized_return)}
-          </div>
-        </div>
-        <div>
           <div className="text-gray-500">Ann. Return (FT)</div>
-          <div className={`font-mono ${profitColor(opp.annualized_return_ft)}`}>
+          <div className={`font-mono font-semibold ${profitColor(opp.annualized_return_ft)}`}>
             {fmtPct(opp.annualized_return_ft)}
+            <span className="text-gray-600 ml-1 text-[10px] font-normal">mid {fmtPct(opp.annualized_return)}</span>
           </div>
         </div>
         <div>
@@ -166,6 +162,9 @@ function BestCard({ opp }: { opp: OpportunityResult }) {
 // ── Opportunity table ──────────────────────────────────────────────
 function OpportunityTable({ opportunities }: { opportunities: OpportunityResult[] }) {
   if (opportunities.length === 0) return null;
+  const sorted = [...opportunities].sort(
+    (a, b) => (b.annualized_return_ft ?? 0) - (a.annualized_return_ft ?? 0)
+  );
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
@@ -174,16 +173,16 @@ function OpportunityTable({ opportunities }: { opportunities: OpportunityResult[
             <th className="text-left py-1.5 px-2 text-gray-400">Strike(s)</th>
             <th className="text-left py-1.5 px-2 text-gray-400">Expiry</th>
             <th className="text-right py-1.5 px-2 text-gray-400">DTE</th>
-            <th className="text-right py-1.5 px-2 text-gray-400">Premium/Cost</th>
+            <th className="text-right py-1.5 px-2 text-gray-400">Cost (FT)</th>
             <th className="text-right py-1.5 px-2 text-gray-400">Max Profit</th>
-            <th className="text-right py-1.5 px-2 text-gray-400">Ann. Yield</th>
+            <th className="text-right py-1.5 px-2 text-gray-400">Ann. Yield (FT)</th>
             <th className="text-right py-1.5 px-2 text-gray-400">Prob.</th>
             <th className="text-right py-1.5 px-2 text-gray-400">Liquidity</th>
             <th className="text-left py-1.5 px-2 text-gray-400">Notes</th>
           </tr>
         </thead>
         <tbody>
-          {opportunities.map((opp, i) => {
+          {sorted.map((opp, i) => {
             const dte = opp.contracts[0] ? parseDte(opp.contracts[0].expiry) : 0;
             return (
               <tr
@@ -202,7 +201,8 @@ function OpportunityTable({ opportunities }: { opportunities: OpportunityResult[
                   {dte}
                 </td>
                 <td className="py-1.5 px-2 text-right font-mono text-gray-100">
-                  {fmtDollar(opp.entry_cost)}
+                  {fmtDollar(opp.entry_cost_ft)}
+                  <span className="text-gray-600 ml-1 text-[10px]">mid {fmtDollar(opp.entry_cost)}</span>
                 </td>
                 <td
                   className={`py-1.5 px-2 text-right font-mono ${profitColor(opp.max_profit)}`}
@@ -210,9 +210,10 @@ function OpportunityTable({ opportunities }: { opportunities: OpportunityResult[
                   {fmtDollar(opp.max_profit)}
                 </td>
                 <td
-                  className={`py-1.5 px-2 text-right font-mono font-semibold ${profitColor(opp.annualized_return)}`}
+                  className={`py-1.5 px-2 text-right font-mono font-semibold ${profitColor(opp.annualized_return_ft)}`}
                 >
-                  {fmtPct(opp.annualized_return)}
+                  {fmtPct(opp.annualized_return_ft)}
+                  <span className="text-gray-600 ml-1 text-[10px] font-normal">mid {fmtPct(opp.annualized_return)}</span>
                 </td>
                 <td className="py-1.5 px-2 text-right font-mono text-gray-300">
                   {fmtPct(opp.probability_of_profit)}
