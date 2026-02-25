@@ -482,6 +482,11 @@ def build_deal_assessment_prompt(context: dict) -> str:
                 )
             sections.append("")
 
+    # Section 15: Calibration feedback (computed once per run, same for all deals)
+    calibration_text = context.get("calibration_text")
+    if calibration_text:
+        sections.append(calibration_text)
+
     return "\n".join(sections)
 
 

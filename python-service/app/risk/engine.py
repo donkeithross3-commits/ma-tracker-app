@@ -53,6 +53,7 @@ SUPPLEMENTAL_FACTORS = ["market", "timing", "competing_bid"]
 
 ENABLE_ENRICHED_CONTEXT = os.environ.get("RISK_ENRICHED_CONTEXT", "true").lower() == "true"
 ENABLE_PREDICTIONS = os.environ.get("RISK_PREDICTIONS", "false").lower() == "true"
+ENABLE_CALIBRATION = os.environ.get("RISK_CALIBRATION", "false").lower() == "true"
 
 
 def _extract_estimate_value(data: dict, key: str):
@@ -590,10 +591,26 @@ class RiskAssessmentEngine:
         # Estimated cost of a full assessment (for savings calculation)
         avg_full_cost = 0.02
 
+        # Compute calibration feedback once for the entire run (same for all deals)
+        calibration_text = None
+        if ENABLE_CALIBRATION:
+            try:
+                from .calibration import compute_calibration_summary, format_calibration_for_prompt
+                cal = await compute_calibration_summary(self.pool)
+                calibration_text = format_calibration_for_prompt(cal)
+                if calibration_text:
+                    logger.info("Calibration feedback available (%d resolved predictions)", cal.get("total_resolved", 0))
+            except Exception as e:
+                logger.warning("Calibration computation failed: %s", e)
+
         for ticker in tickers:
             try:
                 # Collect context
                 context = await self.collect_deal_context(ticker)
+
+                # Inject cached calibration feedback
+                if calibration_text:
+                    context["calibration_text"] = calibration_text
 
                 # --- Context hashing & change classification ---
                 ctx_hash = compute_context_hash(context)
