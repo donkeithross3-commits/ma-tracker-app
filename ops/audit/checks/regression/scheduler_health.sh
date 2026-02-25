@@ -11,24 +11,16 @@ init_check "regression/scheduler_health"
 # ---------------------------------------------------------------------------
 # Fetch scheduler health endpoint
 # ---------------------------------------------------------------------------
+# Portfolio service has no host port — use docker exec to reach scheduler
 SCHEDULER_URL="http://localhost:8001/scheduler/health"
 log_info "Fetching scheduler health: ${SCHEDULER_URL}"
 
 response_file="${CHECK_ARTIFACT_DIR}/scheduler_response.json"
 
-http_code=""
-if ! http_code="$(with_retry 2 3 curl -s -o "$response_file" \
-      -w '%{http_code}' \
-      --max-time 10 \
-      "$SCHEDULER_URL" 2>&1)"; then
+# Use docker exec since python-portfolio has no host port mapping
+if ! docker exec python-portfolio curl -sf --max-time 10 "$SCHEDULER_URL" > "$response_file" 2>&1; then
   json_finding "scheduler_unreachable" "$SEV_ALERT" \
-    "Scheduler health endpoint unreachable at ${SCHEDULER_URL}"
-  finalize_check
-fi
-
-if [[ "$http_code" != "200" ]]; then
-  json_finding "scheduler_unhealthy_status" "$SEV_ALERT" \
-    "Scheduler health endpoint returned HTTP ${http_code}"
+    "Scheduler health endpoint unreachable at ${SCHEDULER_URL} via docker exec"
   finalize_check
 fi
 
@@ -38,7 +30,7 @@ if [[ ! -s "$response_file" ]]; then
   finalize_check
 fi
 
-log_info "Scheduler health response received (HTTP ${http_code})"
+log_info "Scheduler health response received"
 
 # ---------------------------------------------------------------------------
 # Read expected jobs from audit.yml

@@ -93,11 +93,27 @@ probe() {
 # 1. Next.js web app — 200 or 302 (auth redirect) are both acceptable
 probe "web_nextjs" "http://localhost:3000/" "200|302"
 
-# 2. Portfolio service health
-probe "portfolio_health" "http://localhost:8001/health" "200"
+# 2. Portfolio service health (no host port — use docker exec)
+log_info "Probing portfolio_health via docker exec"
+portfolio_health_out=""
+if portfolio_health_out=$(docker exec python-portfolio curl -sf --max-time 10 http://localhost:8001/health 2>&1); then
+    json_finding "portfolio_health healthy" "$SEV_INFO" \
+        "Portfolio service /health responded OK via docker exec"
+else
+    json_finding "portfolio_health unreachable" "$SEV_ALERT" \
+        "Portfolio service /health unreachable via docker exec: ${portfolio_health_out:-no output}"
+fi
 
-# 3. Portfolio scheduler health
-probe "portfolio_scheduler" "http://localhost:8001/scheduler/health" "200"
+# 3. Portfolio scheduler health (no host port — use docker exec)
+log_info "Probing portfolio_scheduler via docker exec"
+scheduler_health_out=""
+if scheduler_health_out=$(docker exec python-portfolio curl -sf --max-time 10 http://localhost:8001/scheduler/health 2>&1); then
+    json_finding "portfolio_scheduler healthy" "$SEV_INFO" \
+        "Scheduler /health responded OK via docker exec"
+else
+    json_finding "portfolio_scheduler unreachable" "$SEV_ALERT" \
+        "Scheduler /health unreachable via docker exec: ${scheduler_health_out:-no output}"
+fi
 
 # 4. Trading service — try /health first, fall back to /docs
 probe "trading_service" "http://localhost:8000/health" "200" "http://localhost:8000/docs"
