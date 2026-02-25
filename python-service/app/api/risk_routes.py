@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date, datetime, timedelta
+import asyncio
 import logging
 import json
 import os
@@ -712,10 +713,28 @@ def _trade_opportunity_to_dict(opp: "TradeOpportunity") -> dict:
 # ---------------------------------------------------------------------------
 # GET /risk/options-scan
 # ---------------------------------------------------------------------------
+def _is_market_hours() -> bool:
+    """Check if US equity options markets are likely open (rough heuristic).
+
+    Returns True Mon-Fri 9:30-16:00 ET.  Outside these hours Polygon option
+    snapshots may be stale or return empty results.
+    """
+    from zoneinfo import ZoneInfo
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if now_et.weekday() >= 5:  # Sat/Sun
+        return False
+    market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+    return market_open <= now_et <= market_close
+
+
 @router.get("/options-scan")
 async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan")):
     """Unified options scan: fetches full option chain and runs all strategies
     (long calls, call spreads, put spreads, covered calls) via MergerArbAnalyzer.
+
+    Returns structured error_code field when something goes wrong so the
+    frontend can render context-appropriate messaging.
     """
     import time as _time
     from app.options.polygon_options import get_polygon_client, PolygonError
@@ -729,20 +748,51 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
     pool = _get_pool()
     client = get_polygon_client()
     if not client:
-        raise HTTPException(status_code=503, detail="Polygon API not configured (POLYGON_API_KEY missing)")
+        return {
+            "ticker": ticker,
+            "error_code": "polygon_not_configured",
+            "error_message": "Options data provider is not configured. Contact support.",
+            "optionable": False,
+            "categories": {},
+            "total_opportunities": 0,
+            "scan_time_ms": 0,
+        }
+
+    market_open = _is_market_hours()
 
     # 1. Fetch deal data from sheet_rows
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """SELECT ticker, deal_price, current_price, close_date, countdown_days
-               FROM sheet_rows
-               WHERE ticker = $1
-                 AND snapshot_id = (SELECT id FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1)
-               LIMIT 1""",
-            ticker,
-        )
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT ticker, deal_price, current_price, close_date, countdown_days
+                   FROM sheet_rows
+                   WHERE ticker = $1
+                     AND snapshot_id = (SELECT id FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1)
+                   LIMIT 1""",
+                ticker,
+            )
+    except Exception as e:
+        logger.error(f"DB error fetching deal data for {ticker}: {e}", exc_info=True)
+        return {
+            "ticker": ticker,
+            "error_code": "db_error",
+            "error_message": "Unable to fetch deal data. Try again shortly.",
+            "optionable": False,
+            "categories": {},
+            "total_opportunities": 0,
+            "scan_time_ms": round((_time.monotonic() - t0) * 1000),
+        }
+
     if not row:
-        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found in sheet data")
+        return {
+            "ticker": ticker,
+            "error_code": "ticker_not_found",
+            "error_message": f"{ticker} not found in portfolio data.",
+            "optionable": False,
+            "categories": {},
+            "total_opportunities": 0,
+            "scan_time_ms": round((_time.monotonic() - t0) * 1000),
+        }
 
     deal_price = float(row["deal_price"]) if row["deal_price"] else None
     current_price = float(row["current_price"]) if row["current_price"] else None
@@ -778,15 +828,80 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
     max_exp = (close_dt + timedelta(days=30)).strftime("%Y-%m-%d")
 
     try:
-        chain = await client.get_option_chain(
-            underlying=ticker,
-            strike_gte=strike_lower,
-            strike_lte=strike_upper,
-            expiration_date_gte=min_exp,
-            expiration_date_lte=max_exp,
+        chain = await asyncio.wait_for(
+            client.get_option_chain(
+                underlying=ticker,
+                strike_gte=strike_lower,
+                strike_lte=strike_upper,
+                expiration_date_gte=min_exp,
+                expiration_date_lte=max_exp,
+            ),
+            timeout=30.0,
         )
+    except asyncio.TimeoutError:
+        logger.warning(f"Options scan timeout for {ticker} after 30s")
+        return {
+            "ticker": ticker,
+            "deal_price": deal_price,
+            "current_price": current_price,
+            "days_to_close": days_to_close,
+            "expected_close": expected_close_str,
+            "error_code": "timeout",
+            "error_message": "Options data request timed out. The data provider may be slow — try again in a moment.",
+            "market_open": market_open,
+            "optionable": False,
+            "categories": {},
+            "total_opportunities": 0,
+            "scan_time_ms": round((_time.monotonic() - t0) * 1000),
+        }
     except PolygonError as exc:
-        raise HTTPException(status_code=502, detail=f"Polygon API error: {exc}")
+        err_str = str(exc).lower()
+        if "403" in err_str or "forbidden" in err_str:
+            error_code = "polygon_auth"
+            error_msg = "Options data provider authentication failed."
+        elif "429" in err_str or "rate" in err_str:
+            error_code = "rate_limited"
+            error_msg = "Rate limited by data provider. Try again in a few seconds."
+        elif "timeout" in err_str:
+            error_code = "timeout"
+            error_msg = "Options data request timed out."
+        else:
+            error_code = "polygon_error"
+            error_msg = "Unable to fetch options chain from data provider."
+            if not market_open:
+                error_msg += " Markets are currently closed — data may be unavailable."
+
+        logger.warning(f"Polygon error for {ticker}: {exc}")
+        return {
+            "ticker": ticker,
+            "deal_price": deal_price,
+            "current_price": current_price,
+            "days_to_close": days_to_close,
+            "expected_close": expected_close_str,
+            "error_code": error_code,
+            "error_message": error_msg,
+            "market_open": market_open,
+            "optionable": False,
+            "categories": {},
+            "total_opportunities": 0,
+            "scan_time_ms": round((_time.monotonic() - t0) * 1000),
+        }
+    except Exception as exc:
+        logger.error(f"Unexpected error fetching chain for {ticker}: {exc}", exc_info=True)
+        return {
+            "ticker": ticker,
+            "deal_price": deal_price,
+            "current_price": current_price,
+            "days_to_close": days_to_close,
+            "expected_close": expected_close_str,
+            "error_code": "unknown",
+            "error_message": "An unexpected error occurred while scanning options.",
+            "market_open": market_open,
+            "optionable": False,
+            "categories": {},
+            "total_opportunities": 0,
+            "scan_time_ms": round((_time.monotonic() - t0) * 1000),
+        }
 
     if not chain:
         return {
@@ -796,6 +911,7 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
             "days_to_close": days_to_close,
             "expected_close": expected_close_str,
             "optionable": False,
+            "market_open": market_open,
             "categories": {},
             "total_opportunities": 0,
             "scan_time_ms": round((_time.monotonic() - t0) * 1000),
@@ -831,7 +947,25 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
         confidence=0.80,
     )
     analyzer = MergerArbAnalyzer(deal)
-    all_opps = analyzer.find_best_opportunities(options, current_price)
+
+    try:
+        all_opps = analyzer.find_best_opportunities(options, current_price)
+    except Exception as exc:
+        logger.error(f"Strategy analysis failed for {ticker}: {exc}", exc_info=True)
+        return {
+            "ticker": ticker,
+            "deal_price": deal_price,
+            "current_price": current_price,
+            "days_to_close": days_to_close,
+            "expected_close": expected_close_str,
+            "error_code": "analysis_error",
+            "error_message": "Options chain retrieved but strategy analysis failed.",
+            "market_open": market_open,
+            "optionable": True,
+            "categories": {},
+            "total_opportunities": 0,
+            "scan_time_ms": round((_time.monotonic() - t0) * 1000),
+        }
 
     # 5. Group by strategy, pick best per category
     from collections import defaultdict
@@ -857,6 +991,7 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
         "days_to_close": days_to_close,
         "expected_close": expected_close_str,
         "optionable": True,
+        "market_open": market_open,
         "categories": categories,
         "total_opportunities": len(all_opps),
         "scan_time_ms": scan_time_ms,

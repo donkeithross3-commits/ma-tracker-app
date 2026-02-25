@@ -33,6 +33,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import logging
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DealInput:
@@ -51,8 +53,8 @@ class DealInput:
 
     @property
     def days_to_close(self) -> int:
-        """Days until expected close"""
-        return (self.expected_close_date - datetime.now()).days
+        """Days until expected close (min 1 to avoid division-by-zero)."""
+        return max((self.expected_close_date - datetime.now()).days, 1)
 
 
 @dataclass
@@ -110,7 +112,7 @@ class IBMergerArbScanner(EWrapper, EClient):
     def __init__(self):
         EWrapper.__init__(self)
         EClient.__init__(self, wrapper=self)
-        logger = logging.getLogger(__name__)
+
         logger.info("=" * 80)
         logger.info("SCANNER INIT: Code version with callback fix loaded!")
         logger.info("=" * 80)
@@ -197,7 +199,7 @@ class IBMergerArbScanner(EWrapper, EClient):
     def connectionClosed(self):
         """Callback when connection is closed by IB or network"""
         import logging
-        logger = logging.getLogger(__name__)
+
         logger.warning("⚠️  IB TWS connection closed!")
         print("=" * 80)
         print("⚠️  CONNECTION TO IB TWS LOST!")
@@ -208,7 +210,7 @@ class IBMergerArbScanner(EWrapper, EClient):
     def error(self, reqId, errorCode, errorString, advancedOrderRejectJson=""):
         """Enhanced error handling with connection state tracking"""
         import logging
-        logger = logging.getLogger(__name__)
+
         
         # Critical connection errors
         if errorCode in [1100, 1101, 1102, 2110]:
@@ -354,7 +356,7 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def tickSize(self, reqId: TickerId, tickType: int, size: int):
         """Handle size updates (volume, open interest, bid/ask sizes)"""
-        logger = logging.getLogger(__name__)
+
         if reqId in self.option_chain:
             if tickType == 0:  # Bid size
                 logger.info(f"📊 Received BID SIZE: reqId={reqId}, size={size}")
@@ -429,8 +431,8 @@ class IBMergerArbScanner(EWrapper, EClient):
                 seen = set()
                 unique_expiries = [x for x in sorted_expiries if not (x in seen or seen.add(x))]
 
-                print(f"DEBUG: {len(unique_expiries)} unique expirations for {ticker}: {unique_expiries}")
-                print(f"DEBUG: Deal close date: {deal_close_date.strftime('%Y-%m-%d')}")
+                logger.debug(f": {len(unique_expiries)} unique expirations for {ticker}: {unique_expiries}")
+                logger.debug(f": Deal close date: {deal_close_date.strftime('%Y-%m-%d')}")
 
                 # Parse close date for comparison (date only, ignore time)
                 close_date_only = deal_close_date.date()
@@ -441,8 +443,8 @@ class IBMergerArbScanner(EWrapper, EClient):
                 expiries_after = [exp for exp in unique_expiries 
                                   if datetime.strptime(exp, '%Y%m%d').date() > close_date_only]
 
-                print(f"DEBUG: {len(expiries_on_close)} expirations ON close: {expiries_on_close}")
-                print(f"DEBUG: {len(expiries_after)} expirations AFTER close: {expiries_after}")
+                logger.debug(f": {len(expiries_on_close)} expirations ON close: {expiries_on_close}")
+                logger.debug(f": {len(expiries_after)} expirations AFTER close: {expiries_after}")
 
                 # ALWAYS get exactly 2 expirations AFTER the close date
                 selected_expiries = expiries_after[:2]
@@ -458,7 +460,7 @@ class IBMergerArbScanner(EWrapper, EClient):
                     earliest_date = (deal_close_date - timedelta(days=days_before_close)).date()
                     expiries_in_window = [exp for exp in unique_expiries 
                                           if earliest_date <= datetime.strptime(exp, '%Y%m%d').date() < close_date_only]
-                    print(f"DEBUG: {len(expiries_in_window)} expirations in window ({earliest_date} to {close_date_only}): {expiries_in_window}")
+                    logger.debug(f": {len(expiries_in_window)} expirations in window ({earliest_date} to {close_date_only}): {expiries_in_window}")
                     
                     # Add any not already included (avoid duplicates)
                     for exp in expiries_in_window:
@@ -577,37 +579,37 @@ class IBMergerArbScanner(EWrapper, EClient):
                     expiry_match = option_data.expiry == '20260618'
                     strike_match = option_data.strike in [200.0, 210.0]
                     if expiry_match and strike_match:
-                        print(f"DEBUG: Found {option_data.expiry} {option_data.strike}{option_data.right} - "
+                        logger.debug(f": Found {option_data.expiry} {option_data.strike}{option_data.right} - "
                               f"bid: {option_data.bid}, ask: {option_data.ask}, mid: {option_data.mid_price}")
                 else:
                     # Debug: Show why options are filtered out (only for key strikes)
                     req = all_batch_requests[i]
                     if req[0] == '20260618' and req[1] in [200.0, 210.0]:
-                        print(f"DEBUG: Filtered out {req[0]} {req[1]}{req[2]} - no valid pricing data from IB")
+                        logger.debug(f": Filtered out {req[0]} {req[1]}{req[2]} - no valid pricing data from IB")
 
         print(f"Retrieved {len(options)} option contracts (limited to avoid IB limits)")
 
         # Debug: Show what we got for June 2026 and September 2026
         june_options = [o for o in options if o.expiry == '20260618']
         if june_options:
-            print(f"DEBUG: June 2026 options retrieved: {len(june_options)} contracts")
+            logger.debug(f": June 2026 options retrieved: {len(june_options)} contracts")
             for opt in june_options:
                 print(f"  {opt.strike}C - bid: {opt.bid}, ask: {opt.ask}, mid: {opt.mid_price}")
 
         sept_options = [o for o in options if o.expiry == '20260918']
         if sept_options:
-            print(f"DEBUG: September 2026 options retrieved: {len(sept_options)} contracts")
+            logger.debug(f": September 2026 options retrieved: {len(sept_options)} contracts")
             for opt in sept_options:
                 print(f"  {opt.strike}C - bid: {opt.bid}, ask: {opt.ask}, mid: {opt.mid_price}")
         else:
-            print(f"DEBUG: No September 2026 options retrieved - likely filtered due to no pricing data")
+            logger.debug(f": No September 2026 options retrieved - likely filtered due to no pricing data")
 
         return options
 
     def get_available_expirations(self, ticker: str, contract_id: int = 0) -> List[str]:
         """Get actual available option expirations from IB"""
         import logging
-        logger = logging.getLogger(__name__)
+
 
         print(f"Getting available expirations for {ticker} (contract ID: {contract_id})...")
 
@@ -656,7 +658,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         """Handle security definition response"""
         import sys
         import logging
-        logger = logging.getLogger(__name__)
+
 
         logger.info(f"=== CALLBACK FIRED === reqId={reqId}, exchange={exchange}")
         print(f"=== CALLBACK FIRED === reqId={reqId}, exchange={exchange}", flush=True)
@@ -688,7 +690,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         """Called when all securityDefinitionOptionParameter callbacks are complete."""
         if getattr(self, "_sec_def_wait_req_id", None) == reqId:
             self.sec_def_opt_params_done.set()
-            logger = logging.getLogger(__name__)
+    
             logger.info(f"secDefOptParams complete for reqId={reqId}")
 
     def get_expiries(self, ticker: str, end_date: datetime) -> List[str]:
@@ -797,7 +799,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Return populated option data
         data = self.option_chain.get(req_id)
         if data and (data['bid'] > 0 or data['last'] > 0):
-            logger = logging.getLogger(__name__)
+    
             logger.info(f"✅ Option data for {ticker} {expiry} {strike}{right}: bid_size={data.get('bid_size', 0)}, ask_size={data.get('ask_size', 0)}")
             return OptionData(**data)
 
@@ -814,7 +816,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         Returns:
             List of OptionData objects (None for failed requests)
         """
-        logger = logging.getLogger(__name__)
+
         batch_size = 25  # Increased from 10 for better performance (IB allows ~50 req/sec)
         results = []
 
@@ -1104,8 +1106,6 @@ class MergerArbAnalyzer:
         # FAR-TOUCH spread cost (pay ask for long, receive bid for short)
         spread_cost_ft = long_call.ask - short_call.bid
 
-        print(f"DEBUG FT: {long_call.strike}/{short_call.strike} - Long ask: {long_call.ask}, Short bid: {short_call.bid}, FT cost: {spread_cost_ft}")
-
         if spread_cost_mid <= 0 or spread_cost_ft <= 0:
             return None
 
@@ -1144,12 +1144,6 @@ class MergerArbAnalyzer:
         expected_return_ft = value_at_deal_close - spread_cost_ft
         annualized_return_ft = expected_return_ft / spread_cost_ft if spread_cost_ft > 0 else 0
         
-        # Debug logging for far touch
-        print(f"DEBUG FT CALL: {long_call.strike}/{short_call.strike}")
-        print(f"  spread_cost_ft={spread_cost_ft:.2f}, expected_return_ft={expected_return_ft:.2f}")
-        print(f"  years_to_expiry={years_to_expiry:.3f}, days_to_exit={days_to_exit} (deal_close={self.deal.days_to_close}, option_expiry={(option_expiry_date - datetime.now()).days})")
-        print(f"  annualized_return_mid={annualized_return_mid:.4f}, annualized_return_ft={annualized_return_ft:.4f}")
-
         # Probability (based on midpoint breakeven)
         prob_above_breakeven = self.calculate_probability_above(
             current_price,
@@ -1203,8 +1197,6 @@ class MergerArbAnalyzer:
         # FAR-TOUCH credit (sell short put at bid, buy long put at ask)
         credit_ft = short_put.bid - long_put.ask
 
-        print(f"DEBUG PUT FT: {long_put.strike}/{short_put.strike} - Short bid: {short_put.bid}, Long ask: {long_put.ask}, FT credit: {credit_ft}")
-
         if credit_mid <= 0 or credit_ft <= 0:
             return None
 
@@ -1245,18 +1237,11 @@ class MergerArbAnalyzer:
         option_expiry_date = datetime.strptime(long_put.expiry, "%Y%m%d")
         days_to_exit = min(self.deal.days_to_close, (option_expiry_date - datetime.now()).days)
         years_to_expiry = max(days_to_exit, 1) / 365  # At least 1 day to avoid division issues
-        # Holding period return on collateral (not annualized — merger arb is one-shot).
-        # Uses spread_width (collateral) as denominator, not max_loss, because
-        # the broker ties up spread_width in margin.
-        annualized_return_mid = expected_return_mid / spread_width if spread_width > 0 else 0
-        annualized_return_ft = expected_return_ft / spread_width if spread_width > 0 else 0
+        # Holding period return on capital at risk (not annualized — merger arb is one-shot).
+        # Uses max_loss as denominator: this is the actual capital at risk for the trade.
+        annualized_return_mid = expected_return_mid / max_loss_mid if max_loss_mid > 0 else 0
+        annualized_return_ft = expected_return_ft / max_loss_ft if max_loss_ft > 0 else 0
         
-        # Debug logging for far touch
-        print(f"DEBUG PUT FT: {long_put.strike}/{short_put.strike}")
-        print(f"  max_loss_ft={max_loss_ft:.2f}, expected_return_ft={expected_return_ft:.2f}")
-        print(f"  years_to_expiry={years_to_expiry:.3f}, days_to_exit={days_to_exit} (deal_close={self.deal.days_to_close}, option_expiry={(option_expiry_date - datetime.now()).days})")
-        print(f"  annualized_return_mid={annualized_return_mid:.4f}, annualized_return_ft={annualized_return_ft:.4f}")
-
         # Breakeven = short strike - credit
         breakeven_mid = short_put.strike - credit_mid
 
@@ -1370,51 +1355,40 @@ class MergerArbAnalyzer:
         # Analyze single calls - group by expiration and select top 3 per expiration
         calls_only = [opt for opt in options if opt.right == 'C']
         eligible_calls = [opt for opt in calls_only if opt.strike < self.deal.total_deal_value]
-        print(f"DEBUG CALL: Analyzing {len(eligible_calls)} calls below deal price (${self.deal.total_deal_value:.2f})")
-        
         single_calls_by_expiry = defaultdict(list)
         
         for option in eligible_calls:
-            opp = self.analyze_single_call(option, current_price)
-            if opp and opp.expected_return > 0:
-                single_calls_by_expiry[option.expiry].append(opp)
-                print(f"DEBUG CALL: {option.expiry} {option.strike}C - cost: ${opp.entry_cost:.2f}, profit: ${opp.max_profit:.2f}, IRR: {opp.annualized_return:.2%}")
+            try:
+                opp = self.analyze_single_call(option, current_price)
+                if opp and opp.expected_return > 0:
+                    single_calls_by_expiry[option.expiry].append(opp)
+            except Exception:
+                continue  # Skip malformed contracts
         
         # Add top 3 single calls from each expiration (sorted by annualized return)
-        print(f"DEBUG CALL: Found single calls in {len(single_calls_by_expiry)} expirations")
         for expiry, expiry_calls in single_calls_by_expiry.items():
             sorted_calls = sorted(expiry_calls, key=lambda x: x.annualized_return, reverse=True)
-            top_3 = sorted_calls[:3]
-            print(f"DEBUG CALL: Adding top {len(top_3)} single calls from {expiry}")
-            opportunities.extend(top_3)
+            opportunities.extend(sorted_calls[:3])
 
         # Analyze COVERED CALLS - sell calls at/near deal price against long stock
         covered_calls_by_expiry = defaultdict(list)
         for option in calls_only:
-            opp = self.analyze_covered_call(option, current_price)
-            if opp:
-                covered_calls_by_expiry[option.expiry].append(opp)
+            try:
+                opp = self.analyze_covered_call(option, current_price)
+                if opp:
+                    covered_calls_by_expiry[option.expiry].append(opp)
+            except Exception:
+                continue  # Skip malformed contracts
 
         # Add top 3 covered calls from each expiration (sorted by annualized return)
-        cc_count = 0
         for expiry, expiry_ccs in covered_calls_by_expiry.items():
             expiry_ccs.sort(key=lambda x: x.annualized_return, reverse=True)
-            top_3 = expiry_ccs[:3]
-            opportunities.extend(top_3)
-            cc_count += len(top_3)
-        print(f"DEBUG CC: Added {cc_count} covered calls across {len(covered_calls_by_expiry)} expirations")
+            opportunities.extend(expiry_ccs[:3])
 
         # Group options by expiration - spreads MUST use same expiration
         options_by_expiry = defaultdict(list)
         for option in options:
             options_by_expiry[option.expiry].append(option)
-
-        print(f"DEBUG: Analyzing spreads for {len(options_by_expiry)} expirations")
-        print(f"DEBUG: Deal price: ${self.deal.total_deal_value:.2f}")
-        print(f"DEBUG: Call long leg range: ${call_long_lower_bound:.2f} - ${call_long_upper_bound:.2f}")
-        print(f"DEBUG: Call short leg range: ${self.deal.total_deal_value * call_short_lower_mult:.2f} - ${self.deal.total_deal_value * call_short_upper_mult:.2f}")
-        print(f"DEBUG: Put long leg range: ${put_long_lower_bound:.2f} - ${put_long_upper_bound:.2f}")
-        print(f"DEBUG: Put short leg range: ${self.deal.total_deal_value * put_short_lower_mult:.2f} - ${self.deal.total_deal_value * put_short_upper_mult:.2f}")
 
         # Analyze CALL SPREADS - only within same expiration month
         # Collect spreads per expiration to ensure we show top 5 from each
@@ -1424,7 +1398,6 @@ class MergerArbAnalyzer:
             # CRITICAL: Separate calls from puts - only use CALLS for call spreads
             calls = [opt for opt in expiry_options if opt.right == 'C']
             sorted_calls = sorted(calls, key=lambda x: x.strike)
-            print(f"DEBUG: Expiry {expiry}: {len(sorted_calls)} calls with strikes {[opt.strike for opt in sorted_calls]}")
 
             for i in range(len(sorted_calls) - 1):
                 long_call = sorted_calls[i]
@@ -1440,41 +1413,26 @@ class MergerArbAnalyzer:
                     # Use CALL-specific short strike bounds (with buffer for higher offers)
                     if (short_call.strike >= self.deal.total_deal_value * call_short_lower_mult and
                         short_call.strike <= self.deal.total_deal_value * call_short_upper_mult):
-                        print(f"DEBUG: Analyzing {expiry} {long_call.strike}/{short_call.strike} spread")
-                        opp = self.analyze_call_spread(long_call, short_call, current_price)
-                        if opp:  # Changed: accept any valid spread analysis (removed expected_return > 0 filter)
-                            spreads_by_expiry[expiry].append(opp)
-                            print(f"DEBUG: Added {expiry} {long_call.strike}/{short_call.strike} spread - expected return: ${opp.expected_return:.2f}, annualized: {opp.annualized_return:.2%}")
-                        else:
-                            print(f"DEBUG: X Rejected {expiry} {long_call.strike}/{short_call.strike} spread - failed spread analysis")
+                        try:
+                            opp = self.analyze_call_spread(long_call, short_call, current_price)
+                            if opp:
+                                spreads_by_expiry[expiry].append(opp)
+                        except Exception:
+                            continue  # Skip malformed contracts
 
         # Add top 5 call spreads from each expiration (sorted by annualized return)
         for expiry, expiry_spreads in spreads_by_expiry.items():
-            # Sort this expiration's spreads by annualized return
             expiry_spreads.sort(key=lambda x: x.annualized_return, reverse=True)
-            top_5 = expiry_spreads[:5]
-            print(f"DEBUG: Adding top {len(top_5)} call spreads from {expiry}")
-            opportunities.extend(top_5)
+            opportunities.extend(expiry_spreads[:5])
 
         # Analyze PUT SPREADS - only within same expiration month
         # Collect put spreads per expiration to ensure we show top 5 from each
         put_spreads_by_expiry = defaultdict(list)
 
-        print(f"DEBUG: Analyzing PUT spreads for {len(options_by_expiry)} expirations")
-        print(f"DEBUG PUT: Deal price: ${self.deal.total_deal_value:.2f}")
-        print(f"DEBUG PUT: Long leg range: ${put_long_lower_bound:.2f} - ${put_long_upper_bound:.2f}")
-        print(f"DEBUG PUT: Short leg range: ${self.deal.total_deal_value * put_short_lower_mult:.2f} - ${self.deal.total_deal_value * put_short_upper_mult:.2f}")
-
         for expiry, expiry_options in options_by_expiry.items():
             # Separate puts from calls
             puts = [opt for opt in expiry_options if opt.right == 'P']
             sorted_puts = sorted(puts, key=lambda x: x.strike)
-
-            print(f"DEBUG PUT: Expiry {expiry}: {len(sorted_puts)} puts with strikes {[opt.strike for opt in sorted_puts]}")
-
-            # Show which puts have valid pricing
-            for p in sorted_puts:
-                print(f"DEBUG PUT: {expiry} {p.strike}P - bid: {p.bid}, ask: {p.ask}, mid: {p.mid_price}")
 
             for i in range(len(sorted_puts) - 1):
                 long_put = sorted_puts[i]  # Buy lower strike put
@@ -1491,30 +1449,26 @@ class MergerArbAnalyzer:
                     # Use PUT-specific short strike bounds (tighter, at deal price)
                     if (short_put.strike >= self.deal.total_deal_value * put_short_lower_mult and
                         short_put.strike <= self.deal.total_deal_value * put_short_upper_mult):
-                        print(f"DEBUG PUT: Analyzing {expiry} {long_put.strike}/{short_put.strike} put spread")
-                        opp = self.analyze_put_spread(long_put, short_put, current_price)
-                        if opp:
-                            put_spreads_by_expiry[expiry].append(opp)
-                            print(f"DEBUG PUT: Added {expiry} {long_put.strike}/{short_put.strike} put spread - expected return: ${opp.expected_return:.2f}, annualized: {opp.annualized_return:.2%}, R/R: {opp.edge_vs_market:.2f}x")
-                        else:
-                            print(f"DEBUG PUT: X Rejected {expiry} {long_put.strike}/{short_put.strike} put spread - failed spread analysis")
-                    else:
-                        print(f"DEBUG PUT: Skipped {expiry} {long_put.strike}/{short_put.strike} - short strike ${short_put.strike:.2f} outside range")
+                        try:
+                            opp = self.analyze_put_spread(long_put, short_put, current_price)
+                            if opp:
+                                put_spreads_by_expiry[expiry].append(opp)
+                        except Exception:
+                            continue  # Skip malformed contracts
 
         # Add top 5 put spreads from each expiration (sorted by annualized return)
         for expiry, expiry_put_spreads in put_spreads_by_expiry.items():
-            # Sort this expiration's put spreads by annualized return
             expiry_put_spreads.sort(key=lambda x: x.annualized_return, reverse=True)
-            top_5 = expiry_put_spreads[:5]
-            print(f"DEBUG PUT: Adding top {len(top_5)} put spreads from {expiry}")
-            opportunities.extend(top_5)
+            opportunities.extend(expiry_put_spreads[:5])
 
-        # Don't limit or globally sort - return all strategies
-        # Frontend will display them in separate sections
-        print(f"DEBUG: Returning {len(opportunities)} total opportunities")
-        print(f"DEBUG: Single calls: {len([o for o in opportunities if o.strategy == 'call'])}")
-        print(f"DEBUG: Covered calls: {len([o for o in opportunities if o.strategy == 'covered_call'])}")
-        print(f"DEBUG: Call spreads: {len([o for o in opportunities if o.strategy == 'spread'])}")
-        print(f"DEBUG: Put spreads: {len([o for o in opportunities if o.strategy == 'put_spread'])}")
+        logger.info(
+            "Options scan for %s: %d opportunities (calls=%d, cc=%d, spreads=%d, put_spreads=%d)",
+            self.deal.ticker,
+            len(opportunities),
+            sum(1 for o in opportunities if o.strategy == "call"),
+            sum(1 for o in opportunities if o.strategy == "covered_call"),
+            sum(1 for o in opportunities if o.strategy == "spread"),
+            sum(1 for o in opportunities if o.strategy == "put_spread"),
+        )
 
         return opportunities

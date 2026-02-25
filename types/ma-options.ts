@@ -245,13 +245,28 @@ export interface CategoryResult {
   all: OpportunityResult[];
 }
 
+export type OptionsScanErrorCode =
+  | "polygon_not_configured"
+  | "polygon_error"
+  | "polygon_auth"
+  | "rate_limited"
+  | "timeout"
+  | "ticker_not_found"
+  | "db_error"
+  | "analysis_error"
+  | "proxy_error"
+  | "unknown";
+
 export interface OptionsScanResponse {
   ticker: string;
-  deal_price: number;
-  current_price: number;
-  days_to_close: number;
-  expected_close: string;
+  deal_price?: number;
+  current_price?: number;
+  days_to_close?: number;
+  expected_close?: string;
   optionable: boolean;
+  market_open?: boolean;
+  error_code?: OptionsScanErrorCode;
+  error_message?: string;
   categories: {
     covered_call?: CategoryResult;
     call?: CategoryResult;

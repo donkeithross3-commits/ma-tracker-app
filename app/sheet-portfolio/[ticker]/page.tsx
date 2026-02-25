@@ -175,11 +175,14 @@ interface OptionsCategoryData {
 
 interface OptionsScanResponse {
   ticker: string;
-  deal_price: number;
-  current_price: number;
-  days_to_close: number;
-  expected_close: string;
+  deal_price?: number;
+  current_price?: number;
+  days_to_close?: number;
+  expected_close?: string;
   optionable: boolean;
+  market_open?: boolean;
+  error_code?: string;
+  error_message?: string;
   categories: {
     covered_call?: OptionsCategoryData;
     call?: OptionsCategoryData;
@@ -233,7 +236,6 @@ interface RiskAssessment {
   vote_score: number | null;
   financing_score: number | null;
   legal_score: number | null;
-  timing_score: number | null;
   mac_score: number | null;
 }
 
@@ -381,8 +383,13 @@ export default function DealDetailPage() {
     setOptionsScanError(false);
     fetch(`/api/sheet-portfolio/risk/options-scan?ticker=${encodeURIComponent(ticker)}`)
       .then(async (resp) => {
-        if (resp.ok) {
-          setOptionsScan(await resp.json());
+        const json = await resp.json().catch(() => null);
+        if (json && !json.error_code) {
+          setOptionsScan(json);
+        } else if (json?.error_code) {
+          // Structured error — still set scan data for partial info
+          setOptionsScan(json);
+          setOptionsScanError(true);
         } else {
           setOptionsScanError(true);
         }
@@ -718,15 +725,20 @@ export default function DealDetailPage() {
                   );
                 }
 
-                // Error or no data: show static fallback
+                // Error or no data: show graceful status
                 if (optionsScanError || !optionsScan) {
+                  const errMsg = optionsScan?.error_message;
+                  const isMarketClosed = optionsScan?.market_open === false;
                   return (
                     <>
                       <Row label="Optionable" value={d?.optionable ?? "-"} />
-                      <Row label="Sell Covered Calls" value={d?.long_covered_call ?? "-"} />
-                      <Row label="Bull Call Spreads" value={d?.long_vertical_call_spread ?? "-"} />
-                      <Row label="Credit Put Spreads" value={d?.short_put_vertical_spread ?? "-"} />
-                      <Row label="Long Calls" value={d?.long_naked_calls ?? "-"} />
+                      <div className="text-xs text-gray-500 py-1.5">
+                        {isMarketClosed
+                          ? "Markets closed — options data refreshes during trading hours."
+                          : errMsg
+                            ? errMsg
+                            : "Options scan unavailable. View full page for details."}
+                      </div>
                     </>
                   );
                 }

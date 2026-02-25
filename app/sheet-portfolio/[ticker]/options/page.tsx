@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import type {
   OptionsScanResponse,
+  OptionsScanErrorCode,
   CategoryResult,
   OpportunityResult,
 } from "@/types/ma-options";
@@ -294,6 +295,106 @@ function CategorySection({
   );
 }
 
+// ── Scan status / error banner ────────────────────────────────────
+function ScanStatusBanner({
+  errorCode,
+  errorMessage,
+  marketOpen,
+  onRetry,
+  loading,
+}: {
+  errorCode: OptionsScanErrorCode | null;
+  errorMessage: string;
+  marketOpen?: boolean;
+  onRetry: () => void;
+  loading: boolean;
+}) {
+  // Pick style + icon based on error type
+  const isWarning =
+    errorCode === "timeout" ||
+    errorCode === "rate_limited" ||
+    errorCode === "polygon_error";
+  const isInfo =
+    errorCode === "ticker_not_found" ||
+    errorCode === "polygon_not_configured";
+  const isRetryable =
+    errorCode !== "ticker_not_found" &&
+    errorCode !== "polygon_not_configured";
+
+  const bgClass = isInfo
+    ? "bg-gray-900 border-gray-700"
+    : isWarning
+      ? "bg-yellow-900/15 border-yellow-700/40"
+      : "bg-red-900/15 border-red-700/40";
+  const textClass = isInfo
+    ? "text-gray-400"
+    : isWarning
+      ? "text-yellow-400"
+      : "text-red-400";
+  const iconColor = isInfo
+    ? "text-gray-500"
+    : isWarning
+      ? "text-yellow-500"
+      : "text-red-500";
+
+  // Context hint
+  let hint: string | null = null;
+  if (marketOpen === false && errorCode !== "ticker_not_found") {
+    hint = "Markets are closed. Options data refreshes during trading hours (9:30 AM – 4:00 PM ET).";
+  } else if (errorCode === "rate_limited") {
+    hint = "Too many requests — wait a few seconds and retry.";
+  } else if (errorCode === "timeout") {
+    hint = "The scan took too long. This can happen with illiquid names or during high load.";
+  }
+
+  return (
+    <div className={`${bgClass} border rounded-lg p-3 text-sm`}>
+      <div className="flex items-start gap-2.5">
+        {/* Icon */}
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className={`h-4 w-4 mt-0.5 shrink-0 ${iconColor}`}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          {isInfo ? (
+            <path
+              fillRule="evenodd"
+              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+              clipRule="evenodd"
+            />
+          ) : (
+            <path
+              fillRule="evenodd"
+              d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+              clipRule="evenodd"
+            />
+          )}
+        </svg>
+        <div className="flex-1 min-w-0">
+          <div className={`font-medium ${textClass}`}>{errorMessage}</div>
+          {hint && (
+            <div className="text-xs text-gray-500 mt-1">{hint}</div>
+          )}
+        </div>
+        {isRetryable && (
+          <button
+            onClick={onRetry}
+            disabled={loading}
+            className={`shrink-0 px-3 py-1 text-xs rounded transition-colors ${
+              loading
+                ? "bg-gray-800 text-gray-500 cursor-not-allowed"
+                : "bg-gray-700 hover:bg-gray-600 text-gray-200"
+            }`}
+          >
+            {loading ? "Scanning..." : "Retry"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────
 export default function DealOptionsPage() {
   const params = useParams();
@@ -302,22 +403,40 @@ export default function DealOptionsPage() {
   const [data, setData] = useState<OptionsScanResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<OptionsScanErrorCode | null>(null);
 
   const fetchScan = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setErrorCode(null);
     try {
       const res = await fetch(
         `/api/sheet-portfolio/risk/options-scan?ticker=${encodeURIComponent(ticker)}`
       );
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${res.status}`);
+      const json: OptionsScanResponse = await res.json().catch(() => ({
+        ticker,
+        optionable: false,
+        categories: {},
+        total_opportunities: 0,
+        scan_time_ms: 0,
+        error_code: "unknown" as OptionsScanErrorCode,
+        error_message: `HTTP ${res.status}`,
+      }));
+
+      // Backend now returns 200 with error_code for structured errors
+      if (json.error_code) {
+        setErrorCode(json.error_code);
+        setError(json.error_message || "Unknown error");
+        // Still set data for partial info (deal_price, current_price, etc.)
+        setData(json);
+      } else if (!res.ok) {
+        setError(`HTTP ${res.status}`);
+      } else {
+        setData(json);
       }
-      const json: OptionsScanResponse = await res.json();
-      setData(json);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+      setErrorCode("unknown");
     } finally {
       setLoading(false);
     }
@@ -337,8 +456,8 @@ export default function DealOptionsPage() {
     : [];
 
   const spread =
-    data && data.deal_price > 0 && data.current_price > 0
-      ? ((data.deal_price - data.current_price) / data.current_price) * 100
+    data && (data.deal_price ?? 0) > 0 && (data.current_price ?? 0) > 0
+      ? ((data.deal_price! - data.current_price!) / data.current_price!) * 100
       : null;
 
   return (
@@ -404,18 +523,18 @@ export default function DealOptionsPage() {
       {/* Content */}
       <main className="max-w-6xl mx-auto px-4 py-3 space-y-3">
         {/* Deal metrics bar */}
-        {data && (
+        {data && (data.deal_price ?? 0) > 0 && (
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
             <div>
               <span className="text-gray-500">Deal </span>
               <span className="font-mono font-semibold text-gray-100">
-                ${data.deal_price.toFixed(2)}
+                ${data.deal_price!.toFixed(2)}
               </span>
             </div>
             <div>
               <span className="text-gray-500">Current </span>
               <span className="font-mono font-semibold text-gray-100">
-                ${data.current_price.toFixed(2)}
+                ${(data.current_price ?? 0).toFixed(2)}
               </span>
             </div>
             {spread !== null && (
@@ -460,18 +579,15 @@ export default function DealOptionsPage() {
           </div>
         )}
 
-        {/* Error state */}
+        {/* Error state — context-aware messaging */}
         {error && (
-          <div className="bg-red-900/20 border border-red-700 rounded-lg p-3 text-sm text-red-400">
-            <div className="font-semibold mb-1">Scan Error</div>
-            <div>{error}</div>
-            <button
-              onClick={fetchScan}
-              className="mt-2 px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded"
-            >
-              Retry
-            </button>
-          </div>
+          <ScanStatusBanner
+            errorCode={errorCode}
+            errorMessage={error}
+            marketOpen={data?.market_open}
+            onRetry={fetchScan}
+            loading={loading}
+          />
         )}
 
         {/* Not optionable */}
