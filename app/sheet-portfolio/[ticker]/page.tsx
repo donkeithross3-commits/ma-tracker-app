@@ -907,7 +907,7 @@ export default function DealDetailPage() {
               )}
 
               {/* Key risks */}
-              {riskAssessment.key_risks && riskAssessment.key_risks.length > 0 && (
+              {Array.isArray(riskAssessment.key_risks) && riskAssessment.key_risks.length > 0 && (
                 <div className="mb-3 p-2 bg-gray-800/50 rounded">
                   <h4 className="text-xs font-medium text-gray-500 mb-1">Key Risks</h4>
                   <ul className="text-xs text-gray-400 space-y-0.5">
@@ -922,7 +922,7 @@ export default function DealDetailPage() {
               )}
 
               {/* Discrepancies */}
-              {riskAssessment.discrepancies && riskAssessment.discrepancies.length > 0 && (
+              {Array.isArray(riskAssessment.discrepancies) && riskAssessment.discrepancies.length > 0 && (
                 <div className="mb-3 p-2 bg-yellow-400/5 border border-yellow-600/20 rounded">
                   <h4 className="text-xs font-medium text-yellow-400 mb-1">Discrepancies ({riskAssessment.discrepancies.length})</h4>
                   <div className="space-y-1">
@@ -939,7 +939,7 @@ export default function DealDetailPage() {
               )}
 
               {/* Overnight events */}
-              {riskAssessment.overnight_events && riskAssessment.overnight_events.length > 0 && (
+              {Array.isArray(riskAssessment.overnight_events) && riskAssessment.overnight_events.length > 0 && (
                 <div className="p-2 bg-blue-400/5 border border-blue-600/20 rounded">
                   <h4 className="text-xs font-medium text-blue-400 mb-1">Overnight Events ({riskAssessment.overnight_events.length})</h4>
                   <div className="space-y-1">
