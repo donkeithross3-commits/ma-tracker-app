@@ -487,6 +487,16 @@ def build_deal_assessment_prompt(context: dict) -> str:
     if calibration_text:
         sections.append(calibration_text)
 
+    # Section 16: Human corrections feedback
+    corrections_text = context.get("corrections_text")
+    if corrections_text:
+        sections.append(corrections_text)
+
+    # Section 17: Signal track record / weights
+    signal_weights_text = context.get("signal_weights_text")
+    if signal_weights_text:
+        sections.append(signal_weights_text)
+
     return "\n".join(sections)
 
 

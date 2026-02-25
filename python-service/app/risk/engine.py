@@ -54,6 +54,8 @@ SUPPLEMENTAL_FACTORS = ["market", "timing", "competing_bid"]
 ENABLE_ENRICHED_CONTEXT = os.environ.get("RISK_ENRICHED_CONTEXT", "true").lower() == "true"
 ENABLE_PREDICTIONS = os.environ.get("RISK_PREDICTIONS", "false").lower() == "true"
 ENABLE_CALIBRATION = os.environ.get("RISK_CALIBRATION", "false").lower() == "true"
+ENABLE_REVIEW_QUEUE = os.environ.get("RISK_REVIEW_QUEUE", "false").lower() == "true"
+ENABLE_SIGNAL_WEIGHTS = os.environ.get("RISK_SIGNAL_WEIGHTS", "false").lower() == "true"
 
 
 def _extract_estimate_value(data: dict, key: str):
@@ -319,6 +321,24 @@ class RiskAssessmentEngine:
                     )
                     if open_preds:
                         context["open_predictions"] = [dict(p) for p in open_preds]
+                except Exception:
+                    pass  # Table may not exist yet
+
+            # 12. Recent human corrections (for feedback into next assessment)
+            if ENABLE_REVIEW_QUEUE:
+                try:
+                    corrections = await conn.fetch("""
+                        SELECT ha.correct_signal, ha.corrected_grades,
+                               ha.corrected_probability, ha.probability_reasoning,
+                               ha.missed_reasoning, ha.error_type, ha.annotation_date
+                        FROM human_annotations ha
+                        JOIN human_review_items hri ON hri.id = ha.review_item_id
+                        WHERE hri.ticker = $1
+                          AND ha.annotation_date > CURRENT_DATE - INTERVAL '30 days'
+                        ORDER BY ha.annotation_date DESC LIMIT 3
+                    """, ticker)
+                    if corrections:
+                        context["human_corrections"] = [dict(c) for c in corrections]
                 except Exception:
                     pass  # Table may not exist yet
 
@@ -603,6 +623,18 @@ class RiskAssessmentEngine:
             except Exception as e:
                 logger.warning("Calibration computation failed: %s", e)
 
+        # Compute signal weights once for the entire run (same for all deals)
+        signal_weights_text = None
+        if ENABLE_SIGNAL_WEIGHTS:
+            try:
+                from .signal_weights import compute_signal_weights, format_signal_weights_for_prompt
+                weights = await compute_signal_weights(self.pool)
+                signal_weights_text = format_signal_weights_for_prompt(weights)
+                if signal_weights_text:
+                    logger.info("Signal weights available (%d deals)", weights.get("n_deals", 0))
+            except Exception as e:
+                logger.warning("Signal weights computation failed: %s", e)
+
         for ticker in tickers:
             try:
                 # Collect context
@@ -611,6 +643,20 @@ class RiskAssessmentEngine:
                 # Inject cached calibration feedback
                 if calibration_text:
                     context["calibration_text"] = calibration_text
+
+                # Inject cached signal weights
+                if signal_weights_text:
+                    context["signal_weights_text"] = signal_weights_text
+
+                # Format human corrections for prompt
+                if ENABLE_REVIEW_QUEUE and context.get("human_corrections"):
+                    try:
+                        from .review_queue import format_corrections_for_prompt
+                        corrections_text = format_corrections_for_prompt(context["human_corrections"])
+                        if corrections_text:
+                            context["corrections_text"] = corrections_text
+                    except Exception:
+                        pass
 
                 # --- Context hashing & change classification ---
                 ctx_hash = compute_context_hash(context)
@@ -830,6 +876,15 @@ class RiskAssessmentEngine:
                 await expire_overdue_predictions(self.pool)
             except Exception as e:
                 logger.warning("Prediction resolution failed: %s", e)
+
+        # Populate human review queue
+        if ENABLE_REVIEW_QUEUE:
+            try:
+                from .review_queue import generate_review_items
+                review_items = await generate_review_items(self.pool, run_id, run_date)
+                logger.info("Review queue: %d items generated", len(review_items))
+            except Exception as e:
+                logger.warning("Review queue population failed: %s", e)
 
         return {
             "run_id": str(run_id),
