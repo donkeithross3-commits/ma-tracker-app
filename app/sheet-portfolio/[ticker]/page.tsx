@@ -340,6 +340,41 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+function ProvenancePill({ type }: { type: "ai" | "live" | "prior-close" }) {
+  if (type === "ai") {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 font-medium">AI</span>;
+  }
+  if (type === "live") {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 font-medium">LIVE</span>;
+  }
+  return <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/80 text-gray-500 font-medium">PRIOR CLOSE</span>;
+}
+
+function useMarketFreshness(lastRefresh: Date | null): "fresh" | "stale" | "disconnected" {
+  const [freshness, setFreshness] = useState<"fresh" | "stale" | "disconnected">("disconnected");
+  useEffect(() => {
+    function check() {
+      if (!lastRefresh) { setFreshness("disconnected"); return; }
+      const age = (Date.now() - lastRefresh.getTime()) / 1000;
+      setFreshness(age > 90 ? "stale" : "fresh");
+    }
+    check();
+    const id = setInterval(check, 10_000);
+    return () => clearInterval(id);
+  }, [lastRefresh]);
+  return freshness;
+}
+
+function freshnessDotColor(freshness: "fresh" | "stale" | "disconnected"): string {
+  if (freshness === "fresh") return "bg-green-500";
+  if (freshness === "stale") return "bg-amber-500";
+  return "bg-gray-600";
+}
+
+function freshnessPriceColor(freshness: "fresh" | "stale" | "disconnected"): string {
+  return freshness === "stale" ? "text-cyan-600" : "text-cyan-400";
+}
+
 export default function DealDetailPage() {
   const params = useParams();
   const ticker = (params.ticker as string)?.toUpperCase();
@@ -355,6 +390,8 @@ export default function DealDetailPage() {
   const [optionsScan, setOptionsScan] = useState<OptionsScanResponse | null>(null);
   const [optionsScanLoading, setOptionsScanLoading] = useState(false);
   const [optionsScanError, setOptionsScanError] = useState(false);
+
+  const freshness = useMarketFreshness(lastRefresh);
 
   useEffect(() => {
     if (!ticker) return;
@@ -506,10 +543,10 @@ export default function DealDetailPage() {
             </div>
             <div className="flex items-center gap-5 text-right">
               <div className="flex items-center gap-1.5 border border-gray-700 rounded px-2.5 py-1">
-                <span className={`inline-block w-2 h-2 rounded-full ${lastRefresh ? "bg-green-500" : "bg-gray-600"}`} title={lastRefresh ? "Polygon connected" : "No market data yet"} />
+                <span className={`inline-block w-2 h-2 rounded-full ${freshnessDotColor(freshness)}`} title={lastRefresh ? (freshness === "stale" ? "Market data stale" : "Polygon connected") : "No market data yet"} />
                 <span className="text-xs text-gray-400">
                   {lastRefresh
-                    ? `Mkt data ${lastRefresh.toLocaleTimeString()}`
+                    ? `Mkt data ${lastRefresh.toLocaleTimeString()}${freshness === "stale" ? " (stale)" : ""}`
                     : "Mkt data loading\u2026"}
                 </span>
                 <button
@@ -536,7 +573,7 @@ export default function DealDetailPage() {
               </div>
               <div>
                 <div className="text-xs text-gray-500">Target Px</div>
-                <div className={`font-mono font-semibold ${targetPriceIsLive ? "text-cyan-400" : ""}`}>{fmtPrice(targetPrice)}</div>
+                <div className={`font-mono font-semibold ${targetPriceIsLive ? freshnessPriceColor(freshness) : ""}`} title={targetPriceIsLive ? `Live: $${targetPrice?.toFixed(2)} (${freshness})` : "From sheet"}>{fmtPrice(targetPrice)}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Deal Px</div>
@@ -619,7 +656,7 @@ export default function DealDetailPage() {
             <Row label="Total price/share" value={fmtPrice(d?.total_price_per_share)} color="text-white font-semibold" />
 
             <SectionTitle>Pricing &amp; Returns</SectionTitle>
-            <Row label="Target current price" value={fmtPrice(targetPrice)} color={targetPriceIsLive ? "text-cyan-400" : undefined} />
+            <Row label="Target current price" value={fmtPrice(targetPrice)} color={targetPriceIsLive ? freshnessPriceColor(freshness) : undefined} />
             <Row label="Deal spread" value={fmtPct(d?.deal_spread)} />
             <Row label="Close time (months)" value={d?.deal_close_time_months != null ? d.deal_close_time_months.toFixed(2) : "-"} />
             <Row label="Expected IRR" value={fmtPct(d?.expected_irr)} color={d?.expected_irr != null ? (d.expected_irr >= 0 ? "text-green-400" : "text-red-400") : undefined} />
@@ -695,7 +732,12 @@ export default function DealDetailPage() {
             {/* Options teaser - dynamic from options-scan API */}
             <div className="mt-3 first:mt-0">
               <div className="flex items-center justify-between mb-1">
-                <h3 className="text-sm font-bold text-gray-300">Options</h3>
+                <h3 className="text-sm font-bold text-gray-300 flex items-center gap-1.5">
+                  Options
+                  {optionsScan && !optionsScanLoading && (
+                    <ProvenancePill type={optionsScan.market_open !== false ? "live" : "prior-close"} />
+                  )}
+                </h3>
                 <div className="flex items-center gap-2">
                   {optionsScanLoading && (
                     <svg className="animate-spin h-3 w-3 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -834,9 +876,9 @@ export default function DealDetailPage() {
         </div>
 
         {/* Risk Assessment */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mt-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mt-3 border-l-2 border-l-purple-500/40">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-bold text-gray-300">AI Risk Assessment</h3>
+            <h3 className="text-sm font-bold text-gray-300 flex items-center gap-1.5">AI Risk Assessment <ProvenancePill type="ai" /></h3>
             <div className="flex items-center gap-2">
               {riskAssessment?.assessment_date && (
                 <span className="text-xs text-gray-500">
@@ -930,7 +972,7 @@ export default function DealDetailPage() {
                       <div key={i} className="text-xs">
                         <span className="text-gray-400 font-medium">{disc.field}:</span>{" "}
                         <span className="text-gray-500">Sheet: {disc.sheet_value}</span>{" "}
-                        <span className="text-yellow-400">AI: {disc.ai_value}</span>
+                        <span className="text-purple-400">AI: {disc.ai_value}</span>
                         {disc.explanation && <span className="text-gray-600 ml-1">- {disc.explanation}</span>}
                       </div>
                     ))}

@@ -151,6 +151,41 @@ function isCountdownArtifact(raw: string | null): boolean {
   return raw.includes("1773") || raw.includes("/");
 }
 
+function ProvenancePill({ type }: { type: "ai" | "live" | "prior-close" }) {
+  if (type === "ai") {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 font-medium">AI</span>;
+  }
+  if (type === "live") {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 font-medium">LIVE</span>;
+  }
+  return <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/80 text-gray-500 font-medium">PRIOR CLOSE</span>;
+}
+
+function useMarketFreshness(lastRefresh: Date | null): "fresh" | "stale" | "disconnected" {
+  const [freshness, setFreshness] = useState<"fresh" | "stale" | "disconnected">("disconnected");
+  useEffect(() => {
+    function check() {
+      if (!lastRefresh) { setFreshness("disconnected"); return; }
+      const age = (Date.now() - lastRefresh.getTime()) / 1000;
+      setFreshness(age > 90 ? "stale" : "fresh");
+    }
+    check();
+    const id = setInterval(check, 10_000);
+    return () => clearInterval(id);
+  }, [lastRefresh]);
+  return freshness;
+}
+
+function freshnessDotColor(freshness: "fresh" | "stale" | "disconnected"): string {
+  if (freshness === "fresh") return "bg-green-500";
+  if (freshness === "stale") return "bg-amber-500";
+  return "bg-gray-600";
+}
+
+function freshnessPriceColor(freshness: "fresh" | "stale" | "disconnected"): string {
+  return freshness === "stale" ? "text-cyan-600" : "text-cyan-400";
+}
+
 export default function SheetPortfolioPage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -167,6 +202,8 @@ export default function SheetPortfolioPage() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [diffMap, setDiffMap] = useState<Record<string, DiffEntry>>({});
+
+  const freshness = useMarketFreshness(lastRefresh);
 
   const fetchData = useCallback(async () => {
     try {
@@ -423,10 +460,10 @@ export default function SheetPortfolioPage() {
           <div className="flex items-center gap-3">
             {/* Market data status + refresh */}
             <div className="flex items-center gap-1.5 border border-gray-700 rounded px-2.5 py-1">
-              <span className={`inline-block w-2 h-2 rounded-full ${lastRefresh ? "bg-green-500" : "bg-gray-600"}`} title={lastRefresh ? "Polygon connected" : "No market data yet"} />
+              <span className={`inline-block w-2 h-2 rounded-full ${freshnessDotColor(freshness)}`} title={lastRefresh ? (freshness === "stale" ? "Market data stale" : "Polygon connected") : "No market data yet"} />
               <span className="text-xs text-gray-400">
                 {lastRefresh
-                  ? `Mkt data ${lastRefresh.toLocaleTimeString()}`
+                  ? `Mkt data ${lastRefresh.toLocaleTimeString()}${freshness === "stale" ? " (stale)" : ""}`
                   : "Mkt data loading\u2026"}
               </span>
               <button
@@ -557,7 +594,7 @@ export default function SheetPortfolioPage() {
                       </th>
                     ))}
                     <th className="py-2 px-2 font-medium text-center whitespace-nowrap">
-                      Risk
+                      Risk <ProvenancePill type="ai" />
                     </th>
                     {showExcluded && (
                       <th className="py-2 px-1 font-medium text-center w-8"></th>
@@ -637,7 +674,7 @@ export default function SheetPortfolioPage() {
                         {/* Crrnt Px */}
                         <td className="py-1.5 px-2 text-right font-mono">
                           {livePrices[deal.ticker] ? (
-                            <span className="text-cyan-400" title={`Live: $${livePrices[deal.ticker].price.toFixed(2)}`}>
+                            <span className={freshnessPriceColor(freshness)} title={`Live: $${livePrices[deal.ticker].price.toFixed(2)}`}>
                               {livePrices[deal.ticker].price.toFixed(2)}
                             </span>
                           ) : (
@@ -650,7 +687,7 @@ export default function SheetPortfolioPage() {
                             (() => {
                               const liveGross = (deal.deal_price - livePrices[deal.ticker].price) / livePrices[deal.ticker].price;
                               const pct = (liveGross * 100).toFixed(2);
-                              return <span className="text-cyan-400">{pct}%</span>;
+                              return <span className={freshnessPriceColor(freshness)}>{pct}%</span>;
                             })()
                           ) : (
                             yieldCell(deal.gross_yield_raw, deal.gross_yield)
@@ -678,7 +715,7 @@ export default function SheetPortfolioPage() {
                               const monthsToClose = deal.countdown_days / 30;
                               const liveCurrentYield = liveGross * (12 / monthsToClose);
                               const pct = (liveCurrentYield * 100).toFixed(2);
-                              return <span className="text-cyan-400">{pct}%</span>;
+                              return <span className={freshnessPriceColor(freshness)}>{pct}%</span>;
                             })()
                           ) : (
                             yieldCell(

@@ -396,6 +396,16 @@ function ScanStatusBanner({
   );
 }
 
+function ProvenancePill({ type }: { type: "ai" | "live" | "prior-close" }) {
+  if (type === "ai") {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 font-medium">AI</span>;
+  }
+  if (type === "live") {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 font-medium">LIVE</span>;
+  }
+  return <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/80 text-gray-500 font-medium">PRIOR CLOSE</span>;
+}
+
 // ── Main page ──────────────────────────────────────────────────────
 export default function DealOptionsPage() {
   const params = useParams();
@@ -486,9 +496,12 @@ export default function DealOptionsPage() {
                 </svg>
               </Link>
               <div>
-                <h1 className="text-xl font-bold text-gray-100">
+                <h1 className="text-xl font-bold text-gray-100 flex items-center gap-2">
                   Options Opportunities{" "}
                   <span className="font-mono text-cyan-400">{ticker}</span>
+                  {data && !loading && (
+                    <ProvenancePill type={data.market_open !== false ? "live" : "prior-close"} />
+                  )}
                 </h1>
               </div>
             </div>
