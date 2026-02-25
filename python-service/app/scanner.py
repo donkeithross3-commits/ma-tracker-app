@@ -21,12 +21,20 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import time
 
-# IB API imports
-from ibapi.client import EClient
-from ibapi.wrapper import EWrapper
-from ibapi.contract import Contract
-from ibapi.order import Order
-from ibapi.common import TickerId, TickAttrib, SetOfString, SetOfFloat
+# IB API imports — optional, only needed by IBMergerArbScanner
+try:
+    from ibapi.client import EClient
+    from ibapi.wrapper import EWrapper
+    from ibapi.contract import Contract
+    from ibapi.order import Order
+    from ibapi.common import TickerId, TickAttrib, SetOfString, SetOfFloat
+    _HAS_IBAPI = True
+except ImportError:
+    _HAS_IBAPI = False
+    # Stubs so IBMergerArbScanner class definition parses without ibapi
+    class EWrapper: pass  # type: ignore[no-redef]
+    class EClient: pass   # type: ignore[no-redef]
+    Contract = None        # type: ignore[assignment,misc]
 from threading import Thread, Event
 import queue
 import asyncio
