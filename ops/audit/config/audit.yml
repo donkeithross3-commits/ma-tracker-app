@@ -58,7 +58,7 @@ expected_scheduler_jobs:
 
 alert:
   recipients:
-    email: []  # configure with actual emails
+    email: ["don.keith.ross3@gmail.com"]
   sendgrid_env_var: "SENDGRID_API_KEY"
   from_email: "audit@dr3-dashboard.com"
 

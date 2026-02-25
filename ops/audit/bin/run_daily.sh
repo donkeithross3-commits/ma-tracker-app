@@ -5,6 +5,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source env vars for cron (SendGrid key, etc.)
+# Cron has minimal environment — load from dotfiles if they exist
+for _envfile in "${HOME}/.env.audit" "${HOME}/.bashrc"; do
+    # shellcheck disable=SC1090
+    [[ -f "$_envfile" ]] && source "$_envfile" 2>/dev/null || true
+done
+
 source "${SCRIPT_DIR}/lib.sh"
 
 # ============================================================

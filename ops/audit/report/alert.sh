@@ -116,7 +116,7 @@ Findings:
 ${FINDING_TEXT}
 
 To view the full report:
-  ssh dr3 'cat /opt/app/ops/audit/artifacts/${RUN_DATE}/report.md'
+  ssh droplet 'cat ~/apps/ma-tracker-app/ops/audit/artifacts/\${RUN_DATE}*/report.md'
 
 ---
 Automated audit by DR3 Dashboard ops/audit"
