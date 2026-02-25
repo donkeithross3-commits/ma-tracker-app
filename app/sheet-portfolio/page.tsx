@@ -273,7 +273,7 @@ export default function SheetPortfolioPage() {
 
       const rowCount = data.skipped ? 0 : data.row_count;
       if (data.skipped) {
-        setIngestResult("Skipped (no changes)");
+        setIngestResult("Skipped (no changes) — refreshing deal details...");
       } else {
         setIngestResult(`Ingested ${rowCount} rows — refreshing deal details...`);
       }

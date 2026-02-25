@@ -1,7 +1,7 @@
 {
   "date": "2026-02-24",
   "title": "Feb 24, 2026",
-  "summary": "Live Polygon prices, Event Driven Portfolio rename, and BamSEC filing links on deal pages.",
+  "summary": "Live Polygon prices, chained detail ingest, diff highlights, and BamSEC filing links.",
   "features": [
     {
       "id": "live-polygon-prices",
@@ -28,6 +28,26 @@
       "title": "BamSEC Filing Link on Deal Pages",
       "summary": "Each deal detail page now has a direct BamSEC link for quick access to SEC filings.",
       "description": "The deal detail page header now shows a BamSEC link alongside the Yahoo Quote link. Clicking it opens the target company's SEC filings on BamSEC (e.g. bamsec.com/companies/924901/veris-residential-inc for VRE).\n\nThe link is resolved automatically by looking up the ticker's CIK number from SEC data and constructing the BamSEC URL. If the ticker can't be resolved, the link gracefully doesn't appear.",
+      "category": "portfolio",
+      "project": "sheet-portfolio",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "chained-detail-ingest",
+      "title": "Re-ingest Now Includes Deal Details",
+      "summary": "Clicking Re-ingest Sheet now automatically ingests all ~50 deal detail tabs, not just the dashboard CSV.",
+      "description": "Previously, clicking Re-ingest Sheet only ingested the dashboard-level CSV (tickers, prices, yields). The 60+ fields on each deal's detail page were only populated by a scheduled job at 6:35 AM ET, meaning mid-day re-ingests left deal detail pages showing dashes.\n\n**Two-phase ingest:** The button now runs the dashboard ingest (~500ms), refreshes the table, then automatically ingests all deal detail tabs (~5s for ~50 deals), and refreshes again. The button stays disabled throughout and shows \"Ingesting...\" then \"Refreshing details...\" with a final count like \"Ingested 82 rows + 80 deal details\".\n\n**Faster detail parsing:** Concurrency increased from 3 to 5 concurrent requests with sleep reduced from 0.5s to 0.2s between batches, cutting total time from ~15s to ~5s while staying well within Google Sheets rate limits.",
+      "category": "portfolio",
+      "project": "sheet-portfolio",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "diff-highlights",
+      "title": "New/Changed Deal Highlights",
+      "summary": "New deals show a green left border and NEW pill; modified deals show an amber left border with a tooltip.",
+      "description": "The portfolio dashboard now fetches diff data comparing the current snapshot to the previous one and subtly highlights changes.\n\n**New deals:** A thin green left border on the row plus a small muted \"NEW\" pill next to the ticker.\n\n**Modified deals:** A thin amber left border on the row. Hovering the ticker shows a tooltip listing which fields changed (e.g. \"Changed: legal_risk, deal_price_raw\").\n\n**Unchanged deals:** No visual change from before.\n\nThe diff data is fetched in parallel with the deals, health, and risk data on every page load and after each re-ingest.",
       "category": "portfolio",
       "project": "sheet-portfolio",
       "image": "",
