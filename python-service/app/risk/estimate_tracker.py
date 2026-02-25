@@ -474,7 +474,7 @@ async def detect_potential_outcomes(pool) -> list[dict]:
         # 1. Deals removed from sheet (diff_type = 'removed') in last 7 days
         removed = await conn.fetch("""
             SELECT DISTINCT ticker FROM sheet_diffs
-            WHERE diff_type = 'removed' AND created_at >= CURRENT_DATE - 7
+            WHERE diff_type = 'removed' AND detected_at >= CURRENT_DATE - 7
         """)
         for r in removed:
             # Skip if already has an outcome recorded

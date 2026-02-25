@@ -99,11 +99,11 @@ async def scan_overnight_events(pool, tickers: list[str]) -> list[dict]:
         # 3. Sheet diffs (PM may have updated grades overnight)
         # changed_fields is JSONB: {"field_name": {"old": "X", "new": "Y"}}
         diffs = await conn.fetch(
-            """SELECT ticker, created_at, changed_fields
+            """SELECT ticker, detected_at, changed_fields
                FROM sheet_diffs
-               WHERE created_at >= $1
+               WHERE detected_at >= $1
                  AND changed_fields IS NOT NULL
-               ORDER BY created_at DESC""",
+               ORDER BY detected_at DESC""",
             cutoff,
         )
         risk_fields = {

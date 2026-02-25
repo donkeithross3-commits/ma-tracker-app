@@ -255,8 +255,8 @@ class RiskAssessmentEngine:
             # 6. Recent sheet diffs (last 7 days)
             diffs = await conn.fetch(
                 """SELECT * FROM sheet_diffs
-                   WHERE ticker = $1 AND created_at > CURRENT_DATE - INTERVAL '7 days'
-                   ORDER BY created_at DESC""",
+                   WHERE ticker = $1 AND detected_at > CURRENT_DATE - INTERVAL '7 days'
+                   ORDER BY detected_at DESC""",
                 ticker,
             )
             context["sheet_diffs"] = [dict(d) for d in diffs]

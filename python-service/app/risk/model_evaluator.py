@@ -78,7 +78,7 @@ async def _call_model(anthropic: Anthropic, model: str, prompt: str) -> dict:
     response = anthropic.messages.create(
         model=model,
         temperature=0,
-        max_tokens=2000,
+        max_tokens=2800,
         system=[{
             "type": "text",
             "text": RISK_ASSESSMENT_SYSTEM_PROMPT,
@@ -242,9 +242,9 @@ async def run_model_comparison(
 # ---------------------------------------------------------------------------
 
 BASELINE_MODELS = [
-    "claude-opus-4-20250514",
-    "claude-sonnet-4-20250514",
-    "claude-haiku-3-5-20241022",
+    "claude-opus-4-6-20250514",
+    "claude-sonnet-4-6-20250514",
+    "claude-haiku-4-5-20251001",
 ]
 
 
@@ -278,6 +278,9 @@ async def run_baseline_comparison(
 ) -> dict:
     """Run full factorial comparison: every active ticker x every model.
 
+    Uses the Anthropic Batch API for 50% cost savings. All ticker×model
+    combinations are submitted as a single batch request.
+
     For each ticker, one model is randomly selected as the "presented"
     assessment for blind human review. All results are stored for
     counterfactual analysis.
@@ -289,10 +292,11 @@ async def run_baseline_comparison(
 
     anthropic = Anthropic(api_key=api_key)
 
+    from .batch_assessor import run_batch_assessment
     from .engine import RiskAssessmentEngine
     engine = RiskAssessmentEngine(pool, api_key)
 
-    # Get all active tickers
+    # Get all active (non-excluded) tickers
     async with pool.acquire() as conn:
         snapshot = await conn.fetchrow(
             "SELECT id FROM sheet_snapshots ORDER BY snapshot_date DESC, ingested_at DESC LIMIT 1"
@@ -321,104 +325,156 @@ async def run_baseline_comparison(
         )
 
     logger.info(
-        "Starting baseline run %s: %d tickers x %d models = %d calls",
+        "Starting baseline run %s: %d tickers x %d models = %d batch requests",
         run_id, len(tickers), len(models), len(tickers) * len(models),
     )
 
+    # Phase 1: Collect context and build prompts for all tickers
+    deal_prompts = {}  # ticker -> user_prompt
+    context_errors = []
+    for ticker in tickers:
+        try:
+            context = await engine.collect_deal_context(ticker)
+            deal_prompts[ticker] = build_deal_assessment_prompt(context)
+        except Exception as e:
+            logger.error("Context collection failed for %s: %s", ticker, e, exc_info=True)
+            context_errors.append(ticker)
+
+    valid_tickers = [t for t in tickers if t in deal_prompts]
+    logger.info(
+        "Collected context for %d/%d tickers (%d failed)",
+        len(valid_tickers), len(tickers), len(context_errors),
+    )
+
+    # Phase 2: Build batch requests — one per ticker×model
+    # custom_id format: "cmp-{TICKER}-{model_short}" (e.g. "cmp-ATVI-opus")
+    deal_requests = []
+    for ticker in valid_tickers:
+        for model in models:
+            # Short model label for custom_id
+            if "opus" in model:
+                label = "opus"
+            elif "sonnet" in model:
+                label = "sonnet"
+            elif "haiku" in model:
+                label = "haiku"
+            else:
+                label = model[:10]
+
+            deal_requests.append({
+                "ticker": f"{ticker}--{label}",  # compound key for batch_assessor
+                "model": model,
+                "system_prompt": RISK_ASSESSMENT_SYSTEM_PROMPT,
+                "user_prompt": deal_prompts[ticker],
+                "max_tokens": 2800,
+            })
+
+    logger.info("Submitting %d batch requests...", len(deal_requests))
+
+    # Phase 3: Submit batch and wait for results
+    batch_results = await run_batch_assessment(anthropic, deal_requests)
+
+    # Phase 4: Process results — regroup by ticker and model
     results = []
     total_cost = 0.0
     successful_tickers = 0
-    failed_tickers = 0
+    failed_tickers = len(context_errors)
 
-    for ticker in tickers:
-        ticker_ok = True
+    for ticker in valid_tickers:
         ticker_results = {}
+        for model in models:
+            if "opus" in model:
+                label = "opus"
+            elif "sonnet" in model:
+                label = "sonnet"
+            elif "haiku" in model:
+                label = "haiku"
+            else:
+                label = model[:10]
 
-        try:
-            # Collect context once per ticker
-            context = await engine.collect_deal_context(ticker)
-            prompt = build_deal_assessment_prompt(context)
-
-            # Call each model with the same prompt
-            for model in models:
-                try:
-                    result = await _call_model(anthropic, model, prompt)
-                    ticker_results[model] = result
-                    total_cost += result["cost_usd"]
-
-                    logger.info(
-                        "Baseline %s/%s: $%.4f, %dms, prob=%.0f%%",
-                        ticker, model.split("-")[1],  # sonnet/opus/haiku
-                        result["cost_usd"],
-                        result["latency_ms"],
-                        _extract_prob(result["parsed"]) or 0,
-                    )
-
-                except Exception as e:
-                    logger.error(
-                        "Baseline call failed for %s/%s: %s",
-                        ticker, model, e, exc_info=True,
-                    )
-                    ticker_ok = False
-
-            if not ticker_results:
-                failed_tickers += 1
-                results.append({"ticker": ticker, "error": "All models failed"})
+            compound_key = f"{ticker}--{label}"
+            batch_result = batch_results.get(compound_key)
+            if not batch_result:
                 continue
 
-            # Randomly select which model to present for blind review
-            presented_model = random.choice(list(ticker_results.keys()))
+            meta = batch_result.get("_meta", {})
+            if "error" in meta:
+                logger.warning("Baseline %s/%s errored: %s", ticker, label, meta["error"])
+                continue
 
-            # Store all results
-            async with pool.acquire() as conn:
-                for model, result in ticker_results.items():
-                    parsed = result["parsed"]
-                    grades = _extract_grades(parsed)
-                    prob = _extract_prob(parsed)
+            # Remove _meta from the parsed response for storage
+            parsed = {k: v for k, v in batch_result.items() if k != "_meta"}
+            ticker_results[model] = {
+                "parsed": parsed,
+                "input_tokens": meta.get("input_tokens", 0),
+                "output_tokens": meta.get("output_tokens", 0),
+                "cost_usd": meta.get("cost_usd", 0),
+                "latency_ms": meta.get("processing_time_ms", 0),
+            }
+            total_cost += meta.get("cost_usd", 0)
 
-                    await conn.execute(
-                        """INSERT INTO baseline_model_results (
-                            run_id, ticker, model, is_presented,
-                            response, input_tokens, output_tokens,
-                            cost_usd, latency_ms,
-                            probability_of_success, investable_assessment,
-                            reasoning_depth,
-                            grade_vote, grade_financing, grade_legal,
-                            grade_regulatory, grade_mac
-                        ) VALUES (
-                            $1, $2, $3, $4,
-                            $5, $6, $7,
-                            $8, $9,
-                            $10, $11,
-                            $12,
-                            $13, $14, $15,
-                            $16, $17
-                        )""",
-                        run_id, ticker, model, model == presented_model,
-                        json.dumps(parsed),
-                        result["input_tokens"], result["output_tokens"],
-                        result["cost_usd"], result["latency_ms"],
-                        prob,
-                        parsed.get("investable_assessment", ""),
-                        _reasoning_depth(parsed),
-                        grades["grade_vote"], grades["grade_financing"],
-                        grades["grade_legal"], grades["grade_regulatory"],
-                        grades["grade_mac"],
-                    )
-
-            successful_tickers += 1
-            results.append({
-                "ticker": ticker,
-                "presented_model": presented_model,
-                "models_completed": list(ticker_results.keys()),
-                "costs": {m: round(r["cost_usd"], 6) for m, r in ticker_results.items()},
-                "latencies": {m: r["latency_ms"] for m, r in ticker_results.items()},
-            })
-
-        except Exception as e:
-            logger.error("Baseline failed for %s: %s", ticker, e, exc_info=True)
+        if not ticker_results:
             failed_tickers += 1
-            results.append({"ticker": ticker, "error": str(e)})
+            results.append({"ticker": ticker, "error": "All models failed"})
+            continue
+
+        # Randomly select which model to present for blind review
+        presented_model = random.choice(list(ticker_results.keys()))
+
+        # Store all results
+        async with pool.acquire() as conn:
+            for model, result in ticker_results.items():
+                parsed = result["parsed"]
+                grades = _extract_grades(parsed)
+                prob = _extract_prob(parsed)
+
+                await conn.execute(
+                    """INSERT INTO baseline_model_results (
+                        run_id, ticker, model, is_presented,
+                        response, input_tokens, output_tokens,
+                        cost_usd, latency_ms,
+                        probability_of_success, investable_assessment,
+                        reasoning_depth,
+                        grade_vote, grade_financing, grade_legal,
+                        grade_regulatory, grade_mac
+                    ) VALUES (
+                        $1, $2, $3, $4,
+                        $5, $6, $7,
+                        $8, $9,
+                        $10, $11,
+                        $12,
+                        $13, $14, $15,
+                        $16, $17
+                    )""",
+                    run_id, ticker, model, model == presented_model,
+                    json.dumps(parsed),
+                    result["input_tokens"], result["output_tokens"],
+                    result["cost_usd"], result["latency_ms"],
+                    prob,
+                    parsed.get("investable_assessment", ""),
+                    _reasoning_depth(parsed),
+                    grades["grade_vote"], grades["grade_financing"],
+                    grades["grade_legal"], grades["grade_regulatory"],
+                    grades["grade_mac"],
+                )
+
+        successful_tickers += 1
+        results.append({
+            "ticker": ticker,
+            "presented_model": presented_model,
+            "models_completed": list(ticker_results.keys()),
+            "costs": {m: round(r["cost_usd"], 6) for m, r in ticker_results.items()},
+        })
+
+        logger.info(
+            "Baseline %s: %d/%d models, presented=%s",
+            ticker, len(ticker_results), len(models),
+            presented_model.split("-")[1] if "-" in presented_model else presented_model,
+        )
+
+    # Add context errors to results
+    for ticker in context_errors:
+        results.append({"ticker": ticker, "error": "Context collection failed"})
 
     # Finalize the run record
     async with pool.acquire() as conn:
@@ -437,7 +493,7 @@ async def run_baseline_comparison(
     }
 
     logger.info(
-        "Baseline run %s complete: %d/%d tickers, $%.2f total",
+        "Baseline run %s complete: %d/%d tickers, $%.2f total (batch API, 50%% discount)",
         run_id, successful_tickers, len(tickers), total_cost,
     )
 
