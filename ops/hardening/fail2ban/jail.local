@@ -1,0 +1,21 @@
+# /etc/fail2ban/jail.local
+# fail2ban config for ma-tracker-app droplet
+# Overrides defaults in jail.conf — do not edit jail.conf directly.
+
+[DEFAULT]
+# Ban for 1 hour
+bantime = 3600
+# Detection window: 10 minutes
+findtime = 600
+# Notify on bans (optional, set to your email to receive alerts)
+# destemail = you@example.com
+# action = %(action_mwl)s
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 5
+bantime = 3600
+findtime = 600
