@@ -123,6 +123,132 @@ def _break_price_anchors_html(estimate_data) -> str:
     )
 
 
+def _severity_badge(severity: str) -> str:
+    """Colored inline badge for disagreement severity."""
+    colors = {
+        "material": ("#dc2626", "#fef2f2"),  # red
+        "notable": ("#d97706", "#fffbeb"),    # amber
+        "minor": ("#6b7280", "#f3f4f6"),      # gray
+    }
+    color, bg = colors.get(severity, ("#6b7280", "#f3f4f6"))
+    return (
+        f'<span style="display:inline-block;padding:2px 8px;border-radius:10px;'
+        f'font-size:10px;font-weight:700;color:{color};background-color:{bg};'
+        f'border:1px solid {color}30;text-transform:uppercase;letter-spacing:0.3px;">{severity}</span>'
+    )
+
+
+def _new_badge() -> str:
+    """Purple 'NEW' badge for first-time disagreements."""
+    return (
+        '<span style="display:inline-block;padding:2px 6px;border-radius:10px;'
+        'font-size:9px;font-weight:800;color:#7c3aed;background-color:#f5f3ff;'
+        'border:1px solid #7c3aed30;letter-spacing:0.5px;margin-left:6px;">NEW</span>'
+    )
+
+
+def _render_structured_disagreement(d: dict) -> str:
+    """Render a single structured disagreement as a card."""
+    factor = d.get("factor", "unknown").replace("_", " ").title()
+    severity = d.get("severity", "minor")
+    is_new = d.get("is_new", False)
+    sheet_says = d.get("sheet_says", "N/A")
+    ai_says = d.get("ai_says", "N/A")
+    evidence = d.get("evidence", [])
+    reasoning = d.get("reasoning", "")
+
+    # Header: factor name + severity + optional NEW badge
+    header = f'{factor} {_severity_badge(severity)}'
+    if is_new:
+        header += _new_badge()
+
+    # Evidence list with blue date badges
+    evidence_html = ""
+    if evidence:
+        items = ""
+        for e in evidence:
+            date_str = e.get("date", "")
+            source = e.get("source", "")
+            detail = e.get("detail", "")
+            date_badge = (
+                f'<span style="display:inline-block;padding:1px 6px;border-radius:8px;'
+                f'font-size:9px;font-weight:600;color:#1d4ed8;background-color:#eff6ff;'
+                f'border:1px solid #1d4ed830;margin-right:4px;">{date_str}</span>'
+            ) if date_str else ""
+            items += (
+                f'<div style="margin-bottom:4px;font-size:11px;line-height:1.4;">'
+                f'{date_badge}<span style="font-weight:600;color:#374151;">{source}</span>'
+                f'{f" — {detail}" if detail else ""}</div>'
+            )
+        evidence_html = (
+            f'<div style="margin-top:6px;padding:6px 8px;background:#f8fafc;border-radius:4px;">'
+            f'<div style="font-size:9px;font-weight:600;color:#9ca3af;text-transform:uppercase;'
+            f'letter-spacing:0.5px;margin-bottom:3px;">Evidence</div>{items}</div>'
+        )
+
+    # Reasoning in italics
+    reasoning_html = (
+        f'<div style="margin-top:6px;font-size:12px;color:#6b7280;font-style:italic;line-height:1.4;">{reasoning}</div>'
+    ) if reasoning else ""
+
+    # Card border color based on severity
+    border_colors = {"material": "#dc2626", "notable": "#d97706", "minor": "#e5e7eb"}
+    border = border_colors.get(severity, "#e5e7eb")
+
+    return (
+        f'<div style="padding:12px 14px;margin-bottom:10px;border-left:3px solid {border};'
+        f'background:#ffffff;border-radius:0 6px 6px 0;border:1px solid #e5e7eb;border-left:3px solid {border};">'
+        f'<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:6px;">{header}</div>'
+        f'<div style="font-size:12px;color:#374151;margin-bottom:4px;">'
+        f'<span style="color:#9ca3af;">Sheet:</span> <span style="font-weight:600;">{sheet_says}</span>'
+        f' <span style="color:#9ca3af;margin:0 6px;">&rarr;</span> '
+        f'<span style="color:#9ca3af;">AI:</span> <span style="font-weight:600;">{ai_says}</span></div>'
+        f'{evidence_html}{reasoning_html}</div>'
+    )
+
+
+def _render_assessment_changes(changes: list) -> str:
+    """Render 'What Changed Since Last Assessment' section."""
+    if not changes:
+        return ""
+    cards = ""
+    for c in changes:
+        factor = c.get("factor", "unknown").replace("_", " ").title()
+        previous = c.get("previous", "N/A")
+        current = c.get("current", "N/A")
+        trigger = c.get("trigger", "")
+        direction = c.get("direction", "")
+
+        # Direction arrow + color
+        if direction == "worsened":
+            arrow = '<span style="color:#dc2626;font-size:16px;font-weight:bold;">&#9650;</span>'
+            dir_color = "#dc2626"
+            dir_label = "Worsened"
+        else:
+            arrow = '<span style="color:#16a34a;font-size:16px;font-weight:bold;">&#9660;</span>'
+            dir_color = "#16a34a"
+            dir_label = "Improved"
+
+        cards += (
+            f'<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;'
+            f'margin-bottom:8px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0;">'
+            f'<div style="flex-shrink:0;padding-top:2px;">{arrow}</div>'
+            f'<div style="flex:1;">'
+            f'<div style="font-size:13px;font-weight:700;color:#0f172a;">{factor}'
+            f' <span style="font-size:11px;font-weight:600;color:{dir_color};">{dir_label}</span></div>'
+            f'<div style="font-size:12px;color:#6b7280;margin-top:2px;">'
+            f'{previous} &rarr; {current}</div>'
+            f'{f"<div style=&quot;font-size:11px;color:#374151;margin-top:4px;&quot;>Trigger: {trigger}</div>" if trigger else ""}'
+            f'</div></div>'
+        )
+
+    return (
+        f'<div style="padding:20px 24px;border-bottom:1px solid #e2e8f0;background:#f0fdf4;">'
+        f'<h2 style="font-size:16px;color:#0f172a;margin:0 0 12px 0;">'
+        f'What Changed Since Last Assessment</h2>{cards}</div>'
+    )
+
+
 def _estimate_factors_section(prob_data, prob_higher_data, break_data) -> str:
     """Render the combined estimate reasoning section below hero cards."""
     prob_factors = _estimate_factors_html(prob_data) if prob_data else ""
@@ -361,12 +487,35 @@ def risk_assessment_email(
     disagreements = assessment.get("production_disagreements", [])
     disagreement_section = ""
     if disagreements:
-        items = "".join(f'<li style="margin-bottom:8px;color:#374151;font-size:13px;line-height:1.5;">{d}</li>' for d in disagreements)
-        disagreement_section = f"""
+        # Detect format: structured dicts vs legacy strings
+        if isinstance(disagreements[0], dict):
+            new_count = sum(1 for d in disagreements if d.get("is_new"))
+            persist_count = len(disagreements) - new_count
+            subtitle_parts = []
+            if new_count:
+                subtitle_parts.append(f"{new_count} new")
+            if persist_count:
+                subtitle_parts.append(f"{persist_count} persisting")
+            subtitle = " | ".join(subtitle_parts)
+            cards = "".join(_render_structured_disagreement(d) for d in disagreements)
+            disagreement_section = f"""
+            <div style="padding:20px 24px;border-bottom:1px solid #e2e8f0;background:#fef2f2;">
+                <h2 style="font-size:16px;color:#dc2626;margin:0 0 4px 0;">Where AI Disagrees with Production</h2>
+                <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">{subtitle}</div>
+                {cards}
+            </div>"""
+        else:
+            # Legacy string format — backward compat
+            items = "".join(f'<li style="margin-bottom:8px;color:#374151;font-size:13px;line-height:1.5;">{d}</li>' for d in disagreements)
+            disagreement_section = f"""
             <div style="padding:20px 24px;border-bottom:1px solid #e2e8f0;background:#fef2f2;">
                 <h2 style="font-size:16px;color:#dc2626;margin:0 0 10px 0;">Where AI Disagrees with Production</h2>
                 <ul style="margin:0;padding-left:20px;">{items}</ul>
             </div>"""
+
+    # Assessment changes section
+    assessment_changes = assessment.get("assessment_changes", [])
+    changes_section = _render_assessment_changes(assessment_changes)
 
     # Deal summary
     summary = assessment.get("deal_summary", "")
@@ -474,6 +623,8 @@ def risk_assessment_email(
             </div>
 
             {disagreement_section}
+
+            {changes_section}
 
             <!-- Grade Comparison Table -->
             <div style="padding:16px 24px;border-bottom:1px solid #e2e8f0;">

@@ -87,7 +87,21 @@ and explain what evidence leads you to a different conclusion.
 - **Key Risks**: List the top 3-5 specific risks to this deal.
 - **Watchlist Items**: List things to monitor in the coming days/weeks.
 - **Needs Attention**: Flag true if any graded factor is High, any supplemental score >= 7, or there are significant recent changes.
-- **Production Disagreements**: List any factors where you disagree with the production sheet grades, with a brief explanation for each.
+- **Production Disagreements**: For each factor where you disagree with the production sheet,
+  provide a structured object (see JSON schema below). Rules:
+  - **factor**: one of timing|vote|financing|legal|regulatory|investable|probability|mac
+  - **severity**: "material" = could change trade sizing or position; "notable" = worth monitoring;
+    "minor" = cosmetic or low-impact difference
+  - **is_new**: true if this disagreement was NOT present in the previous assessment's
+    production_disagreements list (or if no previous assessment exists). false if persisting.
+  - **evidence**: cite 1-3 specific sources from the context (filing type + date, halt code + date,
+    sheet diff field + date, deal attribute). Each evidence item needs source, date, and detail.
+  - **reasoning**: 1-2 sentences linking the evidence to your conclusion.
+
+- **Assessment Changes**: If previous assessment data is provided, list any factors where
+  your current grade/score differs from your PREVIOUS assessment (not the production sheet).
+  Each change object needs the factor name, previous value, current value, what triggered the
+  change (cite a specific event with date), and direction (improved or worsened).
 
 You MUST respond with valid JSON in exactly this format:
 {
@@ -137,7 +151,28 @@ You MUST respond with valid JSON in exactly this format:
     "watchlist_items": ["item1", "item2"],
     "needs_attention": true,
     "attention_reason": "reason or null if needs_attention is false",
-    "production_disagreements": ["Factor: reason for disagreement", "..."]
+    "production_disagreements": [
+        {
+            "factor": "timing|vote|financing|legal|regulatory|investable|probability|mac",
+            "sheet_says": "Q2 2026",
+            "ai_says": "Q3-Q4 2026",
+            "severity": "material|notable|minor",
+            "is_new": true,
+            "evidence": [
+                {"source": "14D-9 filing", "date": "2026-02-15", "detail": "Outside date Sep 30, 2026"}
+            ],
+            "reasoning": "1-2 sentence linking evidence to conclusion"
+        }
+    ],
+    "assessment_changes": [
+        {
+            "factor": "timing",
+            "previous": "Score 4/10",
+            "current": "Score 7/10",
+            "trigger": "EU Phase II review opened 2026-02-20",
+            "direction": "improved|worsened"
+        }
+    ]
 }
 
 Be precise and concise. Base grades and scores on the evidence provided, not speculation.
@@ -245,6 +280,22 @@ def build_deal_assessment_prompt(context: dict) -> str:
         sections.append(f"Investable: {prev.get('investable_assessment', prev.get('overall_risk_level', 'N/A'))}")
         sections.append(f"Probability: {prev.get('our_prob_success', prev.get('probability_of_success', 'N/A'))}")
         sections.append(f"Summary: {prev.get('deal_summary', prev.get('overall_risk_summary', 'N/A'))}")
+        # Include previous disagreements so AI can flag new vs persisting
+        ai_resp = prev.get("ai_response")
+        if isinstance(ai_resp, str):
+            try:
+                ai_resp = __import__("json").loads(ai_resp)
+            except (TypeError, ValueError):
+                ai_resp = None
+        if isinstance(ai_resp, dict):
+            prev_disagreements = ai_resp.get("production_disagreements", [])
+            if prev_disagreements:
+                sections.append("Previous Production Disagreements:")
+                for pd in prev_disagreements:
+                    if isinstance(pd, dict):
+                        sections.append(f"  - {pd.get('factor', '?')}: AI said {pd.get('ai_says', '?')} vs sheet {pd.get('sheet_says', '?')} (severity: {pd.get('severity', '?')})")
+                    else:
+                        sections.append(f"  - {pd}")
         sections.append("")
     else:
         sections.append("## PREVIOUS AI ASSESSMENT")
@@ -345,6 +396,15 @@ fields to reference new developments where relevant.
 Respond with the SAME JSON format as a full assessment. Every field must be present.
 If a grade hasn't changed, keep the previous value but you may update the detail text.
 
+For production_disagreements, use the structured format with evidence citations:
+each disagreement must include factor, sheet_says, ai_says, severity, is_new, evidence
+(with source/date/detail), and reasoning. Check previous disagreements to set is_new
+correctly (true only if this is a NEW disagreement not in the previous list).
+
+For assessment_changes, list any factors where YOUR grade/score changed from the
+previous assessment. Cite the specific trigger (event + date) and direction
+(improved or worsened).
+
 Be precise and concise. Only change grades when evidence clearly justifies it.
 """
 
@@ -407,6 +467,15 @@ def build_delta_assessment_prompt(
                             elif "anchor" in item:
                                 sections.append(f"    - {item['anchor']}: ${item.get('value', '?')}")
         sections.append(f"  Summary: {prev_assessment.get('deal_summary', 'N/A')}")
+        # Include previous disagreements so AI can flag new vs persisting
+        prev_disagreements = ai_resp.get("production_disagreements", []) if isinstance(ai_resp, dict) else []
+        if prev_disagreements:
+            sections.append("  Previous Production Disagreements:")
+            for pd in prev_disagreements:
+                if isinstance(pd, dict):
+                    sections.append(f"    - {pd.get('factor', '?')}: AI said {pd.get('ai_says', '?')} vs sheet {pd.get('sheet_says', '?')} (severity: {pd.get('severity', '?')})")
+                else:
+                    sections.append(f"    - {pd}")
     sections.append("")
 
     # What changed

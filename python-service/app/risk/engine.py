@@ -323,7 +323,7 @@ class RiskAssessmentEngine:
             response = self.anthropic.messages.create(
                 model=model,
                 temperature=0,
-                max_tokens=2500,
+                max_tokens=2800,
                 system=[{
                     "type": "text",
                     "text": sys_text,
@@ -1021,6 +1021,8 @@ Keep it actionable and direct."""
             "deal_summary": prev.get("deal_summary"),
             "key_risks": ai_resp.get("key_risks", []),
             "watchlist_items": ai_resp.get("watchlist_items", []),
+            "production_disagreements": ai_resp.get("production_disagreements", []),
+            "assessment_changes": ai_resp.get("assessment_changes", []),
             "needs_attention": prev.get("needs_attention", False),
             "attention_reason": prev.get("attention_reason"),
         }
