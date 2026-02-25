@@ -145,10 +145,26 @@ function riskScoreCell(risk: RiskData | undefined) {
   );
 }
 
-// Check if countdown_raw is the 11/3/1773 artifact
+// Check if countdown_raw is the 11/3/1773 artifact (Google Sheets formula bug on empty end dates)
 function isCountdownArtifact(raw: string | null): boolean {
   if (!raw) return false;
   return raw.includes("1773") || raw.includes("/");
+}
+
+// Compute countdown days from end_date when sheet formula produced an artifact
+function computeCountdown(deal: Deal): number | null {
+  // Use sheet value if valid
+  if (!isCountdownArtifact(deal.countdown_raw) && deal.countdown_days !== null) {
+    return deal.countdown_days;
+  }
+  // Fall back to computing from end_date
+  if (!deal.end_date) return null;
+  const end = new Date(deal.end_date);
+  if (isNaN(end.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+  return Math.round((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 function ProvenancePill({ type }: { type: "ai" | "live" | "prior-close" }) {
@@ -603,7 +619,7 @@ export default function SheetPortfolioPage() {
                 </thead>
                 <tbody>
                   {sortedDeals.map((deal, idx) => {
-                    const artifact = isCountdownArtifact(deal.countdown_raw);
+                    const countdown = computeCountdown(deal);
                     const diff = diffMap[deal.ticker];
                     const diffBorder = diff?.diff_type === "added"
                       ? "border-l-2 border-green-500/60"
@@ -651,21 +667,17 @@ export default function SheetPortfolioPage() {
                         </td>
                         {/* Cntdwn */}
                         <td className="py-1.5 px-2 text-right font-mono">
-                          {artifact ? (
-                            <span className="bg-red-900/40 text-red-300 px-1 rounded text-xs">
-                              {deal.countdown_raw}
-                            </span>
-                          ) : deal.countdown_days !== null ? (
+                          {countdown !== null ? (
                             <span
                               className={
-                                deal.countdown_days < 0
+                                countdown < 0
                                   ? "text-red-400"
-                                  : deal.countdown_days < 30
+                                  : countdown < 30
                                   ? "text-yellow-400"
                                   : "text-gray-300"
                               }
                             >
-                              {deal.countdown_days}
+                              {countdown}
                             </span>
                           ) : (
                             <span className="text-gray-500">-</span>
