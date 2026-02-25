@@ -99,6 +99,23 @@ def compute_context_hash(context: dict) -> str:
             if key not in ("id", "ticker", "created_at", "updated_at"):
                 parts.append(f"attr:{key}:{_safe_str(attrs.get(key))}")
 
+    # Options-implied probability (bucketed to 2pp to avoid noise)
+    options_prob = context.get("options_implied_probability")
+    if options_prob is not None:
+        try:
+            bucketed = round(float(options_prob) * 50) / 50  # 2pp buckets
+            parts.append(f"options_prob:{bucketed:.2f}")
+        except (ValueError, TypeError):
+            pass
+
+    # Milestone count and statuses
+    milestones = context.get("milestones") or []
+    parts.append(f"milestone_count:{len(milestones)}")
+    pending = sum(1 for m in milestones if m.get("status") == "pending")
+    completed = sum(1 for m in milestones if m.get("status") == "completed")
+    parts.append(f"milestones_pending:{pending}")
+    parts.append(f"milestones_completed:{completed}")
+
     blob = "|".join(parts)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
@@ -131,6 +148,11 @@ def build_context_summary(context: dict) -> dict:
         "filing_types": sorted(set(f.get("filing_type", "") for f in filings)),
         "halt_count": len(halts),
         "diff_count": len(diffs),
+        "options_prob": context.get("options_implied_probability"),
+        "milestones_pending": sum(1 for m in (context.get("milestones") or [])
+                                  if m.get("status") == "pending"),
+        "milestones_completed": sum(1 for m in (context.get("milestones") or [])
+                                    if m.get("status") == "completed"),
     }
 
 
@@ -197,6 +219,25 @@ def classify_changes(context: dict, prev_summary: dict | None) -> tuple[ChangeSi
     if old_close != new_close and new_close is not None:
         changes.append(f"expected_close_date: {old_close} -> {new_close}")
         _upgrade(ChangeSignificance.MODERATE)
+
+    # Check milestone status changes
+    old_milestones_completed = prev_summary.get("milestones_completed", 0) or 0
+    new_milestones_completed = current.get("milestones_completed", 0) or 0
+    if new_milestones_completed > old_milestones_completed:
+        changes.append(f"milestone completed: {old_milestones_completed} -> {new_milestones_completed}")
+        _upgrade(ChangeSignificance.MODERATE)
+
+    # Check options-implied probability shift (>5pp)
+    try:
+        old_options = float(prev_summary.get("options_prob") or 0)
+        new_options = float(current.get("options_prob") or 0)
+        if old_options > 0 and new_options > 0:
+            options_shift = abs(new_options - old_options)
+            if options_shift >= 0.05:
+                changes.append(f"options-implied shift: {old_options:.0%} -> {new_options:.0%}")
+                _upgrade(ChangeSignificance.MODERATE)
+    except (ValueError, TypeError):
+        pass
 
     # Check MINOR triggers: price drift >0.1%
     try:

@@ -181,6 +181,15 @@ You MUST respond with valid JSON in exactly this format:
     ]
 }
 
+## Three-Signal Triangulation
+
+When a SIGNAL COMPARISON section is provided, you MUST:
+1. Note where the three signals agree (high confidence zone)
+2. For each divergence >5pp, either:
+   a. Justify YOUR estimate with specific evidence if you disagree with the market/sheet, OR
+   b. Update your estimate toward the consensus if you lack contrary evidence
+3. Never ignore the options-implied signal — it represents real money at risk
+
 Be precise and concise. Base grades and scores on the evidence provided, not speculation.
 If data is missing for a factor, note it and assign a moderate default (Medium grade or score 4-5).
 """
@@ -386,6 +395,44 @@ def build_deal_assessment_prompt(context: dict) -> str:
         sections.append(f"Change: {live.get('change', 'N/A')}")
         sections.append("")
 
+    # Section 11: Options-implied probability
+    options_prob = context.get("options_implied_probability")
+    if options_prob is not None:
+        sections.append("## Options-Implied Probability")
+        sections.append(f"Deal Completion Probability: {options_prob * 100:.1f}%")
+        options_snap = context.get("options_snapshot")
+        if options_snap:
+            sections.append(f"ATM IV: {options_snap.get('atm_iv', 'N/A')}")
+            sections.append(f"Put/Call Ratio: {options_snap.get('put_call_ratio', 'N/A')}")
+            sections.append(f"Unusual Volume: {options_snap.get('unusual_volume', 'N/A')}")
+        sections.append("")
+
+    # Section 12: Milestone timeline
+    milestones = context.get("milestones")
+    if milestones:
+        sections.append("## Milestone Timeline")
+        for m in milestones:
+            status = m.get("status", "PENDING").upper()
+            m_type = m.get("milestone_type", "unknown").replace("_", " ").title()
+            m_date = m.get("expected_date") or m.get("milestone_date") or "N/A"
+            affects = m.get("risk_factor_affected") or "N/A"
+            sections.append(f"- [{status}] {m_type}: {m_date} (affects: {affects})")
+        sections.append("")
+
+    # Section 13: Three-signal comparison
+    signal_comparison = context.get("signal_comparison")
+    if signal_comparison:
+        sections.append("## SIGNAL COMPARISON (three-signal triangulation)")
+        signals = signal_comparison.get("signals", {})
+        for signal_name, signal_val in signals.items():
+            sections.append(f"- {signal_name}: {signal_val * 100:.1f}%")
+        divergences = signal_comparison.get("divergences", [])
+        if divergences:
+            sections.append("Divergences (explain why or update your estimate):")
+            for d in divergences:
+                sections.append(f"  - {d['higher']} is {d['gap_pp']}pp more optimistic than {d['lower']}")
+        sections.append("")
+
     return "\n".join(sections)
 
 
@@ -554,5 +601,15 @@ def build_delta_assessment_prompt(
         sections.append(f"Legal Risk: {comparison.get('legal_risk', 'N/A')}")
         sections.append(f"Investable: {comparison.get('investable', 'N/A')}")
         sections.append("")
+
+    # Signal divergences (for delta updates)
+    signal_comparison = context.get("signal_comparison")
+    if signal_comparison:
+        divergences = signal_comparison.get("divergences", [])
+        if divergences:
+            sections.append("## SIGNAL DIVERGENCES (address in your update)")
+            for d in divergences:
+                sections.append(f"- {d['higher']} is {d['gap_pp']}pp more optimistic than {d['lower']}")
+            sections.append("")
 
     return "\n".join(sections)

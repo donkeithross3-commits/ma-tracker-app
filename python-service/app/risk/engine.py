@@ -6,6 +6,7 @@ Grade-based system: Low/Medium/High for 5 sheet-aligned factors,
 
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -49,6 +50,8 @@ GRADE_ORDER = {"Low": 1, "Medium": 2, "High": 3}
 GRADED_FACTORS = ["vote", "financing", "legal", "regulatory", "mac"]
 
 SUPPLEMENTAL_FACTORS = ["market", "timing", "competing_bid"]
+
+ENABLE_ENRICHED_CONTEXT = os.environ.get("RISK_ENRICHED_CONTEXT", "true").lower() == "true"
 
 
 def _extract_estimate_value(data: dict, key: str):
@@ -273,6 +276,68 @@ class RiskAssessmentEngine:
                     context["deal_attributes"] = dict(attrs)
             except Exception:
                 pass  # Table may not exist in portfolio DB
+
+            # 9. Options snapshot (latest row)
+            if ENABLE_ENRICHED_CONTEXT:
+                try:
+                    opt_snap = await conn.fetchrow(
+                        """SELECT * FROM deal_options_snapshots
+                           WHERE ticker = $1
+                           ORDER BY snapshot_date DESC LIMIT 1""",
+                        ticker,
+                    )
+                    if opt_snap:
+                        context["options_snapshot"] = dict(opt_snap)
+                except Exception:
+                    pass  # Table may not exist yet
+
+            # 10. Milestones
+            if ENABLE_ENRICHED_CONTEXT:
+                try:
+                    milestones = await conn.fetch(
+                        """SELECT * FROM canonical_deal_milestones
+                           WHERE ticker = $1
+                           ORDER BY COALESCE(expected_date, milestone_date) ASC NULLS LAST""",
+                        ticker,
+                    )
+                    context["milestones"] = [dict(m) for m in milestones]
+                except Exception:
+                    pass  # Table may not exist yet
+
+        # Compute options-implied probability
+        if ENABLE_ENRICHED_CONTEXT:
+            from .signals import compute_options_implied_probability
+
+            current_price = context.get("sheet_row", {}).get("current_price")
+            deal_price = context.get("sheet_row", {}).get("deal_price")
+            options_prob = compute_options_implied_probability(current_price, deal_price)
+            if options_prob is not None:
+                context["options_implied_probability"] = options_prob
+
+        # Build three-signal comparison
+        if ENABLE_ENRICHED_CONTEXT:
+            from .signals import build_signal_comparison
+
+            sheet_prob = None
+            deal_details = context.get("deal_details")
+            if deal_details and deal_details.get("probability_of_success") is not None:
+                try:
+                    sheet_prob = float(deal_details["probability_of_success"]) / 100.0
+                except (ValueError, TypeError):
+                    pass
+
+            prev_ai_prob = None
+            prev_assessment = context.get("previous_assessment")
+            if prev_assessment and prev_assessment.get("our_prob_success") is not None:
+                try:
+                    prev_ai_prob = float(prev_assessment["our_prob_success"]) / 100.0
+                except (ValueError, TypeError):
+                    pass
+
+            options_implied = context.get("options_implied_probability")
+            signal_comp = build_signal_comparison(options_implied, sheet_prob, prev_ai_prob)
+            if signal_comp is not None:
+                context["signal_comparison"] = signal_comp
 
         # Live price: use sheet row's current_price for now
         if row and row.get("current_price") is not None:

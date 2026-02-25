@@ -63,6 +63,7 @@ python-service/token.json
 test_*.py
 # But keep real test suites
 !python-service/tests/test_*.py
+!python-service/tests/**/test_*.py
 check_*.py
 disable_*.py
 investigate_*.py
