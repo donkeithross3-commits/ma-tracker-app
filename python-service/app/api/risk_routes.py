@@ -816,6 +816,7 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
             "days_to_close": days_to_close,
             "expected_close": expected_close_str,
             "optionable": False,
+            "market_open": market_open,
             "categories": {},
             "total_opportunities": 0,
             "scan_time_ms": round((_time.monotonic() - t0) * 1000),

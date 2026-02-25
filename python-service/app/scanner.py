@@ -935,8 +935,14 @@ class MergerArbAnalyzer:
         If the option expires after the deal close, assume full convergence
         to deal price.  Otherwise interpolate linearly between current price
         and deal price based on how far through the timeline we are.
+
+        Returns deal price if the expiry string can't be parsed (safe fallback
+        that still produces valid, conservative opportunity analysis).
         """
-        expiry_date = datetime.strptime(option_expiry, "%Y%m%d")
+        try:
+            expiry_date = datetime.strptime(option_expiry, "%Y%m%d")
+        except (ValueError, TypeError):
+            return self.deal.total_deal_value
         days_to_expiry = max((expiry_date - datetime.now()).days, 1)
         if days_to_expiry >= self.deal.days_to_close:
             return self.deal.total_deal_value
@@ -1285,25 +1291,25 @@ class MergerArbAnalyzer:
 
     def calculate_probability_itm(self, current: float, target: float,
                                   vol: float, time: float) -> float:
-        """Calculate probability of being in the money"""
+        """Calculate probability of being in the money using Black-Scholes d2."""
         from scipy import stats
 
-        if vol <= 0 or time <= 0:
+        if vol <= 0 or time <= 0 or current <= 0 or target <= 0:
             return 0.5
 
         d2 = (np.log(current / target) + (self.risk_free_rate - 0.5 * vol**2) * time) / (vol * np.sqrt(time))
-        return stats.norm.cdf(d2)
+        return float(stats.norm.cdf(d2))
 
     def calculate_probability_above(self, current: float, target: float,
                                    vol: float, time: float) -> float:
-        """Calculate probability of price being above target"""
+        """Calculate probability of price being above target using Black-Scholes d2."""
         from scipy import stats
 
-        if vol <= 0 or time <= 0:
+        if vol <= 0 or time <= 0 or current <= 0 or target <= 0:
             return 0.5
 
         d2 = (np.log(current / target) + (self.risk_free_rate - 0.5 * vol**2) * time) / (vol * np.sqrt(time))
-        return stats.norm.cdf(d2)
+        return float(stats.norm.cdf(d2))
 
     def get_market_implied_probability(self, current: float, deal_price: float,
                                       option_cost: float, strike: float) -> float:
