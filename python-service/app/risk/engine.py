@@ -52,6 +52,7 @@ GRADED_FACTORS = ["vote", "financing", "legal", "regulatory", "mac"]
 SUPPLEMENTAL_FACTORS = ["market", "timing", "competing_bid"]
 
 ENABLE_ENRICHED_CONTEXT = os.environ.get("RISK_ENRICHED_CONTEXT", "true").lower() == "true"
+ENABLE_PREDICTIONS = os.environ.get("RISK_PREDICTIONS", "false").lower() == "true"
 
 
 def _extract_estimate_value(data: dict, key: str):
@@ -301,6 +302,22 @@ class RiskAssessmentEngine:
                         ticker,
                     )
                     context["milestones"] = [dict(m) for m in milestones]
+                except Exception:
+                    pass  # Table may not exist yet
+
+            # 11. Open predictions (for update/supersede)
+            if ENABLE_PREDICTIONS:
+                try:
+                    open_preds = await conn.fetch(
+                        """SELECT prediction_type, claim, by_date, probability,
+                                  confidence, status, assessment_date
+                           FROM deal_predictions
+                           WHERE ticker = $1 AND status = 'open'
+                           ORDER BY assessment_date DESC""",
+                        ticker,
+                    )
+                    if open_preds:
+                        context["open_predictions"] = [dict(p) for p in open_preds]
                 except Exception:
                     pass  # Table may not exist yet
 
@@ -672,6 +689,19 @@ class RiskAssessmentEngine:
                 for change in score_changes:
                     await self._store_change(assessment_id, run_date, ticker, change)
 
+                # Store predictions from AI response
+                if ENABLE_PREDICTIONS:
+                    try:
+                        from .predictions import store_predictions
+                        raw_predictions = assessment.get("predictions", [])
+                        if raw_predictions:
+                            await store_predictions(
+                                self.pool, ticker, run_date,
+                                assessment_id, raw_predictions,
+                            )
+                    except Exception as e:
+                        logger.warning("Failed to store predictions for %s: %s", ticker, e)
+
                 meta = assessment.get("_meta", {})
                 total_tokens += meta.get("tokens_used", 0)
                 total_cost += meta.get("cost_usd", 0)
@@ -773,6 +803,16 @@ class RiskAssessmentEngine:
             logger.info("Estimate snapshots captured: %s", snapshot_result)
         except Exception as e:
             logger.error("Estimate snapshot capture failed: %s", e, exc_info=True)
+
+        # Auto-resolve milestone predictions and expire overdue
+        if ENABLE_PREDICTIONS:
+            try:
+                from .predictions import resolve_from_milestones, expire_overdue_predictions
+                for ticker in tickers:
+                    await resolve_from_milestones(self.pool, ticker)
+                await expire_overdue_predictions(self.pool)
+            except Exception as e:
+                logger.warning("Prediction resolution failed: %s", e)
 
         return {
             "run_id": str(run_id),

@@ -4,6 +4,7 @@ Grade-based system: Low/Medium/High for 5 sheet-aligned factors,
 0-10 supplemental scores for 3 factors the sheet does not assess.
 """
 
+import os
 from datetime import date
 
 RISK_ASSESSMENT_SYSTEM_PROMPT = """You are an expert M&A risk analyst specializing in merger arbitrage.
@@ -178,8 +179,43 @@ You MUST respond with valid JSON in exactly this format:
             "trigger": "EU Phase II review opened 2026-02-20",
             "direction": "improved|worsened"
         }
+    ],
+    "predictions": [
+        {
+            "type": "deal_closes",
+            "claim": "Deal will close at $25.50 per share",
+            "by_date": "2026-06-30",
+            "probability": 0.92,
+            "confidence": 0.80,
+            "evidence": [
+                {"source": "HSR filing", "date": "2026-01-15", "detail": "No second request after 30 days"}
+            ]
+        },
+        {
+            "type": "milestone_completion",
+            "claim": "Shareholder vote will pass",
+            "by_date": "2026-04-15",
+            "probability": 0.95,
+            "confidence": 0.85,
+            "evidence": [
+                {"source": "DEFM14A filing", "date": "2026-02-10", "detail": "Board unanimously recommends"}
+            ]
+        }
     ]
 }
+
+## Predictions
+
+Make 2-5 explicit, falsifiable predictions about this deal. Each prediction must be:
+- **type**: one of "deal_closes", "milestone_completion", "spread_direction", "break_price"
+- **claim**: a clear, falsifiable statement (e.g., "HSR clearance will be received by May 2026")
+- **by_date**: YYYY-MM-DD when the prediction should resolve
+- **probability**: your probability estimate (0.00-1.00)
+- **confidence**: how confident you are in THIS estimate (0.0-1.0)
+- **evidence**: list of 1-3 evidence items (same format as disagreement evidence: source, date, detail)
+
+You MUST include at least one "deal_closes" prediction for every deal.
+If YOUR OPEN PREDICTIONS are shown below, update or supersede them when new evidence changes your view.
 
 ## Three-Signal Triangulation
 
@@ -432,6 +468,19 @@ def build_deal_assessment_prompt(context: dict) -> str:
             for d in divergences:
                 sections.append(f"  - {d['higher']} is {d['gap_pp']}pp more optimistic than {d['lower']}")
         sections.append("")
+
+    # Section 14: Open predictions (for update/supersede)
+    if os.environ.get("RISK_PREDICTIONS", "false").lower() == "true":
+        open_preds = context.get("open_predictions", [])
+        if open_preds:
+            sections.append("## YOUR OPEN PREDICTIONS (update or supersede if evidence changed)")
+            for p in open_preds:
+                sections.append(
+                    f"- [{p.get('prediction_type')}] {p.get('claim')} "
+                    f"(P={p.get('probability')}, by {p.get('by_date')}, "
+                    f"made {p.get('assessment_date')})"
+                )
+            sections.append("")
 
     return "\n".join(sections)
 
