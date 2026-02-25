@@ -1,0 +1,67 @@
+# DR3 Audit Configuration
+version: 1
+
+schedule:
+  weekly_scan_day: 0  # 0=Sunday
+  retention_days: 30
+  check_timeout_seconds: 120
+
+thresholds:
+  disk_warn_pct: 85
+  disk_alert_pct: 95
+  memory_warn_pct: 80
+  container_restart_alert: 3
+  failed_ssh_alert: 100
+  spread_alert_threshold_pct: 2.0
+
+allowed_ports:
+  public:
+    - {port: 443, process: "caddy", note: "HTTPS via Cloudflare"}
+    - {port: 80, process: "caddy", note: "HTTP redirect"}
+  localhost:
+    - {port: 3000, process: "node", note: "Next.js web"}
+    - {port: 5432, process: "postgres", note: "PostgreSQL"}
+    - {port: 8000, process: "python", note: "Trading service"}
+    - {port: 8001, process: "python", note: "Portfolio service"}
+
+expected_containers:
+  always_running: ["web", "python-portfolio", "postgres"]
+  on_demand: ["krj-batch"]
+
+containers_allowed_root: ["postgres"]
+
+external_url: "https://dr3-dashboard.com"
+
+database:
+  name: "ma_tracker"
+  container: "postgres"
+
+expected_scheduler_jobs:
+  - morning_sheet_ingest
+  - morning_detail_refresh
+  - overnight_event_scan
+  - morning_risk_assessment
+  - morning_report_compile
+  - morning_report_deliver
+  - edgar_filing_check
+  - spread_monitor_tick
+  - after_hours_summary
+  - options_opportunity_check
+  - weekly_cleanup
+
+alert:
+  recipients:
+    email: []  # configure with actual emails
+  sendgrid_env_var: "SENDGRID_API_KEY"
+  from_email: "audit@dr3-dashboard.com"
+
+weekly_only_checks:
+  - "app/bandit_scan"
+  - "app/eslint_security"
+
+suppressions: []
+  # Example:
+  # - check: "pip_audit"
+  #   id: "PYSEC-2024-XXXX"
+  #   reason: "Not exploitable in our usage"
+  #   expires: "2026-04-01"

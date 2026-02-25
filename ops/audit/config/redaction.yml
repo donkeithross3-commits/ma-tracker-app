@@ -1,0 +1,36 @@
+# Secret redaction patterns — applied to ALL output
+# Each pattern is a regex with a replacement label
+patterns:
+  - pattern: 'sk-ant-[a-zA-Z0-9_-]{20,}'
+    label: "[REDACTED:ANTHROPIC_KEY]"
+  - pattern: 'sk-[a-zA-Z0-9]{20,}'
+    label: "[REDACTED:API_KEY]"
+  - pattern: 'SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}'
+    label: "[REDACTED:SENDGRID_KEY]"
+  - pattern: 'whatsapp_api_key=[^\s&"]*'
+    label: "whatsapp_api_key=[REDACTED]"
+  - pattern: 'WHATSAPP_API_KEY=[^\s&"]*'
+    label: "WHATSAPP_API_KEY=[REDACTED]"
+  - pattern: 'password=[^\s&"]*'
+    label: "password=[REDACTED]"
+  - pattern: 'PASSWORD=[^\s&"]*'
+    label: "PASSWORD=[REDACTED]"
+  - pattern: 'DATABASE_URL=[^\s"]*'
+    label: "DATABASE_URL=[REDACTED]"
+  - pattern: 'postgres://[^\s"]*'
+    label: "[REDACTED:DB_URL]"
+  - pattern: 'Bearer [a-zA-Z0-9_-]{20,}'
+    label: "Bearer [REDACTED]"
+  - pattern: 'AKIA[A-Z0-9]{16}'
+    label: "[REDACTED:AWS_KEY]"
+  - pattern: 'token=[^\s&"]*'
+    label: "token=[REDACTED]"
+  - pattern: 'TOKEN=[^\s&"]*'
+    label: "TOKEN=[REDACTED]"
+  - pattern: 'api[_-]?key=[^\s&"]*'
+    label: "api_key=[REDACTED]"
+  - pattern: 'API[_-]?KEY=[^\s&"]*'
+    label: "API_KEY=[REDACTED]"
+  - pattern: '[a-f0-9]{40}'
+    label: "[REDACTED:HEX40]"
+    context_required: true  # only redact if near key/token/secret words
