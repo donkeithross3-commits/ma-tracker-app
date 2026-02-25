@@ -647,3 +647,293 @@ async def get_diff(
     except Exception as e:
         logger.error(f"Diff computation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to compute diff: {str(e)}")
+
+
+# ===========================================================================
+# V2 Canonical API Endpoints
+# ===========================================================================
+
+
+def _safe_float(val) -> Optional[float]:
+    """Safely convert a value to float."""
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_str(val) -> Optional[str]:
+    """Safely convert to string, None for None."""
+    return str(val) if val is not None else None
+
+
+# ---------------------------------------------------------------------------
+# GET /portfolio/v2/deal/{ticker}
+# ---------------------------------------------------------------------------
+@router.get("/v2/deal/{ticker}")
+async def get_deal_v2(ticker: str):
+    """Get unified deal data from canonical tables."""
+    pool = _get_pool()
+    ticker = ticker.upper()
+
+    try:
+        async with pool.acquire() as conn:
+            # Get canonical deal
+            deal = await conn.fetchrow(
+                "SELECT * FROM canonical_deals WHERE ticker = $1",
+                ticker,
+            )
+            if not deal:
+                raise HTTPException(status_code=404, detail=f"No canonical deal found for {ticker}")
+
+            # Get latest risk grades
+            grades = await conn.fetchrow(
+                """SELECT * FROM canonical_risk_grades
+                   WHERE ticker = $1
+                   ORDER BY assessed_date DESC LIMIT 1""",
+                ticker,
+            )
+
+            # Get milestones
+            milestones = await conn.fetch(
+                """SELECT * FROM canonical_deal_milestones
+                   WHERE ticker = $1
+                   ORDER BY COALESCE(milestone_date, expected_date) ASC NULLS LAST""",
+                ticker,
+            )
+
+            # Build response
+            result = {
+                "ticker": ticker,
+                "deal": {
+                    "id": str(deal["id"]),
+                    "target_name": deal["target_name"],
+                    "acquiror_name": deal["acquiror_name"],
+                    "deal_structure": deal["deal_structure"],
+                    "deal_price": _safe_float(deal["deal_price"]),
+                    "current_price": _safe_float(deal["current_price"]),
+                    "announced_date": _safe_str(deal["announced_date"]),
+                    "expected_close_date": _safe_str(deal["expected_close_date"]),
+                    "outside_date": _safe_str(deal["outside_date"]),
+                    "cash_per_share": _safe_float(deal["cash_per_share"]),
+                    "stock_ratio": deal["stock_ratio"],
+                    "stock_per_share": _safe_float(deal["stock_per_share"]),
+                    "dividends_other": _safe_float(deal["dividends_other"]),
+                    "termination_fee": deal["termination_fee"],
+                    "termination_fee_pct": _safe_float(deal["termination_fee_pct"]),
+                    "consideration": deal["consideration"],
+                    "total_deal_value_mm": _safe_float(deal["total_deal_value_mm"]),
+                    "status": deal["status"],
+                    "has_cvr": deal["has_cvr"],
+                    "sheet_investable": deal["sheet_investable"],
+                    "investable_flag": deal["investable_flag"],
+                    "go_shop_text": deal["go_shop_text"],
+                    "regulatory_approvals": deal["regulatory_approvals"],
+                    "shareholder_vote": deal["shareholder_vote"],
+                    "financing_details": deal["financing_details"],
+                    "mac_clauses": deal["mac_clauses"],
+                    "closing_conditions": deal["closing_conditions"],
+                    "sheet_prob_success": _safe_float(deal["sheet_prob_success"]),
+                    "sheet_break_price": _safe_float(deal["sheet_break_price"]),
+                    "data_provenance": deal["data_provenance"],
+                    "sheet_last_updated": deal["sheet_last_updated"].isoformat() if deal["sheet_last_updated"] else None,
+                    "detail_last_updated": deal["detail_last_updated"].isoformat() if deal["detail_last_updated"] else None,
+                    "ai_last_assessed": deal["ai_last_assessed"].isoformat() if deal["ai_last_assessed"] else None,
+                    "updated_at": deal["updated_at"].isoformat() if deal["updated_at"] else None,
+                },
+                "risk_grades": None,
+                "milestones": [],
+            }
+
+            if grades:
+                result["risk_grades"] = {
+                    "assessed_date": _safe_str(grades["assessed_date"]),
+                    "sheet": {
+                        "vote": grades["sheet_vote_grade"],
+                        "financing": grades["sheet_financing_grade"],
+                        "legal": grades["sheet_legal_grade"],
+                        "prob_success": _safe_float(grades["sheet_prob_success"]),
+                        "break_price": _safe_float(grades["sheet_break_price"]),
+                    },
+                    "ai": {
+                        "vote": {"grade": grades["ai_vote_grade"], "confidence": _safe_float(grades["ai_vote_confidence"]), "detail": grades["ai_vote_detail"]},
+                        "financing": {"grade": grades["ai_financing_grade"], "confidence": _safe_float(grades["ai_financing_confidence"]), "detail": grades["ai_financing_detail"]},
+                        "legal": {"grade": grades["ai_legal_grade"], "confidence": _safe_float(grades["ai_legal_confidence"]), "detail": grades["ai_legal_detail"]},
+                        "regulatory": {"grade": grades["ai_regulatory_grade"], "confidence": _safe_float(grades["ai_regulatory_confidence"]), "detail": grades["ai_regulatory_detail"]},
+                        "mac": {"grade": grades["ai_mac_grade"], "confidence": _safe_float(grades["ai_mac_confidence"]), "detail": grades["ai_mac_detail"]},
+                        "market_score": _safe_float(grades["ai_market_score"]),
+                        "timing_score": _safe_float(grades["ai_timing_score"]),
+                        "competing_bid_score": _safe_float(grades["ai_competing_bid_score"]),
+                        "prob_success": _safe_float(grades["ai_prob_success"]),
+                        "prob_success_confidence": _safe_float(grades["ai_prob_success_confidence"]),
+                        "break_price": _safe_float(grades["ai_break_price"]),
+                    },
+                    "disagreement_count": grades["disagreement_count"],
+                    "material_disagreement_count": grades["material_disagreement_count"],
+                }
+
+            for m in milestones:
+                result["milestones"].append({
+                    "id": str(m["id"]),
+                    "type": m["milestone_type"],
+                    "date": _safe_str(m["milestone_date"]),
+                    "expected_date": _safe_str(m["expected_date"]),
+                    "status": m["status"],
+                    "source": m["source"],
+                    "notes": m["notes"],
+                    "risk_factor_affected": m["risk_factor_affected"],
+                })
+
+            return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"V2 deal fetch failed for {ticker}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch canonical deal: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# GET /portfolio/v2/deal/{ticker}/timeline
+# ---------------------------------------------------------------------------
+@router.get("/v2/deal/{ticker}/timeline")
+async def get_deal_timeline(ticker: str):
+    """Get deal milestone timeline from canonical tables."""
+    pool = _get_pool()
+    ticker = ticker.upper()
+
+    try:
+        async with pool.acquire() as conn:
+            milestones = await conn.fetch(
+                """SELECT * FROM canonical_deal_milestones
+                   WHERE ticker = $1
+                   ORDER BY COALESCE(milestone_date, expected_date) ASC NULLS LAST""",
+                ticker,
+            )
+
+            deal = await conn.fetchrow(
+                """SELECT announced_date, expected_close_date, outside_date
+                   FROM canonical_deals WHERE ticker = $1""",
+                ticker,
+            )
+
+            if not deal:
+                raise HTTPException(status_code=404, detail=f"No canonical deal found for {ticker}")
+
+            result = {
+                "ticker": ticker,
+                "announced_date": _safe_str(deal["announced_date"]),
+                "expected_close_date": _safe_str(deal["expected_close_date"]),
+                "outside_date": _safe_str(deal["outside_date"]),
+                "milestones": [
+                    {
+                        "id": str(m["id"]),
+                        "type": m["milestone_type"],
+                        "date": _safe_str(m["milestone_date"]),
+                        "expected_date": _safe_str(m["expected_date"]),
+                        "status": m["status"],
+                        "source": m["source"],
+                        "notes": m["notes"],
+                        "risk_factor_affected": m["risk_factor_affected"],
+                    }
+                    for m in milestones
+                ],
+            }
+            return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Timeline fetch failed for {ticker}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch timeline: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# GET /portfolio/v2/deal/{ticker}/accuracy
+# ---------------------------------------------------------------------------
+@router.get("/v2/deal/{ticker}/accuracy")
+async def get_deal_accuracy(ticker: str):
+    """Get accuracy scores for a deal (Brier scores, winner, etc.)."""
+    pool = _get_pool()
+    ticker = ticker.upper()
+
+    try:
+        async with pool.acquire() as conn:
+            scores = await conn.fetchrow(
+                "SELECT * FROM estimate_accuracy_scores WHERE ticker = $1",
+                ticker,
+            )
+
+            if not scores:
+                return {"ticker": ticker, "accuracy": None, "message": "No accuracy data available (deal may not have outcome recorded)"}
+
+            return {
+                "ticker": ticker,
+                "accuracy": {
+                    "days_tracked": scores["days_tracked"],
+                    "first_estimate_date": _safe_str(scores["first_estimate_date"]),
+                    "last_estimate_date": _safe_str(scores["last_estimate_date"]),
+                    "outcome": scores["outcome"],
+                    "sheet_brier": _safe_float(scores["sheet_prob_success_brier"]),
+                    "ai_brier": _safe_float(scores["ai_prob_success_brier"]),
+                    "prob_success_winner": scores["prob_success_winner"],
+                    "sheet_score": _safe_float(scores["sheet_score"]),
+                    "ai_score": _safe_float(scores["ai_score"]),
+                    "overall_winner": scores["overall_winner"],
+                },
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Accuracy fetch failed for {ticker}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch accuracy: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# GET /portfolio/v2/deal/{ticker}/estimates
+# ---------------------------------------------------------------------------
+@router.get("/v2/deal/{ticker}/estimates")
+async def get_deal_estimates(ticker: str):
+    """Get daily estimate snapshots for divergence chart."""
+    pool = _get_pool()
+    ticker = ticker.upper()
+
+    try:
+        async with pool.acquire() as conn:
+            snapshots = await conn.fetch(
+                """SELECT snapshot_date, sheet_prob_success, ai_prob_success,
+                          sheet_break_price, ai_break_price,
+                          prob_success_divergence, grade_mismatches,
+                          deal_price, current_price, gross_spread_pct,
+                          days_to_close
+                   FROM deal_estimate_snapshots
+                   WHERE ticker = $1
+                   ORDER BY snapshot_date ASC""",
+                ticker,
+            )
+
+            return {
+                "ticker": ticker,
+                "snapshots": [
+                    {
+                        "date": _safe_str(s["snapshot_date"]),
+                        "sheet_prob_success": _safe_float(s["sheet_prob_success"]),
+                        "ai_prob_success": _safe_float(s["ai_prob_success"]),
+                        "sheet_break_price": _safe_float(s["sheet_break_price"]),
+                        "ai_break_price": _safe_float(s["ai_break_price"]),
+                        "divergence": _safe_float(s["prob_success_divergence"]),
+                        "grade_mismatches": s["grade_mismatches"],
+                        "deal_price": _safe_float(s["deal_price"]),
+                        "current_price": _safe_float(s["current_price"]),
+                        "gross_spread_pct": _safe_float(s["gross_spread_pct"]),
+                        "days_to_close": s["days_to_close"],
+                    }
+                    for s in snapshots
+                ],
+                "count": len(snapshots),
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Estimates fetch failed for {ticker}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch estimates: {str(e)}")

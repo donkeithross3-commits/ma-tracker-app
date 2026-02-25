@@ -1006,7 +1006,139 @@ Keep it actionable and direct."""
                 meta.get("cost_usd", 0),
             )
 
+        # Dual-write: sync to canonical_risk_grades
+        try:
+            await self._sync_risk_to_canonical(
+                run_date, ticker, assessment, sheet_comp, details, assessment_id,
+            )
+        except Exception:
+            logger.warning("Canonical risk sync failed for %s (non-critical)", ticker, exc_info=True)
+
         return assessment_id
+
+    async def _sync_risk_to_canonical(
+        self, assessed_date, ticker, assessment, sheet_comp, details, assessment_id,
+    ) -> None:
+        """Sync risk grades to canonical_risk_grades (dual-write)."""
+        grades = assessment.get("grades", {})
+        supplementals = assessment.get("supplemental_scores", {})
+
+        # Extract production disagreements for counting
+        prod_disagreements = assessment.get("production_disagreements", [])
+        material_count = sum(
+            1 for d in prod_disagreements
+            if isinstance(d, dict) and d.get("severity") == "material"
+        )
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO canonical_risk_grades (
+                    ticker, assessed_date,
+                    sheet_vote_grade, sheet_financing_grade, sheet_legal_grade,
+                    ai_vote_grade, ai_vote_confidence, ai_vote_detail,
+                    ai_financing_grade, ai_financing_confidence, ai_financing_detail,
+                    ai_legal_grade, ai_legal_confidence, ai_legal_detail,
+                    ai_regulatory_grade, ai_regulatory_confidence, ai_regulatory_detail,
+                    ai_mac_grade, ai_mac_confidence, ai_mac_detail,
+                    ai_market_score, ai_timing_score, ai_competing_bid_score,
+                    sheet_prob_success, ai_prob_success, ai_prob_success_confidence,
+                    sheet_break_price, ai_break_price,
+                    disagreement_count, material_disagreement_count,
+                    ai_response, risk_assessment_id
+                ) VALUES (
+                    $1, $2,
+                    $3, $4, $5,
+                    $6, $7, $8,
+                    $9, $10, $11,
+                    $12, $13, $14,
+                    $15, $16, $17,
+                    $18, $19, $20,
+                    $21, $22, $23,
+                    $24, $25, $26,
+                    $27, $28,
+                    $29, $30,
+                    $31::jsonb, $32
+                )
+                ON CONFLICT (ticker, assessed_date) DO UPDATE SET
+                    sheet_vote_grade = EXCLUDED.sheet_vote_grade,
+                    sheet_financing_grade = EXCLUDED.sheet_financing_grade,
+                    sheet_legal_grade = EXCLUDED.sheet_legal_grade,
+                    ai_vote_grade = EXCLUDED.ai_vote_grade,
+                    ai_vote_confidence = EXCLUDED.ai_vote_confidence,
+                    ai_vote_detail = EXCLUDED.ai_vote_detail,
+                    ai_financing_grade = EXCLUDED.ai_financing_grade,
+                    ai_financing_confidence = EXCLUDED.ai_financing_confidence,
+                    ai_financing_detail = EXCLUDED.ai_financing_detail,
+                    ai_legal_grade = EXCLUDED.ai_legal_grade,
+                    ai_legal_confidence = EXCLUDED.ai_legal_confidence,
+                    ai_legal_detail = EXCLUDED.ai_legal_detail,
+                    ai_regulatory_grade = EXCLUDED.ai_regulatory_grade,
+                    ai_regulatory_confidence = EXCLUDED.ai_regulatory_confidence,
+                    ai_regulatory_detail = EXCLUDED.ai_regulatory_detail,
+                    ai_mac_grade = EXCLUDED.ai_mac_grade,
+                    ai_mac_confidence = EXCLUDED.ai_mac_confidence,
+                    ai_mac_detail = EXCLUDED.ai_mac_detail,
+                    ai_market_score = EXCLUDED.ai_market_score,
+                    ai_timing_score = EXCLUDED.ai_timing_score,
+                    ai_competing_bid_score = EXCLUDED.ai_competing_bid_score,
+                    sheet_prob_success = EXCLUDED.sheet_prob_success,
+                    ai_prob_success = EXCLUDED.ai_prob_success,
+                    ai_prob_success_confidence = EXCLUDED.ai_prob_success_confidence,
+                    sheet_break_price = EXCLUDED.sheet_break_price,
+                    ai_break_price = EXCLUDED.ai_break_price,
+                    disagreement_count = EXCLUDED.disagreement_count,
+                    material_disagreement_count = EXCLUDED.material_disagreement_count,
+                    ai_response = EXCLUDED.ai_response,
+                    risk_assessment_id = EXCLUDED.risk_assessment_id
+                """,
+                ticker,
+                assessed_date,
+                # Sheet grades
+                sheet_comp.get("vote_risk"),
+                sheet_comp.get("finance_risk"),
+                sheet_comp.get("legal_risk"),
+                # AI grades
+                grades.get("vote", {}).get("grade"),
+                grades.get("vote", {}).get("confidence"),
+                grades.get("vote", {}).get("detail"),
+                grades.get("financing", {}).get("grade"),
+                grades.get("financing", {}).get("confidence"),
+                grades.get("financing", {}).get("detail"),
+                grades.get("legal", {}).get("grade"),
+                grades.get("legal", {}).get("confidence"),
+                grades.get("legal", {}).get("detail"),
+                grades.get("regulatory", {}).get("grade"),
+                grades.get("regulatory", {}).get("confidence"),
+                grades.get("regulatory", {}).get("detail"),
+                grades.get("mac", {}).get("grade"),
+                grades.get("mac", {}).get("confidence"),
+                grades.get("mac", {}).get("detail"),
+                # Supplemental scores
+                supplementals.get("market", {}).get("score"),
+                supplementals.get("timing", {}).get("score"),
+                supplementals.get("competing_bid", {}).get("score"),
+                # Probabilities
+                float(details.get("probability_of_success")) if details.get("probability_of_success") is not None else None,
+                _extract_estimate_value(assessment, "probability_of_success"),
+                assessment.get("probability_of_success", {}).get("confidence") if isinstance(assessment.get("probability_of_success"), dict) else None,
+                # Break price
+                float(details.get("break_price")) if details.get("break_price") is not None else None,
+                _extract_estimate_value(assessment, "break_price_estimate"),
+                # Disagreements
+                len(prod_disagreements),
+                material_count,
+                # Full AI response
+                json.dumps(assessment),
+                assessment_id,
+            )
+
+        # Update canonical_deals.ai_last_assessed
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE canonical_deals SET ai_last_assessed = NOW(), updated_at = NOW() WHERE ticker = $1",
+                ticker,
+            )
 
     def _reconstruct_assessment(self, prev: dict) -> dict:
         """Reconstruct a parsed AI assessment dict from a previous DB record.

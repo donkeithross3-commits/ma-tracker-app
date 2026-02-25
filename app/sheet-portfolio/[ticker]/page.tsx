@@ -3,6 +3,16 @@
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import {
+  GradeBadge,
+  GradeFactorCard,
+  SupplementalScoreCard,
+  ProductionDisagreements,
+  ProvenancePill,
+  DealTimeline,
+  AccuracyScoreboard,
+  EstimateDivergenceChart,
+} from "@/components/sheet-portfolio";
 
 interface DashboardData {
   ticker: string;
@@ -266,141 +276,6 @@ const SUPPLEMENTAL_FACTORS = [
   { key: "competing_bid", label: "Competing Bid" },
 ] as const;
 
-function gradeStyle(grade: string | null): { text: string; bg: string; border: string } {
-  if (!grade) return { text: "text-gray-500", bg: "bg-gray-500/10", border: "border-gray-500/30" };
-  const g = grade.toUpperCase();
-  if (g === "LOW") return { text: "text-green-400", bg: "bg-green-400/10", border: "border-green-400/30" };
-  if (g === "MEDIUM" || g === "MED") return { text: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/30" };
-  if (g === "HIGH") return { text: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/30" };
-  return { text: "text-gray-400", bg: "bg-gray-400/10", border: "border-gray-400/30" };
-}
-
-function GradeBadge({ grade, label }: { grade: string | null; label: string }) {
-  const style = gradeStyle(grade);
-  return (
-    <div className={`px-3 py-2 rounded border text-center ${style.bg} ${style.border}`}>
-      <div className={`text-lg font-bold ${style.text}`}>{grade || "-"}</div>
-      <div className="text-xs text-gray-500 uppercase tracking-wider">{label}</div>
-    </div>
-  );
-}
-
-function GradeFactorCard({ label, grade, confidence, detail }: {
-  label: string;
-  grade: string | null;
-  confidence: number | null;
-  detail: string | null;
-}) {
-  if (!grade) return null;
-  const style = gradeStyle(grade);
-
-  return (
-    <div className="bg-gray-800/50 rounded p-2">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium text-gray-400">{label}</span>
-        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>{grade}</span>
-      </div>
-      {confidence != null && (
-        <div className="w-full bg-gray-700 rounded-full h-1 mb-1.5" title={`Confidence: ${(confidence * 100).toFixed(0)}%`}>
-          <div className="h-1 rounded-full bg-blue-400" style={{ width: `${confidence * 100}%` }} />
-        </div>
-      )}
-      {detail && <p className="text-xs text-gray-500 line-clamp-2">{detail}</p>}
-    </div>
-  );
-}
-
-function SupplementalScoreCard({ label, score, detail, hasDisagreement }: {
-  label: string;
-  score: number | null;
-  detail: string | null;
-  hasDisagreement?: boolean;
-}) {
-  if (score === null) return null;
-
-  let barColor = "bg-green-400";
-  if (score >= 8) barColor = "bg-red-400";
-  else if (score >= 6) barColor = "bg-orange-400";
-  else if (score >= 4) barColor = "bg-yellow-400";
-  else if (score >= 2) barColor = "bg-lime-400";
-
-  return (
-    <div className={`bg-gray-800/50 rounded p-2 ${hasDisagreement ? "border border-amber-500/40" : ""}`}>
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium text-gray-400">
-          {label}
-          {hasDisagreement && <span className="ml-1 text-amber-400" title="AI disagrees with sheet timing">&#x23F0;</span>}
-        </span>
-        <span className="text-xs font-mono font-bold text-gray-200">{score.toFixed(1)}/10</span>
-      </div>
-      <div className="w-full bg-gray-700 rounded-full h-1 mb-1.5">
-        <div className={`h-1 rounded-full ${barColor}`} style={{ width: `${(score / 10) * 100}%` }} />
-      </div>
-      {detail && <p className="text-xs text-gray-500 line-clamp-2">{detail}</p>}
-    </div>
-  );
-}
-
-function ProductionDisagreements({ disagreements }: {
-  disagreements: Array<{
-    factor: string;
-    sheet_says: string;
-    ai_says: string;
-    severity: string;
-    is_new: boolean;
-    evidence: Array<{ source: string; date: string; detail: string }>;
-    reasoning: string;
-  }>;
-}) {
-  if (!disagreements || disagreements.length === 0) return null;
-
-  const severityStyle = (s: string) => {
-    if (s === "material") return "bg-red-400/15 text-red-400";
-    if (s === "notable") return "bg-amber-400/15 text-amber-400";
-    return "bg-gray-700 text-gray-400";
-  };
-
-  return (
-    <div className="mb-3 p-2 bg-amber-400/5 border border-amber-600/20 rounded">
-      <h4 className="text-xs font-medium text-amber-400 mb-1.5">
-        AI Disagreements ({disagreements.length})
-      </h4>
-      <div className="space-y-2">
-        {disagreements.map((d, i) => (
-          <div key={i} className="text-xs bg-gray-800/60 rounded p-2">
-            <div className="flex items-center gap-1.5 mb-1">
-              {d.factor === "timing" && <span title="Timeline Mismatch">&#x23F0;</span>}
-              <span className="font-medium text-gray-200 capitalize">{d.factor}</span>
-              <span className={`px-1 py-0.5 rounded text-[10px] font-medium ${severityStyle(d.severity)}`}>
-                {d.severity}
-              </span>
-              {d.is_new && (
-                <span className="px-1 py-0.5 rounded text-[10px] font-medium bg-blue-400/15 text-blue-400">NEW</span>
-              )}
-            </div>
-            <div className="text-gray-400 mb-1">
-              <span className="text-gray-500">Sheet:</span> {d.sheet_says}
-              <span className="mx-1.5 text-gray-600">&rarr;</span>
-              <span className="text-amber-300">AI:</span> {d.ai_says}
-            </div>
-            {d.reasoning && <p className="text-gray-500 mb-1">{d.reasoning}</p>}
-            {Array.isArray(d.evidence) && d.evidence.length > 0 && (
-              <div className="space-y-0.5 mt-1 pl-2 border-l border-gray-700">
-                {d.evidence.map((e, j) => (
-                  <div key={j} className="text-[11px] text-gray-500">
-                    <span className="text-gray-400">{e.source}</span>
-                    {e.date && <span className="text-gray-600 ml-1">({e.date})</span>}
-                    {e.detail && <span className="ml-1">- {e.detail}</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 function Row({ label, value, color }: { label: string; value: React.ReactNode; color?: string }) {
   return (
@@ -417,15 +292,6 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ProvenancePill({ type }: { type: "ai" | "live" | "prior-close" }) {
-  if (type === "ai") {
-    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 font-medium">AI</span>;
-  }
-  if (type === "live") {
-    return <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 font-medium">LIVE</span>;
-  }
-  return <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/80 text-gray-500 font-medium">PRIOR CLOSE</span>;
-}
 
 function useMarketFreshness(lastRefresh: Date | null): "fresh" | "stale" | "disconnected" {
   const [freshness, setFreshness] = useState<"fresh" | "stale" | "disconnected">("disconnected");
@@ -467,6 +333,7 @@ export default function DealDetailPage() {
   const [optionsScan, setOptionsScan] = useState<OptionsScanResponse | null>(null);
   const [optionsScanLoading, setOptionsScanLoading] = useState(false);
   const [optionsScanError, setOptionsScanError] = useState(false);
+  const [timelineData, setTimelineData] = useState<{ milestones: any[]; announced_date: string | null; expected_close_date: string | null; outside_date: string | null } | null>(null);
 
   const freshness = useMarketFreshness(lastRefresh);
 
@@ -489,6 +356,13 @@ export default function DealDetailPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+
+    // Fetch timeline data from v2 API (non-blocking)
+    fetch(`/api/sheet-portfolio/v2/deal/${encodeURIComponent(ticker)}/timeline`)
+      .then(async (resp) => {
+        if (resp.ok) setTimelineData(await resp.json());
+      })
+      .catch(() => {});
   }, [ticker]);
 
   // Fetch options scan data (non-blocking)
@@ -703,6 +577,18 @@ export default function DealDetailPage() {
         {!d && (
           <div className="bg-yellow-400/10 border border-yellow-600/30 rounded-lg px-4 py-2 mb-3 text-sm text-yellow-300">
             Detail data not yet ingested for this deal. Showing dashboard data only.
+          </div>
+        )}
+
+        {/* Deal Timeline */}
+        {timelineData && (
+          <div className="mb-3">
+            <DealTimeline
+              milestones={timelineData.milestones}
+              announcedDate={timelineData.announced_date}
+              expectedCloseDate={timelineData.expected_close_date}
+              outsideDate={timelineData.outside_date}
+            />
           </div>
         )}
 
@@ -950,6 +836,12 @@ export default function DealDetailPage() {
               })()}
             </div>
           </div>
+        </div>
+
+        {/* Estimate Tracking & Accuracy */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+          <EstimateDivergenceChart ticker={ticker} />
+          <AccuracyScoreboard ticker={ticker} />
         </div>
 
         {/* Risk Assessment */}

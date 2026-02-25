@@ -792,6 +792,81 @@ async def _store_deal_detail(
         )
 
 
+async def _sync_detail_to_canonical(
+    db_pool: asyncpg.Pool,
+    detail: Dict[str, Any],
+) -> None:
+    """Sync deal detail fields to canonical_deals (dual-write).
+
+    Updates canonical_deals with rich fields from the detail tab that
+    aren't available in the dashboard row (terms, qualitative assessments, etc.)
+    """
+    ticker = detail.get("ticker")
+    if not ticker:
+        return
+
+    consideration = {}
+    if detail.get("cash_per_share"):
+        consideration["cash_per_share"] = detail["cash_per_share"]
+    if detail.get("stock_per_share"):
+        consideration["stock_per_share"] = detail["stock_per_share"]
+    if detail.get("stock_ratio"):
+        consideration["exchange_ratio"] = detail["stock_ratio"]
+    if detail.get("dividends_other"):
+        consideration["dividends_other"] = detail["dividends_other"]
+    if detail.get("cvrs"):
+        consideration["cvrs"] = detail["cvrs"]
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE canonical_deals SET
+                target_name = COALESCE($2, target_name),
+                cash_per_share = COALESCE($3, cash_per_share),
+                stock_ratio = COALESCE($4, stock_ratio),
+                stock_per_share = COALESCE($5, stock_per_share),
+                dividends_other = COALESCE($6, dividends_other),
+                termination_fee = COALESCE($7, termination_fee),
+                termination_fee_pct = COALESCE($8, termination_fee_pct),
+                consideration = COALESCE($9::jsonb, consideration),
+                regulatory_approvals = COALESCE($10, regulatory_approvals),
+                shareholder_vote = COALESCE($11, shareholder_vote),
+                financing_details = COALESCE($12, financing_details),
+                mac_clauses = COALESCE($13, mac_clauses),
+                closing_conditions = COALESCE($14, closing_conditions),
+                target_business_desc = COALESCE($15, target_business_desc),
+                expected_close_date = COALESCE($16, expected_close_date),
+                outside_date = COALESCE($17, outside_date),
+                sheet_prob_success = COALESCE($18, sheet_prob_success),
+                sheet_break_price = COALESCE($19, sheet_break_price),
+                go_shop_text = COALESCE($20, go_shop_text),
+                detail_last_updated = NOW(),
+                updated_at = NOW()
+            WHERE ticker = $1
+            """,
+            ticker,
+            detail.get("target"),
+            detail.get("cash_per_share"),
+            detail.get("stock_ratio"),
+            detail.get("stock_per_share"),
+            detail.get("dividends_other"),
+            detail.get("termination_fee"),
+            detail.get("termination_fee_pct"),
+            json.dumps(consideration) if consideration else None,
+            detail.get("regulatory_approvals"),
+            detail.get("shareholder_vote"),
+            detail.get("financing_details"),
+            detail.get("mac_clauses"),
+            detail.get("closing_conditions"),
+            detail.get("target_business_description"),
+            _str_to_date(detail.get("expected_close_date")),
+            _str_to_date(detail.get("outside_date")),
+            detail.get("probability_of_success"),
+            detail.get("break_price"),
+            detail.get("go_shop_or_overbid"),
+        )
+
+
 async def ingest_deal_details(
     db_pool: asyncpg.Pool,
     snapshot_id: str,
@@ -810,6 +885,7 @@ async def ingest_deal_details(
         "succeeded": 0,
         "failed": 0,
         "errors": [],
+        "canonical_synced": 0,
     }
 
     async def _process_one(
@@ -824,6 +900,12 @@ async def ingest_deal_details(
                 await _store_deal_detail(db_pool, snapshot_id, detail)
                 summary["succeeded"] += 1
                 logger.info("Ingested detail for %s (gid=%s)", ticker, gid)
+                # Dual-write: sync to canonical_deals
+                try:
+                    await _sync_detail_to_canonical(db_pool, detail)
+                    summary["canonical_synced"] += 1
+                except Exception:
+                    logger.warning("Canonical detail sync failed for %s (non-critical)", ticker, exc_info=True)
             except Exception as exc:
                 summary["failed"] += 1
                 msg = f"{ticker} (gid={gid}): {exc}"
@@ -838,9 +920,10 @@ async def ingest_deal_details(
         await asyncio.gather(*tasks)
 
     logger.info(
-        "Deal detail ingest complete: %d/%d succeeded, %d failed",
+        "Deal detail ingest complete: %d/%d succeeded, %d failed, %d canonical synced",
         summary["succeeded"],
         summary["total"],
         summary["failed"],
+        summary["canonical_synced"],
     )
     return summary

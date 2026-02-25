@@ -121,7 +121,10 @@ def run_job(job_id: str, job_name: str):
 
 @run_job("morning_sheet_ingest", "Morning Google Sheet Ingest")
 async def job_morning_sheet_ingest():
-    """Ingest the Dashboard tab from Google Sheets (6:30 AM ET weekdays)."""
+    """Ingest the Dashboard tab from Google Sheets (6:30 AM ET weekdays).
+
+    Also syncs to canonical_deals via dual-write (handled inside ingest_dashboard).
+    """
     from app.portfolio.ingest import ingest_dashboard
 
     pool = _get_pool()
@@ -131,7 +134,10 @@ async def job_morning_sheet_ingest():
 
 @run_job("morning_detail_refresh", "Morning Deal Detail Refresh")
 async def job_morning_detail_refresh():
-    """Re-fetch every deal's detail tab (6:35 AM ET weekdays)."""
+    """Re-fetch every deal's detail tab (6:35 AM ET weekdays).
+
+    Also syncs detail fields to canonical_deals via dual-write (handled inside ingest_deal_details).
+    """
     from app.portfolio.ingest import DASHBOARD_GID
     from app.portfolio.detail_parser import ingest_deal_details
 

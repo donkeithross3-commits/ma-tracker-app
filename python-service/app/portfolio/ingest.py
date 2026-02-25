@@ -743,6 +743,13 @@ async def ingest_dashboard(
         snapshot_id, inserted, excluded_count, diff_count,
     )
 
+    # Dual-write: sync to canonical_deals table
+    canonical_synced = 0
+    try:
+        canonical_synced = await sync_to_canonical(db_pool, parsed_rows)
+    except Exception:
+        logger.warning("Canonical sync failed (non-critical)", exc_info=True)
+
     return {
         "snapshot_id": str(snapshot_id),
         "row_count": inserted,
@@ -752,7 +759,92 @@ async def ingest_dashboard(
         "parse_errors": parse_errors,
         "excluded_count": excluded_count,
         "diff_count": diff_count,
+        "canonical_synced": canonical_synced,
     }
+
+
+async def sync_to_canonical(
+    db_pool: asyncpg.Pool,
+    parsed_rows: List[Dict[str, Any]],
+) -> int:
+    """Sync parsed sheet rows to canonical_deals table (dual-write).
+
+    Upserts canonical_deals for each deal in the latest snapshot.
+    Called after ingest_dashboard() completes.
+
+    Returns count of deals synced.
+    """
+    synced = 0
+    async with db_pool.acquire() as conn:
+        for row_data in parsed_rows:
+            ticker = row_data.get("ticker")
+            if not ticker:
+                continue
+            if row_data.get("is_excluded", False):
+                continue
+
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO canonical_deals (
+                        ticker, acquiror_name, deal_structure,
+                        deal_price, current_price,
+                        announced_date, expected_close_date, outside_date,
+                        has_cvr, sheet_investable, investable_flag,
+                        go_shop_text, sheet_detail_gid,
+                        status, sheet_last_updated,
+                        data_provenance, updated_at
+                    ) VALUES (
+                        $1, $2, $3,
+                        $4, $5,
+                        $6, $7, $8,
+                        $9, $10, $11,
+                        $12, $13,
+                        'active', NOW(),
+                        $14::jsonb, NOW()
+                    )
+                    ON CONFLICT (ticker) DO UPDATE SET
+                        acquiror_name = COALESCE(EXCLUDED.acquiror_name, canonical_deals.acquiror_name),
+                        deal_structure = COALESCE(EXCLUDED.deal_structure, canonical_deals.deal_structure),
+                        deal_price = COALESCE(EXCLUDED.deal_price, canonical_deals.deal_price),
+                        current_price = COALESCE(EXCLUDED.current_price, canonical_deals.current_price),
+                        announced_date = COALESCE(EXCLUDED.announced_date, canonical_deals.announced_date),
+                        expected_close_date = COALESCE(EXCLUDED.expected_close_date, canonical_deals.expected_close_date),
+                        outside_date = COALESCE(EXCLUDED.outside_date, canonical_deals.outside_date),
+                        has_cvr = EXCLUDED.has_cvr,
+                        sheet_investable = EXCLUDED.sheet_investable,
+                        investable_flag = EXCLUDED.investable_flag,
+                        go_shop_text = COALESCE(EXCLUDED.go_shop_text, canonical_deals.go_shop_text),
+                        sheet_detail_gid = COALESCE(EXCLUDED.sheet_detail_gid, canonical_deals.sheet_detail_gid),
+                        sheet_last_updated = NOW(),
+                        data_provenance = canonical_deals.data_provenance || EXCLUDED.data_provenance,
+                        updated_at = NOW()
+                    """,
+                    ticker,
+                    row_data.get("acquiror"),
+                    row_data.get("category"),
+                    row_data.get("deal_price"),
+                    row_data.get("current_price"),
+                    row_data.get("announced_date"),
+                    row_data.get("close_date"),
+                    row_data.get("end_date"),
+                    row_data.get("cvr_flag", "").upper() == "YES" if row_data.get("cvr_flag") else False,
+                    row_data.get("investable"),
+                    row_data.get("investable", "").strip().lower() in ("yes", "y") if row_data.get("investable") else None,
+                    row_data.get("go_shop_raw"),
+                    row_data.get("deal_tab_gid"),
+                    json.dumps({
+                        "deal_price": {"source": "sheet", "date": str(date.today())},
+                        "current_price": {"source": "sheet", "date": str(date.today())},
+                        "acquiror_name": {"source": "sheet", "date": str(date.today())},
+                    }),
+                )
+                synced += 1
+            except Exception:
+                logger.warning("Failed to sync %s to canonical_deals", ticker, exc_info=True)
+
+    logger.info("Synced %d deals to canonical_deals", synced)
+    return synced
 
 
 async def check_ingest_health(db_pool: asyncpg.Pool) -> Dict[str, Any]:
