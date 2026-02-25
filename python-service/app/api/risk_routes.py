@@ -278,6 +278,49 @@ async def trigger_assessment(ticker: Optional[str] = Query(None)):
             ticker = ticker.upper()
             context = await engine.collect_deal_context(ticker)
             result = await engine.assess_single_deal(context)
+
+            # Store assessment to DB so it appears in /risk/deal/{ticker}
+            try:
+                run_id = uuid.uuid4()
+                run_date = date.today()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """INSERT INTO risk_assessment_runs (id, run_date, status, triggered_by, total_deals, assessed_deals)
+                           VALUES ($1, $2, 'completed', 'manual_single', 1, 1)""",
+                        run_id, run_date,
+                    )
+                discrepancies = []
+                try:
+                    from app.risk.engine import detect_discrepancies
+                    sheet_comp = context.get("sheet_comparison", {})
+                    discrepancies = detect_discrepancies(result, sheet_comp)
+                except Exception:
+                    pass
+                await engine._store_assessment(run_id, run_date, ticker, result, context, discrepancies)
+
+                # Capture estimate snapshot
+                try:
+                    from app.risk.estimate_tracker import capture_daily_estimates
+                    async with pool.acquire() as conn:
+                        stored = await conn.fetch(
+                            "SELECT * FROM deal_risk_assessments WHERE run_id = $1", run_id
+                        )
+                    tracker_list = []
+                    for sa in stored:
+                        d = dict(sa)
+                        ai_resp = d.get("ai_response")
+                        if isinstance(ai_resp, str):
+                            ai_resp = json.loads(ai_resp) if ai_resp else {}
+                        if isinstance(ai_resp, dict):
+                            d.update(ai_resp)
+                        tracker_list.append(d)
+                    snapshot_result = await capture_daily_estimates(pool, tracker_list)
+                    logger.info("Single-ticker estimate snapshot: %s", snapshot_result)
+                except Exception as snap_err:
+                    logger.error("Single-ticker snapshot failed: %s", snap_err, exc_info=True)
+            except Exception as store_err:
+                logger.error("Failed to store single-ticker assessment: %s", store_err, exc_info=True)
+
             return {"ticker": ticker, "assessment": result}
         else:
             result = await engine.run_morning_assessment(triggered_by="manual")
