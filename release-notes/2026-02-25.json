@@ -1,7 +1,7 @@
 {
   "date": "2026-02-25",
   "title": "Feb 25, 2026",
-  "summary": "Data provenance indicators across the Event Driven Portfolio.",
+  "summary": "Smart model routing, batch API for risk engine, and Prediction System Guide.",
   "features": [
     {
       "id": "data-provenance-indicators",
@@ -10,6 +10,26 @@
       "description": "Traders can now instantly identify the source of every data element on the portfolio pages.\n\n**AI provenance (purple):** The AI Risk Assessment section on deal detail pages now has a purple left border and a small \"AI\" pill next to the heading. Discrepancy labels changed from yellow to purple (\"AI: value\") to align with the AI color convention. The Risk column header on the listing page also shows an \"AI\" pill since that column is entirely AI-sourced.\n\n**Live market data (cyan with freshness):** Options sections show a \"LIVE\" pill during market hours or \"PRIOR CLOSE\" when markets are closed. The market data status dot is now freshness-aware: green when data is <90s old, amber when stale, gray when disconnected. The status label appends \"(stale)\" when amber. Live price text dims from cyan-400 to cyan-600 when data is stale (>5 minutes).\n\n**Google Sheets data (unlabeled):** Sheet-sourced sections (Deal Terms, Key Dates, Deal Assessment, risk badges) remain unlabeled as the default baseline -- labeling them would add noise since they represent ~90% of the data.\n\n**Pages affected:** /sheet-portfolio (listing), /sheet-portfolio/[ticker] (deal detail), /sheet-portfolio/[ticker]/options (options detail).",
       "category": "portfolio",
       "project": "sheet-portfolio",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "smart-model-routing",
+      "title": "Smart Model Routing & Batch API",
+      "summary": "Risk assessments now route to Opus 4.6, Sonnet 4.6, or Haiku 4.5 based on change significance, with batch API for 50% cost savings.",
+      "description": "The risk assessment engine now intelligently selects the right Claude model for each deal based on how much has changed since the last assessment.\n\n**Model routing by significance:**\n- MAJOR changes (new deals, large regulatory shifts) → Opus 4.6 ($5/$25 per MTok) for maximum quality\n- MODERATE changes (price moves, timeline updates) → Sonnet 4.6 ($3/$15 per MTok) for strong analysis\n- MINOR changes (small news, routine filings) → Haiku 4.5 ($1/$5 per MTok) for fast, cheap updates\n- NO_CHANGE → Reuse previous assessment (no API call, $0)\n\n**Batch API integration:** All API-needing assessments are submitted as a single Anthropic Batch API request instead of sequential calls. This provides a 50% discount on all token costs. Feature-gated by RISK_BATCH_MODE env var.\n\n**Prompt caching:** System prompts are cached with ephemeral cache_control, providing 90% discount on cache reads across batch requests sharing the same system prompt.\n\n**Projected cost:** ~$0.30/run for 20 deals (down from ~$0.60+ with all-Sonnet sequential).",
+      "category": "intel",
+      "project": "event-driven",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "prediction-system-guide",
+      "title": "Prediction System Guide",
+      "summary": "New user-facing documentation page explaining the 5-phase prediction system, smart routing, and cost optimization.",
+      "description": "A comprehensive guide at /user-guide documents the entire prediction assessment system.\n\n**Sections covered:**\n- Overview of the 5-phase prediction loop\n- Phase 1: Enriched Context (options-implied probability, three-signal triangulation, milestones)\n- Phase 2: Prediction Registry (falsifiable predictions, auto-resolution, Brier scoring)\n- Phase 3: Calibration Loop (calibration curves, bias detection, prompt feedback)\n- Phase 4: Human Review Queue (review triggers, annotation workflow, corrections)\n- Phase 5: Signal Weighting (historical accuracy, inverse-Brier weights)\n- Smart Routing (how change significance determines strategy and model)\n- Cost Optimization (batch API, caching, model routing savings)\n- How to Use (running assessments, reading results, interpreting grades)\n\nAccessible from the dashboard homepage via a new link in the Event Driven section.",
+      "category": "general",
+      "project": "event-driven",
       "image": "",
       "screenshot": null
     }
