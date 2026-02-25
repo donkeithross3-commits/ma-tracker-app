@@ -772,28 +772,28 @@ export default function DealDetailPage() {
                       return (
                         <span>
                           <span className="font-mono">{expLabel} {c0.strike}C @ ${c0.bid.toFixed(2)}</span>
-                          <span className="text-green-400 ml-1.5">{ann}% ann.</span>
+                          <span className="text-green-400 ml-1.5">{ann}% return</span>
                         </span>
                       );
                     case "call":
                       return (
                         <span>
                           <span className="font-mono">{expLabel} {c0.strike}C @ ${c0.ask.toFixed(2)}</span>
-                          <span className="text-green-400 ml-1.5">{ann}% ann.</span>
+                          <span className="text-green-400 ml-1.5">{ann}% return</span>
                         </span>
                       );
                     case "spread":
                       return (
                         <span>
                           <span className="font-mono">{expLabel} {c0.strike}/{c1?.strike ?? "?"} @ ${Math.abs(b.entry_cost).toFixed(2)}</span>
-                          <span className="text-green-400 ml-1.5">{ann}% ann.</span>
+                          <span className="text-green-400 ml-1.5">{ann}% return</span>
                         </span>
                       );
                     case "put_spread":
                       return (
                         <span>
                           <span className="font-mono">{expLabel} {c0.strike}/{c1?.strike ?? "?"} cr ${Math.abs(b.entry_cost).toFixed(2)}</span>
-                          <span className="text-green-400 ml-1.5">{ann}% ann.</span>
+                          <span className="text-green-400 ml-1.5">{ann}% return</span>
                         </span>
                       );
                   }

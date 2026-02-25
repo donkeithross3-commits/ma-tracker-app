@@ -938,6 +938,12 @@ class MergerArbAnalyzer:
 
         Returns deal price if the expiry string can't be parsed (safe fallback
         that still produces valid, conservative opportunity analysis).
+
+        NOTE: Linear interpolation creates cliff effects at strike boundaries for
+        short-dated options on long-dated deals. A 1-day change in expiry can flip
+        a spread from partial to full value when expected_price crosses a strike.
+        This is inherent to the model — a future improvement could use probabilistic
+        weighting across a price distribution instead of point estimates.
         """
         try:
             expiry_date = datetime.strptime(option_expiry, "%Y%m%d")
@@ -1070,9 +1076,9 @@ class MergerArbAnalyzer:
         if_called_profit = (call_option.strike - current_price) + premium
         if_called_return = if_called_profit / current_price if current_price > 0 else 0
 
-        # Annualized yield (based on if-called scenario)
+        # Annualized premium yield (excludes stock appreciation already captured in deal IRR)
         years_to_expiry = max(days_to_expiry, 1) / 365
-        annualized_yield = if_called_return / years_to_expiry if years_to_expiry > 0 else 0
+        annualized_yield = static_return / years_to_expiry if years_to_expiry > 0 else 0
 
         # Skip if negative if-called return (stock too far above strike already without enough premium)
         if if_called_return <= 0:
