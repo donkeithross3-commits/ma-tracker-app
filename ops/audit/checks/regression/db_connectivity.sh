@@ -14,7 +14,7 @@ init_check "regression/db_connectivity"
 if ! command -v docker >/dev/null 2>&1; then
   json_finding "docker_not_found" "$SEV_ALERT" \
     "docker command not found in PATH — cannot reach postgres via docker exec"
-  finalize_check
+  finalize_check; exit $?
 fi
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ if echo "$select1_output" | grep -q "^1$"; then
 else
   json_finding "db_connectivity_failed" "$SEV_ALERT" \
     "Cannot connect to PostgreSQL: ${select1_output}"
-  finalize_check
+  finalize_check; exit $?
 fi
 
 # ---------------------------------------------------------------------------

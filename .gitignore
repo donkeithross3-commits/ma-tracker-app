@@ -32,10 +32,10 @@ yarn-error.log*
 # env files (CRITICAL: Never commit secrets!)
 .env
 .env*.local
+.env.development
+.env.production
 python-service/.env
 python-service/.env.local
-.env.production
-.env.production.local
 
 # vercel
 .vercel

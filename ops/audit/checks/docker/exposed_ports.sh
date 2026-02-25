@@ -10,7 +10,7 @@ init_check "docker/exposed_ports"
 
 if ! command -v docker &>/dev/null; then
     json_finding "docker_not_available" "$SEV_WARN" "docker command not found"
-    finalize_check
+    finalize_check; exit $?
 fi
 
 # Read allowed public ports from config
@@ -51,7 +51,7 @@ is_allowed_public() {
 container_ids=$(docker ps -q 2>/dev/null || true)
 if [[ -z "$container_ids" ]]; then
     json_finding "no_running_containers" "$SEV_INFO" "No running Docker containers found"
-    finalize_check
+    finalize_check; exit $?
 fi
 
 # Collect all port mappings from containers
@@ -84,13 +84,14 @@ if [[ -n "$all_mappings" ]]; then
         mapping=$(echo "$line" | cut -d'|' -f2-)
 
         # Format: "container_port/proto -> host_ip:host_port"
-        host_binding=$(echo "$mapping" | grep -oE '[0-9.]+:[0-9]+$' || true)
+        # Handles both IPv4 (0.0.0.0:3000) and IPv6 ([::]:3000 or :::3000)
+        host_binding=$(echo "$mapping" | grep -oE '->.*' | sed 's/^-> *//' || true)
         if [[ -z "$host_binding" ]]; then continue; fi
 
-        host_ip=$(echo "$host_binding" | cut -d: -f1)
         host_port=$(echo "$host_binding" | rev | cut -d: -f1 | rev)
+        host_ip=$(echo "$host_binding" | sed "s/:${host_port}$//")
 
-        if [[ "$host_ip" == "0.0.0.0" ]] || [[ "$host_ip" == "::" ]]; then
+        if [[ "$host_ip" == "0.0.0.0" ]] || [[ "$host_ip" == "::" ]] || [[ "$host_ip" == "[::0]" ]] || [[ "$host_ip" == "[::]" ]]; then
             # Public binding — check allowlist
             if ! is_allowed_public "$host_port"; then
                 json_finding "unauthorized_public_port_${container_name}_${host_port}" "$SEV_CRITICAL" \

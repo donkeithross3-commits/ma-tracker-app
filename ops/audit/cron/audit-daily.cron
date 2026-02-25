@@ -1,0 +1,10 @@
+# DR3 Daily Security Audit -- runs at 6:00 AM UTC (1:00 AM EST)
+# Install with: ops/audit/cron/install.sh
+#
+# Cron environment has minimal PATH; we set it explicitly below.
+# Logs go to ops/audit/logs/cron.log (rotated by retention_days in audit.yml).
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+0 6 * * * /home/don/apps/ma-tracker-app/ops/audit/bin/run_daily.sh >> /home/don/apps/ma-tracker-app/ops/audit/logs/cron.log 2>&1

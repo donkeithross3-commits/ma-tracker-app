@@ -21,13 +21,13 @@ response_file="${CHECK_ARTIFACT_DIR}/scheduler_response.json"
 if ! docker exec python-portfolio python -c "import urllib.request; print(urllib.request.urlopen('${SCHEDULER_URL}').read().decode())" > "$response_file" 2>&1; then
   json_finding "scheduler_unreachable" "$SEV_ALERT" \
     "Scheduler health endpoint unreachable at ${SCHEDULER_URL} via docker exec"
-  finalize_check
+  finalize_check; exit $?
 fi
 
 if [[ ! -s "$response_file" ]]; then
   json_finding "scheduler_empty_response" "$SEV_ALERT" \
     "Scheduler health endpoint returned empty body"
-  finalize_check
+  finalize_check; exit $?
 fi
 
 log_info "Scheduler health response received"

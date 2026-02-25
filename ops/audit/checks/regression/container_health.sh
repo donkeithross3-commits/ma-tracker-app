@@ -14,7 +14,7 @@ init_check "regression/container_health"
 if ! command -v docker >/dev/null 2>&1; then
   json_finding "docker_not_found" "$SEV_ALERT" \
     "docker command not found in PATH"
-  finalize_check
+  finalize_check; exit $?
 fi
 
 # ---------------------------------------------------------------------------
