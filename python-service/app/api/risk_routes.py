@@ -119,6 +119,53 @@ async def get_deal_latest_risk(ticker: str):
 
 
 # ---------------------------------------------------------------------------
+# GET /risk/deal/{ticker}/email
+# ---------------------------------------------------------------------------
+@router.get("/deal/{ticker}/email")
+async def preview_deal_email(ticker: str):
+    """Render the per-deal email HTML for local preview."""
+    from fastapi.responses import HTMLResponse
+    from app.services.risk_email_template import build_email_from_db_row
+
+    pool = _get_pool()
+    ticker = ticker.upper()
+    if not re.match(r'^[A-Z]{1,10}$', ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker format")
+
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT * FROM deal_risk_assessments
+                WHERE ticker = $1 ORDER BY assessment_date DESC LIMIT 1""",
+                ticker
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail=f"No risk assessment found for {ticker}")
+            db_row = _row_to_dict(row)
+
+            # Enrich with acquiror from sheet_rows if available
+            sheet_row = await conn.fetchrow(
+                "SELECT acquiror FROM sheet_rows WHERE ticker = $1 LIMIT 1",
+                ticker
+            )
+            if sheet_row and sheet_row["acquiror"]:
+                ai_resp = db_row.get("ai_response")
+                if isinstance(ai_resp, str):
+                    ai_resp = json.loads(ai_resp) if ai_resp else {}
+                if isinstance(ai_resp, dict) and not ai_resp.get("acquirer"):
+                    ai_resp["acquirer"] = sheet_row["acquiror"]
+                    db_row["ai_response"] = ai_resp
+
+        html = build_email_from_db_row(db_row, ticker)
+        return HTMLResponse(content=html)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to render email for {ticker}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to render email: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
 # GET /risk/runs
 # ---------------------------------------------------------------------------
 @router.get("/runs")

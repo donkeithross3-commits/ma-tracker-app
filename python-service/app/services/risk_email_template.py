@@ -184,25 +184,44 @@ def risk_assessment_email(
     supplemental = assessment.get("supplemental_scores", {})
     meta = assessment.get("_meta", {})
 
-    # Deal header info from context
+    # Deal header info from context (with fallback to assessment's stored DB columns)
     sheet = {}
     if deal_context:
         sheet = deal_context.get("sheet_row", {})
 
-    deal_price_raw = sheet.get("deal_price_raw") or ""
-    current_price_raw = sheet.get("current_price_raw") or ""
-    acquirer = sheet.get("acquirer") or sheet.get("acquiror") or ""
-    target = sheet.get("target") or sheet.get("company") or ticker
-    category = sheet.get("category") or ""
-    spread_raw = sheet.get("gross_yield_raw") or sheet.get("spread") or ""
-    current_yield_raw = sheet.get("current_yield_raw") or ""
-    countdown = sheet.get("countdown_raw") or ""
+    def _fmt_price(val):
+        if val is None:
+            return ""
+        try:
+            return f"${float(val):.2f}"
+        except (TypeError, ValueError):
+            return str(val)
 
-    # Production grades from the sheet
-    prod_vote = sheet.get("vote_risk") or "N/A"
-    prod_finance = sheet.get("finance_risk") or "N/A"
-    prod_legal = sheet.get("legal_risk") or "N/A"
-    prod_investable = sheet.get("investable") or "N/A"
+    def _fmt_pct(val):
+        if val is None:
+            return ""
+        try:
+            v = float(val)
+            if 0 < abs(v) <= 1.0:
+                v *= 100
+            return f"{v:.2f}%"
+        except (TypeError, ValueError):
+            return str(val)
+
+    deal_price_raw = sheet.get("deal_price_raw") or _fmt_price(assessment.get("deal_price")) or ""
+    current_price_raw = sheet.get("current_price_raw") or _fmt_price(assessment.get("current_price")) or ""
+    acquirer = sheet.get("acquirer") or sheet.get("acquiror") or assessment.get("acquirer") or ""
+    target = sheet.get("target") or sheet.get("company") or assessment.get("target") or ticker
+    category = sheet.get("category") or assessment.get("category") or ""
+    spread_raw = sheet.get("gross_yield_raw") or sheet.get("spread") or _fmt_pct(assessment.get("gross_spread_pct")) or ""
+    current_yield_raw = sheet.get("current_yield_raw") or _fmt_pct(assessment.get("annualized_yield_pct")) or ""
+    countdown = sheet.get("countdown_raw") or assessment.get("days_to_close") or ""
+
+    # Production grades from the sheet (with fallback to assessment's stored sheet_ columns)
+    prod_vote = sheet.get("vote_risk") or assessment.get("sheet_vote_risk") or "N/A"
+    prod_finance = sheet.get("finance_risk") or assessment.get("sheet_finance_risk") or "N/A"
+    prod_legal = sheet.get("legal_risk") or assessment.get("sheet_legal_risk") or "N/A"
+    prod_investable = sheet.get("investable") or assessment.get("sheet_investable") or "N/A"
 
     prod_grades = {
         "vote": prod_vote,
@@ -402,7 +421,7 @@ def risk_assessment_email(
         <!-- Header -->
         <div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#1d4ed8 100%);color:#ffffff;padding:28px 24px;border-radius:12px 12px 0 0;">
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:0.6;margin-bottom:4px;">AI Risk Assessment</div>
-            <h1 style="margin:0;font-size:28px;font-weight:800;">{ticker} &mdash; {target}</h1>
+            <h1 style="margin:0;font-size:28px;font-weight:800;">{f'{ticker} &mdash; {target}' if target and target != ticker else ticker}</h1>
             <p style="margin:6px 0 0 0;font-size:14px;opacity:0.85;">{header_detail_str}</p>
 
             <!-- Price bar -->
@@ -509,3 +528,41 @@ def risk_assessment_email(
     </div>
 </body>
 </html>"""
+
+
+def build_email_from_db_row(db_row: dict, ticker: str = None) -> str:
+    """Build email HTML from a deal_risk_assessments DB row.
+
+    Merges ai_response with DB columns so template has all data sources.
+    """
+    import json
+
+    row = dict(db_row)
+    ticker = ticker or row.get("ticker", "UNKNOWN")
+
+    # Parse ai_response
+    ai_resp = row.get("ai_response")
+    if isinstance(ai_resp, str):
+        ai_resp = json.loads(ai_resp) if ai_resp else {}
+    if not isinstance(ai_resp, dict):
+        ai_resp = {}
+
+    # Merge: start with AI response, overlay DB columns for template fallbacks
+    assessment = dict(ai_resp)
+    for key in ("deal_price", "current_price", "gross_spread_pct", "annualized_yield_pct",
+                "days_to_close", "sheet_vote_risk", "sheet_finance_risk", "sheet_legal_risk",
+                "sheet_investable", "sheet_prob_success", "model_used", "tokens_used",
+                "processing_time_ms", "cost_usd"):
+        if key in row and row[key] is not None:
+            assessment[key] = row[key]
+
+    # Build _meta from DB columns if not in ai_resp
+    if "_meta" not in assessment:
+        assessment["_meta"] = {
+            "model": row.get("model_used", "unknown"),
+            "tokens_used": row.get("tokens_used", 0),
+            "processing_time_ms": row.get("processing_time_ms", 0),
+            "cost_usd": row.get("cost_usd", 0),
+        }
+
+    return risk_assessment_email(assessment, ticker)
