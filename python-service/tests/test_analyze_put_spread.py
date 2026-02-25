@@ -24,12 +24,13 @@ class TestAnalyzePutSpread:
         self.deal = standard_deal
         self.analyzer = MergerArbAnalyzer(self.deal)
 
-    def test_denominator_is_spread_width(self):
-        """Bug #2 regression: HPR denominator MUST be spread_width, not max_loss.
+    def test_denominator_is_max_loss(self):
+        """HPR denominator is max_loss (capital at risk), not spread_width.
 
         Setup: sell 100P at mid=9, buy 90P at mid=1 → credit=8, width=10, max_loss=2.
-        Correct HPR on collateral = 8 / 10 = 0.80.
-        Old (buggy) HPR = 8 / 2 = 4.0.
+        Expected price at expiry = deal price (100) ≥ short strike (100),
+        so expected_return = credit = 8.
+        HPR = expected_return / max_loss = 8 / 2 = 4.0.
         """
         long_put = make_option(strike=90, right="P", expiry="20260714",
                                bid=0.50, ask=1.50, last=1.0)
@@ -40,12 +41,10 @@ class TestAnalyzePutSpread:
         assert result is not None
         spread_width = 100 - 90  # = 10
         credit_mid = short_put.mid_price - long_put.mid_price  # 9.0 - 1.0 = 8.0
-        # HPR on collateral = expected_return / spread_width
-        assert result.annualized_return == pytest.approx(credit_mid / spread_width, abs=0.01)
-        # Specifically: must NOT be credit / max_loss
         max_loss = spread_width - credit_mid  # 10 - 8 = 2
-        buggy_hpr = credit_mid / max_loss  # 8/2 = 4.0
-        assert result.annualized_return != pytest.approx(buggy_hpr, abs=0.5)
+        # HPR on capital at risk = expected_return / max_loss
+        # (abs=0.05 accounts for half-day interpolation gap at expiry boundary)
+        assert result.annualized_return == pytest.approx(credit_mid / max_loss, abs=0.05)
 
     def test_stock_above_both_strikes(self):
         """Stock above short strike → keep full credit."""

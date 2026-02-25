@@ -47,5 +47,6 @@ class TestDaysToClose:
         assert deal.days_to_close == 5
 
     def test_past_close(self):
+        """Past close date floors to 1 to avoid division-by-zero."""
         deal = DealInput("OLD", 80.0, datetime(2026, 1, 10, 12, 0))
-        assert deal.days_to_close == -5
+        assert deal.days_to_close == 1
