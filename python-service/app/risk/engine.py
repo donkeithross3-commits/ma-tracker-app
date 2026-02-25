@@ -339,8 +339,13 @@ class RiskAssessmentEngine:
         )
 
         raw_text = response.content[0].text
+        # Strip markdown code fences if present (```json ... ```)
+        stripped = raw_text.strip()
+        if stripped.startswith("```"):
+            stripped = re.sub(r"^```(?:json)?\s*\n?", "", stripped)
+            stripped = re.sub(r"\n?```\s*$", "", stripped)
         try:
-            parsed = json.loads(raw_text)
+            parsed = json.loads(stripped)
         except json.JSONDecodeError:
             logger.error("Malformed JSON from Claude for %s: %s", ticker, raw_text[:500])
             raise ValueError(f"Claude returned invalid JSON for {ticker}")

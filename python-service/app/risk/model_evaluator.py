@@ -85,7 +85,13 @@ async def _call_model(anthropic: Anthropic, model: str, prompt: str) -> dict:
     elapsed_ms = int((time.monotonic() - t0) * 1000)
 
     raw_text = response.content[0].text
-    parsed = json.loads(raw_text)
+    # Strip markdown code fences if present
+    stripped = raw_text.strip()
+    if stripped.startswith("```"):
+        import re
+        stripped = re.sub(r"^```(?:json)?\s*\n?", "", stripped)
+        stripped = re.sub(r"\n?```\s*$", "", stripped)
+    parsed = json.loads(stripped)
 
     cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
     cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
