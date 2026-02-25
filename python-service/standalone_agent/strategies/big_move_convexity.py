@@ -260,6 +260,19 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Store ticker for this instance
         self._ticker = cfg["ticker"]
 
+        # Parse risk config from frontend (flows through BMCConfig)
+        self._risk_config = {
+            "preset": config.get("risk_preset", "zero_dte_convexity"),
+            "stop_loss_enabled": config.get("risk_stop_loss_enabled", False),
+            "stop_loss_type": config.get("risk_stop_loss_type", "none"),
+            "stop_loss_trigger_pct": config.get("risk_stop_loss_trigger_pct", -5.0),
+            "trailing_enabled": config.get("risk_trailing_enabled", True),
+            "trailing_activation_pct": config.get("risk_trailing_activation_pct", 25),
+            "trailing_trail_pct": config.get("risk_trailing_trail_pct", 15),
+            "profit_targets_enabled": config.get("risk_profit_targets_enabled", True),
+            "profit_targets": config.get("risk_profit_targets", []),
+        }
+
         try:
             self._init_bmc_pipeline(cfg)
             self._start_polygon_ws(cfg)
@@ -339,12 +352,50 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._active_positions.append(position_info)
         self._positions_spawned += 1
 
+        # Update risk config from latest config (hot-reload support)
+        self._risk_config = {
+            "preset": config.get("risk_preset", self._risk_config.get("preset", "zero_dte_convexity")),
+            "stop_loss_enabled": config.get("risk_stop_loss_enabled", self._risk_config.get("stop_loss_enabled", False)),
+            "stop_loss_type": config.get("risk_stop_loss_type", self._risk_config.get("stop_loss_type", "none")),
+            "stop_loss_trigger_pct": config.get("risk_stop_loss_trigger_pct", self._risk_config.get("stop_loss_trigger_pct", -5.0)),
+            "trailing_enabled": config.get("risk_trailing_enabled", self._risk_config.get("trailing_enabled", True)),
+            "trailing_activation_pct": config.get("risk_trailing_activation_pct", self._risk_config.get("trailing_activation_pct", 25)),
+            "trailing_trail_pct": config.get("risk_trailing_trail_pct", self._risk_config.get("trailing_trail_pct", 15)),
+            "profit_targets_enabled": config.get("risk_profit_targets_enabled", self._risk_config.get("profit_targets_enabled", True)),
+            "profit_targets": config.get("risk_profit_targets", self._risk_config.get("profit_targets", [])),
+        }
+
         # Spawn risk manager if callback is wired
         if self._spawn_risk_manager is not None and self._last_signal:
             try:
                 contract_info = self._last_signal.get("option_contract", {})
+
+                # Build risk config from strategy settings
+                if self._risk_config.get("preset") != "custom":
+                    # Use preset name — RiskManagerStrategy resolves it
+                    risk_section = {"preset": self._risk_config["preset"]}
+                else:
+                    # Custom: build full config from individual fields
+                    risk_section = {
+                        "stop_loss": {
+                            "enabled": self._risk_config["stop_loss_enabled"],
+                            "type": self._risk_config["stop_loss_type"],
+                            "trigger_pct": self._risk_config["stop_loss_trigger_pct"],
+                        },
+                        "profit_taking": {
+                            "enabled": self._risk_config["profit_targets_enabled"],
+                            "targets": self._risk_config["profit_targets"],
+                            "trailing_stop": {
+                                "enabled": self._risk_config["trailing_enabled"],
+                                "activation_pct": self._risk_config["trailing_activation_pct"],
+                                "trail_pct": self._risk_config["trailing_trail_pct"],
+                            },
+                        },
+                        "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
+                    }
+
                 risk_config = {
-                    "preset": "zero_dte_convexity",
+                    **risk_section,
                     "instrument": {
                         "symbol": contract_info.get("symbol", self._ticker),
                         "secType": "OPT",

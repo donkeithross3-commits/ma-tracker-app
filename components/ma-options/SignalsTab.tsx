@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { OrderBudgetControl } from "./OrderBudgetControl";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,6 +98,16 @@ interface BMCConfig {
   straddle_richness_max: number;
   straddle_richness_ideal: number;
   options_gate_enabled: boolean;
+  // Risk management
+  risk_preset: string;
+  risk_stop_loss_enabled: boolean;
+  risk_stop_loss_type: string;
+  risk_stop_loss_trigger_pct: number;
+  risk_trailing_enabled: boolean;
+  risk_trailing_activation_pct: number;
+  risk_trailing_trail_pct: number;
+  risk_profit_targets_enabled: boolean;
+  risk_profit_targets: Array<{ trigger_pct: number; exit_pct: number }>;
 }
 
 const DEFAULT_CONFIG: BMCConfig = {
@@ -119,7 +130,68 @@ const DEFAULT_CONFIG: BMCConfig = {
   straddle_richness_max: 1.5,
   straddle_richness_ideal: 0.9,
   options_gate_enabled: false,
+  risk_preset: "zero_dte_convexity",
+  risk_stop_loss_enabled: false,
+  risk_stop_loss_type: "none",
+  risk_stop_loss_trigger_pct: -5.0,
+  risk_trailing_enabled: true,
+  risk_trailing_activation_pct: 25,
+  risk_trailing_trail_pct: 15,
+  risk_profit_targets_enabled: true,
+  risk_profit_targets: [],
 };
+
+// Risk management presets (mirrors Python RiskManagerStrategy PRESETS)
+const RISK_PRESETS: Record<string, Partial<BMCConfig>> = {
+  zero_dte_convexity: {
+    risk_stop_loss_enabled: false,
+    risk_stop_loss_type: "none",
+    risk_trailing_enabled: true,
+    risk_trailing_activation_pct: 25,
+    risk_trailing_trail_pct: 15,
+    risk_profit_targets_enabled: true,
+    risk_profit_targets: [],
+  },
+  zero_dte_lotto: {
+    risk_stop_loss_enabled: false,
+    risk_stop_loss_type: "none",
+    risk_trailing_enabled: true,
+    risk_trailing_activation_pct: 50,
+    risk_trailing_trail_pct: 25,
+    risk_profit_targets_enabled: true,
+    risk_profit_targets: [
+      { trigger_pct: 100, exit_pct: 20 },
+      { trigger_pct: 300, exit_pct: 25 },
+      { trigger_pct: 500, exit_pct: 25 },
+      { trigger_pct: 1000, exit_pct: 50 },
+    ],
+  },
+  stock_swing: {
+    risk_stop_loss_enabled: true,
+    risk_stop_loss_type: "simple",
+    risk_stop_loss_trigger_pct: -5.0,
+    risk_trailing_enabled: true,
+    risk_trailing_activation_pct: 5,
+    risk_trailing_trail_pct: 3,
+    risk_profit_targets_enabled: true,
+    risk_profit_targets: [{ trigger_pct: 10, exit_pct: 50 }],
+  },
+  conservative: {
+    risk_stop_loss_enabled: true,
+    risk_stop_loss_type: "simple",
+    risk_stop_loss_trigger_pct: -5.0,
+    risk_trailing_enabled: false,
+    risk_trailing_activation_pct: 0,
+    risk_trailing_trail_pct: 0,
+    risk_profit_targets_enabled: true,
+    risk_profit_targets: [
+      { trigger_pct: 5, exit_pct: 50 },
+      { trigger_pct: 10, exit_pct: 100 },
+    ],
+  },
+};
+
+const RISK_PRESET_NAMES = ["zero_dte_convexity", "zero_dte_lotto", "stock_swing", "conservative", "custom"] as const;
 
 // Per-ticker config overrides (mirrors _TICKER_PROFILES in Python)
 const TICKER_DEFAULTS: Record<string, Partial<BMCConfig>> = {
@@ -285,6 +357,49 @@ export default function SignalsTab() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchSignal]);
 
+  // ── Execution status polling (for OrderBudgetControl) ──
+  const [executionStatus, setExecutionStatus] = useState<{
+    running: boolean;
+    order_budget: number;
+    total_algo_orders: number;
+  } | null>(null);
+  const execPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchExecutionStatus = useCallback(async () => {
+    if (document.hidden) return;
+    try {
+      const res = await fetch("/api/ma-options/execution/status", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setExecutionStatus(data);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => {
+    if (!running) {
+      setExecutionStatus(null);
+      return () => { if (execPollRef.current) clearInterval(execPollRef.current); };
+    }
+    fetchExecutionStatus();
+    execPollRef.current = setInterval(fetchExecutionStatus, 5000);
+    return () => { if (execPollRef.current) clearInterval(execPollRef.current); };
+  }, [running, fetchExecutionStatus]);
+
+  const handleSetBudget = useCallback(async (budget: number) => {
+    const res = await fetch("/api/ma-options/execution/budget", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ budget }),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error || `Budget update failed: ${res.status}`);
+    }
+    setTimeout(fetchExecutionStatus, 300);
+  }, [fetchExecutionStatus]);
+
   // ── Start BMC (multi-ticker) ──
   const handleStart = async () => {
     setLoading(true);
@@ -354,12 +469,50 @@ export default function SignalsTab() {
   };
 
   const updateConfig = (ticker: string, key: keyof BMCConfig, value: any) => {
+    setConfigs(prev => {
+      const current = prev[ticker] || makeDefaultConfig(ticker);
+      const updated = { ...current, [key]: value };
+      // If a risk field changed (not the preset itself), switch preset to "custom"
+      if (key !== "risk_preset" && key.startsWith("risk_")) {
+        updated.risk_preset = "custom";
+      }
+      return { ...prev, [ticker]: updated };
+    });
+    setConfigDirty(prev => ({ ...prev, [ticker]: true }));
+    configDirtyRef.current[ticker] = true;
+  };
+
+  const applyRiskPreset = (ticker: string, presetName: string) => {
+    const preset = RISK_PRESETS[presetName];
+    if (!preset) {
+      updateConfig(ticker, "risk_preset", presetName);
+      return;
+    }
     setConfigs(prev => ({
       ...prev,
-      [ticker]: { ...(prev[ticker] || makeDefaultConfig(ticker)), [key]: value },
+      [ticker]: { ...(prev[ticker] || makeDefaultConfig(ticker)), ...preset, risk_preset: presetName },
     }));
     setConfigDirty(prev => ({ ...prev, [ticker]: true }));
     configDirtyRef.current[ticker] = true;
+  };
+
+  const addProfitTarget = (ticker: string) => {
+    const current = configs[ticker] || makeDefaultConfig(ticker);
+    const targets = [...(current.risk_profit_targets || []), { trigger_pct: 100, exit_pct: 25 }];
+    updateConfig(ticker, "risk_profit_targets", targets);
+  };
+
+  const removeProfitTarget = (ticker: string, idx: number) => {
+    const current = configs[ticker] || makeDefaultConfig(ticker);
+    const targets = (current.risk_profit_targets || []).filter((_, i) => i !== idx);
+    updateConfig(ticker, "risk_profit_targets", targets);
+  };
+
+  const updateProfitTarget = (ticker: string, idx: number, field: "trigger_pct" | "exit_pct", val: number) => {
+    const current = configs[ticker] || makeDefaultConfig(ticker);
+    const targets = [...(current.risk_profit_targets || [])];
+    targets[idx] = { ...targets[idx], [field]: val };
+    updateConfig(ticker, "risk_profit_targets", targets);
   };
 
   const toggleTicker = (ticker: string) => {
@@ -610,6 +763,14 @@ export default function SignalsTab() {
 
         {/* ── Config Panel ── */}
         <div className="space-y-2">
+          {running && executionStatus && (
+            <OrderBudgetControl
+              orderBudget={executionStatus.order_budget ?? 0}
+              totalAlgoOrders={executionStatus.total_algo_orders ?? 0}
+              isRunning={executionStatus.running ?? false}
+              onSetBudget={handleSetBudget}
+            />
+          )}
           <div className="bg-gray-900 border border-gray-800 rounded p-2.5">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium text-gray-300 flex items-center gap-2">
@@ -804,6 +965,166 @@ export default function SignalsTab() {
                   {activeConfig.use_delayed_data ? "15m delay" : "LIVE"}
                 </button>
               </div>
+
+              {/* ── Risk Management ── */}
+              <div className="col-span-2 border-t border-gray-800 mt-1" />
+              <div className="col-span-2 flex items-center justify-between py-0.5">
+                <label className="text-gray-400 text-xs font-medium">Risk Preset</label>
+                <select
+                  value={activeConfig.risk_preset}
+                  onChange={e => applyRiskPreset(activeTicker, e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded px-2 py-0.5 text-gray-200 text-xs inline-edit"
+                >
+                  {RISK_PRESET_NAMES.map(p => (
+                    <option key={p} value={p}>{p.replace(/_/g, " ")}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between py-0.5">
+                <label className="text-gray-400">Trailing</label>
+                <button
+                  onClick={() => updateConfig(activeTicker, "risk_trailing_enabled", !activeConfig.risk_trailing_enabled)}
+                  className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    activeConfig.risk_trailing_enabled
+                      ? "bg-green-900/50 text-green-400 border border-green-700"
+                      : "bg-gray-800 text-gray-500 border border-gray-700"
+                  }`}
+                >
+                  {activeConfig.risk_trailing_enabled ? "ON" : "OFF"}
+                </button>
+              </div>
+              {activeConfig.risk_trailing_enabled && (
+                <>
+                  <ConfigField
+                    label="Activation %"
+                    value={activeConfig.risk_trailing_activation_pct}
+                    onChange={v => updateConfig(activeTicker, "risk_trailing_activation_pct", parseFloat(v))}
+                    type="number"
+                    step="1"
+                  />
+                  <ConfigField
+                    label="Trail %"
+                    value={activeConfig.risk_trailing_trail_pct}
+                    onChange={v => updateConfig(activeTicker, "risk_trailing_trail_pct", parseFloat(v))}
+                    type="number"
+                    step="1"
+                  />
+                </>
+              )}
+
+              <div className="flex items-center justify-between py-0.5">
+                <label className="text-gray-400">Stop Loss</label>
+                <button
+                  onClick={() => updateConfig(activeTicker, "risk_stop_loss_enabled", !activeConfig.risk_stop_loss_enabled)}
+                  className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    activeConfig.risk_stop_loss_enabled
+                      ? "bg-red-900/50 text-red-400 border border-red-700"
+                      : "bg-gray-800 text-gray-500 border border-gray-700"
+                  }`}
+                >
+                  {activeConfig.risk_stop_loss_enabled ? "ON" : "OFF"}
+                </button>
+              </div>
+              {activeConfig.risk_stop_loss_enabled && (
+                <>
+                  <div className="flex items-center justify-between py-0.5">
+                    <label className="text-gray-400">Type</label>
+                    <select
+                      value={activeConfig.risk_stop_loss_type}
+                      onChange={e => updateConfig(activeTicker, "risk_stop_loss_type", e.target.value)}
+                      className="bg-gray-800 border border-gray-700 rounded px-2 py-0.5 text-gray-200 text-xs inline-edit"
+                    >
+                      <option value="simple">Simple</option>
+                      <option value="laddered">Laddered</option>
+                    </select>
+                  </div>
+                  {activeConfig.risk_stop_loss_type === "simple" && (
+                    <ConfigField
+                      label="Trigger %"
+                      value={activeConfig.risk_stop_loss_trigger_pct}
+                      onChange={v => updateConfig(activeTicker, "risk_stop_loss_trigger_pct", parseFloat(v))}
+                      type="number"
+                      step="0.5"
+                    />
+                  )}
+                </>
+              )}
+
+              <div className="flex items-center justify-between py-0.5">
+                <label className="text-gray-400">Profit Targets</label>
+                <button
+                  onClick={() => updateConfig(activeTicker, "risk_profit_targets_enabled", !activeConfig.risk_profit_targets_enabled)}
+                  className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    activeConfig.risk_profit_targets_enabled
+                      ? "bg-green-900/50 text-green-400 border border-green-700"
+                      : "bg-gray-800 text-gray-500 border border-gray-700"
+                  }`}
+                >
+                  {activeConfig.risk_profit_targets_enabled ? "ON" : "OFF"}
+                </button>
+              </div>
+              {activeConfig.risk_profit_targets_enabled && activeConfig.risk_profit_targets.length > 0 && (
+                <div className="col-span-2">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500">
+                        <th className="text-left py-0.5">Trigger %</th>
+                        <th className="text-left py-0.5">Exit %</th>
+                        <th className="w-6"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeConfig.risk_profit_targets.map((t, i) => (
+                        <tr key={i}>
+                          <td className="py-0.5">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={t.trigger_pct}
+                              onChange={e => {
+                                const v = parseFloat(e.target.value);
+                                if (!isNaN(v)) updateProfitTarget(activeTicker, i, "trigger_pct", v);
+                              }}
+                              className="w-16 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-right text-gray-200 text-xs inline-edit"
+                            />
+                          </td>
+                          <td className="py-0.5">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={t.exit_pct}
+                              onChange={e => {
+                                const v = parseFloat(e.target.value);
+                                if (!isNaN(v)) updateProfitTarget(activeTicker, i, "exit_pct", v);
+                              }}
+                              className="w-16 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-right text-gray-200 text-xs inline-edit"
+                            />
+                          </td>
+                          <td className="py-0.5 text-center">
+                            <button
+                              onClick={() => removeProfitTarget(activeTicker, i)}
+                              className="text-red-500 hover:text-red-400 text-xs px-1"
+                            >
+                              &times;
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {activeConfig.risk_profit_targets_enabled && (
+                <div className="col-span-2">
+                  <button
+                    onClick={() => addProfitTarget(activeTicker)}
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    + Add Target
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -863,6 +1184,15 @@ function configFromAgent(c: any, ticker: string): BMCConfig {
     straddle_richness_max: c.straddle_richness_max ?? defaults.straddle_richness_max,
     straddle_richness_ideal: c.straddle_richness_ideal ?? defaults.straddle_richness_ideal,
     options_gate_enabled: c.options_gate_enabled ?? defaults.options_gate_enabled,
+    risk_preset: c.risk_preset ?? defaults.risk_preset,
+    risk_stop_loss_enabled: c.risk_stop_loss_enabled ?? defaults.risk_stop_loss_enabled,
+    risk_stop_loss_type: c.risk_stop_loss_type ?? defaults.risk_stop_loss_type,
+    risk_stop_loss_trigger_pct: c.risk_stop_loss_trigger_pct ?? defaults.risk_stop_loss_trigger_pct,
+    risk_trailing_enabled: c.risk_trailing_enabled ?? defaults.risk_trailing_enabled,
+    risk_trailing_activation_pct: c.risk_trailing_activation_pct ?? defaults.risk_trailing_activation_pct,
+    risk_trailing_trail_pct: c.risk_trailing_trail_pct ?? defaults.risk_trailing_trail_pct,
+    risk_profit_targets_enabled: c.risk_profit_targets_enabled ?? defaults.risk_profit_targets_enabled,
+    risk_profit_targets: c.risk_profit_targets ?? defaults.risk_profit_targets,
   };
 }
 
