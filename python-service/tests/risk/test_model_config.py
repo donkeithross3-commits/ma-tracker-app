@@ -81,13 +81,13 @@ def test_get_model_unknown_falls_back():
 
 
 def test_pricing_opus():
-    inp, out = get_pricing("claude-opus-4-6-20250514")
+    inp, out = get_pricing("claude-opus-4-6")
     assert inp == 5.0
     assert out == 25.0
 
 
 def test_pricing_sonnet():
-    inp, out = get_pricing("claude-sonnet-4-6-20250514")
+    inp, out = get_pricing("claude-sonnet-4-6")
     assert inp == 3.0
     assert out == 15.0
 

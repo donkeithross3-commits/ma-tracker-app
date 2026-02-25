@@ -14,19 +14,21 @@ import os
 
 # Task -> model mapping with environment variable overrides
 MODEL_REGISTRY = {
-    "full_assessment": os.environ.get("RISK_MODEL_FULL", "claude-opus-4-6-20250514"),
-    "delta_assessment": os.environ.get("RISK_MODEL_DELTA", "claude-sonnet-4-6-20250514"),
+    "full_assessment": os.environ.get("RISK_MODEL_FULL", "claude-opus-4-6"),
+    "delta_assessment": os.environ.get("RISK_MODEL_DELTA", "claude-sonnet-4-6"),
     "delta_minor": os.environ.get("RISK_MODEL_MINOR", "claude-haiku-4-5-20251001"),
     "run_summary": os.environ.get("RISK_MODEL_SUMMARY", "claude-haiku-4-5-20251001"),
 }
 
 # Per-million token pricing: (input_cost, output_cost)
 MODEL_PRICING = {
+    "claude-opus-4-6": (5.0, 25.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5-20251001": (1.0, 5.0),
+    # Legacy entries for backward compatibility
     "claude-opus-4-6-20250514": (5.0, 25.0),
     "claude-sonnet-4-6-20250514": (3.0, 15.0),
     "claude-sonnet-4-20250514": (3.0, 15.0),
-    "claude-haiku-4-5-20251001": (1.0, 5.0),
-    # Legacy entries for backward compatibility
     "claude-opus-4-20250514": (15.0, 75.0),
     "claude-haiku-3-5-20241022": (0.80, 4.0),
 }
@@ -39,10 +41,13 @@ CACHE_READ_MULTIPLIER = 0.10      # 90% discount to read from cache
 # Minimum cached token thresholds per model family
 # Content below this threshold won't be cached by the API
 CACHE_MIN_TOKENS = {
+    "claude-opus-4-6": 4096,
+    "claude-sonnet-4-6": 1024,
+    "claude-haiku-4-5-20251001": 4096,
+    # Legacy entries
     "claude-opus-4-6-20250514": 4096,
     "claude-sonnet-4-6-20250514": 1024,
     "claude-sonnet-4-20250514": 1024,
-    "claude-haiku-4-5-20251001": 4096,
 }
 
 
