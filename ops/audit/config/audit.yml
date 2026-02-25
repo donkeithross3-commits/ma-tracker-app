@@ -18,23 +18,29 @@ allowed_ports:
   public:
     - {port: 443, process: "caddy", note: "HTTPS via Cloudflare"}
     - {port: 80, process: "caddy", note: "HTTP redirect"}
+    - {port: 22, process: "sshd", note: "SSH"}
+    - {port: 3000, process: "node", note: "Next.js web (Docker)"}
+    - {port: 5432, process: "postgres", note: "PostgreSQL (Docker) — TODO: bind to 127.0.0.1"}
+    - {port: 8000, process: "python", note: "Trading service (bare-metal)"}
   localhost:
     - {port: 3000, process: "node", note: "Next.js web"}
     - {port: 5432, process: "postgres", note: "PostgreSQL"}
     - {port: 8000, process: "python", note: "Trading service"}
     - {port: 8001, process: "python", note: "Portfolio service"}
+    - {port: 2019, process: "caddy", note: "Caddy admin API"}
+    - {port: 53, process: "systemd-resolved", note: "DNS resolver"}
 
 expected_containers:
-  always_running: ["web", "python-portfolio", "postgres"]
+  always_running: ["ma-tracker-app-web", "python-portfolio", "ma-tracker-postgres"]
   on_demand: ["krj-batch"]
 
-containers_allowed_root: ["postgres"]
+containers_allowed_root: ["ma-tracker-postgres"]
 
 external_url: "https://dr3-dashboard.com"
 
 database:
   name: "ma_tracker"
-  container: "postgres"
+  container: "ma-tracker-postgres"
 
 expected_scheduler_jobs:
   - morning_sheet_ingest
@@ -59,9 +65,8 @@ weekly_only_checks:
   - "app/bandit_scan"
   - "app/eslint_security"
 
-suppressions: []
-  # Example:
-  # - check: "pip_audit"
-  #   id: "PYSEC-2024-XXXX"
-  #   reason: "Not exploitable in our usage"
-  #   expires: "2026-04-01"
+suppressions:
+  - check: "app/npm_audit"
+    id: "npm_not_installed"
+    reason: "npm not available on bare-metal droplet — Node runs inside Docker only"
+    expires: "2027-01-01"
