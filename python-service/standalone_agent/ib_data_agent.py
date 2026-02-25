@@ -982,7 +982,12 @@ class IBDataAgent:
                 results.append({"error": f"Unknown strategy_type: {strategy_type}"})
                 continue
 
-            result = self.execution_engine.load_strategy(strategy_id, strategy, config)
+            # Run load_strategy in a thread pool so strategy.on_start()
+            # (which performs blocking REST calls for bootstrap + backfill)
+            # doesn't freeze the asyncio event loop and cause relay timeouts.
+            result = await self._run_in_thread(
+                self.execution_engine.load_strategy, strategy_id, strategy, config
+            )
             results.append(result)
 
         # Start the evaluation loop
