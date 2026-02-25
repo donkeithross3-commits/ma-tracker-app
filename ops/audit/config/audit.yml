@@ -59,8 +59,10 @@ expected_scheduler_jobs:
 alert:
   recipients:
     email: ["don.keith.ross3@gmail.com"]
-  sendgrid_env_var: "SENDGRID_API_KEY"
-  from_email: "audit@dr3-dashboard.com"
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  smtp_user: "don.keith.ross3@gmail.com"
+  from_email: "don.keith.ross3@gmail.com"
 
 weekly_only_checks:
   - "app/bandit_scan"
