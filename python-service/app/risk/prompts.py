@@ -39,9 +39,23 @@ For these 3 factors, assign a numeric score from 0 to 10:
 7. **Timing** — Days to expected close, outside date proximity, extension risk, delays
 8. **Competing Bid** — Likelihood of topping bid, strategic interest, go-shop results
 
+## Grade Comparison (CRITICAL)
+
+The Google Sheet contains the production team's grades for Vote, Financing, Legal, and Investability.
+Your primary job is to COMPARE your independent assessment against the production grades.
+
+For each graded factor, you MUST provide a "vs_production" field:
+- "agree" if your grade matches the production sheet
+- "disagree" if your grade differs — explain WHY you differ in the detail field
+- "no_production_grade" if the sheet doesn't have a grade for this factor
+
+When you disagree with production, your detail field should explicitly reference the production grade
+and explain what evidence leads you to a different conclusion.
+
 ## Additional Assessments
 
 - **Investability**: Is this deal investable? Answer "Yes", "No", or "Conditional" with reasoning.
+  Compare against the production sheet's investable flag.
 - **Probability of Success**: Your independent estimate (0-100) of deal completion probability.
 - **Probability of Higher Offer**: Estimate (0-100) of a competing or sweetened bid.
 - **Break Price Estimate**: If the deal breaks, what price would the target trade to?
@@ -50,15 +64,16 @@ For these 3 factors, assign a numeric score from 0 to 10:
 - **Key Risks**: List the top 3-5 specific risks to this deal.
 - **Watchlist Items**: List things to monitor in the coming days/weeks.
 - **Needs Attention**: Flag true if any graded factor is High, any supplemental score >= 7, or there are significant recent changes.
+- **Production Disagreements**: List any factors where you disagree with the production sheet grades, with a brief explanation for each.
 
 You MUST respond with valid JSON in exactly this format:
 {
     "grades": {
-        "vote": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.85},
-        "financing": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.90},
-        "legal": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.80},
-        "regulatory": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.75},
-        "mac": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.70}
+        "vote": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.85, "vs_production": "agree|disagree|no_production_grade"},
+        "financing": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.90, "vs_production": "agree|disagree|no_production_grade"},
+        "legal": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.80, "vs_production": "agree|disagree|no_production_grade"},
+        "regulatory": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.75, "vs_production": "no_production_grade"},
+        "mac": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.70, "vs_production": "no_production_grade"}
     },
     "supplemental_scores": {
         "market": {"score": 0, "detail": "..."},
@@ -67,6 +82,7 @@ You MUST respond with valid JSON in exactly this format:
     },
     "investable_assessment": "Yes|No|Conditional",
     "investable_reasoning": "...",
+    "investable_vs_production": "agree|disagree",
     "probability_of_success": 95.5,
     "probability_of_higher_offer": 12.0,
     "break_price_estimate": 28.50,
@@ -75,7 +91,8 @@ You MUST respond with valid JSON in exactly this format:
     "key_risks": ["risk1", "risk2", "risk3"],
     "watchlist_items": ["item1", "item2"],
     "needs_attention": true,
-    "attention_reason": "reason or null if needs_attention is false"
+    "attention_reason": "reason or null if needs_attention is false",
+    "production_disagreements": ["Factor: reason for disagreement", "..."]
 }
 
 Be precise and concise. Base grades and scores on the evidence provided, not speculation.
