@@ -4,6 +4,8 @@ Grade-based system: Low/Medium/High for 5 sheet-aligned factors,
 0-10 supplemental scores for 3 factors the sheet does not assess.
 """
 
+from datetime import date
+
 RISK_ASSESSMENT_SYSTEM_PROMPT = """You are an expert M&A risk analyst specializing in merger arbitrage.
 You assess the risk profile of pending M&A deals by analyzing multiple risk factors.
 
@@ -36,7 +38,11 @@ For these 3 factors, assign a numeric score from 0 to 10:
 - 7-10: High risk (significant concern)
 
 6. **Market** — Spread behavior, unusual widening, volume anomalies, market sentiment
-7. **Timing** — Days to expected close, outside date proximity, extension risk, delays
+7. **Timing** — Days to expected close, outside date proximity, extension risk, delays.
+   IMPORTANT: Calculate exact months from the provided Today's Date to the Expected Close Date.
+   Do NOT estimate timing from training data or general knowledge — use the actual dates provided.
+   If your estimated close timing differs materially from the sheet's Expected Close Date,
+   include a production_disagreement with factor "timing", citing specific filings/dates as evidence.
 8. **Competing Bid** — Likelihood of topping bid, strategic interest, go-shop results
 
 ## Grade Comparison (CRITICAL)
@@ -190,6 +196,10 @@ def build_deal_assessment_prompt(context: dict) -> str:
                  'live_price', 'sheet_comparison'.
     """
     sections = []
+
+    # Anchor the model to the real current date
+    sections.append(f"Today's Date: {date.today().isoformat()}")
+    sections.append("")
 
     # Section 1: Sheet row data (core deal metrics)
     row = context.get("sheet_row")
@@ -422,6 +432,10 @@ def build_delta_assessment_prompt(
     """
     sections = []
     ticker = context.get("ticker", "UNKNOWN")
+
+    # Anchor the model to the real current date
+    sections.append(f"Today's Date: {date.today().isoformat()}")
+    sections.append("")
 
     sections.append(f"## Delta Assessment for {ticker}")
     sections.append(f"Change significance: {significance}")
