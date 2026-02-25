@@ -93,23 +93,23 @@ probe() {
 # 1. Next.js web app — 200 or 302 (auth redirect) are both acceptable
 probe "web_nextjs" "http://localhost:3000/" "200|302"
 
-# 2. Portfolio service health (no host port — use docker exec)
-log_info "Probing portfolio_health via docker exec"
+# 2. Portfolio service health (no host port, no curl in container — use python urllib)
+log_info "Probing portfolio_health via docker exec python"
 portfolio_health_out=""
-if portfolio_health_out=$(docker exec python-portfolio curl -sf --max-time 10 http://localhost:8001/health 2>&1); then
+if portfolio_health_out=$(docker exec python-portfolio python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8001/health').read().decode())" 2>&1); then
     json_finding "portfolio_health healthy" "$SEV_INFO" \
-        "Portfolio service /health responded OK via docker exec"
+        "Portfolio service /health responded OK: ${portfolio_health_out}"
 else
     json_finding "portfolio_health unreachable" "$SEV_ALERT" \
         "Portfolio service /health unreachable via docker exec: ${portfolio_health_out:-no output}"
 fi
 
-# 3. Portfolio scheduler health (no host port — use docker exec)
-log_info "Probing portfolio_scheduler via docker exec"
+# 3. Portfolio scheduler health (no host port, no curl in container — use python urllib)
+log_info "Probing portfolio_scheduler via docker exec python"
 scheduler_health_out=""
-if scheduler_health_out=$(docker exec python-portfolio curl -sf --max-time 10 http://localhost:8001/scheduler/health 2>&1); then
+if scheduler_health_out=$(docker exec python-portfolio python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8001/scheduler/health').read().decode())" 2>&1); then
     json_finding "portfolio_scheduler healthy" "$SEV_INFO" \
-        "Scheduler /health responded OK via docker exec"
+        "Scheduler /health responded OK"
 else
     json_finding "portfolio_scheduler unreachable" "$SEV_ALERT" \
         "Scheduler /health unreachable via docker exec: ${scheduler_health_out:-no output}"

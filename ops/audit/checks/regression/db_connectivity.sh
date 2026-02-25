@@ -21,7 +21,8 @@ fi
 # Determine database name from audit.yml or use default
 # ---------------------------------------------------------------------------
 db_name="$(read_config 'database.name' 2>/dev/null || echo "ma_tracker")"
-pg_container="$(read_config 'database.container' 2>/dev/null || echo "postgres")"
+pg_container="$(read_config 'database.container' 2>/dev/null || echo "ma-tracker-postgres")"
+pg_user="$(read_config 'database.user' 2>/dev/null || echo "ma_user")"
 
 log_info "Testing DB connectivity: container=${pg_container}, database=${db_name}"
 
@@ -32,7 +33,7 @@ log_info "Testing DB connectivity: container=${pg_container}, database=${db_name
 connectivity_ok=false
 
 select1_output="$(docker exec "$pg_container" \
-  psql -U postgres -d "$db_name" -t -A \
+  psql -U "$pg_user" -d "$db_name" -t -A \
   -c "BEGIN TRANSACTION READ ONLY; SELECT 1; COMMIT;" 2>&1)" || true
 
 if echo "$select1_output" | grep -q "^1$"; then
@@ -52,11 +53,11 @@ artifact_file="${CHECK_ARTIFACT_DIR}/db_stats.json"
 echo "{" > "$artifact_file"
 
 conn_count="$(docker exec "$pg_container" \
-  psql -U postgres -d "$db_name" -t -A \
+  psql -U "$pg_user" -d "$db_name" -t -A \
   -c "SELECT count(*) FROM pg_stat_activity;" 2>/dev/null || echo "")"
 
 max_conns="$(docker exec "$pg_container" \
-  psql -U postgres -d "$db_name" -t -A \
+  psql -U "$pg_user" -d "$db_name" -t -A \
   -c "SHOW max_connections;" 2>/dev/null || echo "")"
 
 if [[ -n "$conn_count" && -n "$max_conns" ]]; then
@@ -84,7 +85,7 @@ fi
 # Database size
 # ---------------------------------------------------------------------------
 db_size="$(docker exec "$pg_container" \
-  psql -U postgres -d "$db_name" -t -A \
+  psql -U "$pg_user" -d "$db_name" -t -A \
   -c "SELECT pg_size_pretty(pg_database_size(current_database()));" 2>/dev/null || echo "")"
 
 if [[ -n "$db_size" ]]; then

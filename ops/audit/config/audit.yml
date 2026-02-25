@@ -41,6 +41,7 @@ external_url: "https://dr3-dashboard.com"
 database:
   name: "ma_tracker"
   container: "ma-tracker-postgres"
+  user: "ma_user"
 
 expected_scheduler_jobs:
   - morning_sheet_ingest

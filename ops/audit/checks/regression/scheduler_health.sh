@@ -17,8 +17,8 @@ log_info "Fetching scheduler health: ${SCHEDULER_URL}"
 
 response_file="${CHECK_ARTIFACT_DIR}/scheduler_response.json"
 
-# Use docker exec since python-portfolio has no host port mapping
-if ! docker exec python-portfolio curl -sf --max-time 10 "$SCHEDULER_URL" > "$response_file" 2>&1; then
+# Use docker exec with python urllib (no curl in slim container)
+if ! docker exec python-portfolio python -c "import urllib.request; print(urllib.request.urlopen('${SCHEDULER_URL}').read().decode())" > "$response_file" 2>&1; then
   json_finding "scheduler_unreachable" "$SEV_ALERT" \
     "Scheduler health endpoint unreachable at ${SCHEDULER_URL} via docker exec"
   finalize_check
