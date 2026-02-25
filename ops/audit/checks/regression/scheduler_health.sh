@@ -17,7 +17,7 @@ log_info "Fetching scheduler health: ${SCHEDULER_URL}"
 
 response_file="${CHECK_ARTIFACT_DIR}/scheduler_response.json"
 
-# Use docker exec with python urllib (no curl in slim container)
+# Use docker exec with python urllib (no curl in slim container, no host port)
 if ! docker exec python-portfolio python -c "import urllib.request; print(urllib.request.urlopen('${SCHEDULER_URL}').read().decode())" > "$response_file" 2>&1; then
   json_finding "scheduler_unreachable" "$SEV_ALERT" \
     "Scheduler health endpoint unreachable at ${SCHEDULER_URL} via docker exec"
@@ -31,6 +31,13 @@ if [[ ! -s "$response_file" ]]; then
 fi
 
 log_info "Scheduler health response received"
+
+# Fetch the full jobs list for individual job verification
+jobs_file="${CHECK_ARTIFACT_DIR}/scheduler_jobs.json"
+if docker exec python-portfolio python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8001/scheduler/jobs').read().decode())" > "$jobs_file" 2>&1; then
+  log_info "Scheduler jobs list retrieved for verification"
+  response_file="$jobs_file"
+fi
 
 # ---------------------------------------------------------------------------
 # Read expected jobs from audit.yml
