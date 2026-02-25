@@ -9,12 +9,16 @@ export function SupplementalScoreCard({ label, score, detail, hasDisagreement }:
   hasDisagreement?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [isClamped, setIsClamped] = useState(false);
+  const [overflow, setOverflow] = useState<"none" | "minor" | "major">("none");
   const textRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     const el = textRef.current;
-    if (el) setIsClamped(el.scrollHeight > el.clientHeight + 1);
+    if (!el) return;
+    const hidden = el.scrollHeight - el.clientHeight;
+    if (hidden <= 1) setOverflow("none");
+    else if (hidden <= el.clientHeight) setOverflow("minor");
+    else setOverflow("major");
   }, [detail]);
 
   if (score === null) return null;
@@ -24,6 +28,8 @@ export function SupplementalScoreCard({ label, score, detail, hasDisagreement }:
   else if (score >= 6) barColor = "bg-orange-400";
   else if (score >= 4) barColor = "bg-yellow-400";
   else if (score >= 2) barColor = "bg-lime-400";
+
+  const showFull = expanded || overflow === "minor";
 
   return (
     <div className={`bg-gray-800/50 rounded p-2 ${hasDisagreement ? "border border-amber-500/40" : ""}`}>
@@ -41,11 +47,11 @@ export function SupplementalScoreCard({ label, score, detail, hasDisagreement }:
         <>
           <p
             ref={textRef}
-            className={`text-xs text-gray-500 ${expanded ? "" : "line-clamp-2"}`}
+            className={`text-xs text-gray-500 ${showFull ? "" : "line-clamp-2"}`}
           >
             {detail}
           </p>
-          {(isClamped || expanded) && (
+          {overflow === "major" && (
             <button
               onClick={() => setExpanded(!expanded)}
               className="text-[11px] text-gray-600 hover:text-gray-300 transition-colors flex items-center gap-1 mt-1"
