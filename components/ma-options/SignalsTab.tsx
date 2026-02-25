@@ -17,6 +17,9 @@ interface SignalState {
   signals_generated: number;
   positions_spawned: number;
   last_decision_time: number;
+  model_version: string;
+  model_ticker: string;
+  model_type: string;
   current_signal: {
     timestamp: string;
     probability: number;
@@ -555,6 +558,9 @@ export default function SignalsTab() {
           const isActive = activeTicker === t;
           const isEnabled = enabledTickers.includes(t);
           const isRunning = runningTickers.includes(t);
+          const strat = strategies.find(s => s.ticker === t);
+          const hasModel = strat?.signal?.model_version;
+          const hasFailed = strat?.signal?.startup_error;
           return (
             <div key={t} className="flex items-center gap-1">
               {!running && (
@@ -567,18 +573,31 @@ export default function SignalsTab() {
               )}
               <button
                 onClick={() => setActiveTicker(t)}
+                title={
+                  hasModel ? `Model: ${strat?.signal?.model_version} (${strat?.signal?.model_type})`
+                  : hasFailed ? `Error: ${strat?.signal?.startup_error}`
+                  : isRunning ? "Loading..."
+                  : undefined
+                }
                 className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
                   isActive
                     ? "bg-blue-600 text-white"
-                    : isRunning
-                      ? "bg-green-900/30 text-green-400 hover:bg-green-900/50"
-                      : isEnabled
-                        ? "bg-blue-900/30 text-blue-400 hover:bg-blue-900/50"
-                        : "text-gray-500 hover:text-gray-300"
+                    : hasFailed
+                      ? "bg-red-900/30 text-red-400 hover:bg-red-900/50"
+                      : isRunning
+                        ? "bg-green-900/30 text-green-400 hover:bg-green-900/50"
+                        : isEnabled
+                          ? "bg-blue-900/30 text-blue-400 hover:bg-blue-900/50"
+                          : "text-gray-500 hover:text-gray-300"
                 }`}
               >
                 {t}
-                {running && isRunning && !isActive && <span className="ml-1 text-[9px]">{"\u25CF"}</span>}
+                {running && isRunning && hasModel && !isActive && (
+                  <span className="ml-1 text-[9px]">{"\u25CF"}</span>
+                )}
+                {running && hasFailed && (
+                  <span className="ml-1 text-[9px] text-red-400">{"\u26A0"}</span>
+                )}
               </button>
             </div>
           );
@@ -630,7 +649,14 @@ export default function SignalsTab() {
         </div>
       )}
 
-      {signal?.startup_error && (
+      {/* Per-ticker startup errors (show all, not just active) */}
+      {running && strategies.filter(s => s.signal?.startup_error).map(s => (
+        <div key={s.ticker} className="bg-red-900/30 border border-red-800 text-red-300 text-sm px-3 py-1.5 rounded">
+          <span className="font-medium">{s.ticker}:</span> {s.signal?.startup_error}
+        </div>
+      ))}
+      {/* Non-running startup error for active ticker */}
+      {!running && signal?.startup_error && (
         <div className="bg-red-900/30 border border-red-800 text-red-300 text-sm px-3 py-1.5 rounded">
           Startup error: {signal.startup_error}
         </div>
@@ -640,8 +666,13 @@ export default function SignalsTab() {
         {/* ── Signal Panel ── */}
         <div className="col-span-2 space-y-3">
           <div className="bg-gray-900 border border-gray-800 rounded p-3">
-            <h3 className="text-sm font-medium text-gray-300 mb-2">
-              Current Signal {activeTicker && <span className="text-blue-400">({activeTicker})</span>}
+            <h3 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+              <span>Current Signal {activeTicker && <span className="text-blue-400">({activeTicker})</span>}</span>
+              {signal?.model_version && (
+                <span className="text-[10px] text-gray-600 font-normal" title={`Model: ${signal.model_version}`}>
+                  {signal.model_type}/{signal.model_ticker || "?"}
+                </span>
+              )}
             </h3>
             {currentSig ? (
               <div className="space-y-2">
@@ -685,7 +716,13 @@ export default function SignalsTab() {
               </div>
             ) : (
               <div className="text-gray-600 text-sm">
-                {running ? "Waiting for first decision cycle..." : "Strategy not running"}
+                {signal?.startup_error ? (
+                  <span className="text-red-400">Failed to start: {signal.startup_error}</span>
+                ) : running ? (
+                  "Waiting for first decision cycle..."
+                ) : (
+                  "Strategy not running"
+                )}
               </div>
             )}
           </div>

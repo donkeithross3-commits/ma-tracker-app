@@ -229,6 +229,11 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._started = False
         self._startup_error: str = ""
 
+        # Model metadata (populated in on_start)
+        self._model_version: str = ""
+        self._model_ticker: str = ""
+        self._model_type: str = ""
+
     # ------------------------------------------------------------------
     # ExecutionStrategy interface
     # ------------------------------------------------------------------
@@ -464,6 +469,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "signals_generated": self._signals_generated,
             "positions_spawned": self._positions_spawned,
             "last_decision_time": self._last_decision_time,
+            "model_version": self._model_version,
+            "model_ticker": self._model_ticker,
+            "model_type": self._model_type,
         }
 
         # Current signal
@@ -525,17 +533,21 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             registry_path = os.path.join(_BMC_PATH, "big_move_convexity", "models", "registry")
 
         registry = ModelRegistry(registry_path)
-        prod_version = registry.get_production()
+        prod_version = registry.get_production(ticker=self._ticker)
         if prod_version is None:
             raise RuntimeError(
-                f"No production model registered in {registry_path}. "
+                f"No production model for ticker '{self._ticker}' in {registry_path}. "
                 "Run scripts/train_production_model.py first."
             )
 
         self._model = registry.load(prod_version.version_id)
+        self._model_version = prod_version.version_id
+        self._model_ticker = prod_version.ticker
+        self._model_type = self._model.model_type
         logger.info(
-            "Loaded production model: %s (type=%s, features=%d)",
+            "Loaded production model: %s (ticker=%s, type=%s, features=%d)",
             prod_version.version_id,
+            prod_version.ticker,
             self._model.model_type,
             len(self._model.feature_names),
         )
