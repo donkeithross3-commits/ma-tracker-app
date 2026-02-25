@@ -1392,8 +1392,8 @@ class MergerArbAnalyzer:
         
         # Add top 3 single calls from each expiration (sorted by annualized return)
         for expiry, expiry_calls in single_calls_by_expiry.items():
-            sorted_calls = sorted(expiry_calls, key=lambda x: x.annualized_return, reverse=True)
-            opportunities.extend(sorted_calls[:3])
+            sorted_calls = sorted(expiry_calls, key=lambda x: x.annualized_return_ft, reverse=True)
+            opportunities.extend([o for o in sorted_calls[:3] if o.annualized_return_ft > 0])
 
         # Analyze COVERED CALLS - sell calls at/near deal price against long stock
         covered_calls_by_expiry = defaultdict(list)
@@ -1407,8 +1407,8 @@ class MergerArbAnalyzer:
 
         # Add top 3 covered calls from each expiration (sorted by annualized return)
         for expiry, expiry_ccs in covered_calls_by_expiry.items():
-            expiry_ccs.sort(key=lambda x: x.annualized_return, reverse=True)
-            opportunities.extend(expiry_ccs[:3])
+            expiry_ccs.sort(key=lambda x: x.annualized_return_ft, reverse=True)
+            opportunities.extend([o for o in expiry_ccs[:3] if o.annualized_return_ft > 0])
 
         # Group options by expiration - spreads MUST use same expiration
         options_by_expiry = defaultdict(list)
@@ -1447,8 +1447,8 @@ class MergerArbAnalyzer:
 
         # Add top 5 call spreads from each expiration (sorted by annualized return)
         for expiry, expiry_spreads in spreads_by_expiry.items():
-            expiry_spreads.sort(key=lambda x: x.annualized_return, reverse=True)
-            opportunities.extend(expiry_spreads[:5])
+            expiry_spreads.sort(key=lambda x: x.annualized_return_ft, reverse=True)
+            opportunities.extend([o for o in expiry_spreads[:5] if o.annualized_return_ft > 0])
 
         # Analyze PUT SPREADS - only within same expiration month
         # Collect put spreads per expiration to ensure we show top 5 from each
@@ -1483,8 +1483,8 @@ class MergerArbAnalyzer:
 
         # Add top 5 put spreads from each expiration (sorted by annualized return)
         for expiry, expiry_put_spreads in put_spreads_by_expiry.items():
-            expiry_put_spreads.sort(key=lambda x: x.annualized_return, reverse=True)
-            opportunities.extend(expiry_put_spreads[:5])
+            expiry_put_spreads.sort(key=lambda x: x.annualized_return_ft, reverse=True)
+            opportunities.extend([o for o in expiry_put_spreads[:5] if o.annualized_return_ft > 0])
 
         logger.info(
             "Options scan for %s: %d opportunities (calls=%d, cc=%d, spreads=%d, put_spreads=%d)",

@@ -164,6 +164,7 @@ interface OpportunityResult {
   entry_cost: number;
   max_profit: number;
   annualized_return: number;
+  annualized_return_ft: number;
   notes: string;
 }
 
@@ -765,7 +766,7 @@ export default function DealDetailPage() {
                   const c1 = b.contracts[1];
                   if (!c0) return <span className="text-gray-600">-</span>;
                   const expLabel = fmtExpiry(c0.expiry);
-                  const ann = (b.annualized_return * 100).toFixed(1);
+                  const ann = (b.annualized_return_ft * 100).toFixed(1);
 
                   switch (type) {
                     case "covered_call":

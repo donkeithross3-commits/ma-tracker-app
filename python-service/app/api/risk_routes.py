@@ -1199,7 +1199,7 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
 
     categories = {}
     for strategy, opps in by_strategy.items():
-        opps.sort(key=lambda x: x.annualized_return, reverse=True)
+        opps.sort(key=lambda x: x.annualized_return_ft, reverse=True)
         categories[strategy] = {
             "best": _trade_opportunity_to_dict(opps[0]),
             "count": len(opps),
