@@ -264,3 +264,126 @@ def build_deal_assessment_prompt(context: dict) -> str:
         sections.append("")
 
     return "\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# Delta assessment prompts (Phase 3)
+# ---------------------------------------------------------------------------
+
+RISK_DELTA_SYSTEM_PROMPT = """You are an expert M&A risk analyst updating a previous assessment.
+
+You will receive:
+1. Your previous assessment (grades, scores, estimates, reasoning)
+2. A list of what changed since yesterday
+
+Your job: update grades and scores ONLY where the new information warrants it.
+Preserve unchanged grades/scores exactly as they were. Update reasoning/detail
+fields to reference new developments where relevant.
+
+Respond with the SAME JSON format as a full assessment. Every field must be present.
+If a grade hasn't changed, keep the previous value but you may update the detail text.
+
+Be precise and concise. Only change grades when evidence clearly justifies it.
+"""
+
+
+def build_delta_assessment_prompt(
+    context: dict,
+    prev_assessment: dict,
+    changes: list[str],
+    significance: str,
+) -> str:
+    """Build a delta prompt with yesterday's assessment + only changed data.
+
+    Much smaller than a full prompt: includes the compact previous assessment
+    and only the sections that actually changed.
+    """
+    sections = []
+    ticker = context.get("ticker", "UNKNOWN")
+
+    sections.append(f"## Delta Assessment for {ticker}")
+    sections.append(f"Change significance: {significance}")
+    sections.append("")
+
+    # Previous assessment (compact)
+    sections.append("## YOUR PREVIOUS ASSESSMENT")
+    if prev_assessment:
+        # Grades
+        for f in ("vote", "financing", "legal", "regulatory", "mac"):
+            grade = prev_assessment.get(f"{f}_grade", "N/A")
+            detail = prev_assessment.get(f"{f}_detail", "")
+            sections.append(f"  {f}: {grade} — {detail}")
+        # Supplemental scores
+        for f in ("market", "timing", "competing_bid"):
+            score = prev_assessment.get(f"{f}_score", "N/A")
+            detail = prev_assessment.get(f"{f}_detail", "")
+            sections.append(f"  {f}: {score}/10 — {detail}")
+        sections.append(f"  Investable: {prev_assessment.get('investable_assessment', 'N/A')}")
+        sections.append(f"  Prob Success: {prev_assessment.get('our_prob_success', 'N/A')}")
+        sections.append(f"  Summary: {prev_assessment.get('deal_summary', 'N/A')}")
+    sections.append("")
+
+    # What changed
+    sections.append("## CHANGES SINCE LAST ASSESSMENT")
+    if changes:
+        for c in changes:
+            sections.append(f"- {c}")
+    else:
+        sections.append("- Minor price drift only")
+    sections.append("")
+
+    # Include only changed data sections
+    row = context.get("sheet_row")
+    if row:
+        sections.append("## Current Deal Metrics")
+        sections.append(f"Deal Price: {row.get('deal_price_raw', 'N/A')}")
+        sections.append(f"Current Price: {row.get('current_price_raw', 'N/A')}")
+        sections.append(f"Gross Yield: {row.get('gross_yield_raw', 'N/A')}")
+        sections.append(f"Countdown: {row.get('countdown_raw', 'N/A')}")
+        sections.append("")
+
+    # Include new filings if they're part of the change
+    filings = context.get("recent_filings", [])
+    prev_filing_count = 0
+    if prev_assessment and prev_assessment.get("input_data"):
+        try:
+            prev_data = prev_assessment["input_data"]
+            if isinstance(prev_data, str):
+                prev_data = __import__("json").loads(prev_data)
+            prev_filing_count = prev_data.get("filing_count", 0) or 0
+        except (TypeError, KeyError):
+            pass
+    new_filings = filings[: len(filings) - prev_filing_count] if len(filings) > prev_filing_count else []
+    if new_filings:
+        sections.append("## NEW SEC Filings (since last assessment)")
+        for f in new_filings:
+            sections.append(f"- [{f.get('filing_type', 'N/A')}] {f.get('filed_at', 'N/A')}: {f.get('description', f.get('headline', 'N/A'))}")
+        sections.append("")
+
+    # Include recent halts if new
+    halts = context.get("recent_halts", [])
+    if halts:
+        sections.append("## Recent Trading Halts")
+        for h in halts:
+            sections.append(f"- {h.get('halted_at', 'N/A')}: Code {h.get('halt_code', 'N/A')}")
+        sections.append("")
+
+    # Include sheet diffs if new
+    diffs = context.get("sheet_diffs", [])
+    if diffs:
+        sections.append("## Recent Sheet Changes")
+        for d in diffs:
+            sections.append(f"- {d.get('diff_date', 'N/A')}: {d.get('field_name', 'N/A')} changed to '{d.get('new_value', 'N/A')}'")
+        sections.append("")
+
+    # Sheet comparison (always include for reference)
+    comparison = context.get("sheet_comparison", {})
+    if comparison:
+        sections.append("## GOOGLE SHEET GRADES (for comparison)")
+        sections.append(f"Vote Risk: {comparison.get('vote_risk', 'N/A')}")
+        sections.append(f"Finance Risk: {comparison.get('finance_risk', 'N/A')}")
+        sections.append(f"Legal Risk: {comparison.get('legal_risk', 'N/A')}")
+        sections.append(f"Investable: {comparison.get('investable', 'N/A')}")
+        sections.append("")
+
+    return "\n".join(sections)

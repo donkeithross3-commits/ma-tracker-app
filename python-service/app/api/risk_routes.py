@@ -861,3 +861,108 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
         "total_opportunities": len(all_opps),
         "scan_time_ms": scan_time_ms,
     }
+
+
+# ===========================================================================
+# Model Comparison & Cost Tracking
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# POST /risk/model-comparison
+# ---------------------------------------------------------------------------
+@router.post("/model-comparison")
+async def trigger_model_comparison(
+    sample_size: int = Query(5, ge=1, le=20, description="Number of deals to compare"),
+    model_a: str = Query("claude-sonnet-4-20250514", description="First model to compare"),
+    model_b: str = Query("claude-opus-4-20250514", description="Second model to compare"),
+):
+    """Run A/B model comparison on a sample of deals."""
+    pool = _get_pool()
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    try:
+        from app.risk.model_evaluator import run_model_comparison
+        result = await run_model_comparison(pool, api_key, model_a, model_b, sample_size)
+        return result
+    except Exception as e:
+        logger.error(f"Model comparison failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Model comparison failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/model-comparisons
+# ---------------------------------------------------------------------------
+@router.get("/model-comparisons")
+async def get_model_comparisons(
+    days: int = Query(30, ge=1, le=90, description="Days to look back"),
+):
+    """View model comparison results."""
+    pool = _get_pool()
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, ticker, run_date, model_a, model_b,
+                          grade_agreement, prob_success_diff, investable_agree,
+                          reasoning_depth_a, reasoning_depth_b,
+                          input_tokens_a, output_tokens_a, cost_usd_a, latency_ms_a,
+                          input_tokens_b, output_tokens_b, cost_usd_b, latency_ms_b,
+                          created_at
+                   FROM model_comparison_runs
+                   WHERE run_date >= CURRENT_DATE - INTERVAL '1 day' * $1
+                   ORDER BY run_date DESC, ticker""",
+                days,
+            )
+            return [_row_to_dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch model comparisons: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch model comparisons: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/cost-summary
+# ---------------------------------------------------------------------------
+@router.get("/cost-summary")
+async def get_cost_summary(
+    days: int = Query(30, ge=1, le=90, description="Days to look back"),
+):
+    """Cost breakdown by model, strategy, and date."""
+    pool = _get_pool()
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT
+                       assessment_date,
+                       assessment_strategy,
+                       model_used,
+                       COUNT(*)                                AS deal_count,
+                       SUM(COALESCE(input_tokens, 0))          AS total_input_tokens,
+                       SUM(COALESCE(output_tokens, 0))         AS total_output_tokens,
+                       SUM(COALESCE(cache_read_tokens, 0))     AS total_cache_read_tokens,
+                       SUM(COALESCE(cost_usd, 0))              AS total_cost_usd,
+                       AVG(COALESCE(cost_usd, 0))              AS avg_cost_per_deal,
+                       AVG(processing_time_ms)                 AS avg_latency_ms
+                   FROM deal_risk_assessments
+                   WHERE assessment_date >= CURRENT_DATE - INTERVAL '1 day' * $1
+                   GROUP BY assessment_date, assessment_strategy, model_used
+                   ORDER BY assessment_date DESC, assessment_strategy""",
+                days,
+            )
+            # Also fetch run-level savings data
+            runs = await conn.fetch(
+                """SELECT run_date, total_deals, assessed_deals, total_cost_usd,
+                          reused_deals, delta_deals, full_deals, estimated_savings_usd
+                   FROM risk_assessment_runs
+                   WHERE run_date >= CURRENT_DATE - INTERVAL '1 day' * $1
+                   ORDER BY run_date DESC""",
+                days,
+            )
+            return {
+                "by_strategy": [_row_to_dict(r) for r in rows],
+                "by_run": [_row_to_dict(r) for r in runs],
+            }
+    except Exception as e:
+        logger.error(f"Failed to fetch cost summary: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch cost summary: {str(e)}")

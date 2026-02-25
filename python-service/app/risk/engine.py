@@ -13,7 +13,14 @@ from datetime import date, datetime
 
 from anthropic import Anthropic
 
-from .prompts import RISK_ASSESSMENT_SYSTEM_PROMPT, build_deal_assessment_prompt
+from .context_hash import ChangeSignificance, build_context_summary, classify_changes, compute_context_hash
+from .model_config import compute_cost, get_model
+from .prompts import (
+    RISK_ASSESSMENT_SYSTEM_PROMPT,
+    RISK_DELTA_SYSTEM_PROMPT,
+    build_deal_assessment_prompt,
+    build_delta_assessment_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,14 +161,12 @@ def detect_discrepancies(ai_result: dict, sheet_data: dict) -> list[dict]:
 class RiskAssessmentEngine:
     """Orchestrates morning risk assessments for all active deals."""
 
-    MODEL = "claude-sonnet-4-20250514"
-    # Sonnet pricing: $3/M input, $15/M output
-    INPUT_COST_PER_TOKEN = 3 / 1_000_000
-    OUTPUT_COST_PER_TOKEN = 15 / 1_000_000
-
     def __init__(self, pool, anthropic_key: str):
         self.pool = pool
         self.anthropic = Anthropic(api_key=anthropic_key)
+        self.model = get_model("full_assessment")
+        self.delta_model = get_model("delta_assessment")
+        self.summary_model = get_model("run_summary")
 
     # ------------------------------------------------------------------
     # Data collection
@@ -281,18 +286,37 @@ class RiskAssessmentEngine:
     # ------------------------------------------------------------------
     # Single deal assessment
     # ------------------------------------------------------------------
-    async def assess_single_deal(self, context: dict) -> dict:
-        """Call Claude to assess risk for a single deal. Returns parsed JSON response."""
+    async def assess_single_deal(
+        self,
+        context: dict,
+        system_prompt: str | None = None,
+        user_prompt: str | None = None,
+        model: str | None = None,
+    ) -> dict:
+        """Call Claude to assess risk for a single deal. Returns parsed JSON response.
+
+        Args:
+            context: Deal context dict.
+            system_prompt: Override system prompt (used for delta assessments).
+            user_prompt: Override user prompt (used for delta assessments).
+            model: Override model (used for delta assessments).
+        """
         ticker = context.get("ticker", "UNKNOWN")
-        prompt = build_deal_assessment_prompt(context)
+        model = model or self.model
+        sys_text = system_prompt or RISK_ASSESSMENT_SYSTEM_PROMPT
+        prompt = user_prompt or build_deal_assessment_prompt(context)
 
         t0 = time.monotonic()
         try:
             response = self.anthropic.messages.create(
-                model=self.MODEL,
+                model=model,
                 temperature=0,
                 max_tokens=2000,
-                system=RISK_ASSESSMENT_SYSTEM_PROMPT,
+                system=[{
+                    "type": "text",
+                    "text": sys_text,
+                    "cache_control": {"type": "ephemeral"},
+                }],
                 messages=[{"role": "user", "content": prompt}],
             )
         except Exception as e:
@@ -300,10 +324,18 @@ class RiskAssessmentEngine:
             raise
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+        # Extract cache token counts
+        cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+
         tokens_used = response.usage.input_tokens + response.usage.output_tokens
-        cost = (
-            response.usage.input_tokens * self.INPUT_COST_PER_TOKEN
-            + response.usage.output_tokens * self.OUTPUT_COST_PER_TOKEN
+        cost = compute_cost(
+            model,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+            cache_creation,
+            cache_read,
         )
 
         raw_text = response.content[0].text
@@ -315,12 +347,14 @@ class RiskAssessmentEngine:
 
         # Enrich with metadata
         parsed["_meta"] = {
-            "model": self.MODEL,
+            "model": model,
             "tokens_used": tokens_used,
             "processing_time_ms": elapsed_ms,
             "cost_usd": cost,
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
+            "cache_creation_tokens": cache_creation,
+            "cache_read_tokens": cache_read,
         }
 
         return parsed
@@ -449,21 +483,102 @@ class RiskAssessmentEngine:
         total_tokens = 0
         total_cost = 0.0
         total_discrepancies = 0
+        reused_deals = 0
+        delta_deals = 0
+        full_deals = 0
+        estimated_savings = 0.0
+
+        # Estimated cost of a full assessment (for savings calculation)
+        avg_full_cost = 0.02
 
         for ticker in tickers:
             try:
                 # Collect context
                 context = await self.collect_deal_context(ticker)
 
-                # Run AI assessment
-                assessment = await self.assess_single_deal(context)
+                # --- Context hashing & change classification ---
+                ctx_hash = compute_context_hash(context)
+                prev = context.get("previous_assessment")
+
+                # Load previous context summary from input_data JSONB
+                prev_summary = None
+                prev_hash = None
+                if prev and prev.get("input_data"):
+                    try:
+                        prev_input = prev["input_data"]
+                        if isinstance(prev_input, str):
+                            prev_input = json.loads(prev_input)
+                        prev_summary = prev_input.get("context_summary")
+                        prev_hash = prev_input.get("context_hash")
+                    except (TypeError, json.JSONDecodeError):
+                        pass
+
+                significance, change_list = classify_changes(context, prev_summary)
+
+                # --- Route: reuse / delta / full ---
+                strategy = "full"
+                assessment = None
+
+                if prev_hash and ctx_hash == prev_hash and significance == ChangeSignificance.NO_CHANGE:
+                    # REUSE: Copy previous assessment, zero cost
+                    strategy = "reuse"
+                    reused_deals += 1
+
+                    # Reconstruct assessment from previous DB record
+                    assessment = self._reconstruct_assessment(prev)
+                    assessment["_meta"] = {
+                        "model": "reuse",
+                        "tokens_used": 0,
+                        "processing_time_ms": 0,
+                        "cost_usd": 0.0,
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "cache_creation_tokens": 0,
+                        "cache_read_tokens": 0,
+                        "reused_from": str(prev.get("assessment_date", "")),
+                    }
+                    estimated_savings += avg_full_cost
+                    logger.info("Reusing previous assessment for %s (hash match)", ticker)
+
+                elif significance in (ChangeSignificance.MINOR, ChangeSignificance.MODERATE) and prev:
+                    # DELTA: Abbreviated prompt with yesterday's assessment + changes
+                    strategy = "delta"
+                    delta_deals += 1
+
+                    delta_prompt = build_delta_assessment_prompt(
+                        context, prev, change_list, significance.value,
+                    )
+                    assessment = await self.assess_single_deal(
+                        context,
+                        system_prompt=RISK_DELTA_SYSTEM_PROMPT,
+                        user_prompt=delta_prompt,
+                        model=self.delta_model,
+                    )
+                    # Estimate savings vs full prompt
+                    meta = assessment.get("_meta", {})
+                    estimated_savings += max(0, avg_full_cost - meta.get("cost_usd", 0))
+
+                else:
+                    # FULL: Standard full assessment
+                    strategy = "full"
+                    full_deals += 1
+                    assessment = await self.assess_single_deal(context)
+
+                # --- Store context hash + summary in input_data ---
+                ctx_summary = build_context_summary(context)
+                assessment["_context"] = {
+                    "context_hash": ctx_hash,
+                    "context_summary": ctx_summary,
+                    "assessment_strategy": strategy,
+                    "change_significance": significance.value,
+                    "changes": change_list,
+                }
 
                 # Detect discrepancies against sheet
                 sheet_data = context.get("sheet_comparison", {})
                 discrepancies = detect_discrepancies(assessment, sheet_data)
 
                 # Detect changes from previous assessment
-                prev = context.get("previous_assessment")
                 score_changes = await self.detect_changes(ticker, assessment, prev)
 
                 # Store assessment
@@ -489,6 +604,8 @@ class RiskAssessmentEngine:
                 results.append({
                     "ticker": ticker,
                     "status": "success",
+                    "strategy": strategy,
+                    "significance": significance.value,
                     "needs_attention": assessment.get("needs_attention", False),
                     "discrepancies": len(discrepancies),
                     "changes": len(score_changes),
@@ -498,8 +615,8 @@ class RiskAssessmentEngine:
                     },
                 })
                 logger.info(
-                    "Assessed %s: attention=%s, discrepancies=%d, changes=%d",
-                    ticker,
+                    "Assessed %s [%s/%s]: attention=%s, discrepancies=%d, changes=%d",
+                    ticker, strategy, significance.value,
                     assessment.get("needs_attention", False),
                     len(discrepancies),
                     len(score_changes),
@@ -536,15 +653,22 @@ class RiskAssessmentEngine:
                        changed_deals = $6,
                        total_tokens = $7,
                        total_cost_usd = $8,
-                       summary = $9
+                       summary = $9,
+                       reused_deals = $10,
+                       delta_deals = $11,
+                       full_deals = $12,
+                       estimated_savings_usd = $13
                    WHERE id = $1""",
                 run_id, total_deals, assessed, failed, flagged, changed,
                 total_tokens, total_cost, summary,
+                reused_deals, delta_deals, full_deals, round(estimated_savings, 4),
             )
 
         logger.info(
-            "Risk run %s completed: %d/%d assessed, %d flagged, %d changed, %d discrepancies, %d failed",
-            run_id, assessed, total_deals, flagged, changed, total_discrepancies, failed,
+            "Risk run %s completed: %d/%d assessed (%d reused, %d delta, %d full), "
+            "%d flagged, %d changed, %d discrepancies, %d failed, $%.4f cost, $%.4f saved",
+            run_id, assessed, total_deals, reused_deals, delta_deals, full_deals,
+            flagged, changed, total_discrepancies, failed, total_cost, estimated_savings,
         )
 
         return {
@@ -559,6 +683,10 @@ class RiskAssessmentEngine:
             "total_discrepancies": total_discrepancies,
             "total_tokens": total_tokens,
             "total_cost_usd": round(total_cost, 4),
+            "reused_deals": reused_deals,
+            "delta_deals": delta_deals,
+            "full_deals": full_deals,
+            "estimated_savings_usd": round(estimated_savings, 4),
             "summary": summary,
             "results": results,
         }
@@ -611,7 +739,7 @@ Write a concise 3-5 sentence executive summary. Focus on:
 Keep it actionable and direct."""
 
         response = self.anthropic.messages.create(
-            model=self.MODEL,
+            model=self.summary_model,
             temperature=0.3,
             max_tokens=1500,
             messages=[{"role": "user", "content": summary_prompt}],
@@ -665,7 +793,16 @@ Keep it actionable and direct."""
         )
 
         meta = assessment.get("_meta", {})
+        ctx_info = assessment.get("_context", {})
         disc_list = discrepancies or []
+
+        # Build input_data with context summary for tomorrow's comparison
+        input_data = {
+            "ticker": ticker,
+            "context_keys": list((context or {}).keys()),
+            "context_hash": ctx_info.get("context_hash"),
+            "context_summary": ctx_info.get("context_summary"),
+        }
 
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -704,7 +841,11 @@ Keep it actionable and direct."""
                     -- Raw data
                     input_data, ai_response,
                     model_used, tokens_used, processing_time_ms,
-                    run_id
+                    run_id,
+                    -- Token efficiency columns
+                    context_hash, assessment_strategy, change_significance,
+                    input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, cost_usd
                 ) VALUES (
                     $1, $2, $3,
                     $4, $5, $6,
@@ -730,7 +871,10 @@ Keep it actionable and direct."""
                     $51, $52,
                     $53, $54,
                     $55, $56, $57,
-                    $58
+                    $58,
+                    $59, $60, $61,
+                    $62, $63,
+                    $64, $65, $66
                 )""",
                 assessment_id, run_date, ticker,
                 # Grades
@@ -777,15 +921,71 @@ Keep it actionable and direct."""
                 assessment.get("needs_attention", False),
                 assessment.get("attention_reason"),
                 # Raw data
-                json.dumps({"ticker": ticker, "context_keys": list((context or {}).keys())}),
+                json.dumps(input_data),
                 json.dumps(assessment),
-                meta.get("model", self.MODEL),
+                meta.get("model", self.model),
                 meta.get("tokens_used", 0),
                 meta.get("processing_time_ms", 0),
                 run_id,
+                # Token efficiency columns
+                ctx_info.get("context_hash"),
+                ctx_info.get("assessment_strategy", "full"),
+                ctx_info.get("change_significance"),
+                meta.get("input_tokens", 0),
+                meta.get("output_tokens", 0),
+                meta.get("cache_read_tokens", 0),
+                meta.get("cache_creation_tokens", 0),
+                meta.get("cost_usd", 0),
             )
 
         return assessment_id
+
+    def _reconstruct_assessment(self, prev: dict) -> dict:
+        """Reconstruct a parsed AI assessment dict from a previous DB record.
+
+        Used by the reuse strategy to copy yesterday's assessment without
+        calling Claude again.
+        """
+        grades = {}
+        for f in GRADED_FACTORS:
+            grades[f] = {
+                "grade": prev.get(f"{f}_grade"),
+                "detail": prev.get(f"{f}_detail"),
+                "confidence": float(prev[f"{f}_confidence"]) if prev.get(f"{f}_confidence") is not None else None,
+            }
+
+        supplementals = {}
+        for f in SUPPLEMENTAL_FACTORS:
+            supplementals[f] = {
+                "score": float(prev[f"{f}_score"]) if prev.get(f"{f}_score") is not None else None,
+                "detail": prev.get(f"{f}_detail"),
+            }
+
+        # Try to load watchlist/key_risks from ai_response if available
+        ai_resp = prev.get("ai_response")
+        if isinstance(ai_resp, str):
+            try:
+                ai_resp = json.loads(ai_resp)
+            except (json.JSONDecodeError, TypeError):
+                ai_resp = {}
+        elif not isinstance(ai_resp, dict):
+            ai_resp = {}
+
+        return {
+            "grades": grades,
+            "supplemental_scores": supplementals,
+            "investable_assessment": prev.get("investable_assessment"),
+            "investable_reasoning": prev.get("investable_reasoning"),
+            "probability_of_success": float(prev["our_prob_success"]) if prev.get("our_prob_success") is not None else None,
+            "probability_of_higher_offer": float(prev["our_prob_higher_offer"]) if prev.get("our_prob_higher_offer") is not None else None,
+            "break_price_estimate": float(prev["our_break_price"]) if prev.get("our_break_price") is not None else None,
+            "implied_downside_estimate": float(prev["our_implied_downside"]) if prev.get("our_implied_downside") is not None else None,
+            "deal_summary": prev.get("deal_summary"),
+            "key_risks": ai_resp.get("key_risks", []),
+            "watchlist_items": ai_resp.get("watchlist_items", []),
+            "needs_attention": prev.get("needs_attention", False),
+            "attention_reason": prev.get("attention_reason"),
+        }
 
     async def _store_change(self, assessment_id, run_date, ticker, change: dict):
         """Insert a single risk factor change record."""
