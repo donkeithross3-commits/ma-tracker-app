@@ -1101,3 +1101,159 @@ async def get_cost_summary(
     except Exception as e:
         logger.error(f"Failed to fetch cost summary: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to fetch cost summary: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# POST /risk/baseline-run
+# ---------------------------------------------------------------------------
+@router.post("/baseline-run")
+async def trigger_baseline_run(
+    models: Optional[str] = Query(
+        None,
+        description="Comma-separated model IDs. Defaults to Opus, Sonnet, Haiku.",
+    ),
+):
+    """Run full factorial baseline: every active ticker x every model.
+
+    One model is randomly selected per ticker for blind human review.
+    All results are stored for counterfactual analysis.
+    """
+    pool = _get_pool()
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    model_list = None
+    if models:
+        model_list = [m.strip() for m in models.split(",")]
+
+    try:
+        from app.risk.model_evaluator import run_baseline_comparison
+        result = await run_baseline_comparison(pool, api_key, model_list)
+        return result
+    except Exception as e:
+        logger.error(f"Baseline run failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Baseline run failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/baseline-runs
+# ---------------------------------------------------------------------------
+@router.get("/baseline-runs")
+async def get_baseline_runs(
+    days: int = Query(30, ge=1, le=90, description="Days to look back"),
+):
+    """List baseline runs."""
+    pool = _get_pool()
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, run_date, models, total_tickers, successful, failed,
+                          total_cost_usd, status, created_at, completed_at
+                   FROM baseline_runs
+                   WHERE run_date >= CURRENT_DATE - INTERVAL '1 day' * $1
+                   ORDER BY created_at DESC""",
+                days,
+            )
+            return [_row_to_dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch baseline runs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/baseline-results/{run_id}
+# ---------------------------------------------------------------------------
+@router.get("/baseline-results/{run_id}")
+async def get_baseline_results(run_id: str):
+    """Get all results for a baseline run, grouped by ticker.
+
+    Returns the blind review manifest (which model was presented per ticker)
+    and full results for counterfactual analysis.
+    """
+    pool = _get_pool()
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run_id")
+
+    try:
+        async with pool.acquire() as conn:
+            # Get run metadata
+            run = await conn.fetchrow(
+                "SELECT * FROM baseline_runs WHERE id = $1", run_uuid
+            )
+            if not run:
+                raise HTTPException(status_code=404, detail="Run not found")
+
+            # Get all results
+            rows = await conn.fetch(
+                """SELECT ticker, model, is_presented,
+                          input_tokens, output_tokens, cost_usd, latency_ms,
+                          probability_of_success, investable_assessment,
+                          reasoning_depth,
+                          grade_vote, grade_financing, grade_legal,
+                          grade_regulatory, grade_mac,
+                          response
+                   FROM baseline_model_results
+                   WHERE run_id = $1
+                   ORDER BY ticker, model""",
+                run_uuid,
+            )
+
+            # Group by ticker
+            by_ticker = {}
+            for row in rows:
+                d = _row_to_dict(row)
+                ticker = d["ticker"]
+                if ticker not in by_ticker:
+                    by_ticker[ticker] = {"presented_model": None, "models": {}}
+                if d["is_presented"]:
+                    by_ticker[ticker]["presented_model"] = d["model"]
+                by_ticker[ticker]["models"][d["model"]] = d
+
+            return {
+                "run": _row_to_dict(run),
+                "tickers": by_ticker,
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch baseline results: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/baseline-review/{run_id}
+# ---------------------------------------------------------------------------
+@router.get("/baseline-review/{run_id}")
+async def get_baseline_blind_review(run_id: str):
+    """Get only the presented (blind) assessments for human review.
+
+    Returns one assessment per ticker — the randomly selected one — without
+    revealing which model produced it. For blind taste test.
+    """
+    pool = _get_pool()
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run_id")
+
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT ticker, response,
+                          probability_of_success, investable_assessment,
+                          grade_vote, grade_financing, grade_legal,
+                          grade_regulatory, grade_mac,
+                          reasoning_depth
+                   FROM baseline_model_results
+                   WHERE run_id = $1 AND is_presented = TRUE
+                   ORDER BY ticker""",
+                run_uuid,
+            )
+
+            return [_row_to_dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch blind review: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
