@@ -15,7 +15,7 @@ from datetime import date, datetime
 from anthropic import Anthropic
 
 from .context_hash import ChangeSignificance, build_context_summary, classify_changes, compute_context_hash
-from .model_config import compute_cost, get_model
+from .model_config import compute_cost, get_model, get_model_for_significance
 from .prompts import (
     RISK_ASSESSMENT_SYSTEM_PROMPT,
     RISK_DELTA_SYSTEM_PROMPT,
@@ -56,6 +56,7 @@ ENABLE_PREDICTIONS = os.environ.get("RISK_PREDICTIONS", "false").lower() == "tru
 ENABLE_CALIBRATION = os.environ.get("RISK_CALIBRATION", "false").lower() == "true"
 ENABLE_REVIEW_QUEUE = os.environ.get("RISK_REVIEW_QUEUE", "false").lower() == "true"
 ENABLE_SIGNAL_WEIGHTS = os.environ.get("RISK_SIGNAL_WEIGHTS", "false").lower() == "true"
+ENABLE_BATCH_MODE = os.environ.get("RISK_BATCH_MODE", "false").lower() == "true"
 
 
 def _extract_estimate_value(data: dict, key: str):
@@ -185,6 +186,7 @@ class RiskAssessmentEngine:
         self.anthropic = Anthropic(api_key=anthropic_key)
         self.model = get_model("full_assessment")
         self.delta_model = get_model("delta_assessment")
+        self.delta_minor_model = get_model("delta_minor")
         self.summary_model = get_model("run_summary")
 
     # ------------------------------------------------------------------
@@ -635,20 +637,20 @@ class RiskAssessmentEngine:
             except Exception as e:
                 logger.warning("Signal weights computation failed: %s", e)
 
+        # --- Phase 1: Collect contexts & classify changes ---
+        deal_contexts = {}  # ticker -> (context, ctx_hash, prev, prev_summary, significance, change_list)
+        reuse_bucket = []   # tickers that can reuse previous assessment
+        api_bucket = []     # tickers that need API calls
+
         for ticker in tickers:
             try:
-                # Collect context
                 context = await self.collect_deal_context(ticker)
 
-                # Inject cached calibration feedback
                 if calibration_text:
                     context["calibration_text"] = calibration_text
-
-                # Inject cached signal weights
                 if signal_weights_text:
                     context["signal_weights_text"] = signal_weights_text
 
-                # Format human corrections for prompt
                 if ENABLE_REVIEW_QUEUE and context.get("human_corrections"):
                     try:
                         from .review_queue import format_corrections_for_prompt
@@ -658,11 +660,9 @@ class RiskAssessmentEngine:
                     except Exception:
                         pass
 
-                # --- Context hashing & change classification ---
                 ctx_hash = compute_context_hash(context)
                 prev = context.get("previous_assessment")
 
-                # Load previous context summary from input_data JSONB
                 prev_summary = None
                 prev_hash = None
                 if prev and prev.get("input_data"):
@@ -677,125 +677,149 @@ class RiskAssessmentEngine:
 
                 significance, change_list = classify_changes(context, prev_summary)
 
-                # --- Route: reuse / delta / full ---
-                strategy = "full"
-                assessment = None
-
-                if prev_hash and ctx_hash == prev_hash and significance == ChangeSignificance.NO_CHANGE:
-                    # REUSE: Copy previous assessment, zero cost
-                    strategy = "reuse"
-                    reused_deals += 1
-
-                    # Reconstruct assessment from previous DB record
-                    assessment = self._reconstruct_assessment(prev)
-                    assessment["_meta"] = {
-                        "model": "reuse",
-                        "tokens_used": 0,
-                        "processing_time_ms": 0,
-                        "cost_usd": 0.0,
-                        "input_tokens": 0,
-                        "output_tokens": 0,
-                        "cache_creation_tokens": 0,
-                        "cache_read_tokens": 0,
-                        "reused_from": str(prev.get("assessment_date", "")),
-                    }
-                    estimated_savings += avg_full_cost
-                    logger.info("Reusing previous assessment for %s (hash match)", ticker)
-
-                elif significance in (ChangeSignificance.MINOR, ChangeSignificance.MODERATE) and prev:
-                    # DELTA: Abbreviated prompt with yesterday's assessment + changes
-                    strategy = "delta"
-                    delta_deals += 1
-
-                    delta_prompt = build_delta_assessment_prompt(
-                        context, prev, change_list, significance.value,
-                    )
-                    assessment = await self.assess_single_deal(
-                        context,
-                        system_prompt=RISK_DELTA_SYSTEM_PROMPT,
-                        user_prompt=delta_prompt,
-                        model=self.delta_model,
-                    )
-                    # Estimate savings vs full prompt
-                    meta = assessment.get("_meta", {})
-                    estimated_savings += max(0, avg_full_cost - meta.get("cost_usd", 0))
-
-                else:
-                    # FULL: Standard full assessment
-                    strategy = "full"
-                    full_deals += 1
-                    assessment = await self.assess_single_deal(context)
-
-                # --- Store context hash + summary in input_data ---
-                ctx_summary = build_context_summary(context)
-                assessment["_context"] = {
-                    "context_hash": ctx_hash,
-                    "context_summary": ctx_summary,
-                    "assessment_strategy": strategy,
-                    "change_significance": significance.value,
-                    "changes": change_list,
+                deal_contexts[ticker] = {
+                    "context": context,
+                    "ctx_hash": ctx_hash,
+                    "prev": prev,
+                    "prev_summary": prev_summary,
+                    "prev_hash": prev_hash,
+                    "significance": significance,
+                    "change_list": change_list,
                 }
 
-                # Detect discrepancies against sheet
-                sheet_data = context.get("sheet_comparison", {})
-                discrepancies = detect_discrepancies(assessment, sheet_data)
+                if prev_hash and ctx_hash == prev_hash and significance == ChangeSignificance.NO_CHANGE:
+                    reuse_bucket.append(ticker)
+                else:
+                    api_bucket.append(ticker)
 
-                # Detect changes from previous assessment
-                score_changes = await self.detect_changes(ticker, assessment, prev)
+            except Exception as e:
+                failed += 1
+                results.append({"ticker": ticker, "status": "failed", "error": str(e)})
+                logger.error("Failed to collect context for %s: %s", ticker, e, exc_info=True)
 
-                # Store assessment
-                assessment_id = await self._store_assessment(
-                    run_id, run_date, ticker, assessment, context, discrepancies,
+        # --- Phase 2: Process REUSE deals (no API calls) ---
+        for ticker in reuse_bucket:
+            try:
+                dc = deal_contexts[ticker]
+                context = dc["context"]
+                prev = dc["prev"]
+
+                strategy = "reuse"
+                reused_deals += 1
+
+                assessment = self._reconstruct_assessment(prev)
+                assessment["_meta"] = {
+                    "model": "reuse",
+                    "tokens_used": 0,
+                    "processing_time_ms": 0,
+                    "cost_usd": 0.0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "reused_from": str(prev.get("assessment_date", "")),
+                }
+                estimated_savings += avg_full_cost
+                logger.info("Reusing previous assessment for %s (hash match)", ticker)
+
+                proc_stats = await self._process_assessment_result(
+                    run_id, run_date, ticker, assessment, context,
+                    dc["significance"], dc["change_list"], dc["ctx_hash"],
+                    strategy, results,
                 )
-
-                # Store changes
-                for change in score_changes:
-                    await self._store_change(assessment_id, run_date, ticker, change)
-
-                # Store predictions from AI response
-                if ENABLE_PREDICTIONS:
-                    try:
-                        from .predictions import store_predictions
-                        raw_predictions = assessment.get("predictions", [])
-                        if raw_predictions:
-                            await store_predictions(
-                                self.pool, ticker, run_date,
-                                assessment_id, raw_predictions,
-                            )
-                    except Exception as e:
-                        logger.warning("Failed to store predictions for %s: %s", ticker, e)
-
+                assessed += 1
                 meta = assessment.get("_meta", {})
                 total_tokens += meta.get("tokens_used", 0)
                 total_cost += meta.get("cost_usd", 0)
-                total_discrepancies += len(discrepancies)
-
+                total_discrepancies += proc_stats["discrepancies"]
                 if assessment.get("needs_attention"):
                     flagged += 1
-                if score_changes:
+                if proc_stats["score_changes"] > 0:
                     changed += 1
+            except Exception as e:
+                failed += 1
+                results.append({"ticker": ticker, "status": "failed", "error": str(e)})
+                logger.error("Failed to process reuse for %s: %s", ticker, e, exc_info=True)
 
-                assessed += 1
-                results.append({
-                    "ticker": ticker,
-                    "status": "success",
-                    "strategy": strategy,
-                    "significance": significance.value,
-                    "needs_attention": assessment.get("needs_attention", False),
-                    "discrepancies": len(discrepancies),
-                    "changes": len(score_changes),
-                    "grades": {
-                        f: assessment.get("grades", {}).get(f, {}).get("grade")
-                        for f in GRADED_FACTORS
-                    },
-                })
-                logger.info(
-                    "Assessed %s [%s/%s]: attention=%s, discrepancies=%d, changes=%d",
-                    ticker, strategy, significance.value,
-                    assessment.get("needs_attention", False),
-                    len(discrepancies),
-                    len(score_changes),
+        # --- Phase 3: API calls (batch or sequential) ---
+        batch_used = False
+        if ENABLE_BATCH_MODE and len(api_bucket) >= 2:
+            try:
+                batch_results = await self._run_batch_assessments(
+                    api_bucket, deal_contexts,
                 )
+                batch_used = True
+            except Exception as e:
+                logger.warning("Batch mode failed, falling back to sequential: %s", e)
+                batch_results = {}
+
+        for ticker in api_bucket:
+            try:
+                dc = deal_contexts[ticker]
+                context = dc["context"]
+                prev = dc["prev"]
+                significance = dc["significance"]
+                change_list = dc["change_list"]
+
+                # Smart model routing based on significance
+                routed_model = get_model_for_significance(significance.value)
+
+                strategy = "full"
+                assessment = None
+
+                # Check if batch already handled this ticker
+                if batch_used and ticker in batch_results:
+                    assessment = batch_results[ticker]
+                    if "_meta" in assessment and "error" in assessment["_meta"]:
+                        # Batch failed for this ticker, fall through to sequential
+                        logger.warning("Batch failed for %s, retrying sequentially", ticker)
+                        assessment = None
+                    else:
+                        if significance in (ChangeSignificance.MINOR, ChangeSignificance.MODERATE) and prev:
+                            strategy = "delta"
+                            delta_deals += 1
+                        else:
+                            strategy = "full"
+                            full_deals += 1
+
+                if assessment is None:
+                    # Sequential fallback (or batch not used)
+                    if significance in (ChangeSignificance.MINOR, ChangeSignificance.MODERATE) and prev:
+                        strategy = "delta"
+                        delta_deals += 1
+
+                        delta_prompt = build_delta_assessment_prompt(
+                            context, prev, change_list, significance.value,
+                        )
+                        assessment = await self.assess_single_deal(
+                            context,
+                            system_prompt=RISK_DELTA_SYSTEM_PROMPT,
+                            user_prompt=delta_prompt,
+                            model=routed_model,
+                        )
+                        meta = assessment.get("_meta", {})
+                        estimated_savings += max(0, avg_full_cost - meta.get("cost_usd", 0))
+                    else:
+                        strategy = "full"
+                        full_deals += 1
+                        assessment = await self.assess_single_deal(
+                            context, model=routed_model,
+                        )
+
+                proc_stats = await self._process_assessment_result(
+                    run_id, run_date, ticker, assessment, context,
+                    significance, change_list, dc["ctx_hash"],
+                    strategy, results,
+                )
+                assessed += 1
+                meta = assessment.get("_meta", {})
+                total_tokens += meta.get("tokens_used", 0)
+                total_cost += meta.get("cost_usd", 0)
+                total_discrepancies += proc_stats["discrepancies"]
+                if assessment.get("needs_attention"):
+                    flagged += 1
+                if proc_stats["score_changes"] > 0:
+                    changed += 1
 
             except Exception as e:
                 failed += 1
@@ -902,9 +926,113 @@ class RiskAssessmentEngine:
             "delta_deals": delta_deals,
             "full_deals": full_deals,
             "estimated_savings_usd": round(estimated_savings, 4),
+            "batch_mode": batch_used if ENABLE_BATCH_MODE else False,
             "summary": summary,
             "results": results,
         }
+
+    # ------------------------------------------------------------------
+    # Shared assessment post-processing
+    # ------------------------------------------------------------------
+    async def _process_assessment_result(
+        self, run_id, run_date, ticker, assessment, context,
+        significance, change_list, ctx_hash, strategy, results,
+    ):
+        """Store assessment, detect changes, store predictions, append to results."""
+        prev = context.get("previous_assessment")
+
+        ctx_summary = build_context_summary(context)
+        assessment["_context"] = {
+            "context_hash": ctx_hash,
+            "context_summary": ctx_summary,
+            "assessment_strategy": strategy,
+            "change_significance": significance.value,
+            "changes": change_list,
+        }
+
+        sheet_data = context.get("sheet_comparison", {})
+        discrepancies = detect_discrepancies(assessment, sheet_data)
+        score_changes = await self.detect_changes(ticker, assessment, prev)
+
+        assessment_id = await self._store_assessment(
+            run_id, run_date, ticker, assessment, context, discrepancies,
+        )
+
+        for change in score_changes:
+            await self._store_change(assessment_id, run_date, ticker, change)
+
+        if ENABLE_PREDICTIONS:
+            try:
+                from .predictions import store_predictions
+                raw_predictions = assessment.get("predictions", [])
+                if raw_predictions:
+                    await store_predictions(
+                        self.pool, ticker, run_date,
+                        assessment_id, raw_predictions,
+                    )
+            except Exception as e:
+                logger.warning("Failed to store predictions for %s: %s", ticker, e)
+
+        if score_changes:
+            # Track for run-level changed count (handled by caller via return)
+            pass
+
+        results.append({
+            "ticker": ticker,
+            "status": "success",
+            "strategy": strategy,
+            "significance": significance.value,
+            "needs_attention": assessment.get("needs_attention", False),
+            "discrepancies": len(discrepancies),
+            "changes": len(score_changes),
+            "grades": {
+                f: assessment.get("grades", {}).get(f, {}).get("grade")
+                for f in GRADED_FACTORS
+            },
+        })
+        logger.info(
+            "Assessed %s [%s/%s]: attention=%s, discrepancies=%d, changes=%d",
+            ticker, strategy, significance.value,
+            assessment.get("needs_attention", False),
+            len(discrepancies), len(score_changes),
+        )
+
+    # ------------------------------------------------------------------
+    # Batch assessment
+    # ------------------------------------------------------------------
+    async def _run_batch_assessments(
+        self, api_bucket: list[str], deal_contexts: dict,
+    ) -> dict[str, dict]:
+        """Submit API-needing deals as a batch. Returns {ticker: parsed_response}."""
+        from .batch_assessor import run_batch_assessment
+
+        deal_requests = []
+        for ticker in api_bucket:
+            dc = deal_contexts[ticker]
+            context = dc["context"]
+            prev = dc["prev"]
+            significance = dc["significance"]
+            change_list = dc["change_list"]
+
+            routed_model = get_model_for_significance(significance.value)
+
+            if significance in (ChangeSignificance.MINOR, ChangeSignificance.MODERATE) and prev:
+                system_prompt = RISK_DELTA_SYSTEM_PROMPT
+                user_prompt = build_delta_assessment_prompt(
+                    context, prev, change_list, significance.value,
+                )
+            else:
+                system_prompt = RISK_ASSESSMENT_SYSTEM_PROMPT
+                user_prompt = build_deal_assessment_prompt(context)
+
+            deal_requests.append({
+                "ticker": ticker,
+                "model": routed_model,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            })
+
+        return await run_batch_assessment(self.anthropic, deal_requests)
 
     # ------------------------------------------------------------------
     # Run summary generation
@@ -1388,6 +1516,134 @@ Keep it actionable and direct."""
                 "UPDATE deal_risk_assessments SET has_risk_change = TRUE WHERE id = $1",
                 assessment_id,
             )
+
+    # ------------------------------------------------------------------
+    # Batch and result processing helpers
+    # ------------------------------------------------------------------
+    async def _run_batch_assessments(
+        self, api_bucket: list[str], deal_contexts: dict,
+    ) -> dict[str, dict]:
+        """Submit all API-needing deals as a single batch request.
+
+        Returns dict mapping ticker -> parsed assessment (with _meta).
+        """
+        from .batch_assessor import run_batch_assessment
+        from .prompts import (
+            RISK_ASSESSMENT_SYSTEM_PROMPT,
+            RISK_DELTA_SYSTEM_PROMPT,
+            build_deal_assessment_prompt,
+            build_delta_assessment_prompt,
+        )
+
+        deal_requests = []
+        for ticker in api_bucket:
+            dc = deal_contexts[ticker]
+            context = dc["context"]
+            prev = dc["prev"]
+            significance = dc["significance"]
+            change_list = dc["change_list"]
+
+            routed_model = get_model_for_significance(significance.value)
+
+            if significance in (ChangeSignificance.MINOR, ChangeSignificance.MODERATE) and prev:
+                system_prompt = RISK_DELTA_SYSTEM_PROMPT
+                user_prompt = build_delta_assessment_prompt(
+                    context, prev, change_list, significance.value,
+                )
+            else:
+                system_prompt = RISK_ASSESSMENT_SYSTEM_PROMPT
+                user_prompt = build_deal_assessment_prompt(context)
+
+            deal_requests.append({
+                "ticker": ticker,
+                "model": routed_model,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            })
+
+        return await run_batch_assessment(self.anthropic, deal_requests)
+
+    async def _process_assessment_result(
+        self,
+        run_id,
+        run_date,
+        ticker: str,
+        assessment: dict,
+        context: dict,
+        significance,
+        change_list: list,
+        ctx_hash: str,
+        strategy: str,
+        results: list,
+    ) -> dict:
+        """Common post-processing for an assessment: store, detect changes, append results.
+
+        Returns dict with score_changes count for the caller's tracking.
+        """
+        prev = context.get("previous_assessment")
+
+        # Attach context metadata
+        ctx_summary = build_context_summary(context)
+        assessment["_context"] = {
+            "context_hash": ctx_hash,
+            "context_summary": ctx_summary,
+            "assessment_strategy": strategy,
+            "change_significance": significance.value if hasattr(significance, "value") else str(significance),
+            "changes": change_list,
+        }
+
+        # Detect discrepancies against sheet
+        sheet_data = context.get("sheet_comparison", {})
+        discrepancies = detect_discrepancies(assessment, sheet_data)
+
+        # Detect changes from previous assessment
+        score_changes = await self.detect_changes(ticker, assessment, prev)
+
+        # Store assessment
+        assessment_id = await self._store_assessment(
+            run_id, run_date, ticker, assessment, context, discrepancies,
+        )
+
+        # Store changes
+        for change in score_changes:
+            await self._store_change(assessment_id, run_date, ticker, change)
+
+        # Store predictions from AI response
+        if ENABLE_PREDICTIONS:
+            try:
+                from .predictions import store_predictions
+                raw_predictions = assessment.get("predictions", [])
+                if raw_predictions:
+                    await store_predictions(
+                        self.pool, ticker, run_date,
+                        assessment_id, raw_predictions,
+                    )
+            except Exception as e:
+                logger.warning("Failed to store predictions for %s: %s", ticker, e)
+
+        results.append({
+            "ticker": ticker,
+            "status": "success",
+            "strategy": strategy,
+            "significance": significance.value if hasattr(significance, "value") else str(significance),
+            "needs_attention": assessment.get("needs_attention", False),
+            "discrepancies": len(discrepancies),
+            "changes": len(score_changes),
+            "grades": {
+                f: assessment.get("grades", {}).get(f, {}).get("grade")
+                for f in GRADED_FACTORS
+            },
+        })
+        logger.info(
+            "Assessed %s [%s/%s]: attention=%s, discrepancies=%d, changes=%d",
+            ticker, strategy,
+            significance.value if hasattr(significance, "value") else str(significance),
+            assessment.get("needs_attention", False),
+            len(discrepancies),
+            len(score_changes),
+        )
+
+        return {"score_changes": len(score_changes), "discrepancies": len(discrepancies)}
 
     # ------------------------------------------------------------------
     # Fetch helpers

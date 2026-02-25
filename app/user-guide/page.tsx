@@ -182,8 +182,8 @@ export default async function UserGuidePage() {
               Home
             </Link>
             <UserMenu
-              userName={session?.user?.name || "User"}
               variant="dark"
+              initialUser={session?.user ? { name: session.user.name, email: session.user.email } : undefined}
             />
           </div>
         </div>
