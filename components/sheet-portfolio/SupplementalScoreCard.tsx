@@ -1,9 +1,22 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+
 export function SupplementalScoreCard({ label, score, detail, hasDisagreement }: {
   label: string;
   score: number | null;
   detail: string | null;
   hasDisagreement?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isClamped, setIsClamped] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const el = textRef.current;
+    if (el) setIsClamped(el.scrollHeight > el.clientHeight + 1);
+  }, [detail]);
+
   if (score === null) return null;
 
   let barColor = "bg-green-400";
@@ -24,7 +37,27 @@ export function SupplementalScoreCard({ label, score, detail, hasDisagreement }:
       <div className="w-full bg-gray-700 rounded-full h-1 mb-1.5">
         <div className={`h-1 rounded-full ${barColor}`} style={{ width: `${(score / 10) * 100}%` }} />
       </div>
-      {detail && <p className="text-xs text-gray-500 line-clamp-2">{detail}</p>}
+      {detail && (
+        <>
+          <p
+            ref={textRef}
+            className={`text-xs text-gray-500 ${expanded ? "" : "line-clamp-2"}`}
+          >
+            {detail}
+          </p>
+          {(isClamped || expanded) && (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="text-[11px] text-gray-600 hover:text-gray-300 transition-colors flex items-center gap-1 mt-1"
+            >
+              <span className={`transition-transform inline-block ${expanded ? "rotate-90" : ""}`}>
+                &#9654;
+              </span>
+              {expanded ? "Less" : "More"}
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }
