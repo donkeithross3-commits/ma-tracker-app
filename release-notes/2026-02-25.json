@@ -1,0 +1,17 @@
+{
+  "date": "2026-02-25",
+  "title": "Feb 25, 2026",
+  "summary": "Data provenance indicators across the Event Driven Portfolio.",
+  "features": [
+    {
+      "id": "data-provenance-indicators",
+      "title": "Data Provenance Indicators",
+      "summary": "Visual convention distinguishing Google Sheets data (unlabeled), AI assessments (purple), and live market data (cyan with freshness).",
+      "description": "Traders can now instantly identify the source of every data element on the portfolio pages.\n\n**AI provenance (purple):** The AI Risk Assessment section on deal detail pages now has a purple left border and a small \"AI\" pill next to the heading. Discrepancy labels changed from yellow to purple (\"AI: value\") to align with the AI color convention. The Risk column header on the listing page also shows an \"AI\" pill since that column is entirely AI-sourced.\n\n**Live market data (cyan with freshness):** Options sections show a \"LIVE\" pill during market hours or \"PRIOR CLOSE\" when markets are closed. The market data status dot is now freshness-aware: green when data is <90s old, amber when stale, gray when disconnected. The status label appends \"(stale)\" when amber. Live price text dims from cyan-400 to cyan-600 when data is stale (>5 minutes).\n\n**Google Sheets data (unlabeled):** Sheet-sourced sections (Deal Terms, Key Dates, Deal Assessment, risk badges) remain unlabeled as the default baseline -- labeling them would add noise since they represent ~90% of the data.\n\n**Pages affected:** /sheet-portfolio (listing), /sheet-portfolio/[ticker] (deal detail), /sheet-portfolio/[ticker]/options (options detail).",
+      "category": "portfolio",
+      "project": "sheet-portfolio",
+      "image": "",
+      "screenshot": null
+    }
+  ]
+}
