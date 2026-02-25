@@ -366,7 +366,7 @@ async def run_baseline_comparison(
                 "model": model,
                 "system_prompt": RISK_ASSESSMENT_SYSTEM_PROMPT,
                 "user_prompt": deal_prompts[ticker],
-                "max_tokens": 2800,
+                "max_tokens": 4096,
             })
 
     logger.info("Submitting %d batch requests...", len(deal_requests))
