@@ -37,6 +37,10 @@ WORKDIR /app
 # Set production environment
 ENV NODE_ENV=production
 
+# Install libssl3 (required by Prisma Query Engine — bookworm-slim strips it)
+RUN apt-get update && apt-get install -y --no-install-recommends libssl3 && \
+    rm -rf /var/lib/apt/lists/*
+
 # Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
