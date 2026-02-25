@@ -376,13 +376,12 @@ export default function SignalsTab() {
     } catch { /* silent */ }
   }, []);
 
+  // Always poll — faster when BMC is running, slower when stopped (catches
+  // engine already running from a previous session or another tab).
   useEffect(() => {
-    if (!running) {
-      setExecutionStatus(null);
-      return () => { if (execPollRef.current) clearInterval(execPollRef.current); };
-    }
     fetchExecutionStatus();
-    execPollRef.current = setInterval(fetchExecutionStatus, 5000);
+    const interval = running ? 5000 : 15000;
+    execPollRef.current = setInterval(fetchExecutionStatus, interval);
     return () => { if (execPollRef.current) clearInterval(execPollRef.current); };
   }, [running, fetchExecutionStatus]);
 
@@ -763,11 +762,11 @@ export default function SignalsTab() {
 
         {/* ── Config Panel ── */}
         <div className="space-y-2">
-          {running && executionStatus && (
+          {executionStatus?.running && (
             <OrderBudgetControl
               orderBudget={executionStatus.order_budget ?? 0}
               totalAlgoOrders={executionStatus.total_algo_orders ?? 0}
-              isRunning={executionStatus.running ?? false}
+              isRunning={true}
               onSetBudget={handleSetBudget}
             />
           )}
