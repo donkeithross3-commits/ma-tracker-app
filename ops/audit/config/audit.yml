@@ -71,3 +71,7 @@ suppressions:
     id: "npm_not_installed"
     reason: "npm not available on bare-metal droplet — Node runs inside Docker only"
     expires: "2027-01-01"
+  - check: "secrets/hardcoded_secrets"
+    id: "docker-compose.prod.yml"
+    reason: "Docker-internal postgres credentials — local network only, not external DB"
+    expires: "2027-01-01"
