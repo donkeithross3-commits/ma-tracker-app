@@ -56,10 +56,33 @@ and explain what evidence leads you to a different conclusion.
 
 - **Investability**: Is this deal investable? Answer "Yes", "No", or "Conditional" with reasoning.
   Compare against the production sheet's investable flag.
-- **Probability of Success**: Your independent estimate (0-100) of deal completion probability.
-- **Probability of Higher Offer**: Estimate (0-100) of a competing or sweetened bid.
-- **Break Price Estimate**: If the deal breaks, what price would the target trade to?
-- **Implied Downside Estimate**: Percentage loss from current price to break price.
+- **Probability of Success** (0-100): Provide your independent estimate of deal completion
+  probability as a structured object with:
+  - "value": the probability (0-100)
+  - "confidence": your confidence in this estimate (0.0-1.0)
+  - "factors": list of key factors that influenced it, each with:
+    - "factor": description of the factor
+    - "weight": "high", "medium", or "low"
+    - "direction": "positive" or "negative"
+
+- **Probability of Higher Offer** (0-100): Provide a structured object with:
+  - "value": the probability (0-100)
+  - "confidence": your confidence in this estimate (0.0-1.0)
+  - "factors": list of specific signals, each with:
+    - "factor": description (go-shop status, strategic interest, premium vs sector comps, activist involvement, standalone value)
+    - "weight": "high", "medium", or "low"
+    - "direction": "positive" or "negative"
+
+- **Break Price Estimate** ($): The price the target would trade to if the deal breaks.
+  Provide a structured object with:
+  - "value": the estimated break price in dollars
+  - "confidence": your confidence in this estimate (0.0-1.0)
+  - "anchors": list of price anchors used, each with:
+    - "anchor": description (e.g. "Pre-deal 30-day VWAP", "Termination fee floor", "Sector comparable valuation")
+    - "value": dollar value of this anchor
+  - "methodology": brief description of how you combined the anchors
+
+- **Implied Downside Estimate**: Percentage loss from current price to break price (scalar value).
 - **Deal Summary**: 2-3 sentence overview of the deal's current status and risk profile.
 - **Key Risks**: List the top 3-5 specific risks to this deal.
 - **Watchlist Items**: List things to monitor in the coming days/weeks.
@@ -83,9 +106,31 @@ You MUST respond with valid JSON in exactly this format:
     "investable_assessment": "Yes|No|Conditional",
     "investable_reasoning": "...",
     "investable_vs_production": "agree|disagree",
-    "probability_of_success": 95.5,
-    "probability_of_higher_offer": 12.0,
-    "break_price_estimate": 28.50,
+    "probability_of_success": {
+        "value": 95.5,
+        "confidence": 0.85,
+        "factors": [
+            {"factor": "Committed financing in place", "weight": "high", "direction": "positive"},
+            {"factor": "CFIUS only regulatory hurdle", "weight": "medium", "direction": "positive"}
+        ]
+    },
+    "probability_of_higher_offer": {
+        "value": 12.0,
+        "confidence": 0.70,
+        "factors": [
+            {"factor": "Go-shop period expired with no topping bid", "weight": "high", "direction": "negative"},
+            {"factor": "Strategic interest from peer acquirers", "weight": "medium", "direction": "positive"}
+        ]
+    },
+    "break_price_estimate": {
+        "value": 28.50,
+        "confidence": 0.60,
+        "anchors": [
+            {"anchor": "Pre-deal 30-day VWAP", "value": 26.80},
+            {"anchor": "Termination fee floor", "value": 27.50}
+        ],
+        "methodology": "Weighted average of pre-deal range and comps, floored by termination fee"
+    },
     "implied_downside_estimate": -15.2,
     "deal_summary": "2-3 sentence overview",
     "key_risks": ["risk1", "risk2", "risk3"],
@@ -336,7 +381,31 @@ def build_delta_assessment_prompt(
             detail = prev_assessment.get(f"{f}_detail", "")
             sections.append(f"  {f}: {score}/10 — {detail}")
         sections.append(f"  Investable: {prev_assessment.get('investable_assessment', 'N/A')}")
-        sections.append(f"  Prob Success: {prev_assessment.get('our_prob_success', 'N/A')}")
+        prob_val = prev_assessment.get('our_prob_success', 'N/A')
+        sections.append(f"  Prob Success: {prob_val}")
+        # Include previous estimate reasoning if available (from ai_response)
+        ai_resp = prev_assessment.get("ai_response")
+        if isinstance(ai_resp, str):
+            try:
+                ai_resp = __import__("json").loads(ai_resp)
+            except (TypeError, ValueError):
+                ai_resp = None
+        if isinstance(ai_resp, dict):
+            for est_key, label in [
+                ("probability_of_success", "Prob Success Factors"),
+                ("probability_of_higher_offer", "Higher Offer Factors"),
+                ("break_price_estimate", "Break Price Anchors"),
+            ]:
+                est = ai_resp.get(est_key)
+                if isinstance(est, dict):
+                    items = est.get("factors") or est.get("anchors") or []
+                    if items:
+                        sections.append(f"  {label}:")
+                        for item in items:
+                            if "factor" in item:
+                                sections.append(f"    - {item['factor']} ({item.get('weight', '?')}, {item.get('direction', '?')})")
+                            elif "anchor" in item:
+                                sections.append(f"    - {item['anchor']}: ${item.get('value', '?')}")
         sections.append(f"  Summary: {prev_assessment.get('deal_summary', 'N/A')}")
     sections.append("")
 

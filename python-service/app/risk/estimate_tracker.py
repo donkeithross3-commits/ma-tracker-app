@@ -40,6 +40,14 @@ def _extract_grade(raw) -> str | None:
     return _GRADE_MAP.get(s, s.title() if s else None)
 
 
+def _extract_estimate_value(data: dict, key: str):
+    """Handle both scalar (old) and structured (new) estimate formats."""
+    raw = data.get(key)
+    if isinstance(raw, dict):
+        return raw.get("value")
+    return raw
+
+
 def _safe_float(val) -> float | None:
     """Safely convert a value to float, returning None on failure."""
     if val is None:
@@ -108,12 +116,13 @@ async def capture_daily_estimates(pool, assessments: list[dict]):
             sheet_rrr = _safe_float(sheet["return_risk_ratio"]) if sheet else None
 
             # AI probability values — convert from percentage (85.0) to decimal (0.85)
-            ai_prob_raw = _safe_float(assessment.get("probability_of_success"))
+            # Handle both structured {"value": 92.0, ...} and scalar 92.0 formats
+            ai_prob_raw = _safe_float(_extract_estimate_value(assessment, "probability_of_success"))
             ai_prob = ai_prob_raw / 100 if ai_prob_raw is not None else None
-            ai_prob_higher_raw = _safe_float(assessment.get("probability_of_higher_offer"))
+            ai_prob_higher_raw = _safe_float(_extract_estimate_value(assessment, "probability_of_higher_offer"))
             ai_prob_higher = ai_prob_higher_raw / 100 if ai_prob_higher_raw is not None else None
-            ai_break = _safe_float(assessment.get("break_price"))
-            ai_downside = _safe_float(assessment.get("implied_downside"))
+            ai_break = _safe_float(_extract_estimate_value(assessment, "break_price_estimate"))
+            ai_downside = _safe_float(_extract_estimate_value(assessment, "implied_downside_estimate"))
 
             # Compute probability divergence (ai - sheet)
             divergence = None
@@ -465,7 +474,7 @@ async def detect_potential_outcomes(pool) -> list[dict]:
         # 1. Deals removed from sheet (diff_type = 'removed') in last 7 days
         removed = await conn.fetch("""
             SELECT DISTINCT ticker FROM sheet_diffs
-            WHERE diff_type = 'removed' AND diff_date >= CURRENT_DATE - 7
+            WHERE diff_type = 'removed' AND created_at >= CURRENT_DATE - 7
         """)
         for r in removed:
             # Skip if already has an outcome recorded

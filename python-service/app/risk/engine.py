@@ -51,6 +51,18 @@ GRADED_FACTORS = ["vote", "financing", "legal", "regulatory", "mac"]
 SUPPLEMENTAL_FACTORS = ["market", "timing", "competing_bid"]
 
 
+def _extract_estimate_value(data: dict, key: str):
+    """Handle both scalar (old) and structured (new) estimate formats.
+
+    New format: {"value": 92.0, "confidence": 0.85, "factors": [...]}
+    Old format: 92.0
+    """
+    raw = data.get(key)
+    if isinstance(raw, dict):
+        return raw.get("value")
+    return raw
+
+
 def _score_to_level(score: float | None) -> str:
     """Convert a numeric 0-10 score to a human-readable risk level."""
     if score is None:
@@ -311,7 +323,7 @@ class RiskAssessmentEngine:
             response = self.anthropic.messages.create(
                 model=model,
                 temperature=0,
-                max_tokens=2000,
+                max_tokens=2500,
                 system=[{
                     "type": "text",
                     "text": sys_text,
@@ -676,6 +688,27 @@ class RiskAssessmentEngine:
             flagged, changed, total_discrepancies, failed, total_cost, estimated_savings,
         )
 
+        # Capture daily estimate snapshots for prediction tracking
+        try:
+            from .estimate_tracker import capture_daily_estimates
+            async with self.pool.acquire() as conn:
+                stored = await conn.fetch(
+                    "SELECT * FROM deal_risk_assessments WHERE run_id = $1", run_id
+                )
+            tracker_list = []
+            for sa in stored:
+                d = dict(sa)
+                ai_resp = d.get("ai_response")
+                if isinstance(ai_resp, str):
+                    ai_resp = json.loads(ai_resp) if ai_resp else {}
+                if isinstance(ai_resp, dict):
+                    d.update(ai_resp)
+                tracker_list.append(d)
+            snapshot_result = await capture_daily_estimates(self.pool, tracker_list)
+            logger.info("Estimate snapshots captured: %s", snapshot_result)
+        except Exception as e:
+            logger.error("Estimate snapshot capture failed: %s", e, exc_info=True)
+
         return {
             "run_id": str(run_id),
             "run_date": str(run_date),
@@ -895,11 +928,11 @@ Keep it actionable and direct."""
                 # Investability
                 assessment.get("investable_assessment"),
                 assessment.get("investable_reasoning"),
-                # Our estimates
-                assessment.get("probability_of_success"),
-                assessment.get("probability_of_higher_offer"),
-                assessment.get("break_price_estimate"),
-                assessment.get("implied_downside_estimate"),
+                # Our estimates (handle both structured and scalar formats)
+                _extract_estimate_value(assessment, "probability_of_success"),
+                _extract_estimate_value(assessment, "probability_of_higher_offer"),
+                _extract_estimate_value(assessment, "break_price_estimate"),
+                _extract_estimate_value(assessment, "implied_downside_estimate"),
                 # Sheet values
                 sheet_comp.get("vote_risk"),
                 sheet_comp.get("finance_risk"),
@@ -919,7 +952,7 @@ Keep it actionable and direct."""
                 float(gross_yield) if gross_yield is not None else None,
                 float(current_yield) if current_yield is not None else None,
                 countdown_days,
-                assessment.get("probability_of_success"),
+                _extract_estimate_value(assessment, "probability_of_success"),
                 # Flags
                 has_new_filing, has_new_halt,
                 has_spread_change, False,  # has_risk_change set after change detection

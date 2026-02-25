@@ -1258,3 +1258,181 @@ async def get_baseline_blind_review(run_id: str):
     except Exception as e:
         logger.error(f"Failed to fetch blind review: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/accuracy/report
+# ---------------------------------------------------------------------------
+@router.get("/accuracy/report")
+async def get_accuracy_report():
+    """Aggregate accuracy report: AI vs Sheet across all scored deals.
+
+    Returns:
+        - Average Brier scores (sheet vs AI)
+        - Win/loss record (AI wins, sheet wins, ties)
+        - Outcome distribution
+        - Per-deal detail rows
+    """
+    pool = _get_pool()
+    try:
+        async with pool.acquire() as conn:
+            # Aggregate stats
+            agg = await conn.fetchrow("""
+                SELECT
+                    COUNT(*)                                          AS total_scored,
+                    AVG(sheet_prob_success_brier)                     AS avg_sheet_brier,
+                    AVG(ai_prob_success_brier)                        AS avg_ai_brier,
+                    AVG(sheet_score)                                  AS avg_sheet_score,
+                    AVG(ai_score)                                     AS avg_ai_score,
+                    SUM(CASE WHEN overall_winner = 'ai' THEN 1 ELSE 0 END)    AS ai_wins,
+                    SUM(CASE WHEN overall_winner = 'sheet' THEN 1 ELSE 0 END)  AS sheet_wins,
+                    SUM(CASE WHEN overall_winner = 'tie' THEN 1 ELSE 0 END)    AS ties,
+                    SUM(CASE WHEN prob_success_winner = 'ai' THEN 1 ELSE 0 END)    AS ai_prob_wins,
+                    SUM(CASE WHEN prob_success_winner = 'sheet' THEN 1 ELSE 0 END)  AS sheet_prob_wins
+                FROM estimate_accuracy_scores
+            """)
+
+            # Outcome distribution
+            outcomes = await conn.fetch("""
+                SELECT outcome, COUNT(*) AS count
+                FROM deal_outcomes
+                GROUP BY outcome
+                ORDER BY count DESC
+            """)
+
+            # Per-deal detail
+            details = await conn.fetch("""
+                SELECT
+                    s.ticker,
+                    s.days_tracked,
+                    s.first_estimate_date,
+                    s.last_estimate_date,
+                    s.outcome,
+                    s.sheet_prob_success_brier,
+                    s.ai_prob_success_brier,
+                    s.prob_success_winner,
+                    s.sheet_break_price_error_pct,
+                    s.ai_break_price_error_pct,
+                    s.sheet_identified_risk,
+                    s.ai_identified_risk,
+                    s.sheet_score,
+                    s.ai_score,
+                    s.overall_winner,
+                    o.outcome_date,
+                    o.outcome_price,
+                    o.primary_risk_factor
+                FROM estimate_accuracy_scores s
+                LEFT JOIN deal_outcomes o ON o.ticker = s.ticker
+                ORDER BY s.last_estimate_date DESC
+            """)
+
+            return {
+                "summary": _row_to_dict(agg) if agg else {},
+                "outcome_distribution": [_row_to_dict(r) for r in outcomes],
+                "deals": [_row_to_dict(r) for r in details],
+            }
+    except Exception as e:
+        logger.error(f"Failed to fetch accuracy report: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch accuracy report: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/estimates/export
+# ---------------------------------------------------------------------------
+@router.get("/estimates/export")
+async def export_estimates(
+    format: Optional[str] = Query(None, description="Set to 'csv' for CSV download"),
+    ticker: Optional[str] = Query(None, description="Filter by ticker"),
+):
+    """Training data export: daily snapshots joined with eventual outcomes.
+
+    Each row: date, ticker, sheet estimates, AI estimates, market data, outcome (if resolved).
+    Supports ?format=csv for direct CSV download.
+    """
+    pool = _get_pool()
+    try:
+        params = []
+        where_clause = ""
+        if ticker:
+            if not re.match(r'^[A-Z]{1,10}$', ticker):
+                raise HTTPException(status_code=400, detail="Invalid ticker format")
+            where_clause = "WHERE s.ticker = $1"
+            params.append(ticker)
+
+        query = f"""
+            SELECT
+                s.snapshot_date,
+                s.ticker,
+                s.sheet_prob_success,
+                s.sheet_prob_higher_offer,
+                s.sheet_break_price,
+                s.sheet_implied_downside,
+                s.sheet_return_risk_ratio,
+                s.sheet_offer_bump_premium,
+                s.ai_prob_success,
+                s.ai_prob_higher_offer,
+                s.ai_break_price,
+                s.ai_implied_downside,
+                s.sheet_vote_risk,
+                s.sheet_finance_risk,
+                s.sheet_legal_risk,
+                s.sheet_investable,
+                s.ai_vote_grade,
+                s.ai_finance_grade,
+                s.ai_legal_grade,
+                s.ai_regulatory_grade,
+                s.ai_mac_grade,
+                s.ai_investable_assessment,
+                s.deal_price,
+                s.current_price,
+                s.gross_spread_pct,
+                s.annualized_yield_pct,
+                s.days_to_close,
+                s.prob_success_divergence,
+                s.grade_mismatches,
+                s.has_investable_mismatch,
+                o.outcome,
+                o.outcome_date,
+                o.outcome_price,
+                o.had_competing_bid,
+                o.primary_risk_factor,
+                o.days_to_outcome
+            FROM deal_estimate_snapshots s
+            LEFT JOIN deal_outcomes o ON o.ticker = s.ticker
+            {where_clause}
+            ORDER BY s.ticker, s.snapshot_date
+        """
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        if format == "csv":
+            import csv
+            import io
+            from fastapi.responses import StreamingResponse
+
+            output = io.StringIO()
+            if rows:
+                cols = list(rows[0].keys())
+                writer = csv.writer(output)
+                writer.writerow(cols)
+                for row in rows:
+                    writer.writerow([
+                        v.isoformat() if isinstance(v, (date, datetime)) else v
+                        for v in row.values()
+                    ])
+
+            output.seek(0)
+            filename = f"estimate_snapshots{'_' + ticker if ticker else ''}.csv"
+            return StreamingResponse(
+                iter([output.getvalue()]),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+
+        return [_row_to_dict(r) for r in rows]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export estimates: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to export estimates: {str(e)}")

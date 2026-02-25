@@ -43,6 +43,124 @@ def _match_icon(vs: str) -> str:
     return '<span style="color:#9ca3af;font-size:12px;">&mdash;</span>'
 
 
+def _extract_estimate(assessment: dict, key: str):
+    """Extract estimate data, handling both structured and scalar formats."""
+    raw = assessment.get(key)
+    if isinstance(raw, dict):
+        return raw
+    if raw is not None:
+        return {"value": raw}
+    return None
+
+
+def _confidence_badge(estimate_data: dict) -> str:
+    """Render a small confidence badge if confidence is available."""
+    if not estimate_data or not isinstance(estimate_data, dict):
+        return ""
+    conf = estimate_data.get("confidence")
+    if conf is None:
+        return ""
+    pct = int(conf * 100)
+    color = "#16a34a" if conf >= 0.8 else "#d97706" if conf >= 0.6 else "#dc2626"
+    return (
+        f'<div style="font-size:10px;color:{color};margin-top:2px;">'
+        f'{pct}% confidence</div>'
+    )
+
+
+def _estimate_factors_html(estimate_data) -> str:
+    """Render factor list with +/- icons and weight indicators."""
+    if not isinstance(estimate_data, dict):
+        return ""
+    factors = estimate_data.get("factors", [])
+    if not factors:
+        return ""
+    rows = ""
+    for f in factors:
+        direction = f.get("direction", "")
+        weight = f.get("weight", "medium")
+        factor_text = f.get("factor", "")
+        icon = '<span style="color:#16a34a;font-weight:bold;">+</span>' if direction == "positive" else '<span style="color:#dc2626;font-weight:bold;">&minus;</span>'
+        weight_color = "#1d4ed8" if weight == "high" else "#6b7280" if weight == "medium" else "#9ca3af"
+        weight_label = weight.upper()
+        rows += (
+            f'<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:3px;font-size:11px;line-height:1.4;">'
+            f'{icon} '
+            f'<span style="color:#374151;">{factor_text}</span>'
+            f'<span style="color:{weight_color};font-size:9px;font-weight:600;letter-spacing:0.3px;">{weight_label}</span>'
+            f'</div>'
+        )
+    return (
+        f'<div style="background:#f8fafc;border-radius:4px;padding:8px 10px;margin-top:8px;">'
+        f'{rows}</div>'
+    )
+
+
+def _break_price_anchors_html(estimate_data) -> str:
+    """Render anchor table (anchor name + dollar value)."""
+    if not isinstance(estimate_data, dict):
+        return ""
+    anchors = estimate_data.get("anchors", [])
+    methodology = estimate_data.get("methodology", "")
+    if not anchors and not methodology:
+        return ""
+    rows = ""
+    for a in anchors:
+        anchor_name = a.get("anchor", "")
+        anchor_val = a.get("value")
+        val_str = f"${anchor_val:,.2f}" if anchor_val is not None else "N/A"
+        rows += (
+            f'<div style="display:flex;justify-content:space-between;margin-bottom:2px;font-size:11px;">'
+            f'<span style="color:#6b7280;">{anchor_name}</span>'
+            f'<span style="color:#374151;font-weight:600;">{val_str}</span>'
+            f'</div>'
+        )
+    if methodology:
+        rows += f'<div style="font-size:10px;color:#9ca3af;margin-top:4px;font-style:italic;">{methodology}</div>'
+    return (
+        f'<div style="background:#f8fafc;border-radius:4px;padding:8px 10px;margin-top:8px;">'
+        f'{rows}</div>'
+    )
+
+
+def _estimate_factors_section(prob_data, prob_higher_data, break_data) -> str:
+    """Render the combined estimate reasoning section below hero cards."""
+    prob_factors = _estimate_factors_html(prob_data) if prob_data else ""
+    higher_factors = _estimate_factors_html(prob_higher_data) if prob_higher_data else ""
+    break_anchors = _break_price_anchors_html(break_data) if break_data else ""
+
+    if not prob_factors and not higher_factors and not break_anchors:
+        return ""
+
+    sections = []
+    if prob_factors:
+        sections.append(
+            f'<div style="flex:1;min-width:200px;">'
+            f'<div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Success Factors</div>'
+            f'{prob_factors}</div>'
+        )
+    if higher_factors:
+        sections.append(
+            f'<div style="flex:1;min-width:200px;">'
+            f'<div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Higher Offer Signals</div>'
+            f'{higher_factors}</div>'
+        )
+    if break_anchors:
+        sections.append(
+            f'<div style="flex:1;min-width:200px;">'
+            f'<div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Break Price Anchors</div>'
+            f'{break_anchors}</div>'
+        )
+
+    content = "".join(sections)
+    return (
+        f'<div style="padding:12px 24px;border-bottom:1px solid #e2e8f0;background:#fafbfc;">'
+        f'<h2 style="font-size:13px;color:#0f172a;margin:0 0 8px 0;">Estimate Reasoning</h2>'
+        f'<div style="display:flex;gap:16px;flex-wrap:wrap;">{content}</div>'
+        f'</div>'
+    )
+
+
 def _score_bar(score: int, max_score: int = 5) -> str:
     """Render a simple inline score indicator (filled/empty dots)."""
     filled = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:#2563eb;margin-right:3px;"></span>'
@@ -121,8 +239,13 @@ def risk_assessment_email(
         header_parts.append(f"{countdown} days to close")
     header_detail_str = " &bull; ".join(header_parts)
 
+    # Extract structured estimate data
+    prob_data = _extract_estimate(assessment, "probability_of_success")
+    prob_higher_data = _extract_estimate(assessment, "probability_of_higher_offer")
+    break_data = _extract_estimate(assessment, "break_price_estimate")
+
     # Probability & investability
-    prob = assessment.get("probability_of_success")
+    prob = prob_data.get("value") if prob_data else None
     prob_str = f"{prob:.0f}%" if prob is not None else "N/A"
     prob_color = "#16a34a" if prob and prob >= 80 else "#d97706" if prob and prob >= 60 else "#dc2626"
 
@@ -229,10 +352,11 @@ def risk_assessment_email(
     # Deal summary
     summary = assessment.get("deal_summary", "")
 
-    # Break price / downside / higher offer
-    break_price = assessment.get("break_price_estimate")
-    downside = assessment.get("implied_downside_estimate")
-    prob_higher = assessment.get("probability_of_higher_offer")
+    # Break price / downside / higher offer — extract scalar values from structured data
+    break_price = break_data.get("value") if break_data else None
+    downside_data = _extract_estimate(assessment, "implied_downside_estimate")
+    downside = downside_data.get("value") if downside_data else None
+    prob_higher = prob_higher_data.get("value") if prob_higher_data else None
 
     scenario_items = ""
     if break_price is not None:
@@ -241,6 +365,7 @@ def risk_assessment_email(
                     <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Break Price</div>
                     <div style="font-size:20px;font-weight:700;color:#dc2626;">${break_price:.2f}</div>
                     {f'<div style="font-size:11px;color:#6b7280;">{downside:+.1f}%</div>' if downside is not None else ''}
+                    {_confidence_badge(break_data)}
                 </div>"""
     if prob_higher is not None:
         scenario_items += f"""
@@ -248,6 +373,7 @@ def risk_assessment_email(
                     <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Higher Offer</div>
                     <div style="font-size:20px;font-weight:700;color:#16a34a;">{prob_higher:.0f}%</div>
                     <div style="font-size:11px;color:#6b7280;">probability</div>
+                    {_confidence_badge(prob_higher_data)}
                 </div>"""
 
     # Model / cost footer
@@ -309,6 +435,7 @@ def risk_assessment_email(
                 <div style="flex:1;min-width:130px;text-align:center;padding:14px;background:#f8fafc;border-radius:8px;">
                     <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Success Prob.</div>
                     <div style="font-size:28px;font-weight:800;color:{prob_color};">{prob_str}</div>
+                    {_confidence_badge(prob_data)}
                 </div>
                 <div style="flex:1;min-width:130px;text-align:center;padding:14px;background:#f8fafc;border-radius:8px;">
                     <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">AI vs Production</div>
@@ -317,6 +444,9 @@ def risk_assessment_email(
                 </div>
                 {scenario_items}
             </div>
+
+            <!-- Estimate Reasoning -->
+            {_estimate_factors_section(prob_data, prob_higher_data, break_data)}
 
             <!-- Deal Summary -->
             <div style="padding:16px 24px;border-bottom:1px solid #e2e8f0;">
