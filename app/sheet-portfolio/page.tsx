@@ -325,42 +325,16 @@ export default function SheetPortfolioPage() {
       }
 
       const rowCount = data.skipped ? 0 : data.row_count;
-      if (data.skipped) {
-        setIngestResult("Skipped (no changes) — refreshing deal details...");
-      } else {
-        setIngestResult(`Ingested ${rowCount} rows — refreshing deal details...`);
-      }
 
       // Refresh table immediately with dashboard data
       await fetchData();
 
-      // Phase 2: Detail ingest (all deal tabs)
-      try {
-        const detailResp = await fetch("/api/sheet-portfolio/ingest-details", {
-          method: "POST",
-        });
-        if (detailResp.ok) {
-          const detailData = await detailResp.json();
-          const detailCount = detailData.succeeded || 0;
-          // Refresh again to pick up detail data
-          await fetchData();
-          setIngestResult(
-            data.skipped
-              ? `Skipped dashboard (no changes) + ${detailCount} deal details`
-              : `Ingested ${rowCount} rows + ${detailCount} deal details`
-          );
-        } else {
-          // Detail ingest failed but dashboard was fine
-          setIngestResult(
-            `Ingested ${rowCount} rows (detail refresh failed)`
-          );
-        }
-      } catch {
-        // Detail ingest network error — dashboard still succeeded
-        setIngestResult(
-          `Ingested ${rowCount} rows (detail refresh failed)`
-        );
-      }
+      // Phase 1 succeeded — details are refreshing in the background via the backend
+      setIngestResult(
+        data.skipped
+          ? "No changes detected"
+          : `Ingested ${rowCount} rows (details refreshing in background)`
+      );
     } catch (e) {
       setIngestResult(
         `Error: ${e instanceof Error ? e.message : "Ingest failed"}`
@@ -509,9 +483,7 @@ export default function SheetPortfolioPage() {
               disabled={ingesting}
               className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 disabled:bg-gray-700 disabled:text-gray-500 border border-gray-700 rounded transition-colors"
             >
-              {ingesting
-                ? (ingestResult?.includes("deal details") ? "Refreshing details..." : "Ingesting...")
-                : "Re-ingest Sheet"}
+              {ingesting ? "Ingesting..." : "Re-ingest Sheet"}
             </button>
             {ingestResult && (
               <span className="text-xs text-gray-400">{ingestResult}</span>

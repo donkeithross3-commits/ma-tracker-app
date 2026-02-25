@@ -2,9 +2,11 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from datetime import date, datetime
+import asyncio
 import json
 import logging
 import re
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,25 @@ async def ingest_dashboard_endpoint(
 
     try:
         result = await ingest_dashboard(pool, snapshot_date, force)
+
+        # Auto-trigger background detail ingest if dashboard ingest succeeded
+        if result.get("status") == "success" and not result.get("skipped"):
+            async def _background_detail_ingest():
+                try:
+                    from app.portfolio.detail_parser import ingest_deal_details
+                    async with pool.acquire() as conn:
+                        rows = await conn.fetch(
+                            "SELECT DISTINCT ticker, deal_tab_gid FROM sheet_rows WHERE snapshot_id = $1 AND ticker IS NOT NULL AND deal_tab_gid IS NOT NULL",
+                            uuid.UUID(result["snapshot_id"])
+                        )
+                        deals = [{"ticker": r["ticker"], "gid": r["deal_tab_gid"]} for r in rows]
+                    if deals:
+                        await ingest_deal_details(pool, uuid.UUID(result["snapshot_id"]), deals)
+                except Exception:
+                    logger.error("Background detail ingest failed", exc_info=True)
+
+            asyncio.create_task(_background_detail_ingest())
+
         return result
     except Exception as e:
         logger.error(f"Dashboard ingest failed: {e}", exc_info=True)
@@ -222,11 +243,17 @@ async def get_deal(ticker: str):
                 snapshot["id"], ticker
             )
 
-            # Get deal details
+            # Get deal details (try current snapshot first, then fall back to any)
             detail = await conn.fetchrow(
                 "SELECT * FROM sheet_deal_details WHERE snapshot_id = $1 AND ticker = $2 ORDER BY fetched_at DESC LIMIT 1",
                 snapshot["id"], ticker
             )
+            if detail is None:
+                # Fall back to most recent detail from any snapshot
+                detail = await conn.fetchrow(
+                    "SELECT * FROM sheet_deal_details WHERE ticker = $1 ORDER BY fetched_at DESC LIMIT 1",
+                    ticker
+                )
 
             if not dashboard_row and not detail:
                 raise HTTPException(status_code=404, detail=f"No data found for ticker {ticker}")
