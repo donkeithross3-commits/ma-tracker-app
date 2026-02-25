@@ -32,8 +32,12 @@ services:
       - frontend
       - default
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -74,6 +78,10 @@ services:
       - frontend
       - default
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 30s
@@ -109,6 +117,37 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: ma-tracker-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ma_user
+      POSTGRES_PASSWORD: ma_password_2025
+      POSTGRES_DB: ma_tracker
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ma_user -d ma_tracker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
 networks:
   frontend:
     driver: bridge
+
+volumes:
+  postgres_data:

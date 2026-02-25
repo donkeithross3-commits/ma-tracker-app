@@ -20,7 +20,7 @@ allowed_ports:
     - {port: 80, process: "caddy", note: "HTTP redirect"}
     - {port: 22, process: "sshd", note: "SSH"}
     - {port: 3000, process: "node", note: "Next.js web (Docker)"}
-    - {port: 5432, process: "postgres", note: "PostgreSQL (Docker) — TODO: bind to 127.0.0.1"}
+    - {port: 5432, process: "postgres", note: "PostgreSQL (Docker) — bound to 127.0.0.1"}
     - {port: 8000, process: "python", note: "Trading service (bare-metal)"}
   localhost:
     - {port: 3000, process: "node", note: "Next.js web"}

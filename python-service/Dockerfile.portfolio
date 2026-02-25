@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+# Create non-root user
+RUN groupadd --system --gid 1001 appuser && \
+    useradd --system --uid 1001 --gid appuser appuser
+
 WORKDIR /service
 
 # Install deps first (layer cache)
@@ -23,6 +27,10 @@ COPY app/edgar/models.py app/edgar/models.py
 COPY app/risk/ app/risk/
 COPY app/api/risk_routes.py app/api/risk_routes.py
 COPY app/scanner.py app/scanner.py
+
+# Set ownership and switch to non-root user
+RUN chown -R appuser:appuser /service
+USER appuser
 
 EXPOSE 8001
 

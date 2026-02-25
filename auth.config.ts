@@ -32,6 +32,9 @@ export const authConfig: NextAuthConfig = {
       const isChangePasswordPage = pathname === "/account/change-password"
       const isChangePasswordAPI = pathname === "/api/user/change-password"
       
+      // Health check endpoint (used by Docker health checks, must not require auth)
+      const isHealthCheck = pathname === "/api/health"
+
       // Internal API endpoints (called by Python service or agent, not browser)
       const isInternalAPI = pathname === "/api/ma-options/validate-agent-key" ||
                             pathname === "/api/ma-options/agent-version" ||
@@ -40,7 +43,7 @@ export const authConfig: NextAuthConfig = {
       const isAdminEndpoint = pathname === "/api/admin/seed-whitelist"
       
       // Allow public paths
-      if (isLoginPage || isAuthAPI || isInternalAPI || isAdminEndpoint) {
+      if (isLoginPage || isAuthAPI || isHealthCheck || isInternalAPI || isAdminEndpoint) {
         return true
       }
       
