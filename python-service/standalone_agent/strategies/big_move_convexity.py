@@ -104,6 +104,9 @@ _DEFAULTS: dict[str, Any] = {
     "options_gate_enabled": False,    # enable straddle richness gate
 }
 
+# Cross-asset tickers for correlation features (Group C) and backfill
+_CROSS_ASSET_TICKERS = ["QQQ", "IWM", "TLT", "GLD", "HYG"]
+
 # Ticker-specific defaults for option selection, spreads, and Polygon channels.
 # These override _DEFAULTS when a ticker profile is applied in on_start().
 _TICKER_PROFILES: dict[str, dict[str, Any]] = {
@@ -490,10 +493,10 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # from within the agent's running asyncio event loop (Python 3.12+
         # forbids nested run_until_complete on the same thread).
         bootstrap = DailyBootstrap()
-        # Bootstrap the target ticker plus SPY (needed for cross-ticker features)
-        bootstrap_tickers = [self._ticker]
-        if self._ticker != "SPY":
-            bootstrap_tickers.append("SPY")
+        # Bootstrap the target ticker + SPY + all cross-asset tickers
+        bootstrap_tickers = list(dict.fromkeys(
+            [self._ticker, "SPY"] + _CROSS_ASSET_TICKERS
+        ))
         try:
             bootstrap_result = _run_async_in_thread(
                 bootstrap.bootstrap(self._data_store, tickers=bootstrap_tickers)
@@ -501,6 +504,19 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             logger.info("Daily bootstrap complete: %s", bootstrap_result)
         except Exception:
             logger.warning("Daily bootstrap failed — features may be incomplete", exc_info=True)
+
+        # Backfill today's intraday 1m bars for all tickers so features have
+        # full session data from 09:30, not just from WS connect time.
+        backfill_tickers = list(dict.fromkeys(
+            [self._ticker] + [t for t in _CROSS_ASSET_TICKERS if t != self._ticker] + ["SPY"]
+        ))
+        try:
+            backfill_result = _run_async_in_thread(
+                bootstrap.backfill_intraday_bars(self._data_store, backfill_tickers)
+            )
+            logger.info("Intraday backfill complete: %s", backfill_result)
+        except Exception:
+            logger.warning("Intraday backfill failed — will rely on WS bars only", exc_info=True)
 
     def _start_polygon_ws(self, cfg: dict) -> None:
         """Start Polygon WS in a background thread."""
@@ -537,11 +553,25 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             except Exception:
                 logger.debug("Error in equity quote callback", exc_info=True)
 
-        # Subscribe to ticker equity via the provider (via helper thread to
-        # avoid nested event loop conflict with the agent's main loop).
-        _run_async_in_thread(
-            self._polygon_provider.subscribe_equity(self._ticker, _on_equity_quote)
-        )
+        # Subscribe primary ticker + all cross-asset tickers to the same
+        # callback. BarAccumulator handles multi-ticker natively via lazy
+        # per-(resolution, ticker) state.
+        all_ws_tickers = list(dict.fromkeys([self._ticker] + _CROSS_ASSET_TICKERS))
+        for ws_ticker in all_ws_tickers:
+            _run_async_in_thread(
+                self._polygon_provider.subscribe_equity(ws_ticker, _on_equity_quote)
+            )
+
+        # Build channel list: T (trades) + Q (quotes) for every subscribed ticker
+        all_channels = []
+        for ws_ticker in all_ws_tickers:
+            all_channels.extend([f"T.{ws_ticker}", f"Q.{ws_ticker}"])
+        # Also include SPY if not already present
+        if "SPY" not in all_ws_tickers:
+            all_channels.extend(["T.SPY", "Q.SPY"])
+            _run_async_in_thread(
+                self._polygon_provider.subscribe_equity("SPY", _on_equity_quote)
+            )
 
         # Create client
         self._polygon_client = PolygonWSClient(
@@ -555,8 +585,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             asyncio.set_event_loop(loop)
             self._ws_loop = loop
             try:
-                # Subscribe to channels
-                channels = cfg.get("polygon_channels", [f"T.{self._ticker}", f"Q.{self._ticker}"])
+                # Subscribe to all channels (single WS connection handles all)
+                channels = all_channels
                 loop.run_until_complete(self._polygon_client.subscribe(channels))
                 loop.run_until_complete(self._polygon_client.connect_and_run())
             except Exception:
@@ -614,6 +644,24 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # SPY bars for cross-ticker features
         spy_bars = self._data_store.get_completed_bars("time_1m:SPY", before=t)
 
+        # QQQ bars for cross-ticker features (Group C)
+        qqq_bars = self._data_store.get_completed_bars("time_1m:QQQ", before=t)
+
+        # Extra cross-asset ticker bars (IWM, TLT, GLD, HYG) for Group C
+        extra_ticker_bars = {}
+        for ref_ticker in ["IWM", "TLT", "GLD", "HYG"]:
+            ref_bars = self._data_store.get_completed_bars(f"time_1m:{ref_ticker}", before=t)
+            if not ref_bars.empty:
+                extra_ticker_bars[ref_ticker] = ref_bars
+
+        # Compute session realized vol from accumulated 1m bars
+        session_realized_vol = None
+        primary_1m = bars_by_res.get("time_1m")
+        if primary_1m is not None and len(primary_1m) >= 5:
+            rets = primary_1m["close"].pct_change().dropna()
+            if len(rets) >= 4:
+                session_realized_vol = float(rets.std() * (390 * 252) ** 0.5)
+
         # Underlying price from IB quote cache
         underlying_price = None
         ticker_quote = quotes.get(self._ticker)
@@ -630,10 +678,13 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             t,
             bars_by_resolution=bars_by_res,
             spy_bars=spy_bars if spy_bars is not None and not spy_bars.empty else None,
+            qqq_bars=qqq_bars if qqq_bars is not None and not qqq_bars.empty else None,
             daily_features=daily_features or None,
             regime_override=regime or None,
             prior_close=prior_close,
             underlying_price=underlying_price,
+            extra_ticker_bars=extra_ticker_bars or None,
+            session_realized_vol=session_realized_vol,
         )
 
         # Predict
@@ -663,6 +714,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "computation_ms": fv.computation_time_ms,
             "bars_available": {k: len(v) for k, v in bars_by_res.items()},
             "underlying_price": underlying_price,
+            "n_cross_asset_tickers": len(extra_ticker_bars),
+            "session_realized_vol": session_realized_vol,
         }
         self._last_signal = signal_record
 
