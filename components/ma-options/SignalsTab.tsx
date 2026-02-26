@@ -539,6 +539,23 @@ export default function SignalsTab() {
     }
   };
 
+  // ── Manually close a position ──
+  const handleClosePosition = async (positionId: string, label: string) => {
+    if (!confirm(`Mark position ${label} as manually closed? This will stop the risk manager.`)) return;
+    try {
+      const res = await fetch("/api/ma-options/execution/close-position", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ position_id: positionId }),
+      });
+      const data = await res.json();
+      if (data.error) setError(data.error);
+    } catch (e: any) {
+      setError(e.message || "Failed to close position");
+    }
+  };
+
   // ── Update config for a specific ticker ──
   const handleConfigUpdate = async (ticker: string) => {
     setLoading(true);
@@ -639,16 +656,18 @@ export default function SignalsTab() {
   const positionDetails = useMemo(() => {
     if (!signal?.active_positions?.length) return [];
     const riskStrategies = (executionStatus?.strategies || []).filter(
-      s => s.strategy_id.startsWith("risk_") && s.strategy_state && "entry_price" in s.strategy_state,
+      s => s.strategy_id.includes("risk_") && s.strategy_state && "entry_price" in s.strategy_state,
     ) as (ExecutionStrategyInfo & { strategy_state: RiskManagerState })[];
     const quotes = executionStatus?.quote_snapshot || {};
 
     return signal.active_positions.map(pos => {
       // Match by entry_price + initial_qty (no explicit FK)
-      const rm = riskStrategies.find(
+      const matchedStrategy = riskStrategies.find(
         s => Math.abs(s.strategy_state.entry_price - pos.entry_price) < 0.005
           && s.strategy_state.initial_qty === pos.quantity,
-      )?.strategy_state ?? null;
+      );
+      const rm = matchedStrategy?.strategy_state ?? null;
+      const strategyId = matchedStrategy?.strategy_id ?? null;
       const quote = rm?.cache_key ? quotes[rm.cache_key] ?? null : null;
 
       // Unrealized P&L (assumes long — BMC always buys)
@@ -662,14 +681,14 @@ export default function SignalsTab() {
       // Option info from the signal snapshot at fill time
       const optionContract = pos.signal?.option_contract ?? null;
 
-      return { pos, rm, quote, pnlPct, pnlDollar, optionContract };
+      return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId };
     });
   }, [signal?.active_positions, executionStatus?.strategies, executionStatus?.quote_snapshot]);
 
   // ── Derived: all fills from risk managers ──
   const allFills = useMemo(() => {
     const riskStrategies = (executionStatus?.strategies || []).filter(
-      s => s.strategy_id.startsWith("risk_") && s.strategy_state && "fill_log" in s.strategy_state,
+      s => s.strategy_id.includes("risk_") && s.strategy_state && "fill_log" in s.strategy_state,
     );
     const fills: (FillLogEntry & { source: string })[] = [];
     for (const s of riskStrategies) {
@@ -698,7 +717,7 @@ export default function SignalsTab() {
   // ── Derived: session summary ──
   const sessionSummary = useMemo(() => {
     const riskStrategies = (executionStatus?.strategies || []).filter(
-      s => s.strategy_id.startsWith("risk_") && s.strategy_state && "completed" in s.strategy_state,
+      s => s.strategy_id.includes("risk_") && s.strategy_state && "completed" in s.strategy_state,
     );
     const completed = riskStrategies.filter(s => (s.strategy_state as RiskManagerState).completed);
     let wins = 0;
@@ -921,10 +940,11 @@ export default function SignalsTab() {
               </h3>
               <div className="space-y-2">
                 {positionDetails.map((pd, i) => {
-                  const { pos, rm, quote, pnlPct, pnlDollar, optionContract } = pd;
+                  const { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId } = pd;
                   const isCall = optionContract?.right?.toUpperCase() === "C" || optionContract?.right?.toUpperCase() === "CALL";
                   const isCompleted = rm?.completed;
                   const staleQuote = quote && quote.age_seconds > 30;
+                  const posLabel = optionContract ? `${optionContract.strike} ${isCall ? "C" : "P"}` : "position";
                   return (
                     <div key={i} className={`border rounded p-2 space-y-1 ${isCompleted ? "border-gray-700 bg-gray-800/30" : "border-gray-700"}`}>
                       {/* Row 1: contract info */}
@@ -944,6 +964,15 @@ export default function SignalsTab() {
                         <span className="text-gray-600 ml-auto">{new Date(pos.fill_time * 1000).toLocaleTimeString()}</span>
                         {isCompleted && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-600 text-gray-200">CLOSED</span>
+                        )}
+                        {!isCompleted && strategyId && (
+                          <button
+                            onClick={() => handleClosePosition(strategyId, posLabel)}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-900/40 text-red-400 hover:bg-red-900/70 transition-colors"
+                            title="Mark position as manually closed"
+                          >
+                            Close
+                          </button>
                         )}
                       </div>
                       {/* Row 2: prices + P&L */}

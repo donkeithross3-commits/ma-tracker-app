@@ -1923,6 +1923,32 @@ async def relay_execution_budget(request: ExecutionBudgetRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ExecutionClosePositionRequest(BaseModel):
+    userId: str
+    position_id: str
+
+
+@router.post("/relay/execution/close-position")
+async def relay_execution_close_position(request: ExecutionClosePositionRequest):
+    """Manually close a position on the user's agent (unload risk manager, mark closed)."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_close_position",
+            payload={"position_id": request.position_id},
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/close-position error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---------------------------------------------------------------------------
 # BMC (Big Move Convexity) relay endpoints
 # ---------------------------------------------------------------------------

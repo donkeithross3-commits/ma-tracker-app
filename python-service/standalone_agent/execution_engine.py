@@ -244,10 +244,12 @@ class ExecutionEngine:
         scanner: "IBMergerArbScanner",
         quote_cache: "StreamingQuoteCache",
         resource_manager: "ResourceManager",
+        position_store=None,
     ):
         self._scanner = scanner
         self._cache = quote_cache
         self._resource_manager = resource_manager
+        self._position_store = position_store
         self._strategies: Dict[str, StrategyState] = {}
         self._running = False
         self._eval_interval = self.DEFAULT_EVAL_INTERVAL
@@ -637,6 +639,7 @@ class ExecutionEngine:
                         except Exception as e:
                             logger.error("Strategy %s on_fill error: %s", strategy_id, e)
                             state.errors.append(f"on_fill error: {e}")
+                        self._persist_fill(strategy_id, state, data)
 
                     # Detect terminal states
                     if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
@@ -921,6 +924,7 @@ class ExecutionEngine:
                             state.strategy.on_fill(order_id, result, state.config)
                         except Exception as e2:
                             logger.error("Strategy %s on_fill error: %s", strategy_id, e2)
+                        self._persist_fill(strategy_id, state, result)
                     # If fully filled, clean up
                     if status == "Filled":
                         with self._active_orders_lock:
@@ -931,6 +935,47 @@ class ExecutionEngine:
                 "Order placed for strategy %s: orderId=%s status=%s filled=%s",
                 strategy_id, order_id, status, filled,
             )
+
+    # ── Position store persistence ──
+
+    def _persist_fill(self, strategy_id: str, state: StrategyState, fill_data: dict):
+        """Persist fill + runtime state to position store for bmc_risk_* strategies."""
+        if self._position_store is None or not strategy_id.startswith("bmc_risk_"):
+            return
+        try:
+            # Build fill dict for the ledger
+            fill_dict = {
+                "time": time.time(),
+                "order_id": fill_data.get("orderId", 0),
+                "level": "exit",
+                "qty_filled": int(fill_data.get("filled", 0)),
+                "avg_price": fill_data.get("avgFillPrice", 0),
+                "remaining_qty": 0,
+                "pnl_pct": 0.0,
+            }
+            # Try to get richer data from the strategy's fill log
+            if hasattr(state.strategy, "_fill_log") and state.strategy._fill_log:
+                last_fill = state.strategy._fill_log[-1]
+                fill_dict.update({
+                    "level": last_fill.get("level", "exit"),
+                    "qty_filled": last_fill.get("qty_filled", fill_dict["qty_filled"]),
+                    "avg_price": last_fill.get("avg_price", fill_dict["avg_price"]),
+                    "remaining_qty": last_fill.get("remaining_qty", 0),
+                    "pnl_pct": last_fill.get("pnl_pct", 0.0),
+                })
+            self._position_store.add_fill(strategy_id, fill_dict)
+
+            # Update runtime state
+            if hasattr(state.strategy, "get_runtime_snapshot"):
+                snapshot = state.strategy.get_runtime_snapshot()
+                self._position_store.update_runtime_state(strategy_id, snapshot)
+
+            # Mark closed if position fully exited
+            remaining = getattr(state.strategy, "remaining_qty", None)
+            if remaining is not None and remaining <= 0:
+                self._position_store.mark_closed(strategy_id)
+        except Exception as e:
+            logger.error("Error persisting fill for %s: %s", strategy_id, e)
 
     # ── Status / telemetry ──
 

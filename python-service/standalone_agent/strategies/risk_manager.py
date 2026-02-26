@@ -243,6 +243,11 @@ class RiskManagerStrategy(ExecutionStrategy):
 
     def on_start(self, config: dict):
         """Initialize state from config."""
+        # Resolve named presets (e.g. "zero_dte_convexity") into full config
+        preset_name = config.get("preset")
+        if preset_name and preset_name in PRESETS:
+            config.update({k: v for k, v in PRESETS[preset_name].items() if k not in config})
+
         pos = config.get("position", {})
         self.initial_qty = int(pos.get("quantity", 0))
         self.remaining_qty = self.initial_qty
@@ -469,6 +474,50 @@ class RiskManagerStrategy(ExecutionStrategy):
             },
             "fill_log": self._fill_log[-20:],  # last 20 fills
         }
+
+    # ── Persistence helpers ──
+
+    def get_runtime_snapshot(self) -> dict:
+        """Serialize mutable runtime state for position store persistence."""
+        return {
+            "remaining_qty": self.remaining_qty,
+            "high_water_mark": self.high_water_mark,
+            "trailing_active": self._trailing_active,
+            "trailing_stop_price": self._trailing_stop_price,
+            "level_states": {k: v.value for k, v in self._level_states.items()},
+            "completed": self._completed,
+        }
+
+    def restore_runtime_state(self, state: dict) -> None:
+        """Hydrate runtime state from persisted snapshot after on_start.
+
+        TRIGGERED levels are reset to ARMED because IB orders from the
+        previous session are dead — the risk manager will re-evaluate
+        and re-submit on the next tick.
+        """
+        self.remaining_qty = int(state.get("remaining_qty", self.remaining_qty))
+        self.high_water_mark = float(state.get("high_water_mark", self.high_water_mark))
+        self._trailing_active = bool(state.get("trailing_active", self._trailing_active))
+        self._trailing_stop_price = float(state.get("trailing_stop_price", self._trailing_stop_price))
+        self._completed = bool(state.get("completed", self._completed))
+
+        persisted_levels = state.get("level_states", {})
+        for key, value in persisted_levels.items():
+            if key in self._level_states:
+                try:
+                    ls = LevelState(value)
+                    # TRIGGERED → ARMED: old orders are dead after restart
+                    if ls == LevelState.TRIGGERED:
+                        ls = LevelState.ARMED
+                    self._level_states[key] = ls
+                except ValueError:
+                    pass  # unknown state string, keep the on_start default
+
+        logger.info(
+            "RiskManager restored: remaining=%d, hwm=%.4f, trailing=%s, levels=%s",
+            self.remaining_qty, self.high_water_mark, self._trailing_active,
+            {k: v.value for k, v in self._level_states.items()},
+        )
 
     # ── Internal helpers ──
 

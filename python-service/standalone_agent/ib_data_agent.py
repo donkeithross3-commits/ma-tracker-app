@@ -43,6 +43,7 @@ from ib_scanner import IBMergerArbScanner, DealInput
 from resource_manager import ResourceManager
 from quote_cache import StreamingQuoteCache
 from execution_engine import ExecutionEngine, ExecutionStrategy
+from position_store import PositionStore
 
 # Configure logging
 logging.basicConfig(
@@ -122,6 +123,7 @@ class IBDataAgent:
         self.resource_manager = ResourceManager()
         self.quote_cache: Optional[StreamingQuoteCache] = None  # created after scanner is ready
         self.execution_engine: Optional[ExecutionEngine] = None  # created after scanner is ready
+        self.position_store = PositionStore()  # persistent position ledger
         # TWS reconnection state
         self._tws_reconnecting = False
         self._tws_last_connected: Optional[float] = None
@@ -156,7 +158,8 @@ class IBDataAgent:
                 self.scanner.streaming_cache = self.quote_cache
                 if self.execution_engine is None:
                     self.execution_engine = ExecutionEngine(
-                        self.scanner, self.quote_cache, self.resource_manager
+                        self.scanner, self.quote_cache, self.resource_manager,
+                        self.position_store,
                     )
                 else:
                     self.execution_engine._scanner = self.scanner
@@ -310,6 +313,8 @@ class IBDataAgent:
                 return await self._handle_execution_config(payload)
             elif request_type == "execution_budget":
                 return await self._handle_execution_budget(payload)
+            elif request_type == "execution_close_position":
+                return await self._handle_close_position(payload)
             else:
                 return {"error": f"Unknown request type: {request_type}"}
         except Exception as e:
@@ -990,12 +995,60 @@ class IBDataAgent:
             )
             results.append(result)
 
+        # ── Recover persisted risk manager positions ──
+        recovered = 0
+        active_positions = self.position_store.get_active_positions()
+        if active_positions:
+            from strategies.risk_manager import RiskManagerStrategy
+            for pos in active_positions:
+                pos_id = pos.get("id", "")
+                if not pos_id or pos_id in self.execution_engine._strategies:
+                    continue  # already loaded or invalid
+                stored_config = pos.get("risk_config", {})
+                if not stored_config:
+                    logger.warning("Skipping recovery of %s: no risk_config in store", pos_id)
+                    continue
+                try:
+                    rm = RiskManagerStrategy()
+                    load_result = self.execution_engine.load_strategy(pos_id, rm, stored_config)
+                    if "error" in load_result:
+                        logger.error("Recovery of %s failed: %s", pos_id, load_result["error"])
+                        continue
+                    # Restore runtime state over fresh on_start defaults
+                    runtime = pos.get("runtime_state", {})
+                    if runtime:
+                        rm.restore_runtime_state(runtime)
+                    # Restore fill log for telemetry display
+                    fill_log = pos.get("fill_log", [])
+                    if fill_log:
+                        rm._fill_log = fill_log
+                    recovered += 1
+                    logger.info("Recovered risk manager %s (remaining=%d)", pos_id, rm.remaining_qty)
+
+                    # Populate parent BMC strategy's _active_positions list
+                    parent = pos.get("parent_strategy", "")
+                    parent_state = self.execution_engine._strategies.get(parent)
+                    if parent_state and hasattr(parent_state.strategy, "_active_positions"):
+                        entry_info = pos.get("entry", {})
+                        parent_state.strategy._active_positions.append({
+                            "order_id": entry_info.get("order_id", 0),
+                            "entry_price": entry_info.get("price", 0),
+                            "quantity": entry_info.get("quantity", 0),
+                            "fill_time": entry_info.get("fill_time", 0),
+                            "perm_id": entry_info.get("perm_id", 0),
+                        })
+                except Exception as e:
+                    logger.error("Error recovering position %s: %s", pos_id, e)
+            if recovered > 0:
+                logger.info("Recovered %d risk manager position(s) from store", recovered)
+
         # Start the evaluation loop
         self.execution_engine.start()
 
         return {
             "running": self.execution_engine.is_running,
             "strategies_loaded": results,
+            "recovered_positions": recovered,
             "lines_held": self.resource_manager.execution_lines_held,
         }
 
@@ -1005,6 +1058,15 @@ class IBDataAgent:
             return {"error": "Execution engine not initialized"}
         if not self.execution_engine.is_running:
             return {"error": "Execution engine is not running"}
+
+        # Snapshot all risk manager runtime states before shutdown
+        for sid, state in self.execution_engine._strategies.items():
+            if sid.startswith("bmc_risk_") and hasattr(state.strategy, "get_runtime_snapshot"):
+                try:
+                    snapshot = state.strategy.get_runtime_snapshot()
+                    self.position_store.update_runtime_state(sid, snapshot)
+                except Exception as e:
+                    logger.error("Error snapshotting %s on stop: %s", sid, e)
 
         self.execution_engine.stop()
         return {
@@ -1035,6 +1097,49 @@ class IBDataAgent:
             return {"error": "Execution engine not initialized"}
         budget = int(payload.get("budget", 0))
         return self.execution_engine.set_order_budget(budget)
+
+    async def _handle_close_position(self, payload: dict) -> dict:
+        """Manually close a position: unload risk manager, mark closed in store."""
+        position_id = payload.get("position_id", "")
+        if not position_id:
+            return {"error": "position_id is required"}
+
+        # Check the position exists in the store
+        pos = self.position_store.get_position(position_id)
+        if pos is None:
+            return {"error": f"Position {position_id} not found in store"}
+        if pos.get("status") == "closed":
+            return {"error": f"Position {position_id} is already closed"}
+
+        # Unload the risk manager strategy if it's running
+        if self.execution_engine and position_id in self.execution_engine._strategies:
+            self.execution_engine.unload_strategy(position_id)
+            logger.info("Unloaded risk manager %s for manual close", position_id)
+
+        # Remove from parent BMC strategy's _active_positions list
+        parent = pos.get("parent_strategy", "")
+        if parent and self.execution_engine:
+            parent_state = self.execution_engine._strategies.get(parent)
+            if parent_state and hasattr(parent_state.strategy, "_active_positions"):
+                entry_info = pos.get("entry", {})
+                entry_price = entry_info.get("price", 0)
+                parent_state.strategy._active_positions = [
+                    p for p in parent_state.strategy._active_positions
+                    if abs(p.get("entry_price", 0) - entry_price) > 0.005
+                ]
+
+        # Add a manual_close fill entry and mark closed
+        self.position_store.add_fill(position_id, {
+            "time": time.time(),
+            "order_id": 0,
+            "level": "manual_close",
+            "qty_filled": 0,
+            "avg_price": 0,
+            "remaining_qty": 0,
+            "pnl_pct": 0.0,
+        })
+        self.position_store.mark_closed(position_id)
+        return {"success": True, "position_id": position_id, "status": "closed"}
 
     def _create_strategy(self, strategy_type: str) -> Optional[ExecutionStrategy]:
         """Factory for creating strategy instances by type name."""
@@ -1069,6 +1174,33 @@ class IBDataAgent:
             logger.error("Failed to spawn risk manager for BMC: %s", result["error"])
         else:
             logger.info("Spawned RiskManagerStrategy %s for BMC position", strategy_id)
+            # Persist the new position in the store
+            pos_info = risk_config.get("position", {})
+            instrument = risk_config.get("instrument", {})
+            symbol = instrument.get("symbol", "").lower()
+            self.position_store.add_position(
+                position_id=strategy_id,
+                entry={
+                    "order_id": pos_info.get("order_id", 0),
+                    "price": pos_info.get("entry_price", 0),
+                    "quantity": pos_info.get("quantity", 0),
+                    "fill_time": time.time(),
+                    "perm_id": pos_info.get("perm_id", 0),
+                },
+                instrument=instrument,
+                risk_config=risk_config,
+                parent_strategy=f"bmc_{symbol}" if symbol else "bmc",
+            )
+            # Record the entry fill in the ledger
+            self.position_store.add_fill(strategy_id, {
+                "time": time.time(),
+                "order_id": pos_info.get("order_id", 0),
+                "level": "entry",
+                "qty_filled": pos_info.get("quantity", 0),
+                "avg_price": pos_info.get("entry_price", 0),
+                "remaining_qty": pos_info.get("quantity", 0),
+                "pnl_pct": 0.0,
+            })
 
     async def send_heartbeat(self):
         """Send periodic heartbeats with agent state and execution telemetry."""

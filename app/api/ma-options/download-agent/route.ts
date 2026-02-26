@@ -80,6 +80,7 @@ export async function GET() {
       "resource_manager.py",
       "quote_cache.py",
       "execution_engine.py",
+      "position_store.py",
       "install.py",
       "requirements.txt",
       "README.md",
