@@ -343,6 +343,31 @@ async def job_morning_report_deliver():
     return {"status": "success", "results": results}
 
 
+@run_job("morning_baseline_run", "Morning Baseline Model Run")
+async def job_morning_baseline_run():
+    """Run full factorial Opus + Sonnet baseline via Batch API (5:35 AM ET weekdays).
+
+    Independent from the standard risk assessment. The Batch API takes ~7-15 min.
+    Results are served at /risk/baseline-review-html.
+    """
+    pool = _get_pool()
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"status": "error", "reason": "ANTHROPIC_API_KEY not set"}
+
+    # Run Opus + Sonnet only (Haiku has 0% JSON success)
+    from app.risk.model_evaluator import run_baseline_comparison
+    result = await run_baseline_comparison(pool, api_key, models=[
+        "claude-opus-4-6", "claude-sonnet-4-6"
+    ])
+
+    # Retry any JSON failures
+    from app.risk.baseline_retry import retry_failures
+    retry_result = await retry_failures(pool, api_key, str(result["run_id"]))
+
+    return {**result, "retry": retry_result}
+
+
 @run_job("edgar_filing_check", "EDGAR Filing Check")
 async def job_edgar_filing_check():
     """Check EDGAR for new M&A-relevant filings (every 5 min, 6AM-8PM ET weekdays)."""
@@ -558,6 +583,15 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         id="morning_risk_assessment",
         day_of_week="mon-fri",
         hour=5, minute=30,
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        job_morning_baseline_run,
+        "cron",
+        id="morning_baseline_run",
+        day_of_week="mon-fri",
+        hour=5, minute=35,
         replace_existing=True,
     )
 

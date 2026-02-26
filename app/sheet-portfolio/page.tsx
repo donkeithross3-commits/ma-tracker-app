@@ -489,6 +489,20 @@ export default function SheetPortfolioPage() {
               <span className="text-xs text-gray-400">{ingestResult}</span>
             )}
             <Link
+              href="/baseline-review"
+              className="px-3 py-1.5 text-xs bg-purple-900/40 hover:bg-purple-800/50 border border-purple-700/50 rounded text-purple-300 transition-colors"
+            >
+              AI Review
+              {(() => {
+                const flaggedCount = Object.values(riskData).filter(r => r.needs_attention).length;
+                return flaggedCount > 0 ? (
+                  <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-red-500/20 text-red-400 rounded-full font-medium">
+                    {flaggedCount}
+                  </span>
+                ) : null;
+              })()}
+            </Link>
+            <Link
               href="/"
               className="px-3 py-1.5 text-sm border border-gray-700 rounded hover:bg-gray-800 transition-colors"
             >

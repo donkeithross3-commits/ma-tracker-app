@@ -1,5 +1,6 @@
 """API routes for risk assessment data"""
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date, datetime, timedelta
@@ -1530,5 +1531,33 @@ async def get_baseline_blind_review(run_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# GET /risk/baseline-review-html
+# ---------------------------------------------------------------------------
+@router.get("/baseline-review-html", response_class=HTMLResponse)
+async def get_baseline_review_html(
+    view: str = Query("flagged", description="'flagged' or 'index'"),
+    run_id: Optional[str] = Query(None, description="Specific run ID (defaults to latest)"),
+):
+    """Serve baseline review as rendered HTML.
 
+    ?view=flagged  → flagged deals review page (default)
+    ?view=index    → full comparison index page
+    """
+    from app.risk.baseline_report import (
+        generate_flagged_html,
+        generate_index_html,
+        get_portfolio_tickers_from_sheet,
+    )
 
+    pool = _get_pool()
+    try:
+        portfolio_tickers = await get_portfolio_tickers_from_sheet(pool)
+        if view == "index":
+            html = await generate_index_html(pool, run_id=run_id, portfolio_tickers=portfolio_tickers)
+        else:
+            html = await generate_flagged_html(pool, run_id=run_id, portfolio_tickers=portfolio_tickers)
+        return HTMLResponse(content=html)
+    except Exception as e:
+        logger.error(f"Failed to generate baseline review HTML: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
