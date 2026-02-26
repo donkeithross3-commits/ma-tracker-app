@@ -74,8 +74,18 @@ else
         if $running_on_server; then
             # We're on the server — HTTP test hits localhost which bypasses UFW.
             # Check if UFW is active with Cloudflare-only rules for ports 80/443 instead.
-            ufw_rules=$(cat /etc/ufw/user.rules 2>/dev/null || sudo -n ufw status 2>/dev/null || true)
-            if echo "$ufw_rules" | grep -qi "cloudflare\|173\.245\|103\.21\|108\.162\|104\.16"; then
+            ufw_rules=$(sudo -n ufw status 2>/dev/null \
+                || cat /etc/ufw/user.rules 2>/dev/null \
+                || cat /etc/ufw/user6.rules 2>/dev/null \
+                || true)
+            # Also check the hardening setup script for Cloudflare IPs
+            ufw_setup=$(find /home /root -path "*/ops/hardening/ufw/setup.sh" -readable 2>/dev/null | head -1)
+            if [[ -n "$ufw_setup" ]]; then
+                ufw_rules+=$'\n'"$(cat "$ufw_setup" 2>/dev/null || true)"
+            fi
+            # Check systemd to confirm UFW is active
+            ufw_active=$(systemctl is-active ufw 2>/dev/null || true)
+            if [[ "$ufw_active" == "active" ]] && echo "$ufw_rules" | grep -qi "cloudflare\|173\.245\|103\.21\|108\.162\|104\.16"; then
                 json_finding "cloudflare_bypass_mitigated" "$SEV_INFO" \
                     "UFW firewall has Cloudflare-only rules for HTTP/HTTPS. Bypass test ran from server (localhost bypasses UFW) — external access is blocked."
             else
