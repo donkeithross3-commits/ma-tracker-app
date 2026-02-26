@@ -854,15 +854,28 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         expiry_date = datetime.now() + timedelta(days=min_dte)
         expiry_str = expiry_date.strftime("%Y%m%d")
 
-        # Premium / spread constraints (logged for diagnostics)
+        # Premium / spread constraints
         max_spread = cfg.get("max_spread", 0.05)
         premium_min = cfg.get("premium_min", 0.10)
         premium_max = cfg.get("premium_max", 3.00)
 
         # Determine quantity based on budget
+        # Budget is the hard cap — never spend more than this per entry.
         budget = cfg.get("contract_budget_usd", 150.0)
         max_contracts = cfg.get("max_contracts", 5)
-        estimated_premium = (premium_min + premium_max) / 2.0
+
+        # Cap effective premium at what the budget can afford (1 contract = 100 shares)
+        max_affordable_premium = budget / 100.0
+        effective_premium_max = min(premium_max, max_affordable_premium)
+
+        if effective_premium_max < premium_min:
+            logger.info(
+                "Budget gate: $%.0f budget (max $%.2f/share) below premium_min $%.2f — skipping %s entry",
+                budget, max_affordable_premium, premium_min, self._ticker,
+            )
+            return []
+
+        estimated_premium = (premium_min + effective_premium_max) / 2.0
         qty = min(max_contracts, max(1, int(budget / (estimated_premium * 100))))
 
         contract_dict = {
@@ -888,19 +901,25 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         }
 
         dte_label = "0DTE" if min_dte == 0 else f"{min_dte}d"
+
+        # Use LIMIT at max affordable premium to enforce budget cap.
+        # MKT orders can fill at any price; LIMIT ensures we never overspend.
+        limit_price = round(max_affordable_premium, 2)
+
         order = OrderAction(
             strategy_id="",  # filled by engine
             side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
+            order_type=OrderType.LIMIT,
             quantity=qty,
             contract_dict=contract_dict,
+            limit_price=limit_price,
             reason=f"BMC[{self._ticker}] signal: {signal.direction} p={signal.probability:.3f} "
-                   f"strike={strike} {right} {dte_label}",
+                   f"strike={strike} {right} {dte_label} limit=${limit_price:.2f}",
         )
 
         logger.info(
-            "Entry order: BUY %d %s %s %.2f %s @ MKT (spread_max=$%.2f, prem=$%.2f-$%.2f)",
-            qty, right, self._ticker, strike, dte_label, max_spread, premium_min, premium_max,
+            "Entry order: BUY %d %s %s %.2f %s @ LMT $%.2f (budget=$%.0f, spread_max=$%.2f, prem=$%.2f-$%.2f)",
+            qty, right, self._ticker, strike, dte_label, limit_price, budget, max_spread, premium_min, premium_max,
         )
         return [order]
 
