@@ -1150,6 +1150,7 @@ class IBDataAgent:
             from strategies.big_move_convexity import BigMoveConvexityStrategy
             strategy = BigMoveConvexityStrategy()
             strategy._spawn_risk_manager = self._spawn_risk_manager_for_bmc
+            strategy._fetch_option_quote = lambda cd: self.scanner.fetch_option_snapshot(cd)
             return strategy
         logger.warning("No strategy implementation for type: %s", strategy_type)
         return None

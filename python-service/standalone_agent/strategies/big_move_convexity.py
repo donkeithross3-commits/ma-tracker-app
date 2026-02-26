@@ -221,8 +221,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Cooldown tracker: ticker -> last signal time
         self._cooldown_tracker: dict[str, float] = {}
 
-        # Callback for spawning risk manager (wired by IBDataAgent)
+        # Callbacks wired by IBDataAgent
         self._spawn_risk_manager: Optional[Callable] = None
+        self._fetch_option_quote: Optional[Callable] = None
 
         # Start time for uptime tracking
         self._start_time: float = 0.0
@@ -902,9 +903,46 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         dte_label = "0DTE" if min_dte == 0 else f"{min_dte}d"
 
-        # Use LIMIT at max affordable premium to enforce budget cap.
-        # MKT orders can fill at any price; LIMIT ensures we never overspend.
-        limit_price = round(max_affordable_premium, 2)
+        # Compute limit price: ask + spread (adaptive to current market),
+        # capped at the budget maximum. This avoids paying dumb prices in
+        # fast markets while still filling in normal conditions.
+        limit_price = round(max_affordable_premium, 2)  # budget cap fallback
+        opt_bid = None
+        opt_ask = None
+
+        if self._fetch_option_quote is not None:
+            try:
+                quote = self._fetch_option_quote(contract_dict)
+                opt_bid = quote.get("bid")
+                opt_ask = quote.get("ask")
+                if opt_ask is not None and opt_ask > 0 and opt_bid is not None and opt_bid > 0:
+                    spread = opt_ask - opt_bid
+                    adaptive_limit = opt_ask + spread
+                    limit_price = round(min(adaptive_limit, max_affordable_premium), 2)
+                    logger.info(
+                        "Option quote: bid=$%.2f ask=$%.2f spread=$%.2f → adaptive limit=$%.2f (budget cap=$%.2f)",
+                        opt_bid, opt_ask, spread, adaptive_limit, max_affordable_premium,
+                    )
+                elif opt_ask is not None and opt_ask > 0:
+                    # Have ask but no bid — use ask + 20% as limit
+                    adaptive_limit = opt_ask * 1.20
+                    limit_price = round(min(adaptive_limit, max_affordable_premium), 2)
+                    logger.info(
+                        "Option quote: bid=none ask=$%.2f → adaptive limit=$%.2f (budget cap=$%.2f)",
+                        opt_ask, adaptive_limit, max_affordable_premium,
+                    )
+                else:
+                    logger.info("Option quote returned no usable bid/ask — using budget cap $%.2f", max_affordable_premium)
+            except Exception:
+                logger.warning("Failed to fetch option quote — using budget cap $%.2f", max_affordable_premium, exc_info=True)
+
+        # Budget gate on actual ask: if the current ask exceeds our budget, skip
+        if opt_ask is not None and opt_ask > max_affordable_premium:
+            logger.info(
+                "Ask $%.2f exceeds budget cap $%.2f — skipping %s entry",
+                opt_ask, max_affordable_premium, self._ticker,
+            )
+            return []
 
         order = OrderAction(
             strategy_id="",  # filled by engine
@@ -918,8 +956,11 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         )
 
         logger.info(
-            "Entry order: BUY %d %s %s %.2f %s @ LMT $%.2f (budget=$%.0f, spread_max=$%.2f, prem=$%.2f-$%.2f)",
-            qty, right, self._ticker, strike, dte_label, limit_price, budget, max_spread, premium_min, premium_max,
+            "Entry order: BUY %d %s %s %.2f %s @ LMT $%.2f (bid=$%s ask=$%s budget=$%.0f)",
+            qty, right, self._ticker, strike, dte_label, limit_price,
+            f"{opt_bid:.2f}" if opt_bid else "?",
+            f"{opt_ask:.2f}" if opt_ask else "?",
+            budget,
         )
         return [order]
 

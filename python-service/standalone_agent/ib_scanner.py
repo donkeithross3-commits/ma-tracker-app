@@ -139,6 +139,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._last_market_data_type = {}    # reqId -> marketDataType int
         self._last_tick_req_params = {}     # reqId -> (minTick, bboExchange, snapshotPermissions)
         self._snapshot_end_events = set()   # reqIds that received tickSnapshotEnd
+        # Option snapshot: single-option bid/ask fetch for entry pricing
+        self._opt_snapshot_done: Optional[Event] = None
+        self._opt_snapshot_req_id: Optional[int] = None
 
         # Data farm health: tracks which data farms are up/down
         # Keys are farm names extracted from IB error strings (e.g. "usfarm.nj", "usfuture", "cashfarm")
@@ -915,6 +918,9 @@ class IBMergerArbScanner(EWrapper, EClient):
         """IB signals that a snapshot request has completed."""
         self._snapshot_end_events.add(reqId)
         self.logger.info(f"tickSnapshotEnd reqId={reqId}")
+        # Signal option snapshot early exit
+        if self._opt_snapshot_req_id == reqId and self._opt_snapshot_done is not None:
+            self._opt_snapshot_done.set()
 
     def orderStatus(self, orderId: int, status: str, filled: float, remaining: float,
                    avgFillPrice: float, permId: int, parentId: int, lastFillPrice: float,
@@ -1324,6 +1330,48 @@ class IBMergerArbScanner(EWrapper, EClient):
             'ask': self.underlying_ask,
             'volatility': self.historical_vol if self.historical_vol else 0.30
         }
+
+    def fetch_option_snapshot(self, contract_dict: dict, timeout_sec: float = 3.0) -> dict:
+        """Fetch a snapshot bid/ask for a single option contract.
+
+        Uses IB snapshot mode (all ticks delivered at once, then tickSnapshotEnd).
+        Returns {"bid": float|None, "ask": float|None}.
+        """
+        from ibapi.contract import Contract as IBContract
+
+        contract = IBContract()
+        contract.symbol = contract_dict.get("symbol", "")
+        contract.secType = contract_dict.get("secType", "OPT")
+        contract.exchange = contract_dict.get("exchange", "SMART")
+        contract.currency = contract_dict.get("currency", "USD")
+        contract.strike = float(contract_dict.get("strike", 0))
+        contract.lastTradeDateOrContractMonth = contract_dict.get("lastTradeDateOrContractMonth", "")
+        contract.right = contract_dict.get("right", "C")
+        contract.multiplier = contract_dict.get("multiplier", "100")
+
+        req_id = self.get_next_req_id()
+        self.req_id_map[req_id] = "opt_snapshot"
+        self.option_chain[req_id] = {"bid": None, "ask": None, "last": None}
+
+        self._opt_snapshot_done = Event()
+        self._opt_snapshot_req_id = req_id
+        # snapshot=True: IB delivers all available ticks then calls tickSnapshotEnd
+        self.reqMktData(req_id, contract, "", True, False, [])
+        self._opt_snapshot_done.wait(timeout=timeout_sec)
+        self._opt_snapshot_done = None
+        self._opt_snapshot_req_id = None
+
+        result = self.option_chain.pop(req_id, {"bid": None, "ask": None})
+        self.req_id_map.pop(req_id, None)
+
+        self.logger.info(
+            "Option snapshot %s %.1f%s %s: bid=%s ask=%s",
+            contract_dict.get("symbol"), contract_dict.get("strike", 0),
+            contract_dict.get("right", "?"),
+            contract_dict.get("lastTradeDateOrContractMonth", ""),
+            result.get("bid"), result.get("ask"),
+        )
+        return {"bid": result.get("bid"), "ask": result.get("ask")}
 
     def tickPrice(self, reqId: TickerId, tickType: int, price: float, attrib: TickAttrib):
         """Handle price updates -- routes to streaming cache or scan data as appropriate."""
