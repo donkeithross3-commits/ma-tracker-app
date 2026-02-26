@@ -685,7 +685,7 @@ export default function SheetPortfolioPage() {
                             (() => {
                               const liveGross = (deal.deal_price - livePrices[deal.ticker].price) / livePrices[deal.ticker].price;
                               const pct = (liveGross * 100).toFixed(2);
-                              return <span className={freshnessPriceColor(freshness)}>{pct}%</span>;
+                              return <span className={liveGross >= 0 ? "text-green-400" : "text-red-400"}>{pct}%</span>;
                             })()
                           ) : (
                             yieldCell(deal.gross_yield_raw, deal.gross_yield)
@@ -713,7 +713,7 @@ export default function SheetPortfolioPage() {
                               const monthsToClose = deal.countdown_days / 30;
                               const liveCurrentYield = liveGross * (12 / monthsToClose);
                               const pct = (liveCurrentYield * 100).toFixed(2);
-                              return <span className={freshnessPriceColor(freshness)}>{pct}%</span>;
+                              return <span className={liveCurrentYield >= 0 ? "text-green-400" : "text-red-400"}>{pct}%</span>;
                             })()
                           ) : (
                             yieldCell(
