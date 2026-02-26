@@ -200,6 +200,13 @@ interface OptionsScanResponse {
     spread?: OptionsCategoryData;
     put_spread?: OptionsCategoryData;
   };
+  chain_summary?: {
+    total_contracts: number;
+    calls: number;
+    puts: number;
+    expiration_count: number;
+    contracts_with_quotes: number;
+  };
   total_opportunities: number;
 }
 
@@ -763,6 +770,20 @@ export default function DealDetailPage() {
                 }
 
                 const { categories } = optionsScan;
+                const hasAnyStrategy = optionsScan.total_opportunities > 0;
+
+                // Optionable but no strategies found (illiquid chain)
+                if (!hasAnyStrategy) {
+                  const cs = optionsScan.chain_summary;
+                  return (
+                    <>
+                      <Row label="Optionable" value={<span className="text-green-400">Yes</span>} />
+                      <div className="text-xs text-gray-500 py-1.5">
+                        Options chain available ({cs ? `${cs.total_contracts} contracts, ${cs.expiration_count} exp` : "0 strategies"}) but too illiquid for strategy recommendations.
+                      </div>
+                    </>
+                  );
+                }
 
                 const renderBest = (cat: OptionsCategoryData | undefined, type: "covered_call" | "call" | "spread" | "put_spread") => {
                   if (!cat?.best) return <span className="text-gray-600">-</span>;
@@ -826,11 +847,9 @@ export default function DealDetailPage() {
                         <div className="text-sm">{renderBest(categories.call, "call")}</div>
                       </div>
                     </div>
-                    {optionsScan.total_opportunities > 0 && (
-                      <div className="mt-2 text-xs text-gray-500">
-                        {optionsScan.total_opportunities} total opportunities found
-                      </div>
-                    )}
+                    <div className="mt-2 text-xs text-gray-500">
+                      {optionsScan.total_opportunities} total opportunities found
+                    </div>
                   </>
                 );
               })()}

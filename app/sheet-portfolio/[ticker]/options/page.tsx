@@ -605,12 +605,44 @@ export default function DealOptionsPage() {
         )}
 
         {/* Not optionable */}
-        {data && !data.optionable && (
+        {data && !data.optionable && !error && (
           <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-center">
             <div className="text-gray-400 text-sm">
               No options available for{" "}
               <span className="font-mono text-gray-200">{ticker}</span>
             </div>
+          </div>
+        )}
+
+        {/* Chain summary — optionable but no strategies */}
+        {data && data.optionable && data.total_opportunities === 0 && !loading && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <div className="text-sm text-gray-300 font-medium mb-1">
+              Options chain available — no actionable strategies found
+            </div>
+            {data.chain_summary && (
+              <div className="text-xs text-gray-500 space-y-0.5">
+                <div>
+                  {data.chain_summary.total_contracts} contracts across{" "}
+                  {data.chain_summary.expiration_count} expirations
+                  {" "}({data.chain_summary.calls}C / {data.chain_summary.puts}P)
+                </div>
+                <div>
+                  {data.chain_summary.contracts_with_quotes} contracts have bid/ask quotes
+                </div>
+                {data.chain_summary.contracts_with_quotes === 0 && (
+                  <div className="text-yellow-500/80 mt-1">
+                    No contracts are being quoted — this chain is completely illiquid.
+                  </div>
+                )}
+                {data.chain_summary.contracts_with_quotes > 0 &&
+                  data.chain_summary.contracts_with_quotes < data.chain_summary.total_contracts * 0.2 && (
+                  <div className="text-yellow-500/80 mt-1">
+                    Very few contracts have active quotes — spreads and strategies can&apos;t be constructed.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

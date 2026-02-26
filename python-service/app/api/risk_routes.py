@@ -1308,7 +1308,14 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
     for opp in all_opps:
         by_strategy[opp.strategy].append(opp)
 
-    categories = {}
+    # Always include all 4 category keys so the frontend renders sections
+    _EMPTY_CAT = {"best": None, "count": 0, "all": []}
+    categories = {
+        "covered_call": _EMPTY_CAT.copy(),
+        "call": _EMPTY_CAT.copy(),
+        "spread": _EMPTY_CAT.copy(),
+        "put_spread": _EMPTY_CAT.copy(),
+    }
     for strategy, opps in by_strategy.items():
         opps.sort(key=lambda x: x.annualized_return_ft, reverse=True)
         categories[strategy] = {
@@ -1316,6 +1323,20 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
             "count": len(opps),
             "all": [_trade_opportunity_to_dict(o) for o in opps],
         }
+
+    # Build chain summary so the frontend can show context for illiquid tickers
+    calls = [c for c in options if c.right == "C"]
+    puts = [c for c in options if c.right == "P"]
+    expirations = sorted({c.expiry for c in options})
+    quoted = [c for c in options if c.bid > 0 or c.ask > 0]
+    chain_summary = {
+        "total_contracts": len(options),
+        "calls": len(calls),
+        "puts": len(puts),
+        "expirations": expirations,
+        "expiration_count": len(expirations),
+        "contracts_with_quotes": len(quoted),
+    }
 
     scan_time_ms = round((_time.monotonic() - t0) * 1000)
 
@@ -1328,6 +1349,7 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
         "optionable": True,
         "market_open": market_open,
         "categories": categories,
+        "chain_summary": chain_summary,
         "total_opportunities": len(all_opps),
         "scan_time_ms": scan_time_ms,
     }

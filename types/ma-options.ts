@@ -257,6 +257,15 @@ export type OptionsScanErrorCode =
   | "proxy_error"
   | "unknown";
 
+export interface ChainSummary {
+  total_contracts: number;
+  calls: number;
+  puts: number;
+  expirations: string[];
+  expiration_count: number;
+  contracts_with_quotes: number;
+}
+
 export interface OptionsScanResponse {
   ticker: string;
   deal_price?: number;
@@ -273,6 +282,7 @@ export interface OptionsScanResponse {
     spread?: CategoryResult;
     put_spread?: CategoryResult;
   };
+  chain_summary?: ChainSummary;
   total_opportunities: number;
   scan_time_ms: number;
 }
