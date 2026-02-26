@@ -439,7 +439,15 @@ async def _fetch_results_and_sheet_grades(pool, run_id: str):
 # ---------------------------------------------------------------------------
 
 def _analyze_flagged_deals(grouped, portfolio_tickers, sheet_grades):
-    """Analyze grouped results and return list of flagged deal dicts, sorted by severity."""
+    """Analyze grouped results and return list of flagged deal dicts, sorted by severity.
+
+    Flagging criteria (owned deals only):
+      Tier 1 — At least one model assessed investable != "yes" (No or Conditional).
+               These are deals we hold that AI questions.  Score 5 (No) or 3 (Conditional).
+      Tier 2 — All models say "yes" but at least one "High" risk grade exists.
+               Still investable per AI, but worth monitoring.  Score 2 per High factor.
+    Medium-grade factors alone do NOT trigger flagging.
+    """
     flagged_deals = []
 
     for ticker, ticker_files in grouped:
@@ -469,33 +477,48 @@ def _analyze_flagged_deals(grouped, portfolio_tickers, sheet_grades):
                 else:
                     model_data[ml]["grades"][f] = {"grade": str(g) if g else "", "detail": "", "confidence": None}
 
-        flags = {}
-        flag_details = {}
+        # --- Tier 1: any model says investable != "yes" ---
+        investable_flags = {}
         for ml, md in model_data.items():
             inv = md["investable"].strip().lower() if md["investable"] else ""
             if inv and inv != "yes":
-                flags["investable"] = md["investable"]
+                investable_flags[ml] = md["investable"]
+
+        # --- Tier 2: any model gives a "High" risk grade ---
+        high_grade_flags = {}
+        for ml, md in model_data.items():
             for f in FACTORS:
                 g = md["grades"][f]["grade"]
-                if g and g.capitalize() in ("Medium", "High"):
-                    existing = flags.get(f, "")
-                    if g.capitalize() == "High" or not existing:
-                        flags[f] = g.capitalize()
-                    if f not in flag_details:
-                        flag_details[f] = {}
-                    flag_details[f][ml] = md["grades"][f]
+                if g and g.capitalize() == "High":
+                    if f not in high_grade_flags:
+                        high_grade_flags[f] = {}
+                    high_grade_flags[f][ml] = md["grades"][f]
 
-        if not flags:
+        if not investable_flags and not high_grade_flags:
             continue
 
+        # Build flags & flag_details for the card renderer
+        flags = {}
+        flag_details = {}
+
+        if investable_flags:
+            # Use the most concerning assessment for display
+            for ml, inv in investable_flags.items():
+                flags["investable"] = inv
+
+        for f, model_grades in high_grade_flags.items():
+            flags[f] = "High"
+            flag_details[f] = model_grades
+
+        # Severity scoring
         score = 0
-        for v in flags.values():
-            if v == "High":
-                score += 3
-            elif v in ("Medium", "Conditional", "No"):
-                score += 1
-            else:
-                score += 1
+        has_no = any(v.strip().lower() == "no" for v in investable_flags.values())
+        if has_no:
+            score += 5
+        elif investable_flags:
+            score += 3  # Conditional or other non-yes
+        for f in high_grade_flags:
+            score += 2
 
         models = list(model_data.keys())
         agree = True
