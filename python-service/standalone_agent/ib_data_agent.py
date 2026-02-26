@@ -1457,21 +1457,32 @@ class IBDataAgent:
                 logger.error(f"Account event push error: {e}")
                 break
     
+    # Routine polling requests — suppress per-request logging, emit periodic summary
+    _QUIET_REQUEST_TYPES = frozenset({
+        "execution_status", "ib_status", "check_availability",
+        "get_positions", "get_open_orders",
+    })
+    _request_counts: dict = {}
+    _last_request_summary: float = 0.0
+    _REQUEST_SUMMARY_INTERVAL = 60.0  # seconds
+
     async def _process_request(self, request_id: str, data: dict):
         """Process a request and send response"""
         request_type = data.get("request_type", "unknown")
+        is_quiet = request_type in self._QUIET_REQUEST_TYPES
         t_start = time.monotonic()
         try:
-            logger.info(f"Processing request {request_id} ({request_type})...")
+            if not is_quiet:
+                logger.info(f"Processing request {request_id} ({request_type})...")
             result = await self.handle_request(data)
             t_handler = time.monotonic() - t_start
-            
+
             if "error" in result:
                 logger.error(f"Request {request_id} failed: {result.get('error')}")
-            else:
+            elif not is_quiet:
                 contracts_count = len(result.get("contracts", [])) if "contracts" in result else "N/A"
                 logger.info(f"Request {request_id} completed. Contracts: {contracts_count}")
-            
+
             response = {
                 "type": "response",
                 "request_id": request_id,
@@ -1479,17 +1490,28 @@ class IBDataAgent:
                 "data": result if "error" not in result else None,
                 "error": result.get("error")
             }
-            
+
             if self.websocket:
                 resp_json = json.dumps(response)
                 t_serialize = time.monotonic() - t_start - t_handler
                 await self.websocket.send(resp_json)
                 t_total = time.monotonic() - t_start
-                logger.info(
-                    f"[perf] {request_type} request_id={request_id} "
-                    f"handler={t_handler:.3f}s serialize={t_serialize:.3f}s "
-                    f"total={t_total:.3f}s response_bytes={len(resp_json)}"
-                )
+                if not is_quiet:
+                    logger.info(
+                        f"[perf] {request_type} request_id={request_id} "
+                        f"handler={t_handler:.3f}s serialize={t_serialize:.3f}s "
+                        f"total={t_total:.3f}s response_bytes={len(resp_json)}"
+                    )
+
+            # Track quiet request counts for periodic summary
+            if is_quiet:
+                self._request_counts[request_type] = self._request_counts.get(request_type, 0) + 1
+                now = time.time()
+                if now - self._last_request_summary >= self._REQUEST_SUMMARY_INTERVAL:
+                    counts_str = ", ".join(f"{k}={v}" for k, v in sorted(self._request_counts.items()))
+                    logger.info(f"[heartbeat] requests in last {int(now - self._last_request_summary)}s: {counts_str}")
+                    self._request_counts.clear()
+                    self._last_request_summary = now
         except Exception as e:
             t_total = time.monotonic() - t_start
             logger.error(f"Error processing request {request_id} ({t_total:.3f}s): {e}")
