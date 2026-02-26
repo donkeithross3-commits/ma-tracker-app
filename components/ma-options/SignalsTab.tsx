@@ -75,6 +75,16 @@ interface ActiveOrder {
   last_update: number;
 }
 
+interface PositionLedgerEntry {
+  id: string;
+  status: "active" | "closed";
+  created_at: number;
+  closed_at: number | null;
+  entry: { order_id: number; price: number; quantity: number; fill_time: number; perm_id: number };
+  instrument: { symbol: string; strike?: number; expiry?: string; right?: string };
+  fill_log: FillLogEntry[];
+}
+
 interface FullExecutionStatus {
   running: boolean;
   eval_interval: number;
@@ -88,6 +98,7 @@ interface FullExecutionStatus {
   active_orders: ActiveOrder[];
   order_budget: number;
   total_algo_orders: number;
+  position_ledger?: PositionLedgerEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -686,70 +697,72 @@ export default function SignalsTab() {
     });
   }, [signal?.active_positions, executionStatus?.strategies, executionStatus?.quote_snapshot]);
 
-  // ── Derived: all fills from risk managers ──
+  // ── Derived: all fills from position ledger (persists across restarts) ──
   const allFills = useMemo(() => {
-    const riskStrategies = (executionStatus?.strategies || []).filter(
-      s => s.strategy_id.includes("risk_") && s.strategy_state && "fill_log" in s.strategy_state,
-    );
-    const fills: (FillLogEntry & { source: string })[] = [];
-    for (const s of riskStrategies) {
-      const rm = s.strategy_state as RiskManagerState;
-      // Only collect exit fills from risk managers — entries come from BMC below
-      for (const f of rm.fill_log || []) {
+    const ledger = executionStatus?.position_ledger;
+    if (!ledger || ledger.length === 0) return [];
+    const fills: (FillLogEntry & { source: string; instrument?: PositionLedgerEntry["instrument"]; positionStatus?: string })[] = [];
+    for (const pos of ledger) {
+      // Entry fill from the position's entry data
+      if (pos.entry?.fill_time) {
+        fills.push({
+          time: pos.entry.fill_time,
+          order_id: pos.entry.order_id ?? 0,
+          level: "entry",
+          qty_filled: pos.entry.quantity ?? 0,
+          avg_price: pos.entry.price ?? 0,
+          remaining_qty: pos.entry.quantity ?? 0,
+          pnl_pct: 0,
+          source: pos.id,
+          instrument: pos.instrument,
+          positionStatus: pos.status,
+        });
+      }
+      // Exit fills from fill_log
+      for (const f of pos.fill_log || []) {
         if (f.level !== "entry") {
-          fills.push({ ...f, source: s.strategy_id });
+          fills.push({ ...f, source: pos.id, instrument: pos.instrument, positionStatus: pos.status });
         }
       }
-    }
-    // Entry fills from BMC positions (single source of truth for entries)
-    for (const pos of signal?.active_positions || []) {
-      fills.push({
-        time: pos.fill_time,
-        order_id: pos.order_id,
-        level: "entry",
-        qty_filled: pos.quantity,
-        avg_price: pos.entry_price,
-        remaining_qty: pos.quantity,
-        pnl_pct: 0,
-        source: "bmc_entry",
-      });
     }
     fills.sort((a, b) => b.time - a.time);
     return fills;
-  }, [executionStatus?.strategies, signal?.active_positions]);
+  }, [executionStatus?.position_ledger]);
 
-  // ── Derived: session summary ──
+  // ── Derived: session summary from position ledger ──
   const sessionSummary = useMemo(() => {
-    const riskStrategies = (executionStatus?.strategies || []).filter(
-      s => s.strategy_id.includes("risk_") && s.strategy_state && "completed" in s.strategy_state,
-    );
-    const completed = riskStrategies.filter(s => (s.strategy_state as RiskManagerState).completed);
+    const ledger = executionStatus?.position_ledger || [];
+    const activeLedger = ledger.filter(p => p.status === "active");
+    const closedLedger = ledger.filter(p => p.status === "closed");
     let wins = 0;
     let losses = 0;
     let totalPnl = 0;
-    for (const s of completed) {
-      const rm = s.strategy_state as RiskManagerState;
-      const lastFill = rm.fill_log?.[rm.fill_log.length - 1];
+    for (const pos of closedLedger) {
+      const exitFills = (pos.fill_log || []).filter(f => f.level !== "entry");
+      const lastFill = exitFills[exitFills.length - 1];
       if (lastFill) {
         if (lastFill.pnl_pct >= 0) wins++;
         else losses++;
-        // Sum dollar P&L from all exit fills
-        for (const f of rm.fill_log || []) {
-          if (f.level !== "entry") {
-            totalPnl += (f.avg_price - rm.entry_price) * f.qty_filled * 100;
-          }
-        }
+      }
+      const entryPrice = pos.entry?.price ?? 0;
+      for (const f of exitFills) {
+        totalPnl += (f.avg_price - entryPrice) * f.qty_filled * 100;
       }
     }
-    // Add unrealized P&L from active positions
+    // Unrealized P&L from live position details (quotes-driven, unchanged)
     let unrealizedPnl = 0;
     for (const pd of positionDetails) {
       if (pd.pnlDollar !== null) unrealizedPnl += pd.pnlDollar;
     }
-    const activeCount = positionDetails.length;
-    const completedCount = completed.length;
-    return { activeCount, completedCount, wins, losses, totalPnl, unrealizedPnl };
-  }, [executionStatus?.strategies, positionDetails]);
+    return {
+      activeCount: activeLedger.length,
+      completedCount: closedLedger.length,
+      wins,
+      losses,
+      totalPnl,
+      unrealizedPnl,
+    };
+  }, [executionStatus?.position_ledger, positionDetails]);
 
   const ws = signal?.polygon_ws;
   const bars = signal?.bar_accumulator;
@@ -1047,6 +1060,7 @@ export default function SignalsTab() {
                   <thead>
                     <tr className="text-gray-500">
                       <th className="text-left py-1">Time</th>
+                      <th className="text-left py-1">Contract</th>
                       <th className="text-left py-1">Type</th>
                       <th className="text-right py-1">Qty</th>
                       <th className="text-right py-1">Price</th>
@@ -1061,9 +1075,15 @@ export default function SignalsTab() {
                         f.level === "trailing" ? "text-yellow-400" :
                         f.level.startsWith("stop") ? "text-red-400" :
                         "text-gray-400";
+                      const inst = f.instrument;
+                      const contractLabel = inst
+                        ? `${inst.symbol ?? ""}${inst.strike ? ` ${inst.strike}` : ""}${inst.right ? inst.right[0] : ""}`
+                        : "";
+                      const closedRow = f.positionStatus === "closed" ? " opacity-60" : "";
                       return (
-                        <tr key={i} className="border-t border-gray-800">
+                        <tr key={i} className={`border-t border-gray-800${closedRow}`}>
                           <td className="py-1 text-gray-500">{new Date(f.time * 1000).toLocaleTimeString()}</td>
+                          <td className="py-1 text-gray-400 font-mono">{contractLabel}</td>
                           <td className={`py-1 ${typeColor}`}>{f.level}</td>
                           <td className="py-1 text-right text-gray-300">{f.qty_filled}</td>
                           <td className="py-1 text-right text-gray-300 font-mono">${f.avg_price.toFixed(2)}</td>
@@ -1080,7 +1100,7 @@ export default function SignalsTab() {
           )}
 
           {/* ── Session Summary ── */}
-          {(signal?.positions_spawned ?? 0) > 0 && (
+          {((executionStatus?.position_ledger?.length ?? 0) > 0 || (signal?.positions_spawned ?? 0) > 0) && (
             <div className="bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-300 flex items-center gap-2">
               <span>{sessionSummary.activeCount} active, {sessionSummary.completedCount} closed</span>
               {sessionSummary.completedCount > 0 && (

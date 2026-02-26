@@ -1024,6 +1024,26 @@ class ExecutionEngine:
 
     # ── Status / telemetry ──
 
+    def _get_position_ledger(self) -> list:
+        """Today's positions from persistent store for dashboard blotter."""
+        if not self._position_store:
+            return []
+        from datetime import datetime
+        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        return [
+            {
+                "id": p["id"],
+                "status": p.get("status", "active"),
+                "created_at": p.get("created_at", 0),
+                "closed_at": p.get("closed_at"),
+                "entry": p.get("entry", {}),
+                "instrument": p.get("instrument", {}),
+                "fill_log": p.get("fill_log", []),
+            }
+            for p in self._position_store.get_all_positions()
+            if p.get("created_at", 0) >= midnight
+        ]
+
     def get_status(self) -> dict:
         """Return current engine status for telemetry/dashboard."""
         strategies = []
@@ -1075,6 +1095,7 @@ class ExecutionEngine:
             "active_orders": active_orders_info,
             "order_budget": self._order_budget,
             "total_algo_orders": self._total_algo_orders,
+            "position_ledger": self._get_position_ledger(),
         }
 
     def get_telemetry(self) -> dict:
@@ -1111,4 +1132,5 @@ class ExecutionEngine:
             "quote_snapshot": self._cache.get_all_serialized(),
             "order_budget": self._order_budget,
             "total_algo_orders": self._total_algo_orders,
+            "position_ledger": self._get_position_ledger(),
         }
