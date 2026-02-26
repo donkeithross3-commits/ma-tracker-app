@@ -250,9 +250,16 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
            padding: 12px 20px; }}
   .stat .num {{ font-size: 24px; font-weight: 700; }}
   .stat .label {{ font-size: 12px; color: #9ca3af; }}
+  .nav {{ display: flex; gap: 12px; margin-bottom: 16px; font-size: 14px; }}
+  .nav a {{ color: #60a5fa; text-decoration: none; }}
+  .nav a:hover {{ text-decoration: underline; }}
 </style>
 </head>
 <body>
+<div class="nav">
+  <a href="/sheet-portfolio" target="_top">← Dashboard</a>
+  <a href="/" target="_top">Home</a>
+</div>
 <h1>Baseline Model Comparison</h1>
 <div class="subtitle">Run {run_id_short} · {count} results · ${total_cost:.2f} total</div>
 
@@ -336,9 +343,16 @@ FLAGGED_TEMPLATE = """<!DOCTYPE html>
                        text-transform: uppercase; border-bottom: 1px solid #2a2a3e; }}
   .compare-table td {{ padding: 4px 10px; border-bottom: 1px solid #1a1a2e; }}
   .deal-details {{ font-size: 13px; }}
+  .nav {{ display: flex; gap: 12px; margin-bottom: 16px; font-size: 14px; }}
+  .nav a {{ color: #60a5fa; text-decoration: none; }}
+  .nav a:hover {{ text-decoration: underline; }}
 </style>
 </head>
 <body>
+<div class="nav">
+  <a href="/sheet-portfolio" target="_top">← Dashboard</a>
+  <a href="/" target="_top">Home</a>
+</div>
 <h1>Flagged Deals Review</h1>
 <div class="subtitle">{flagged_count} of {owned_count} owned deals have AI concerns &middot; Sorted by severity</div>
 
