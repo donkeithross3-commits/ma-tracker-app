@@ -94,17 +94,17 @@ class OptionChainCache:
             data, timestamp = self.cache[key]
             age = time.time() - timestamp
             if age < self.ttl:
-                logger.info(f"Cache HIT for {ticker} (age: {age:.1f}s)")
+                logger.debug(f"Cache HIT for {ticker} (age: {age:.1f}s)")
                 return data
             else:
-                logger.info(f"Cache EXPIRED for {ticker} (age: {age:.1f}s)")
+                logger.debug(f"Cache EXPIRED for {ticker} (age: {age:.1f}s)")
                 del self.cache[key]
         return None
     
     def set(self, ticker: str, deal_price: float, close_date: str, days_before_close: int, data: dict):
         key = self._make_key(ticker, deal_price, close_date, days_before_close)
         self.cache[key] = (data, time.time())
-        logger.info(f"Cache SET for {ticker} ({len(data.get('contracts', []))} contracts)")
+        logger.debug(f"Cache SET for {ticker} ({len(data.get('contracts', []))} contracts)")
     
     def clear(self):
         self.cache.clear()
@@ -275,7 +275,7 @@ class IBDataAgent:
         request_type = request.get("request_type")
         payload = request.get("payload", {})
         
-        logger.info(f"Handling request: {request_type}")
+        logger.debug(f"Handling request: {request_type}")
         
         try:
             if request_type == "ib_status":

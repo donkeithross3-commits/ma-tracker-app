@@ -911,19 +911,19 @@ class IBMergerArbScanner(EWrapper, EClient):
         """IB tells us what data mode it switched to for this reqId."""
         self._last_market_data_type[reqId] = marketDataType
         labels = {1: "REALTIME", 2: "FROZEN", 3: "DELAYED", 4: "DELAYED_FROZEN"}
-        self.logger.info(f"marketDataType reqId={reqId} type={marketDataType} "
-                         f"({labels.get(marketDataType, '?')})")
+        self.logger.debug(f"marketDataType reqId={reqId} type={marketDataType} "
+                          f"({labels.get(marketDataType, '?')})")
 
     def tickReqParams(self, tickerId, minTick, bboExchange, snapshotPermissions):
         """IB tells us snapshot permissions for this contract."""
         self._last_tick_req_params[tickerId] = (minTick, bboExchange, snapshotPermissions)
-        self.logger.info(f"tickReqParams reqId={tickerId} minTick={minTick} "
-                         f"bbo={bboExchange} snapshotPerms={snapshotPermissions}")
+        self.logger.debug(f"tickReqParams reqId={tickerId} minTick={minTick} "
+                          f"bbo={bboExchange} snapshotPerms={snapshotPermissions}")
 
     def tickSnapshotEnd(self, reqId):
         """IB signals that a snapshot request has completed."""
         self._snapshot_end_events.add(reqId)
-        self.logger.info(f"tickSnapshotEnd reqId={reqId}")
+        self.logger.debug(f"tickSnapshotEnd reqId={reqId}")
         # Signal option snapshot early exit
         if self._opt_snapshot_req_id == reqId and self._opt_snapshot_done is not None:
             self._opt_snapshot_done.set()
@@ -1354,6 +1354,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         contract.lastTradeDateOrContractMonth = contract_dict.get("lastTradeDateOrContractMonth", "")
         contract.right = contract_dict.get("right", "C")
         contract.multiplier = contract_dict.get("multiplier", "100")
+        if contract_dict.get("tradingClass"):
+            contract.tradingClass = contract_dict["tradingClass"]
 
         req_id = self.get_next_req_id()
         self.req_id_map[req_id] = "opt_snapshot"
@@ -1370,7 +1372,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         result = self.option_chain.pop(req_id, {"bid": None, "ask": None})
         self.req_id_map.pop(req_id, None)
 
-        self.logger.info(
+        self.logger.debug(
             "Option snapshot %s %.1f%s %s: bid=%s ask=%s",
             contract_dict.get("symbol"), contract_dict.get("strike", 0),
             contract_dict.get("right", "?"),

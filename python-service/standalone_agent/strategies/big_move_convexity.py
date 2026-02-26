@@ -179,6 +179,33 @@ def _get_ticker_profile(ticker: str) -> dict[str, Any]:
     }
 
 
+# Tickers with separate weekly/daily trading classes (non-3rd-Friday expirations).
+# Monthly (3rd Friday) uses the standard class; all other dates use the weekly class.
+_WEEKLY_TRADING_CLASSES: dict[str, str] = {
+    "SPY": "SPYW",
+    "QQQ": "QQQW",
+    "IWM": "IWMW",
+}
+
+
+def _get_option_trading_class(ticker: str, expiry_date) -> str:
+    """Return the IB tradingClass for an option expiry.
+
+    SPY/QQQ/IWM have separate trading classes for weekly/daily (non-3rd-Friday)
+    expirations.  Without specifying this, IB returns Error 200 'No security
+    definition' for 0DTE contracts.
+    """
+    weekly_class = _WEEKLY_TRADING_CLASSES.get(ticker)
+    if not weekly_class:
+        return ""  # most tickers don't need tradingClass disambiguation
+    import calendar
+    cal = calendar.monthcalendar(expiry_date.year, expiry_date.month)
+    # 3rd Friday: find all Fridays (weekday index 4) that are nonzero
+    fridays = [week[4] for week in cal if week[4] != 0]
+    is_third_friday = len(fridays) >= 3 and expiry_date.day == fridays[2]
+    return ticker if is_third_friday else weekly_class
+
+
 class BigMoveConvexityStrategy(ExecutionStrategy):
     """Entry strategy for OTM 0DTE options on a configurable ticker.
 
@@ -345,6 +372,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "BMC entry fill: order_id=%d, avg_price=%.2f, qty=%s, permId=%d",
             order_id, avg_price, filled_qty, perm_id,
         )
+
+        # Activate cooldown only after a confirmed fill
+        self._cooldown_tracker[self._ticker] = time.time()
 
         # Record position
         position_info = {
@@ -799,15 +829,14 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Check cooldown
         cooldown_s = cfg.get("cooldown_minutes", 15) * 60
-        last_signal_time = self._cooldown_tracker.get(self._ticker, 0)
-        if (time.time() - last_signal_time) < cooldown_s:
-            logger.info("Signal suppressed by cooldown (last signal %.0fs ago)",
-                        time.time() - last_signal_time)
+        last_fill_time = self._cooldown_tracker.get(self._ticker, 0)
+        if (time.time() - last_fill_time) < cooldown_s:
+            logger.info("Signal suppressed by cooldown (last fill %.0fs ago)",
+                        time.time() - last_fill_time)
             signal_record["suppressed"] = "cooldown"
             self._signal_history.append(signal_record)
             return []
 
-        self._cooldown_tracker[self._ticker] = time.time()
         self._signal_history.append(signal_record)
 
         # Check auto_entry
@@ -879,6 +908,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         estimated_premium = (premium_min + effective_premium_max) / 2.0
         qty = min(max_contracts, max(1, int(budget / (estimated_premium * 100))))
 
+        trading_class = _get_option_trading_class(self._ticker, expiry_date)
         contract_dict = {
             "symbol": self._ticker,
             "secType": "OPT",
@@ -888,6 +918,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "lastTradeDateOrContractMonth": expiry_str,
             "right": right,
             "multiplier": "100",
+            "tradingClass": trading_class,
         }
 
         # Store contract info in signal record for risk manager spawn
@@ -932,7 +963,11 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                         opt_ask, adaptive_limit, max_affordable_premium,
                     )
                 else:
-                    logger.info("Option quote returned no usable bid/ask — using budget cap $%.2f", max_affordable_premium)
+                    logger.warning(
+                        "No quote data for %s %.1f%s %s — contract may not exist, skipping entry",
+                        self._ticker, strike, right, expiry_str,
+                    )
+                    return []
             except Exception:
                 logger.warning("Failed to fetch option quote — using budget cap $%.2f", max_affordable_premium, exc_info=True)
 
