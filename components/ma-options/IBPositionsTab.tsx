@@ -1100,6 +1100,12 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     setError(null);
     try {
       const res = await fetch("/api/ib-connection/positions", { credentials: "include" });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        setError(`Unexpected response from server (${res.status})`);
+        setData(null);
+        return;
+      }
       const json = await res.json();
       if (!res.ok) {
         const msg = json?.error || `Request failed: ${res.status}`;
@@ -1132,6 +1138,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         body: JSON.stringify({ ticker, right }),
         credentials: "include",
       });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        setSellScanError(`Unexpected response from server (${res.status})`);
+        return;
+      }
       const data = await res.json();
       if (!res.ok) {
         setSellScanError(data?.error || `Request failed: ${res.status}`);
@@ -1478,7 +1489,11 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
     const underlyingTickers = [...new Set(selectedGroups.map((g) => g.key.split(" ")[0]).filter(Boolean))];
     const q = new URLSearchParams({ tickers: underlyingTickers.join(",") });
     fetch(`/api/krj/signals?${q}`, { credentials: "include" })
-      .then((res) => res.json())
+      .then((res) => {
+        const ct = res.headers.get("content-type") || "";
+        if (!ct.includes("application/json")) return { signals: {} };
+        return res.json();
+      })
       .then((data: { signals?: Record<string, "Long" | "Short" | "Neutral"> }) => {
         const signals = data.signals ?? {};
         const byGroupKey: Record<string, "Long" | "Short" | "Neutral" | null> = {};
