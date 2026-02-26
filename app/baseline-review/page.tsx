@@ -7,9 +7,25 @@ export default function BaselineReviewPage() {
   const [view, setView] = useState<"flagged" | "index">("flagged");
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [loading, setLoading] = useState(true);
+  const [htmlContent, setHtmlContent] = useState<string>("");
+  const [error, setError] = useState<string>("");
 
   useEffect(() => {
     setLoading(true);
+    setError("");
+    fetch(`/api/sheet-portfolio/baseline-review?view=${view}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        return r.text();
+      })
+      .then((html) => {
+        setHtmlContent(html);
+        setLoading(false);
+      })
+      .catch((e) => {
+        setError(e.message);
+        setLoading(false);
+      });
   }, [view]);
 
   return (
@@ -70,11 +86,15 @@ export default function BaselineReviewPage() {
             <span className="text-gray-400 text-sm">Loading review...</span>
           </div>
         )}
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-950/80 z-5">
+            <span className="text-red-400 text-sm">Failed to load: {error}</span>
+          </div>
+        )}
         <iframe
           ref={iframeRef}
-          src={`/api/sheet-portfolio/baseline-review?view=${view}`}
+          srcDoc={htmlContent}
           className="w-full h-[calc(100vh-48px)] border-0"
-          onLoad={() => setLoading(false)}
         />
       </main>
     </div>
