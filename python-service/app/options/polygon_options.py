@@ -216,11 +216,15 @@ class PolygonOptionsClient:
             prev_day = snap.get("prevDay", {})
             price = last_trade.get("p", 0) or day.get("c", 0)
             prev_close = prev_day.get("c", 0)
+            # Pre-market: if no trade yet, use yesterday's close instead of 0
+            if not price and prev_close:
+                price = prev_close
             change = price - prev_close if price and prev_close else 0
             change_pct = (change / prev_close) if prev_close else 0
             results[t] = {
                 "ticker": t,
                 "price": price,
+                "prev_close": prev_close,
                 "change": round(change, 4),
                 "change_pct": round(change_pct, 6),
                 "updated": snap.get("updated", 0),

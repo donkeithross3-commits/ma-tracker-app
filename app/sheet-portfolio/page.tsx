@@ -681,7 +681,7 @@ export default function SheetPortfolioPage() {
                         </td>
                         {/* Grss Yield */}
                         <td className="py-1.5 px-2 text-right font-mono">
-                          {livePrices[deal.ticker] && deal.deal_price !== null ? (
+                          {livePrices[deal.ticker] && livePrices[deal.ticker].price > 0 && deal.deal_price !== null ? (
                             (() => {
                               const liveGross = (deal.deal_price - livePrices[deal.ticker].price) / livePrices[deal.ticker].price;
                               const pct = (liveGross * 100).toFixed(2);
@@ -707,7 +707,7 @@ export default function SheetPortfolioPage() {
                         </td>
                         {/* Crrnt Yield */}
                         <td className="py-1.5 px-2 text-right font-mono">
-                          {livePrices[deal.ticker] && deal.deal_price !== null && deal.countdown_days !== null && deal.countdown_days > 0 ? (
+                          {livePrices[deal.ticker] && livePrices[deal.ticker].price > 0 && deal.deal_price !== null && deal.countdown_days !== null && deal.countdown_days > 0 ? (
                             (() => {
                               const liveGross = (deal.deal_price - livePrices[deal.ticker].price) / livePrices[deal.ticker].price;
                               const monthsToClose = deal.countdown_days / 30;
