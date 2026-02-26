@@ -328,6 +328,8 @@ class IBDataAgent:
                 return await self._handle_execution_budget(payload)
             elif request_type == "execution_close_position":
                 return await self._handle_close_position(payload)
+            elif request_type == "get_ib_executions":
+                return await self._run_in_thread(self._handle_get_ib_executions_sync, payload)
             else:
                 return {"error": f"Unknown request type: {request_type}"}
         except Exception as e:
@@ -1185,6 +1187,142 @@ class IBDataAgent:
         })
         self.position_store.mark_closed(position_id)
         return {"success": True, "position_id": position_id, "status": "closed"}
+
+    def _handle_get_ib_executions_sync(self, payload: dict) -> dict:
+        """Fetch all IB executions for current session, match into round-trip trades, compute P&L."""
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": "IB not connected"}
+
+        IB_IGNORE = {"VGZ", "UNCO", "HOLO"}
+
+        raw_execs = self.scanner.fetch_executions_sync(timeout_sec=10.0)
+        if not raw_execs:
+            return {"executions": [], "trades": [], "summary": {}}
+
+        # Filter out ignored tickers and non-option trades
+        execs = [
+            e for e in raw_execs
+            if e["contract"].get("symbol") not in IB_IGNORE
+        ]
+
+        # Group by contract key: (symbol, strike, expiry, right, secType)
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for e in execs:
+            c = e["contract"]
+            key = (
+                c.get("symbol", ""),
+                c.get("strike", 0),
+                c.get("lastTradeDateOrContractMonth", ""),
+                c.get("right", ""),
+                c.get("secType", ""),
+            )
+            groups[key].append(e)
+
+        # Build round-trip trades from matched buys/sells
+        trades = []
+        for key, fills in groups.items():
+            symbol, strike, expiry, right, sec_type = key
+
+            buys = []
+            sells = []
+            total_commission = 0.0
+            for f in fills:
+                ex = f["execution"]
+                comm = f.get("commission")
+                if comm and comm.get("commission"):
+                    c_val = comm["commission"]
+                    # IB returns 1e10 for "not yet available"
+                    if c_val < 1e9:
+                        total_commission += c_val
+
+                entry = {
+                    "time": ex.get("time", ""),
+                    "price": ex.get("price", 0),
+                    "shares": ex.get("shares", 0),
+                    "exec_id": ex.get("execId", ""),
+                    "exchange": ex.get("exchange", ""),
+                    "order_id": ex.get("orderId", 0),
+                }
+                if ex.get("side") == "BOT":
+                    buys.append(entry)
+                elif ex.get("side") == "SLD":
+                    sells.append(entry)
+
+            # Compute aggregate entry/exit
+            buy_qty = sum(b["shares"] for b in buys)
+            sell_qty = sum(s["shares"] for s in sells)
+            buy_cost = sum(b["price"] * b["shares"] for b in buys)
+            sell_revenue = sum(s["price"] * s["shares"] for s in sells)
+            avg_buy = buy_cost / buy_qty if buy_qty else 0
+            avg_sell = sell_revenue / sell_qty if sell_qty else 0
+
+            # For options, multiply by 100 for dollar P&L
+            multiplier = 100 if sec_type == "OPT" else 1
+            closed_qty = min(buy_qty, sell_qty)
+            gross_pnl = (avg_sell - avg_buy) * closed_qty * multiplier if closed_qty else None
+            net_pnl = (gross_pnl - total_commission) if gross_pnl is not None else None
+            open_qty = buy_qty - sell_qty
+
+            # Format contract label
+            if sec_type == "OPT":
+                contract_label = f"{symbol} {strike:.0f}{right[0] if right else '?'}"
+                if expiry:
+                    contract_label += f" {expiry}"
+            else:
+                contract_label = symbol
+
+            trades.append({
+                "contract_label": contract_label,
+                "symbol": symbol,
+                "sec_type": sec_type,
+                "strike": strike,
+                "expiry": expiry,
+                "right": right,
+                "buy_qty": int(buy_qty),
+                "sell_qty": int(sell_qty),
+                "open_qty": int(open_qty),
+                "avg_buy": round(avg_buy, 4),
+                "avg_sell": round(avg_sell, 4) if sell_qty else None,
+                "gross_pnl": round(gross_pnl, 2) if gross_pnl is not None else None,
+                "total_commission": round(total_commission, 4),
+                "net_pnl": round(net_pnl, 2) if net_pnl is not None else None,
+                "status": "closed" if open_qty == 0 and sell_qty > 0 else "open",
+                "fills": [
+                    {
+                        "side": f["execution"]["side"],
+                        "time": f["execution"]["time"],
+                        "price": f["execution"]["price"],
+                        "shares": f["execution"]["shares"],
+                        "exchange": f["execution"]["exchange"],
+                        "commission": f["commission"]["commission"] if f.get("commission") and f["commission"].get("commission", 0) < 1e9 else None,
+                    }
+                    for f in fills
+                ],
+            })
+
+        # Summary across all option trades
+        total_gross = sum(t["gross_pnl"] for t in trades if t["gross_pnl"] is not None)
+        total_comm = sum(t["total_commission"] for t in trades)
+        total_net = total_gross - total_comm
+        closed_trades = [t for t in trades if t["status"] == "closed"]
+        open_trades = [t for t in trades if t["status"] == "open"]
+        wins = sum(1 for t in closed_trades if (t["net_pnl"] or 0) > 0)
+        losses = sum(1 for t in closed_trades if (t["net_pnl"] or 0) <= 0)
+
+        return {
+            "executions_count": len(execs),
+            "trades": trades,
+            "summary": {
+                "total_gross_pnl": round(total_gross, 2),
+                "total_commission": round(total_comm, 4),
+                "total_net_pnl": round(total_net, 2),
+                "closed_count": len(closed_trades),
+                "open_count": len(open_trades),
+                "wins": wins,
+                "losses": losses,
+            },
+        }
 
     def _create_strategy(self, strategy_type: str) -> Optional[ExecutionStrategy]:
         """Factory for creating strategy instances by type name."""

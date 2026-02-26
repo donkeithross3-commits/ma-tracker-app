@@ -520,6 +520,52 @@ export default function SignalsTab() {
     setTimeout(fetchExecutionStatus, 300);
   }, [fetchExecutionStatus]);
 
+  // ── IB Execution P&L (on-demand fetch) ──
+  interface IBTrade {
+    contract_label: string;
+    symbol: string;
+    sec_type: string;
+    strike: number;
+    expiry: string;
+    right: string;
+    buy_qty: number;
+    sell_qty: number;
+    open_qty: number;
+    avg_buy: number;
+    avg_sell: number | null;
+    gross_pnl: number | null;
+    total_commission: number;
+    net_pnl: number | null;
+    status: "open" | "closed";
+    fills: { side: string; time: string; price: number; shares: number; exchange: string; commission: number | null }[];
+  }
+  interface IBPnlData {
+    executions_count: number;
+    trades: IBTrade[];
+    summary: {
+      total_gross_pnl: number;
+      total_commission: number;
+      total_net_pnl: number;
+      closed_count: number;
+      open_count: number;
+      wins: number;
+      losses: number;
+    };
+  }
+  const [ibPnl, setIbPnl] = useState<IBPnlData | null>(null);
+  const [ibPnlLoading, setIbPnlLoading] = useState(false);
+  const fetchIbPnl = useCallback(async () => {
+    setIbPnlLoading(true);
+    try {
+      const res = await fetch("/api/ma-options/execution/ib-pnl", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setIbPnl(data);
+      }
+    } catch { /* silent */ }
+    finally { setIbPnlLoading(false); }
+  }, []);
+
   // ── Start BMC (multi-ticker) ──
   const handleStart = async () => {
     setLoading(true);
@@ -1164,6 +1210,89 @@ export default function SignalsTab() {
               )}
             </div>
           )}
+
+          {/* ── IB Execution P&L ── */}
+          <div className="bg-gray-900 border border-gray-800 rounded p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-300">IB Execution P&L</h3>
+              <button
+                onClick={fetchIbPnl}
+                disabled={ibPnlLoading}
+                className="text-xs px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded disabled:opacity-50"
+              >
+                {ibPnlLoading ? "Loading..." : ibPnl ? "Refresh" : "Fetch from IB"}
+              </button>
+            </div>
+            {ibPnl ? (
+              <>
+                {/* Summary bar */}
+                <div className="text-xs text-gray-400 flex items-center gap-2 mb-2">
+                  <span>{ibPnl.executions_count} fills</span>
+                  <span className="text-gray-600">|</span>
+                  <span>{ibPnl.summary.closed_count} closed, {ibPnl.summary.open_count} open</span>
+                  {ibPnl.summary.closed_count > 0 && (
+                    <>
+                      <span className="text-gray-600">|</span>
+                      <span><span className="text-green-400">{ibPnl.summary.wins}W</span>/<span className="text-red-400">{ibPnl.summary.losses}L</span></span>
+                    </>
+                  )}
+                  <span className="text-gray-600">|</span>
+                  <span className={ibPnl.summary.total_gross_pnl >= 0 ? "text-green-400" : "text-red-400"}>
+                    Gross {ibPnl.summary.total_gross_pnl >= 0 ? "+" : ""}${ibPnl.summary.total_gross_pnl.toFixed(2)}
+                  </span>
+                  {ibPnl.summary.total_commission > 0 && (
+                    <span className="text-gray-500">
+                      Comm -${ibPnl.summary.total_commission.toFixed(2)}
+                    </span>
+                  )}
+                  <span className={`font-medium ${ibPnl.summary.total_net_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    Net {ibPnl.summary.total_net_pnl >= 0 ? "+" : ""}${ibPnl.summary.total_net_pnl.toFixed(2)}
+                  </span>
+                </div>
+                {/* Trades table */}
+                {ibPnl.trades.length > 0 && (
+                  <div className="max-h-48 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-500">
+                          <th className="text-left py-1">Contract</th>
+                          <th className="text-right py-1">Buy</th>
+                          <th className="text-right py-1">Sell</th>
+                          <th className="text-right py-1">Avg In</th>
+                          <th className="text-right py-1">Avg Out</th>
+                          <th className="text-right py-1">Gross</th>
+                          <th className="text-right py-1">Comm</th>
+                          <th className="text-right py-1">Net</th>
+                          <th className="text-left py-1">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ibPnl.trades.map((t, i) => (
+                          <tr key={i} className={`border-t border-gray-800 ${t.status === "closed" ? "opacity-70" : ""}`}>
+                            <td className="py-1 text-gray-300 font-mono">{t.contract_label}</td>
+                            <td className="py-1 text-right text-gray-400">{t.buy_qty}</td>
+                            <td className="py-1 text-right text-gray-400">{t.sell_qty}</td>
+                            <td className="py-1 text-right text-gray-300 font-mono">${t.avg_buy.toFixed(2)}</td>
+                            <td className="py-1 text-right text-gray-300 font-mono">{t.avg_sell != null ? `$${t.avg_sell.toFixed(2)}` : "—"}</td>
+                            <td className={`py-1 text-right font-mono ${(t.gross_pnl ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                              {t.gross_pnl != null ? `${t.gross_pnl >= 0 ? "+" : ""}$${t.gross_pnl.toFixed(2)}` : "—"}
+                            </td>
+                            <td className="py-1 text-right text-gray-500 font-mono">{t.total_commission > 0 ? `-$${t.total_commission.toFixed(2)}` : "—"}</td>
+                            <td className={`py-1 text-right font-mono ${(t.net_pnl ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                              {t.net_pnl != null ? `${t.net_pnl >= 0 ? "+" : ""}$${t.net_pnl.toFixed(2)}` : "—"}
+                            </td>
+                            <td className="py-1 text-gray-500">{t.status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-gray-600 text-xs">Click &ldquo;Fetch from IB&rdquo; to load execution data from IB TWS</div>
+            )}
+          </div>
 
           {/* ── Signal History ── */}
           <div className="bg-gray-900 border border-gray-800 rounded p-3">

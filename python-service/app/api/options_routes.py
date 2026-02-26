@@ -1876,6 +1876,29 @@ async def relay_execution_status(user_id: str = ""):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/relay/execution/ib-pnl")
+async def relay_execution_ib_pnl(user_id: str = ""):
+    """Fetch all IB executions for current session and compute round-trip P&L."""
+    if not user_id:
+        return {"error": "user_id required"}
+    try:
+        response_data = await send_request_to_provider(
+            request_type="get_ib_executions",
+            payload={},
+            timeout=15.0,
+            user_id=user_id,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/ib-pnl error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/relay/execution/config")
 async def relay_execution_config(request: ExecutionConfigRequest):
     """Update strategy configuration on the user's agent without restart."""

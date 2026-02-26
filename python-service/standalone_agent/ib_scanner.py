@@ -205,6 +205,11 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._account_events_lock = Lock()
         # Instant account event callback (set by agent for immediate WebSocket push)
         self._account_event_callback = None
+
+        # Batch execution request state (for fetch_executions_sync)
+        self._batch_exec_req_id: Optional[int] = None
+        self._batch_exec_results: List[dict] = []
+        self._batch_exec_done = Event()
         # Early-exit event for fetch_underlying_data (set when price tick arrives)
         self._underlying_done: Optional[Event] = None
         # True when TWS is in Read-Only API mode (we detected an error saying so).
@@ -1151,6 +1156,15 @@ class IBMergerArbScanner(EWrapper, EClient):
             "permId": getattr(execution, "permId", 0),
             "lastLiquidity": getattr(execution, "lastLiquidity", 0),  # 1=added, 2=removed, 3=routed
         }
+
+        # Batch mode: collect for fetch_executions_sync, skip normal routing
+        if self._batch_exec_req_id is not None and reqId == self._batch_exec_req_id:
+            self._batch_exec_results.append({
+                "contract": self._contract_to_dict(contract),
+                "execution": exec_data,
+            })
+            return
+
         self.logger.info("execDetails orderId=%s execId=%s shares=%s price=%s",
                          order_id, exec_data["execId"], exec_data["shares"], exec_data["price"])
 
@@ -1177,7 +1191,8 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def execDetailsEnd(self, reqId: int):
         """End of executions for request."""
-        pass
+        if self._batch_exec_req_id is not None and reqId == self._batch_exec_req_id:
+            self._batch_exec_done.set()
 
     def commissionReport(self, commissionReport):
         """IB callback: commission data for a fill (arrives after execDetails)."""
@@ -1203,6 +1218,49 @@ class IBMergerArbScanner(EWrapper, EClient):
         """Retrieve a stored commission report by exec ID (for async pickup)."""
         with self._commission_lock:
             return self._commission_reports.get(exec_id)
+
+    def fetch_executions_sync(self, timeout_sec: float = 10.0) -> List[dict]:
+        """Batch fetch all executions from IB for the current session.
+
+        Uses reqExecutions() to get historical fills. Returns list of dicts,
+        each with 'contract', 'execution', and 'commission' keys.
+        Commission reports arrive async after execDetails, so we wait briefly.
+        """
+        from ibapi.execution import ExecutionFilter
+
+        req_id = self.get_next_req_id()
+        self._batch_exec_results = []
+        self._batch_exec_done.clear()
+        self._batch_exec_req_id = req_id
+
+        try:
+            self.reqExecutions(req_id, ExecutionFilter())
+            if not self._batch_exec_done.wait(timeout=timeout_sec):
+                self.logger.warning("fetch_executions_sync: timed out after %.1fs", timeout_sec)
+
+            # Wait briefly for trailing commissionReport callbacks
+            time.sleep(1.0)
+
+            # Attach commission reports to each execution by execId
+            results = list(self._batch_exec_results)
+            with self._commission_lock:
+                for r in results:
+                    exec_id = r["execution"].get("execId", "")
+                    cr = self._commission_reports.get(exec_id)
+                    if cr:
+                        r["commission"] = {
+                            "commission": cr.get("commission"),
+                            "currency": cr.get("currency"),
+                            "realized_pnl": cr.get("realized_pnl"),
+                        }
+                    else:
+                        r["commission"] = None
+
+            self.logger.info("fetch_executions_sync: got %d executions", len(results))
+            return results
+        finally:
+            self._batch_exec_req_id = None
+            self._batch_exec_results = []
 
     def drain_account_events(self) -> list:
         """Drain and return all pending account events (thread-safe)."""
