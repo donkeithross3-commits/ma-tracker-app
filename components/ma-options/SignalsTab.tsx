@@ -28,11 +28,19 @@ interface QuoteSnapshot {
 interface FillLogEntry {
   time: number;
   order_id: number;
+  exec_id?: string;
   level: string;
   qty_filled: number;
   avg_price: number;
   remaining_qty: number;
   pnl_pct: number;
+  execution_analytics?: {
+    exchange?: string;
+    last_liquidity?: number;
+    commission?: number | null;
+    realized_pnl_ib?: number | null;
+    slippage?: number | null;
+  };
 }
 
 interface RiskManagerState {
@@ -83,6 +91,12 @@ interface PositionLedgerEntry {
   entry: { order_id: number; price: number; quantity: number; fill_time: number; perm_id: number };
   instrument: { symbol: string; strike?: number; expiry?: string; right?: string };
   fill_log: FillLogEntry[];
+  lineage?: {
+    model_version?: string;
+    model_type?: string;
+    signal?: { probability?: number; direction?: string; strength?: number };
+    option_selection?: { strike?: number; limit_price?: number; opt_bid?: number; opt_ask?: number };
+  };
 }
 
 interface FullExecutionStatus {
@@ -701,8 +715,9 @@ export default function SignalsTab() {
   const allFills = useMemo(() => {
     const ledger = executionStatus?.position_ledger;
     if (!ledger || ledger.length === 0) return [];
-    const fills: (FillLogEntry & { source: string; instrument?: PositionLedgerEntry["instrument"]; positionStatus?: string })[] = [];
+    const fills: (FillLogEntry & { source: string; instrument?: PositionLedgerEntry["instrument"]; positionStatus?: string; modelVersion?: string })[] = [];
     for (const pos of ledger) {
+      const mv = pos.lineage?.model_version;
       // Entry fill from the position's entry data
       if (pos.entry?.fill_time) {
         fills.push({
@@ -716,12 +731,13 @@ export default function SignalsTab() {
           source: pos.id,
           instrument: pos.instrument,
           positionStatus: pos.status,
+          modelVersion: mv,
         });
       }
       // Exit fills from fill_log
       for (const f of pos.fill_log || []) {
         if (f.level !== "entry") {
-          fills.push({ ...f, source: pos.id, instrument: pos.instrument, positionStatus: pos.status });
+          fills.push({ ...f, source: pos.id, instrument: pos.instrument, positionStatus: pos.status, modelVersion: mv });
         }
       }
     }
@@ -737,6 +753,7 @@ export default function SignalsTab() {
     let wins = 0;
     let losses = 0;
     let totalPnl = 0;
+    let totalCommission = 0;
     for (const pos of closedLedger) {
       const exitFills = (pos.fill_log || []).filter(f => f.level !== "entry");
       const lastFill = exitFills[exitFills.length - 1];
@@ -749,6 +766,13 @@ export default function SignalsTab() {
         totalPnl += (f.avg_price - entryPrice) * f.qty_filled * 100;
       }
     }
+    // Sum commissions across ALL fills (entry + exit, active + closed)
+    for (const pos of ledger) {
+      for (const f of pos.fill_log || []) {
+        const comm = f.execution_analytics?.commission;
+        if (comm != null && comm > 0) totalCommission += comm;
+      }
+    }
     // Unrealized P&L from live position details (quotes-driven, unchanged)
     let unrealizedPnl = 0;
     for (const pd of positionDetails) {
@@ -759,7 +783,9 @@ export default function SignalsTab() {
       completedCount: closedLedger.length,
       wins,
       losses,
-      totalPnl,
+      totalPnl,       // gross P&L
+      totalCommission, // total commissions paid
+      netPnl: totalPnl - totalCommission,
       unrealizedPnl,
     };
   }, [executionStatus?.position_ledger, positionDetails]);
@@ -1062,6 +1088,7 @@ export default function SignalsTab() {
                       <th className="text-left py-1">Time</th>
                       <th className="text-left py-1">Contract</th>
                       <th className="text-left py-1">Type</th>
+                      <th className="text-left py-1">Model</th>
                       <th className="text-right py-1">Qty</th>
                       <th className="text-right py-1">Price</th>
                       <th className="text-right py-1">P&L%</th>
@@ -1085,6 +1112,7 @@ export default function SignalsTab() {
                           <td className="py-1 text-gray-500">{new Date(f.time * 1000).toLocaleTimeString()}</td>
                           <td className="py-1 text-gray-400 font-mono">{contractLabel}</td>
                           <td className={`py-1 ${typeColor}`}>{f.level}</td>
+                          <td className="py-1 text-gray-500 font-mono truncate max-w-[80px]" title={f.modelVersion}>{f.modelVersion ? f.modelVersion.slice(-8) : "—"}</td>
                           <td className="py-1 text-right text-gray-300">{f.qty_filled}</td>
                           <td className="py-1 text-right text-gray-300 font-mono">${f.avg_price.toFixed(2)}</td>
                           <td className={`py-1 text-right font-mono ${f.pnl_pct >= 0 ? "text-green-400" : "text-red-400"}`}>
@@ -1114,7 +1142,17 @@ export default function SignalsTab() {
                   <span className="text-gray-600">|</span>
                   {sessionSummary.totalPnl !== 0 && (
                     <span className={sessionSummary.totalPnl >= 0 ? "text-green-400" : "text-red-400"}>
-                      Realized {sessionSummary.totalPnl >= 0 ? "+" : ""}${sessionSummary.totalPnl.toFixed(0)}
+                      Gross {sessionSummary.totalPnl >= 0 ? "+" : ""}${sessionSummary.totalPnl.toFixed(0)}
+                    </span>
+                  )}
+                  {sessionSummary.totalCommission > 0 && (
+                    <span className="text-gray-500">
+                      Comm -${sessionSummary.totalCommission.toFixed(2)}
+                    </span>
+                  )}
+                  {sessionSummary.totalPnl !== 0 && sessionSummary.totalCommission > 0 && (
+                    <span className={sessionSummary.netPnl >= 0 ? "text-green-400" : "text-red-400"}>
+                      Net {sessionSummary.netPnl >= 0 ? "+" : ""}${sessionSummary.netPnl.toFixed(0)}
                     </span>
                   )}
                   {sessionSummary.unrealizedPnl !== 0 && (

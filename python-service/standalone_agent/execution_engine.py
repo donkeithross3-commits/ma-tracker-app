@@ -211,6 +211,22 @@ class ExecutionStrategy(ABC):
         return {}
 
 
+# ── Constants ──
+
+IB_IGNORE_TICKERS = frozenset({"VGZ", "UNCO", "HOLO"})
+
+NUMERIC_CONFIG_KEYS = {
+    "signal_threshold", "min_signal_strength", "cooldown_minutes",
+    "decision_interval_seconds", "contract_budget_usd", "max_contracts",
+    "otm_target_pct", "premium_min", "premium_max", "max_spread",
+    "trailing_activation_pct", "trailing_trail_pct",
+}
+BOOL_CONFIG_KEYS = {
+    "auto_entry", "use_delayed_data", "options_gate_enabled",
+    "trailing_enabled", "stop_loss_enabled",
+}
+
+
 # ── Execution Engine ──
 
 class ExecutionEngine:
@@ -569,6 +585,15 @@ class ExecutionEngine:
         state = self._strategies.get(strategy_id)
         if state is None:
             return {"error": f"Strategy {strategy_id} not found"}
+        # Validate config types (WS6)
+        errors = []
+        for key, value in new_config.items():
+            if key in NUMERIC_CONFIG_KEYS and not isinstance(value, (int, float)):
+                errors.append(f"{key} must be numeric, got {type(value).__name__}")
+            elif key in BOOL_CONFIG_KEYS and not isinstance(value, bool):
+                errors.append(f"{key} must be boolean, got {type(value).__name__}")
+        if errors:
+            return {"error": "; ".join(errors)}
         state.config.update(new_config)
         logger.info("Updated config for strategy %s: %s", strategy_id, list(new_config.keys()))
         return {"strategy_id": strategy_id, "config": state.config}
@@ -988,15 +1013,25 @@ class ExecutionEngine:
         if self._position_store is None or not strategy_id.startswith("bmc_risk_"):
             return
         try:
+            exec_id = fill_data.get("execId", "")
             # Build fill dict for the ledger
             fill_dict = {
                 "time": time.time(),
                 "order_id": fill_data.get("orderId", 0),
+                "exec_id": exec_id,
                 "level": "exit",
                 "qty_filled": int(fill_data.get("filled", 0)),
                 "avg_price": fill_data.get("avgFillPrice", 0),
                 "remaining_qty": 0,
                 "pnl_pct": 0.0,
+                # Execution analytics (WS3)
+                "execution_analytics": {
+                    "exchange": fill_data.get("exchange", ""),
+                    "last_liquidity": fill_data.get("lastLiquidity", 0),
+                    "commission": None,      # filled async from commissionReport
+                    "realized_pnl_ib": None, # IB's realized P&L calculation
+                    "slippage": None,        # computed from order intent
+                },
             }
             # Try to get richer data from the strategy's fill log
             if hasattr(state.strategy, "_fill_log") and state.strategy._fill_log:
@@ -1010,6 +1045,12 @@ class ExecutionEngine:
                 })
             self._position_store.add_fill(strategy_id, fill_dict)
 
+            # Deferred commission pickup (WS3): schedule async lookup
+            if exec_id:
+                self._order_executor.submit(
+                    self._deferred_commission_update, strategy_id, exec_id,
+                )
+
             # Update runtime state
             if hasattr(state.strategy, "get_runtime_snapshot"):
                 snapshot = state.strategy.get_runtime_snapshot()
@@ -1021,6 +1062,87 @@ class ExecutionEngine:
                 self._position_store.mark_closed(strategy_id)
         except Exception as e:
             logger.error("Error persisting fill for %s: %s", strategy_id, e)
+
+    def _deferred_commission_update(self, position_id: str, exec_id: str, timeout: float = 2.0):
+        """Wait briefly for IB commissionReport, then update fill record."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            report = self._scanner.get_commission_report(exec_id)
+            if report:
+                self._position_store.update_fill_commission(position_id, exec_id, report)
+                logger.debug("Commission for exec %s: $%.4f", exec_id, report.get("commission", 0))
+                return
+            time.sleep(0.1)
+        logger.debug("No commission report for exec %s within %.1fs", exec_id, timeout)
+
+    # ── IB Reconciliation (WS4) ──
+
+    def reconcile_with_ib(self, ib_positions: list, ib_open_orders: list = None) -> dict:
+        """Compare agent state against IB source of truth.
+
+        Returns a report with matched, orphaned (in IB but not agent),
+        stale (in agent but not IB), and adjusted (quantity mismatch) positions.
+        """
+        report = {"matched": [], "orphaned_ib": [], "stale_agent": [], "adjusted": []}
+        if not self._position_store:
+            return report
+
+        # Filter out legacy tickers
+        ib_filtered = [
+            p for p in ib_positions
+            if p.get("contract", {}).get("symbol") not in IB_IGNORE_TICKERS
+        ]
+
+        def _instrument_key(instr):
+            return (
+                instr.get("symbol"),
+                instr.get("strike"),
+                instr.get("expiry") or instr.get("lastTradeDateOrContractMonth"),
+                instr.get("right"),
+            )
+
+        # Build agent position lookup
+        store_positions = {}
+        for p in self._position_store.get_all_positions():
+            if p.get("status") == "active":
+                key = _instrument_key(p.get("instrument", {}))
+                store_positions[key] = p
+
+        # Check each IB position against agent store
+        ib_keys = set()
+        for ib_pos in ib_filtered:
+            contract = ib_pos.get("contract", {})
+            qty = ib_pos.get("position", 0)
+            if qty == 0:
+                continue
+            key = (
+                contract.get("symbol"),
+                contract.get("strike"),
+                contract.get("lastTradeDateOrContractMonth"),
+                contract.get("right"),
+            )
+            ib_keys.add(key)
+            if key in store_positions:
+                agent_pos = store_positions[key]
+                agent_qty = agent_pos.get("entry", {}).get("quantity", 0)
+                remaining = agent_pos.get("runtime_state", {}).get("remaining_qty", agent_qty)
+                if remaining != qty:
+                    report["adjusted"].append({
+                        "position_id": agent_pos["id"], "ib_qty": qty, "agent_qty": remaining,
+                    })
+                report["matched"].append(key)
+            else:
+                report["orphaned_ib"].append({
+                    "instrument": key, "qty": qty, "avg_cost": ib_pos.get("avgCost"),
+                })
+
+        # Check for agent positions not in IB
+        for key, agent_pos in store_positions.items():
+            if key not in ib_keys:
+                report["stale_agent"].append({"position_id": agent_pos["id"], "instrument": key})
+                self._position_store.mark_closed(agent_pos["id"])
+
+        return report
 
     # ── Status / telemetry ──
 
@@ -1039,6 +1161,7 @@ class ExecutionEngine:
                 "entry": p.get("entry", {}),
                 "instrument": p.get("instrument", {}),
                 "fill_log": p.get("fill_log", []),
+                "lineage": p.get("lineage", {}),
             }
             for p in self._position_store.get_all_positions()
             if p.get("created_at", 0) >= midnight
@@ -1082,6 +1205,16 @@ class ExecutionEngine:
                 for ao in self._active_orders.values()
             ]
 
+        # Trade attribution summary (WS8)
+        attribution_summary = []
+        if self._position_store:
+            try:
+                from trade_attribution import TradeAttribution
+                ta = TradeAttribution(self._position_store)
+                attribution_summary = ta.model_summary()
+            except Exception:
+                pass
+
         return {
             "running": self._running,
             "eval_interval": self._eval_interval,
@@ -1096,6 +1229,7 @@ class ExecutionEngine:
             "order_budget": self._order_budget,
             "total_algo_orders": self._total_algo_orders,
             "position_ledger": self._get_position_ledger(),
+            "trade_attribution_summary": attribution_summary,
         }
 
     def get_telemetry(self) -> dict:

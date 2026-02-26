@@ -73,6 +73,7 @@ export async function GET(request: NextRequest) {
       "quote_cache.py",
       "execution_engine.py",
       "position_store.py",
+      "trade_attribution.py",
       "install.py",
       "requirements.txt",
       "README.md",

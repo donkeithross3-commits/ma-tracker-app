@@ -118,6 +118,31 @@ class PositionStore:
         with self._lock:
             return self._positions.get(position_id)
 
+    def set_lineage(self, position_id: str, lineage: dict) -> None:
+        """Attach model lineage (model version, signal, config snapshot) to a position."""
+        with self._lock:
+            pos = self._positions.get(position_id)
+            if pos is None:
+                logger.warning("PositionStore: set_lineage for unknown position %s", position_id)
+                return
+            pos["lineage"] = lineage
+            self._save()
+
+    def update_fill_commission(self, position_id: str, exec_id: str, commission_report: dict) -> None:
+        """Update a fill's execution_analytics with commission data from IB."""
+        with self._lock:
+            pos = self._positions.get(position_id)
+            if not pos:
+                return
+            for fill in pos.get("fill_log", []):
+                if fill.get("exec_id") == exec_id:
+                    if "execution_analytics" not in fill:
+                        fill["execution_analytics"] = {}
+                    fill["execution_analytics"]["commission"] = commission_report.get("commission")
+                    fill["execution_analytics"]["realized_pnl_ib"] = commission_report.get("realized_pnl")
+                    break
+            self._save()
+
     # ── Internal ──
 
     def _load(self) -> None:
@@ -144,7 +169,22 @@ class PositionStore:
                 self._path,
             )
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.error("PositionStore: corrupt file %s (%s), starting empty. Check .bak for recovery.", self._path, e)
+            logger.error("PositionStore: corrupt file %s (%s) — trying .bak", self._path, e)
+            if os.path.exists(self._bak_path):
+                try:
+                    with open(self._bak_path, "r") as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        self._positions = {p["id"]: p for p in data if "id" in p}
+                    elif isinstance(data, dict):
+                        self._positions = data
+                    else:
+                        self._positions = {}
+                    logger.warning("PositionStore: recovered %d positions from .bak", len(self._positions))
+                    self._save()  # overwrite corrupt primary with good backup
+                    return
+                except Exception as bak_err:
+                    logger.error("PositionStore: .bak recovery also failed: %s", bak_err)
             self._positions = {}
 
     def _save(self) -> None:

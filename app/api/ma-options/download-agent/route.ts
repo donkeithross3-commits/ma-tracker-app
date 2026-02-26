@@ -81,6 +81,7 @@ export async function GET() {
       "quote_cache.py",
       "execution_engine.py",
       "position_store.py",
+      "trade_attribution.py",
       "install.py",
       "requirements.txt",
       "README.md",

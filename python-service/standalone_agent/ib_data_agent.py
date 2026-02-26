@@ -246,6 +246,19 @@ class IBDataAgent:
                             logger.info("Re-established streaming quote subscriptions")
                     except Exception as e:
                         logger.error("Failed to re-establish streaming subscriptions: %s", e)
+                    # IB Reconciliation on reconnect (WS4)
+                    try:
+                        if self.execution_engine and self.execution_engine.is_running:
+                            ib_positions = self.scanner.get_positions_snapshot()
+                            recon = self.execution_engine.reconcile_with_ib(ib_positions)
+                            if recon["stale_agent"] or recon["orphaned_ib"] or recon["adjusted"]:
+                                logger.warning(
+                                    "Post-reconnect reconciliation: matched=%d, orphaned=%d, stale=%d, adjusted=%d",
+                                    len(recon["matched"]), len(recon["orphaned_ib"]),
+                                    len(recon["stale_agent"]), len(recon["adjusted"]),
+                                )
+                    except Exception as e:
+                        logger.error("Post-reconnect reconciliation failed: %s", e)
                     # Notify frontend to refetch positions and open orders (orders may have filled while disconnected)
                     try:
                         if self.websocket:
@@ -1053,6 +1066,19 @@ class IBDataAgent:
             if recovered > 0:
                 logger.info("Recovered %d risk manager position(s) from store", recovered)
 
+        # ── IB Reconciliation on startup (WS4) ──
+        try:
+            ib_positions = self.scanner.get_positions_snapshot()
+            recon = self.execution_engine.reconcile_with_ib(ib_positions)
+            if recon["orphaned_ib"]:
+                logger.warning("IB reconciliation: %d orphaned positions in IB", len(recon["orphaned_ib"]))
+            if recon["stale_agent"]:
+                logger.warning("IB reconciliation: %d stale positions closed", len(recon["stale_agent"]))
+            if recon["adjusted"]:
+                logger.warning("IB reconciliation: %d positions with qty mismatch", len(recon["adjusted"]))
+        except Exception as e:
+            logger.error("IB reconciliation on startup failed: %s", e)
+
         # Start the evaluation loop
         self.execution_engine.start()
 
@@ -1184,6 +1210,9 @@ class IBDataAgent:
             logger.warning("Cannot spawn risk manager: execution engine not initialized")
             return
 
+        # Extract lineage before passing to risk manager (WS2)
+        lineage = risk_config.pop("lineage", None)
+
         from strategies.risk_manager import RiskManagerStrategy
 
         strategy = RiskManagerStrategy()
@@ -1211,6 +1240,9 @@ class IBDataAgent:
                 risk_config=risk_config,
                 parent_strategy=f"bmc_{symbol}" if symbol else "bmc",
             )
+            # Attach lineage to position record (WS2)
+            if lineage:
+                self.position_store.set_lineage(strategy_id, lineage)
             # Record the entry fill in the ledger
             self.position_store.add_fill(strategy_id, {
                 "time": time.time(),

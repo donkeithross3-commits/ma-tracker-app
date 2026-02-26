@@ -21,7 +21,10 @@ The execution engine evaluates all instances independently.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
+import math
 import os
 import sys
 import threading
@@ -261,6 +264,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._model_version: str = ""
         self._model_ticker: str = ""
         self._model_type: str = ""
+        self._model_metrics: dict = {}
+        self._top_feature_names: list = []
+
+        # Pending lineage snapshot (built on signal fire, consumed by on_fill)
+        self._pending_lineage: Optional[dict] = None
+
+        # Polygon WS resilience
+        self._shutdown_requested: bool = False
+        self._polygon_feed_dead: bool = False
+        self._last_bar_update_ts: float = 0.0
 
     # ------------------------------------------------------------------
     # ExecutionStrategy interface
@@ -447,6 +460,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                         "entry_price": avg_price,
                     },
                 }
+                # Attach lineage for position store persistence (WS2)
+                if self._pending_lineage:
+                    risk_config["lineage"] = self._pending_lineage
                 self._spawn_risk_manager(risk_config)
                 logger.info(
                     "Spawned RiskManagerStrategy for BMC position: strike=%.2f, qty=%d",
@@ -464,6 +480,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
     def on_stop(self, config: dict) -> None:
         """Stop Polygon WS, cleanup."""
         logger.info("BigMoveConvexityStrategy[%s] stopping", self._ticker)
+        self._shutdown_requested = True
 
         # Stop Polygon WS
         if self._polygon_client is not None:
@@ -535,6 +552,11 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Active positions
         state["active_positions"] = self._active_positions
 
+        # Polygon WS health (WS5)
+        state["polygon_feed_dead"] = self._polygon_feed_dead
+        state["polygon_data_age_s"] = round(time.time() - self._last_bar_update_ts, 1) if self._last_bar_update_ts > 0 else None
+        state["ws_thread_alive"] = self._ws_thread.is_alive() if self._ws_thread else False
+
         return state
 
     # ------------------------------------------------------------------
@@ -582,6 +604,21 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             self._model.model_type,
             len(self._model.feature_names),
         )
+
+        # Cache model metrics for lineage snapshots
+        self._model_metrics = {}
+        if hasattr(prod_version, 'metrics') and prod_version.metrics:
+            self._model_metrics = {
+                "auc_roc": prod_version.metrics.get("auc_roc"),
+                "profit_factor": prod_version.metrics.get("profit_factor"),
+            }
+        # Pre-compute top 20 feature names by importance for lineage fingerprint
+        if hasattr(self._model.model, 'feature_importances_'):
+            importances = self._model.model.feature_importances_
+            sorted_idx = sorted(range(len(importances)), key=lambda i: importances[i], reverse=True)[:20]
+            self._top_feature_names = [self._model.feature_names[i] for i in sorted_idx]
+        else:
+            self._top_feature_names = self._model.feature_names[:20]
 
         # Run daily bootstrap — use a helper thread because on_start is called
         # from within the agent's running asyncio event loop (Python 3.12+
@@ -642,6 +679,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                             quote.ticker, quote.last_trade,
                             quote.last_size or 1, ts_ns,
                         )
+                    # Track last bar update for data freshness monitoring
+                    self._last_bar_update_ts = time.time()
                 if self._data_store is not None:
                     self._data_store.update_equity_quote(quote.ticker, quote)
             except Exception:
@@ -673,20 +712,27 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             use_delayed=cfg.get("use_delayed_data", False),
         )
 
-        # Start background thread with its own event loop
+        # Start background thread with restart loop for resilience
         def _ws_thread_main():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            self._ws_loop = loop
-            try:
-                # Subscribe to all channels (single WS connection handles all)
-                channels = all_channels
-                loop.run_until_complete(self._polygon_client.subscribe(channels))
-                loop.run_until_complete(self._polygon_client.connect_and_run())
-            except Exception:
-                logger.exception("Polygon WS thread exited with error")
-            finally:
-                loop.close()
+            MAX_RESTARTS = 10
+            restart_count = 0
+            while not self._shutdown_requested and restart_count < MAX_RESTARTS:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                self._ws_loop = loop
+                try:
+                    channels = all_channels
+                    loop.run_until_complete(self._polygon_client.subscribe(channels))
+                    loop.run_until_complete(self._polygon_client.connect_and_run())
+                except Exception:
+                    restart_count += 1
+                    logger.exception("Polygon WS thread crashed (restart %d/%d)", restart_count, MAX_RESTARTS)
+                    time.sleep(min(5.0 * restart_count, 30.0))
+                finally:
+                    loop.close()
+            if restart_count >= MAX_RESTARTS:
+                logger.error("Polygon WS thread exhausted %d restarts — feed is DOWN", MAX_RESTARTS)
+                self._polygon_feed_dead = True
 
         self._ws_thread = threading.Thread(
             target=_ws_thread_main,
@@ -706,6 +752,15 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         cfg: dict,
     ) -> List[OrderAction]:
         """Assemble features → predict → generate signal → maybe order."""
+        # ── Data freshness gates (WS5) ──
+        if self._polygon_feed_dead:
+            logger.warning("Polygon feed is dead — skipping decision cycle")
+            return []
+        bar_age = time.time() - (self._last_bar_update_ts or 0)
+        if self._last_bar_update_ts > 0 and bar_age > 120:
+            logger.warning("Polygon data stale (%.0fs) — skipping decision cycle", bar_age)
+            return []
+
         import pandas as pd
         from big_move_convexity.features.feature_stack import assemble_feature_vector
         from big_move_convexity.ml.inference import predict_single
@@ -813,6 +868,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         }
         self._last_signal = signal_record
 
+        # Log every decision cycle to JSONL for offline analysis (WS1)
+        self._write_signal_log(signal_record, fv, cfg)
+
         if signal.direction == "none":
             logger.debug(
                 "Decision cycle: no signal (prob=%.4f, threshold=%.2f)",
@@ -825,6 +883,11 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         logger.info(
             "SIGNAL: direction=%s, probability=%.4f, strength=%.4f",
             signal.direction, probability, signal.strength,
+        )
+
+        # Build lineage snapshot on signal fire (WS2) — consumed by on_fill
+        self._pending_lineage = self._build_lineage_snapshot(
+            signal, signal_record, fv, cfg, underlying_price, bars_by_res,
         )
 
         # Check cooldown
@@ -979,6 +1042,21 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             )
             return []
 
+        # Attach option selection details to pending lineage (WS2)
+        if self._pending_lineage is not None:
+            self._pending_lineage["option_selection"] = {
+                "strike": strike,
+                "right": right,
+                "expiry": expiry_str,
+                "dte": min_dte,
+                "opt_bid": opt_bid,
+                "opt_ask": opt_ask,
+                "spread": (opt_ask - opt_bid) if opt_bid and opt_ask else None,
+                "limit_price": limit_price,
+                "budget": budget,
+                "max_affordable_premium": max_affordable_premium,
+            }
+
         order = OrderAction(
             strategy_id="",  # filled by engine
             side=OrderSide.BUY,
@@ -1020,3 +1098,85 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             return start_minutes <= current_minutes <= end_minutes
         except Exception:
             return False
+
+    # ------------------------------------------------------------------
+    # Signal logging & lineage (WS1, WS2)
+    # ------------------------------------------------------------------
+
+    def _write_signal_log(self, signal_record: dict, fv, cfg: dict) -> None:
+        """Append decision cycle to daily JSONL for offline analysis."""
+        try:
+            log_dir = Path(__file__).parent.parent / "signal_logs"
+            log_dir.mkdir(exist_ok=True)
+            log_file = log_dir / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+
+            entry = {
+                **signal_record,
+                "model_version": self._model_version,
+                "model_ticker": self._model_ticker,
+                "model_type": self._model_type,
+                "features": fv.features if fv else {},
+                "nan_features": [
+                    k for k, v in (fv.features if fv else {}).items()
+                    if v is None or (isinstance(v, float) and math.isnan(v))
+                ],
+                "config_snapshot": {
+                    k: cfg.get(k) for k in (
+                        "signal_threshold", "min_signal_strength", "direction_mode",
+                        "cooldown_minutes", "decision_interval_seconds", "otm_target_pct",
+                        "contract_budget_usd", "max_contracts", "auto_entry",
+                        "options_gate_enabled", "straddle_richness_max",
+                    )
+                },
+            }
+            with open(log_file, "a") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+        except Exception:
+            logger.debug("Failed to write signal log", exc_info=True)
+
+    def _build_lineage_snapshot(self, signal, signal_record, fv, cfg, underlying_price, bars_by_res):
+        """Build a lineage dict capturing the full decision context for a fired signal."""
+        feature_hash = ""
+        if fv and fv.features:
+            try:
+                feature_hash = hashlib.sha256(
+                    json.dumps(sorted(fv.features.items()), default=str).encode()
+                ).hexdigest()[:16]
+            except Exception:
+                pass
+
+        return {
+            "model_version": self._model_version,
+            "model_type": self._model_type,
+            "model_ticker": self._model_ticker,
+            "model_n_features": len(self._model.feature_names) if self._model else 0,
+            "model_metrics": self._model_metrics,
+            "signal": {
+                "timestamp": signal_record.get("timestamp"),
+                "direction": signal.direction,
+                "probability": signal.probability,
+                "strength": signal.strength,
+                "threshold_used": signal.threshold_used if hasattr(signal, 'threshold_used') else None,
+                "n_features": signal_record.get("n_features"),
+                "n_nan": signal_record.get("n_nan"),
+                "computation_ms": signal_record.get("computation_ms"),
+            },
+            "config_snapshot": {
+                k: cfg.get(k) for k in (
+                    "signal_threshold", "min_signal_strength", "direction_mode",
+                    "cooldown_minutes", "decision_interval_seconds", "otm_target_pct",
+                    "contract_budget_usd", "max_contracts", "auto_entry",
+                    "options_gate_enabled", "premium_min", "premium_max", "max_spread",
+                )
+            },
+            "feature_fingerprint": {
+                "top_features": {name: fv.features.get(name) for name in self._top_feature_names} if fv else {},
+                "n_total": fv.n_features if fv else 0,
+                "n_nan": fv.n_nan if fv else 0,
+                "feature_hash": feature_hash,
+            },
+            "market_context": {
+                "underlying_price": underlying_price,
+                "bars_available": {res: len(df) for res, df in (bars_by_res or {}).items()},
+            },
+        }

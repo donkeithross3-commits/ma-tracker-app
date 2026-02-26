@@ -196,6 +196,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._TERMINAL_STATUSES = frozenset({
             "Filled", "Cancelled", "ApiCancelled", "Inactive",
         })
+        # Commission reports: execId -> report (for async pickup by execution engine)
+        self._commission_reports: Dict[str, dict] = {}
+        self._commission_lock = Lock()
+
         # Account events queue — pushed to relay for near-real-time UI updates
         self._account_events: deque = deque(maxlen=200)
         self._account_events_lock = Lock()
@@ -1142,6 +1146,10 @@ class IBMergerArbScanner(EWrapper, EClient):
             "price": float(getattr(execution, "price", 0)),
             "cumQty": float(getattr(execution, "cumQty", 0)),
             "avgPrice": float(getattr(execution, "avgPrice", 0)),
+            # Execution analytics fields
+            "exchange": getattr(execution, "exchange", ""),
+            "permId": getattr(execution, "permId", 0),
+            "lastLiquidity": getattr(execution, "lastLiquidity", 0),  # 1=added, 2=removed, 3=routed
         }
         self.logger.info("execDetails orderId=%s execId=%s shares=%s price=%s",
                          order_id, exec_data["execId"], exec_data["shares"], exec_data["price"])
@@ -1170,6 +1178,31 @@ class IBMergerArbScanner(EWrapper, EClient):
     def execDetailsEnd(self, reqId: int):
         """End of executions for request."""
         pass
+
+    def commissionReport(self, commissionReport):
+        """IB callback: commission data for a fill (arrives after execDetails)."""
+        exec_id = commissionReport.execId
+        report = {
+            "exec_id": exec_id,
+            "commission": commissionReport.commission,
+            "currency": commissionReport.currency,
+            "realized_pnl": commissionReport.realizedPNL,
+        }
+        with self._commission_lock:
+            self._commission_reports[exec_id] = report
+        # Notify exec details listeners so execution engine can pick up commission
+        for listener in self._exec_details_listeners:
+            try:
+                listener(0, {"_commission_report": report, "execId": exec_id})
+            except Exception:
+                pass  # never block the IB thread
+        self.logger.debug("commissionReport execId=%s commission=%.4f realized_pnl=%.2f",
+                          exec_id, commissionReport.commission, commissionReport.realizedPNL)
+
+    def get_commission_report(self, exec_id: str) -> Optional[dict]:
+        """Retrieve a stored commission report by exec ID (for async pickup)."""
+        with self._commission_lock:
+            return self._commission_reports.get(exec_id)
 
     def drain_account_events(self) -> list:
         """Drain and return all pending account events (thread-safe)."""
