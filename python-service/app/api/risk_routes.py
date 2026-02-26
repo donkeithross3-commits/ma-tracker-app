@@ -323,6 +323,7 @@ async def trigger_assessment(ticker: Optional[str] = Query(None)):
         engine = RiskAssessmentEngine(pool, api_key)
 
         if ticker:
+            # Single-deal path — stays synchronous (~10s, acceptable)
             ticker = ticker.upper()
             context = await engine.collect_deal_context(ticker)
             result = await engine.assess_single_deal(context)
@@ -345,6 +346,19 @@ async def trigger_assessment(ticker: Optional[str] = Query(None)):
                 except Exception:
                     pass
                 await engine._store_assessment(run_id, run_date, ticker, result, context, discrepancies)
+
+                # Update run record with cost/token data from the single assessment
+                meta = result.get("_meta", {})
+                cost_usd = meta.get("cost_usd", 0)
+                tokens_used = meta.get("tokens_used", 0)
+                if cost_usd or tokens_used:
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            """UPDATE risk_assessment_runs
+                               SET total_cost_usd = $2, total_tokens = $3
+                               WHERE id = $1""",
+                            run_id, cost_usd, tokens_used,
+                        )
 
                 # Capture estimate snapshot
                 try:
@@ -371,13 +385,62 @@ async def trigger_assessment(ticker: Optional[str] = Query(None)):
 
             return {"ticker": ticker, "assessment": result}
         else:
-            result = await engine.run_morning_assessment(triggered_by="manual")
-            return result
+            # Full-run path — fire-and-forget via background task
+            from app.risk.runner import launch, is_running
+
+            if is_running():
+                raise HTTPException(status_code=409, detail="Assessment already in progress")
+
+            run_id = uuid.uuid4()
+
+            # Pre-create the run record so the run_id is valid before the task starts
+            run_date = date.today()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """INSERT INTO risk_assessment_runs (id, run_date, status, triggered_by)
+                       VALUES ($1, $2, 'running', $3)""",
+                    run_id, run_date, "manual",
+                )
+
+            coro = engine.run_morning_assessment(triggered_by="manual", run_id=run_id)
+            launch(coro, run_id, "manual", pool)
+
+            return {"status": "accepted", "run_id": str(run_id)}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Risk assessment failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Risk assessment failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/run-status
+# ---------------------------------------------------------------------------
+@router.get("/run-status")
+async def get_run_status():
+    """Return the current runner status or the latest completed run."""
+    from app.risk.runner import get_run_status as _get_status, is_running
+
+    status = _get_status()
+
+    if not is_running():
+        # Supplement with latest completed run from DB
+        pool = _get_pool()
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """SELECT id, run_date, status, triggered_by, total_deals,
+                              assessed_deals, failed_deals, total_cost_usd,
+                              duration_ms, finished_at
+                       FROM risk_assessment_runs
+                       ORDER BY started_at DESC LIMIT 1"""
+                )
+                if row:
+                    status["latest_run"] = _row_to_dict(row)
+        except Exception as e:
+            logger.warning("Could not fetch latest run for status: %s", e)
+
+    return status
 
 
 # ---------------------------------------------------------------------------

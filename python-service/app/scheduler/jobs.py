@@ -210,6 +210,12 @@ async def job_morning_risk_assessment():
     """Run AI risk assessment on all deals (5:30 AM ET weekdays)."""
     import os
     from app.risk.engine import RiskAssessmentEngine
+    from app.risk.runner import is_running
+
+    # Skip if a manual run is already in progress
+    if is_running():
+        logger.info("[scheduler] Skipping morning_risk_assessment — manual run in progress")
+        return {"status": "skipped", "reason": "manual run in progress"}
 
     pool = _get_pool()
     api_key = os.environ.get("ANTHROPIC_API_KEY")

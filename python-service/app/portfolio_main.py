@@ -69,6 +69,18 @@ async def startup():
     set_scheduler_pool(_pool)
     set_risk_pool(_pool)
 
+    # Mark any stale 'running' risk assessment runs as 'interrupted'
+    # (handles container restarts mid-assessment)
+    try:
+        async with _pool.acquire() as conn:
+            updated = await conn.execute(
+                "UPDATE risk_assessment_runs SET status = 'interrupted' WHERE status = 'running'"
+            )
+            if updated and updated != "UPDATE 0":
+                logger.warning("Marked stale risk runs as interrupted: %s", updated)
+    except Exception:
+        logger.warning("Could not clean up stale risk runs", exc_info=True)
+
     # Initialise scheduler
     from .scheduler.core import get_scheduler
     from .scheduler import core as scheduler_core

@@ -577,21 +577,24 @@ class RiskAssessmentEngine:
     # ------------------------------------------------------------------
     # Full morning run
     # ------------------------------------------------------------------
-    async def run_morning_assessment(self, run_date=None, triggered_by="scheduler") -> dict:
+    async def run_morning_assessment(self, run_date=None, triggered_by="scheduler", run_id=None) -> dict:
         """Run the full morning risk assessment for all active deals."""
         if run_date is None:
             run_date = date.today()
 
-        run_id = uuid.uuid4()
+        _run_id_provided = run_id is not None
+        if run_id is None:
+            run_id = uuid.uuid4()
         logger.info("Starting risk assessment run %s for %s", run_id, run_date)
 
-        # Create run record
-        async with self.pool.acquire() as conn:
-            await conn.execute(
-                """INSERT INTO risk_assessment_runs (id, run_date, status, triggered_by)
-                   VALUES ($1, $2, 'running', $3)""",
-                run_id, run_date, triggered_by,
-            )
+        # Create run record (skip if caller pre-created it, e.g. fire-and-forget route)
+        if not _run_id_provided:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """INSERT INTO risk_assessment_runs (id, run_date, status, triggered_by)
+                       VALUES ($1, $2, 'running', $3)""",
+                    run_id, run_date, triggered_by,
+                )
 
         # Get active deals from latest snapshot
         async with self.pool.acquire() as conn:
