@@ -66,6 +66,7 @@ class LevelState(Enum):
     TRIGGERED = "TRIGGERED"   # Order submitted, waiting for fill
     PARTIAL = "PARTIAL"       # Partially filled, still waiting
     FILLED = "FILLED"         # Fully filled, done
+    FAILED = "FAILED"         # Permanently failed (e.g. repeated rejections)
 
 
 class LevelType(Enum):
@@ -168,6 +169,8 @@ class RiskManagerStrategy(ExecutionStrategy):
     STALE_QUOTE_SEC = 5.0
     # How long before we warn about a TRIGGERED order with no update
     PENDING_ORDER_WARN_SEC = 30.0
+    # Max consecutive rejections before marking level as FAILED
+    MAX_REJECTIONS_PER_LEVEL = 3
 
     def __init__(self):
         # ── State (initialized in on_start) ──
@@ -196,6 +199,9 @@ class RiskManagerStrategy(ExecutionStrategy):
 
         # Strategy completion flag
         self._completed: bool = False
+
+        # Rejection counter: level_key -> consecutive rejection count
+        self._rejection_counts: Dict[str, int] = {}
 
     # ── ExecutionStrategy interface ──
 
@@ -258,6 +264,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         self._level_states.clear()
         self._pending_orders.clear()
         self._fill_log.clear()
+        self._rejection_counts.clear()
         self._completed = False
         self.high_water_mark = self.entry_price
         self._trailing_stop_price = 0.0
@@ -294,6 +301,15 @@ class RiskManagerStrategy(ExecutionStrategy):
         """Main evaluation: check stops, profits, trailing stop."""
         if self._completed or self.remaining_qty <= 0:
             return []
+
+        # Warn about stale pending orders (engine handles actual cancellation)
+        now = time.time()
+        for oid, pending in list(self._pending_orders.items()):
+            age = now - pending.placed_at
+            if age > self.PENDING_ORDER_WARN_SEC:
+                level_key = f"{pending.level_type}_{pending.level_idx}" if pending.level_type != "trailing" else "trailing"
+                logger.warning("RiskManager: pending order %d for level %s is %.0fs old",
+                               oid, level_key, age)
 
         quote = quotes.get(self.cache_key)
         if quote is None:
@@ -386,6 +402,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         if status == "Filled" or remaining_on_order == 0:
             self._level_states[level_key] = LevelState.FILLED
             self._pending_orders.pop(order_id, None)
+            self._rejection_counts.pop(level_key, None)  # reset on success
             logger.info("RiskManager level %s FILLED (remaining_qty=%d)", level_key, self.remaining_qty)
         else:
             self._level_states[level_key] = LevelState.PARTIAL
@@ -436,8 +453,27 @@ class RiskManagerStrategy(ExecutionStrategy):
             return (parts[0], int(parts[1]))
         return (key, 0)
 
-    def on_order_dead(self, order_id: int, reason: str, config: dict):
-        """Handle order death (cancelled, rejected, Inactive) -- re-arm the level."""
+    def on_order_dead(self, order_id, reason: str, config: dict):
+        """Handle order death (cancelled, rejected, Inactive) -- re-arm the level.
+
+        order_id=None means the engine dropped the order before it reached IB
+        (e.g. inflight cap). Find the first orphaned TRIGGERED level and re-arm it.
+        """
+        if order_id is None:
+            # Inflight cap or similar -- find first TRIGGERED level with no pending order
+            for lk, ls in self._level_states.items():
+                if ls == LevelState.TRIGGERED:
+                    has_pending = any(
+                        p.level_type == self._parse_level_key(lk)[0]
+                        and p.level_idx == self._parse_level_key(lk)[1]
+                        for p in self._pending_orders.values()
+                    )
+                    if not has_pending:
+                        self._level_states[lk] = LevelState.ARMED
+                        logger.warning("Re-armed orphaned TRIGGERED level %s: %s", lk, reason)
+                        return
+            return
+
         pending = self._pending_orders.pop(order_id, None)
         if not pending:
             return
@@ -446,9 +482,18 @@ class RiskManagerStrategy(ExecutionStrategy):
         if pending.level_type == "trailing":
             level_key = "trailing"
 
-        logger.warning("RiskManager order %d dead for level %s: %s -- re-arming",
-                        order_id, level_key, reason)
-        self._level_states[level_key] = LevelState.ARMED
+        # Track consecutive rejections per level
+        count = self._rejection_counts.get(level_key, 0) + 1
+        self._rejection_counts[level_key] = count
+
+        if count >= self.MAX_REJECTIONS_PER_LEVEL:
+            self._level_states[level_key] = LevelState.FAILED
+            logger.error("RiskManager level %s FAILED after %d consecutive rejections: %s",
+                         level_key, count, reason)
+        else:
+            self._level_states[level_key] = LevelState.ARMED
+            logger.warning("RiskManager order %d dead for level %s (attempt %d/%d): %s -- re-arming",
+                           order_id, level_key, count, self.MAX_REJECTIONS_PER_LEVEL, reason)
 
     def get_strategy_state(self) -> dict:
         """Return rich state for telemetry/dashboard display."""
@@ -506,8 +551,8 @@ class RiskManagerStrategy(ExecutionStrategy):
             if key in self._level_states:
                 try:
                     ls = LevelState(value)
-                    # TRIGGERED → ARMED: old orders are dead after restart
-                    if ls == LevelState.TRIGGERED:
+                    # TRIGGERED/PARTIAL → ARMED: old orders are dead after restart
+                    if ls in (LevelState.TRIGGERED, LevelState.PARTIAL):
                         ls = LevelState.ARMED
                     self._level_states[key] = ls
                 except ValueError:

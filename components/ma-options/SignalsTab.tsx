@@ -681,7 +681,8 @@ export default function SignalsTab() {
       // Option info from the signal snapshot at fill time
       const optionContract = pos.signal?.option_contract ?? null;
 
-      return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId };
+      const recentErrors = matchedStrategy?.recent_errors ?? [];
+      return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors };
     });
   }, [signal?.active_positions, executionStatus?.strategies, executionStatus?.quote_snapshot]);
 
@@ -943,7 +944,7 @@ export default function SignalsTab() {
               </h3>
               <div className="space-y-2">
                 {positionDetails.map((pd, i) => {
-                  const { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId } = pd;
+                  const { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors } = pd;
                   const isCall = optionContract?.right?.toUpperCase() === "C" || optionContract?.right?.toUpperCase() === "CALL";
                   const isCompleted = rm?.completed;
                   const staleQuote = quote && quote.age_seconds > 30;
@@ -1009,6 +1010,7 @@ export default function SignalsTab() {
                                 state === "FILLED" ? "bg-green-900 text-green-300" :
                                 state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
                                 state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
+                                state === "FAILED" ? "bg-red-900 text-red-300" :
                                 "bg-gray-700 text-gray-300"
                               }`}
                             >
@@ -1021,6 +1023,12 @@ export default function SignalsTab() {
                             </span>
                           )}
                           <span className="text-gray-600 ml-auto">{rm.remaining_qty}/{rm.initial_qty} remaining</span>
+                        </div>
+                      )}
+                      {/* Row 4: errors */}
+                      {recentErrors.length > 0 && (
+                        <div className="text-xs text-red-400 mt-0.5 truncate" title={recentErrors[recentErrors.length - 1]}>
+                          {recentErrors[recentErrors.length - 1]}
                         </div>
                       )}
                     </div>

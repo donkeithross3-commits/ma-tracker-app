@@ -1122,8 +1122,16 @@ class IBDataAgent:
         if pos.get("status") == "closed":
             return {"error": f"Position {position_id} is already closed"}
 
-        # Unload the risk manager strategy if it's running
+        # Cancel any working IB orders and unload the risk manager strategy
         if self.execution_engine and position_id in self.execution_engine._strategies:
+            rm_state = self.execution_engine._strategies[position_id]
+            if hasattr(rm_state.strategy, "_pending_orders"):
+                for oid in list(rm_state.strategy._pending_orders.keys()):
+                    logger.info("Cancelling order %d for manual close of %s", oid, position_id)
+                    try:
+                        self.scanner.cancelOrder(oid, "")
+                    except Exception as e:
+                        logger.error("Failed to cancel order %d: %s", oid, e)
             self.execution_engine.unload_strategy(position_id)
             logger.info("Unloaded risk manager %s for manual close", position_id)
 

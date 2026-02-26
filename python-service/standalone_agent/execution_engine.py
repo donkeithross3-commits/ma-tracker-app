@@ -121,6 +121,7 @@ class StrategyState:
     orders_submitted: int = 0  # total submitted (including in-flight)
     inflight_orders: int = 0   # currently awaiting TWS acknowledgment
     errors: List[str] = field(default_factory=list)
+    flipflop_resume_at: float = 0.0  # timestamp when flip-flop cooldown expires
 
 
 # ── Strategy interface ──
@@ -236,8 +237,10 @@ class ExecutionEngine:
     ORDER_TIMEOUT_SEC = 10.0     # per-order TWS acknowledgment timeout
     LIFECYCLE_SWEEP_TICKS = 20   # run lifecycle sweep every N ticks (2s at 100ms)
     STALE_ORDER_WARN_SEC = 60.0  # warn if order has no update for this long
+    STALE_ORDER_CANCEL_SEC = 120.0  # auto-cancel after 2 minutes with no update
     FLIPFLOP_MAX_ORDERS = 5      # max orders per strategy in the flip-flop window
     FLIPFLOP_WINDOW_SEC = 10.0   # flip-flop detection window
+    FLIPFLOP_COOLDOWN_SEC = 60.0 # resume after cooldown instead of permanent pause
 
     def __init__(
         self,
@@ -385,15 +388,16 @@ class ExecutionEngine:
                      "UNLIMITED" if self._order_budget == -1 else self._order_budget)
 
     def stop(self):
-        """Stop the evaluation loop, drain in-flight orders, then clean up.
+        """Stop the evaluation loop, cancel working orders, drain in-flight, clean up.
 
         Shutdown sequence:
         1. Signal eval loop to stop (self._running = False)
-        2. Wait for eval thread to exit
+        2. Cancel all working IB orders
         3. Drain the order executor -- let in-flight orders complete
         4. Notify strategies of shutdown
         5. Unsubscribe streaming quotes and clear state
-        6. Remove scanner listeners
+        6. Drain event queue
+        7. Remove scanner listeners
         """
         if not self._running:
             return
@@ -404,7 +408,18 @@ class ExecutionEngine:
             self._thread.join(timeout=5.0)
             self._thread = None
 
-        # 2. Drain order executor -- wait for in-flight orders to complete.
+        # 2. Cancel all working orders in IB before draining executor
+        with self._active_orders_lock:
+            working = [(oid, ao) for oid, ao in self._active_orders.items()
+                       if ao.status in ("Submitted", "PreSubmitted")]
+        for order_id, ao in working:
+            logger.info("Cancelling working order %d for %s before shutdown", order_id, ao.strategy_id)
+            try:
+                self._scanner.cancelOrder(order_id, "")
+            except Exception as e:
+                logger.error("Failed to cancel order %d on shutdown: %s", order_id, e)
+
+        # 3. Drain order executor -- wait for in-flight orders to complete.
         #    New submissions won't happen because the eval loop has stopped.
         inflight = self._inflight_order_count
         if inflight > 0:
@@ -416,14 +431,14 @@ class ExecutionEngine:
         )
         self._inflight_order_count = 0
 
-        # 3. Notify all strategies of shutdown
+        # 4. Notify all strategies of shutdown
         for state in self._strategies.values():
             try:
                 state.strategy.on_stop(state.config)
             except Exception as e:
                 logger.error("Error in strategy %s on_stop: %s", state.strategy_id, e)
 
-        # 4. Unsubscribe all streaming quotes and clear state
+        # 5. Unsubscribe all streaming quotes and clear state
         self._cache.unsubscribe_all(self._scanner)
         self._strategies.clear()
         self._order_strategy_map.clear()
@@ -431,14 +446,14 @@ class ExecutionEngine:
             self._active_orders.clear()
         self._order_timestamps.clear()
 
-        # 5. Drain event queue
+        # 6. Drain event queue
         while not self._order_event_queue.empty():
             try:
                 self._order_event_queue.get_nowait()
             except queue.Empty:
                 break
 
-        # 6. Remove scanner listeners
+        # 7. Remove scanner listeners
         self._scanner.remove_order_status_listener(self.on_scanner_order_status)
         self._scanner.remove_exec_details_listener(self.on_scanner_exec_details)
 
@@ -693,19 +708,36 @@ class ExecutionEngine:
 
     def _lifecycle_sweep(self):
         """Periodic check on active orders for stale/stuck orders.
-        Runs every LIFECYCLE_SWEEP_TICKS ticks (~2s)."""
+        Runs every LIFECYCLE_SWEEP_TICKS ticks (~2s).
+        Warns after STALE_ORDER_WARN_SEC, auto-cancels after STALE_ORDER_CANCEL_SEC."""
         now = time.time()
+        to_cancel = []
         with self._active_orders_lock:
             for order_id, active in list(self._active_orders.items()):
                 age = now - active.placed_at
                 since_update = now - active.last_update if active.last_update > 0 else age
 
+                if active.status not in ("Submitted", "PreSubmitted"):
+                    continue
+
                 # Warn about stale orders
-                if since_update > self.STALE_ORDER_WARN_SEC and active.status in ("Submitted", "PreSubmitted"):
+                if since_update > self.STALE_ORDER_WARN_SEC:
                     logger.warning(
                         "Stale order %d for strategy %s: status=%s, no update for %.0fs",
                         order_id, active.strategy_id, active.status, since_update,
                     )
+
+                # Auto-cancel stale orders
+                if since_update > self.STALE_ORDER_CANCEL_SEC:
+                    to_cancel.append(order_id)
+
+        for order_id in to_cancel:
+            logger.warning("Auto-cancelling stale order %d", order_id)
+            try:
+                self._scanner.cancelOrder(order_id, "")
+            except Exception as e:
+                logger.error("Failed to cancel stale order %d: %s", order_id, e)
+            # Strategy will be notified via orderStatus -> on_order_dead path
 
     def _evaluate_all(self):
         """Run evaluate() on each active strategy and process resulting order actions."""
@@ -715,7 +747,13 @@ class ExecutionEngine:
 
         for state in list(self._strategies.values()):
             if not state.is_active:
-                continue
+                # Check flip-flop cooldown recovery
+                if state.flipflop_resume_at > 0 and time.time() > state.flipflop_resume_at:
+                    state.is_active = True
+                    state.flipflop_resume_at = 0.0
+                    logger.info("Strategy %s resumed after flip-flop cooldown", state.strategy_id)
+                else:
+                    continue
             try:
                 # Gather quotes for this strategy's subscriptions
                 quotes = {}
@@ -771,11 +809,13 @@ class ExecutionEngine:
                 self._total_algo_orders = max(0, self._total_algo_orders - 1)
             flipflop_msg = (
                 f"Flip-flop detected: strategy {state.strategy_id} submitted "
-                f">={self.FLIPFLOP_MAX_ORDERS} orders in {self.FLIPFLOP_WINDOW_SEC}s -- order rejected"
+                f">={self.FLIPFLOP_MAX_ORDERS} orders in {self.FLIPFLOP_WINDOW_SEC}s "
+                f"-- paused for {self.FLIPFLOP_COOLDOWN_SEC}s"
             )
             logger.warning(flipflop_msg)
             state.errors.append(flipflop_msg)
-            state.is_active = False  # pause the strategy
+            state.is_active = False
+            state.flipflop_resume_at = time.time() + self.FLIPFLOP_COOLDOWN_SEC
             return
 
         # ── Gate 3: Inflight cap ──
@@ -793,6 +833,11 @@ class ExecutionEngine:
                 state.errors.append(
                     f"Order dropped: {self._inflight_order_count} in-flight (cap={self.MAX_INFLIGHT_ORDERS})"
                 )
+                # Notify strategy so it can re-arm the TRIGGERED level
+                try:
+                    state.strategy.on_order_dead(None, "inflight cap exceeded", state.config)
+                except Exception as e2:
+                    logger.error("Strategy %s on_order_dead error: %s", state.strategy_id, e2)
                 return
             self._inflight_order_count += 1
             state.inflight_orders += 1
@@ -1034,6 +1079,12 @@ class ExecutionEngine:
 
     def get_telemetry(self) -> dict:
         """Lightweight telemetry dict for periodic WebSocket reporting."""
+        with self._active_orders_lock:
+            active_orders_info = [
+                {"order_id": ao.order_id, "strategy_id": ao.strategy_id,
+                 "status": ao.status, "filled": ao.filled, "placed_at": ao.placed_at}
+                for ao in self._active_orders.values()
+            ]
         return {
             "running": self._running,
             "strategy_count": len(self._strategies),
@@ -1045,6 +1096,7 @@ class ExecutionEngine:
                     "orders_submitted": s.orders_submitted,
                     "orders_placed": s.orders_placed,
                     "inflight_orders": s.inflight_orders,
+                    "recent_errors": s.errors[-5:] if s.errors else [],
                     "config": s.config,
                     "strategy_state": (
                         s.strategy.get_strategy_state()
@@ -1053,6 +1105,7 @@ class ExecutionEngine:
                 }
                 for s in self._strategies.values()
             ],
+            "active_orders": active_orders_info,
             "inflight_orders_total": self._inflight_order_count,
             "lines_held": self._resource_manager.execution_lines_held,
             "quote_snapshot": self._cache.get_all_serialized(),
