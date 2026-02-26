@@ -4,7 +4,94 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OrderBudgetControl } from "./OrderBudgetControl";
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — Full execution_status response
+// ---------------------------------------------------------------------------
+
+interface QuoteSnapshot {
+  bid: number;
+  ask: number;
+  last: number;
+  mid: number;
+  bid_size: number;
+  ask_size: number;
+  volume: number;
+  open_interest: number;
+  implied_vol: number;
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  timestamp: number;
+  age_seconds: number;
+}
+
+interface FillLogEntry {
+  time: number;
+  order_id: number;
+  level: string;
+  qty_filled: number;
+  avg_price: number;
+  remaining_qty: number;
+  pnl_pct: number;
+}
+
+interface RiskManagerState {
+  remaining_qty: number;
+  initial_qty: number;
+  entry_price: number;
+  high_water_mark: number;
+  is_long: boolean;
+  cache_key: string;
+  completed: boolean;
+  trailing_stop_price: number;
+  trailing_active: boolean;
+  level_states: Record<string, string>;
+  pending_orders: Record<string, { level: string; expected_qty: number; filled_so_far: number; placed_at: number }>;
+  fill_log: FillLogEntry[];
+}
+
+interface ExecutionStrategyInfo {
+  strategy_id: string;
+  is_active: boolean;
+  subscriptions: string[];
+  eval_count: number;
+  orders_submitted: number;
+  orders_placed: number;
+  inflight_orders: number;
+  last_eval_time: number;
+  recent_errors: string[];
+  config: Record<string, any>;
+  strategy_state: RiskManagerState | Record<string, any>;
+}
+
+interface ActiveOrder {
+  order_id: number;
+  strategy_id: string;
+  status: string;
+  filled: number;
+  remaining: number;
+  avg_fill_price: number;
+  placed_at: number;
+  last_update: number;
+}
+
+interface FullExecutionStatus {
+  running: boolean;
+  eval_interval: number;
+  strategy_count: number;
+  strategies: ExecutionStrategyInfo[];
+  inflight_orders_total: number;
+  max_inflight_orders: number;
+  lines_held: number;
+  available_scan_lines: number;
+  quote_snapshot: Record<string, QuoteSnapshot>;
+  active_orders: ActiveOrder[];
+  order_budget: number;
+  total_algo_orders: number;
+}
+
+// ---------------------------------------------------------------------------
+// Types — BMC signal state
 // ---------------------------------------------------------------------------
 
 interface SignalState {
@@ -69,6 +156,16 @@ interface SignalState {
     entry_price: number;
     quantity: number;
     fill_time: number;
+    perm_id?: number;
+    signal?: {
+      option_contract?: {
+        symbol: string;
+        strike: number;
+        expiry: string;
+        right: string;
+      };
+      direction?: string;
+    } | null;
   }>;
 }
 
@@ -360,12 +457,8 @@ export default function SignalsTab() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchSignal]);
 
-  // ── Execution status polling (for OrderBudgetControl) ──
-  const [executionStatus, setExecutionStatus] = useState<{
-    running: boolean;
-    order_budget: number;
-    total_algo_orders: number;
-  } | null>(null);
+  // ── Execution status polling (for OrderBudgetControl + position display) ──
+  const [executionStatus, setExecutionStatus] = useState<FullExecutionStatus | null>(null);
   const execPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchExecutionStatus = useCallback(async () => {
@@ -541,6 +634,99 @@ export default function SignalsTab() {
   const signal = activeStrategy?.signal ?? null;
   const activeConfig = configs[activeTicker] || makeDefaultConfig(activeTicker);
   const activeConfigDirty = configDirty[activeTicker] ?? false;
+
+  // ── Derived: position details with risk manager + live quotes ──
+  const positionDetails = useMemo(() => {
+    if (!signal?.active_positions?.length) return [];
+    const riskStrategies = (executionStatus?.strategies || []).filter(
+      s => s.strategy_id.startsWith("risk_") && s.strategy_state && "entry_price" in s.strategy_state,
+    ) as (ExecutionStrategyInfo & { strategy_state: RiskManagerState })[];
+    const quotes = executionStatus?.quote_snapshot || {};
+
+    return signal.active_positions.map(pos => {
+      // Match by entry_price + initial_qty (no explicit FK)
+      const rm = riskStrategies.find(
+        s => Math.abs(s.strategy_state.entry_price - pos.entry_price) < 0.005
+          && s.strategy_state.initial_qty === pos.quantity,
+      )?.strategy_state ?? null;
+      const quote = rm?.cache_key ? quotes[rm.cache_key] ?? null : null;
+
+      // Unrealized P&L (assumes long — BMC always buys)
+      let pnlPct: number | null = null;
+      let pnlDollar: number | null = null;
+      if (quote && quote.mid > 0 && pos.entry_price > 0) {
+        pnlPct = ((quote.mid - pos.entry_price) / pos.entry_price) * 100;
+        pnlDollar = (quote.mid - pos.entry_price) * pos.quantity * 100;
+      }
+
+      // Option info from the signal snapshot at fill time
+      const optionContract = pos.signal?.option_contract ?? null;
+
+      return { pos, rm, quote, pnlPct, pnlDollar, optionContract };
+    });
+  }, [signal?.active_positions, executionStatus?.strategies, executionStatus?.quote_snapshot]);
+
+  // ── Derived: all fills from risk managers ──
+  const allFills = useMemo(() => {
+    const riskStrategies = (executionStatus?.strategies || []).filter(
+      s => s.strategy_id.startsWith("risk_") && s.strategy_state && "fill_log" in s.strategy_state,
+    );
+    const fills: (FillLogEntry & { source: string })[] = [];
+    for (const s of riskStrategies) {
+      const rm = s.strategy_state as RiskManagerState;
+      for (const f of rm.fill_log || []) {
+        fills.push({ ...f, source: s.strategy_id });
+      }
+    }
+    // Add entry fills from BMC positions
+    for (const pos of signal?.active_positions || []) {
+      fills.push({
+        time: pos.fill_time,
+        order_id: pos.order_id,
+        level: "entry",
+        qty_filled: pos.quantity,
+        avg_price: pos.entry_price,
+        remaining_qty: pos.quantity,
+        pnl_pct: 0,
+        source: "bmc_entry",
+      });
+    }
+    fills.sort((a, b) => b.time - a.time);
+    return fills;
+  }, [executionStatus?.strategies, signal?.active_positions]);
+
+  // ── Derived: session summary ──
+  const sessionSummary = useMemo(() => {
+    const riskStrategies = (executionStatus?.strategies || []).filter(
+      s => s.strategy_id.startsWith("risk_") && s.strategy_state && "completed" in s.strategy_state,
+    );
+    const completed = riskStrategies.filter(s => (s.strategy_state as RiskManagerState).completed);
+    let wins = 0;
+    let losses = 0;
+    let totalPnl = 0;
+    for (const s of completed) {
+      const rm = s.strategy_state as RiskManagerState;
+      const lastFill = rm.fill_log?.[rm.fill_log.length - 1];
+      if (lastFill) {
+        if (lastFill.pnl_pct >= 0) wins++;
+        else losses++;
+        // Sum dollar P&L from all exit fills
+        for (const f of rm.fill_log || []) {
+          if (f.level !== "entry") {
+            totalPnl += (f.avg_price - rm.entry_price) * f.qty_filled * 100;
+          }
+        }
+      }
+    }
+    // Add unrealized P&L from active positions
+    let unrealizedPnl = 0;
+    for (const pd of positionDetails) {
+      if (pd.pnlDollar !== null) unrealizedPnl += pd.pnlDollar;
+    }
+    const activeCount = positionDetails.length;
+    const completedCount = completed.length;
+    return { activeCount, completedCount, wins, losses, totalPnl, unrealizedPnl };
+  }, [executionStatus?.strategies, positionDetails]);
 
   const ws = signal?.polygon_ws;
   const bars = signal?.bar_accumulator;
@@ -727,34 +913,157 @@ export default function SignalsTab() {
             )}
           </div>
 
-          {/* ── Active Positions ── */}
-          {signal?.active_positions && signal.active_positions.length > 0 && (
+          {/* ── Active Positions (enhanced) ── */}
+          {positionDetails.length > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded p-3">
               <h3 className="text-sm font-medium text-gray-300 mb-2">
-                Active Positions ({signal.active_positions.length})
+                Active Positions ({positionDetails.length})
               </h3>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-gray-500">
-                    <th className="text-left py-1">Order</th>
-                    <th className="text-right py-1">Entry</th>
-                    <th className="text-right py-1">Qty</th>
-                    <th className="text-right py-1">Fill Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {signal.active_positions.map((pos, i) => (
-                    <tr key={i} className="text-gray-300 border-t border-gray-800">
-                      <td className="py-1">{pos.order_id}</td>
-                      <td className="text-right py-1">${pos.entry_price.toFixed(2)}</td>
-                      <td className="text-right py-1">{pos.quantity}</td>
-                      <td className="text-right py-1 text-gray-500">
-                        {new Date(pos.fill_time * 1000).toLocaleTimeString()}
-                      </td>
+              <div className="space-y-2">
+                {positionDetails.map((pd, i) => {
+                  const { pos, rm, quote, pnlPct, pnlDollar, optionContract } = pd;
+                  const isCall = optionContract?.right?.toUpperCase() === "C" || optionContract?.right?.toUpperCase() === "CALL";
+                  const isCompleted = rm?.completed;
+                  const staleQuote = quote && quote.age_seconds > 30;
+                  return (
+                    <div key={i} className={`border rounded p-2 space-y-1 ${isCompleted ? "border-gray-700 bg-gray-800/30" : "border-gray-700"}`}>
+                      {/* Row 1: contract info */}
+                      <div className="flex items-center gap-2 text-xs">
+                        {optionContract ? (
+                          <>
+                            <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${isCall ? "bg-green-900/60 text-green-300" : "bg-red-900/60 text-red-300"}`}>
+                              {isCall ? "CALL" : "PUT"}
+                            </span>
+                            <span className="text-gray-200 font-mono">{optionContract.strike}</span>
+                            <span className="text-gray-500">{optionContract.expiry}</span>
+                          </>
+                        ) : (
+                          <span className="text-gray-400">Option</span>
+                        )}
+                        <span className="text-gray-400">x{pos.quantity}</span>
+                        <span className="text-gray-600 ml-auto">{new Date(pos.fill_time * 1000).toLocaleTimeString()}</span>
+                        {isCompleted && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-600 text-gray-200">CLOSED</span>
+                        )}
+                      </div>
+                      {/* Row 2: prices + P&L */}
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className="text-gray-400">Entry <span className="text-gray-200 font-mono">${pos.entry_price.toFixed(2)}</span></span>
+                        {quote ? (
+                          <>
+                            <span className={`text-gray-400 ${staleQuote ? "opacity-50" : ""}`}>
+                              Bid/Ask <span className="text-gray-300 font-mono">{quote.bid.toFixed(2)}/{quote.ask.toFixed(2)}</span>
+                            </span>
+                            <span className={`text-gray-400 ${staleQuote ? "opacity-50" : ""}`}>
+                              Mid <span className="text-gray-200 font-mono">{quote.mid.toFixed(2)}</span>
+                            </span>
+                          </>
+                        ) : rm ? (
+                          <span className="text-gray-600 italic">Waiting for quote...</span>
+                        ) : null}
+                        {pnlPct !== null && pnlDollar !== null && (
+                          <span className={`ml-auto font-mono font-medium ${staleQuote ? "opacity-50" : ""} ${pnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                            {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
+                          </span>
+                        )}
+                      </div>
+                      {/* Row 3: risk manager state */}
+                      {rm && (
+                        <div className="flex items-center gap-1.5 text-[10px]">
+                          {Object.entries(rm.level_states || {}).map(([key, state]) => (
+                            <span
+                              key={key}
+                              className={`px-1.5 py-0.5 rounded font-mono ${
+                                state === "FILLED" ? "bg-green-900 text-green-300" :
+                                state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
+                                state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
+                                "bg-gray-700 text-gray-300"
+                              }`}
+                            >
+                              {key}: {state}
+                            </span>
+                          ))}
+                          {rm.trailing_active && (
+                            <span className="text-yellow-300 font-mono">
+                              trail@{rm.trailing_stop_price.toFixed(2)}
+                            </span>
+                          )}
+                          <span className="text-gray-600 ml-auto">{rm.remaining_qty}/{rm.initial_qty} remaining</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── Trade Log ── */}
+          {allFills.length > 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded p-3">
+              <h3 className="text-sm font-medium text-gray-300 mb-2">Trade Log ({allFills.length})</h3>
+              <div className="max-h-40 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-500">
+                      <th className="text-left py-1">Time</th>
+                      <th className="text-left py-1">Type</th>
+                      <th className="text-right py-1">Qty</th>
+                      <th className="text-right py-1">Price</th>
+                      <th className="text-right py-1">P&L%</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {allFills.map((f, i) => {
+                      const typeColor =
+                        f.level === "entry" ? "text-blue-400" :
+                        f.level.startsWith("profit") ? "text-green-400" :
+                        f.level === "trailing" ? "text-yellow-400" :
+                        f.level.startsWith("stop") ? "text-red-400" :
+                        "text-gray-400";
+                      return (
+                        <tr key={i} className="border-t border-gray-800">
+                          <td className="py-1 text-gray-500">{new Date(f.time * 1000).toLocaleTimeString()}</td>
+                          <td className={`py-1 ${typeColor}`}>{f.level}</td>
+                          <td className="py-1 text-right text-gray-300">{f.qty_filled}</td>
+                          <td className="py-1 text-right text-gray-300 font-mono">${f.avg_price.toFixed(2)}</td>
+                          <td className={`py-1 text-right font-mono ${f.pnl_pct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                            {f.level === "entry" ? "—" : `${f.pnl_pct >= 0 ? "+" : ""}${f.pnl_pct.toFixed(1)}%`}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Session Summary ── */}
+          {(signal?.positions_spawned ?? 0) > 0 && (
+            <div className="bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-300 flex items-center gap-2">
+              <span>{sessionSummary.activeCount} active, {sessionSummary.completedCount} closed</span>
+              {sessionSummary.completedCount > 0 && (
+                <>
+                  <span className="text-gray-600">|</span>
+                  <span>Exits: <span className="text-green-400">{sessionSummary.wins}W</span>/<span className="text-red-400">{sessionSummary.losses}L</span></span>
+                </>
+              )}
+              {(sessionSummary.totalPnl !== 0 || sessionSummary.unrealizedPnl !== 0) && (
+                <>
+                  <span className="text-gray-600">|</span>
+                  {sessionSummary.totalPnl !== 0 && (
+                    <span className={sessionSummary.totalPnl >= 0 ? "text-green-400" : "text-red-400"}>
+                      Realized {sessionSummary.totalPnl >= 0 ? "+" : ""}${sessionSummary.totalPnl.toFixed(0)}
+                    </span>
+                  )}
+                  {sessionSummary.unrealizedPnl !== 0 && (
+                    <span className={`${sessionSummary.unrealizedPnl >= 0 ? "text-blue-400" : "text-orange-400"}`}>
+                      Unreal {sessionSummary.unrealizedPnl >= 0 ? "+" : ""}${sessionSummary.unrealizedPnl.toFixed(0)}
+                    </span>
+                  )}
+                </>
+              )}
             </div>
           )}
 
