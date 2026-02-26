@@ -1197,7 +1197,7 @@ class IBDataAgent:
         return {"success": True, "position_id": position_id, "status": "closed"}
 
     # IB account dedicated to automated BMC trading
-    IB_ACCT_CODE = "U15213356"
+    IB_ACCT_CODE = "U152133"
 
     def _handle_get_ib_executions_sync(self, payload: dict) -> dict:
         """Fetch all IB executions for current session, match into round-trip trades, compute P&L."""
@@ -1463,7 +1463,7 @@ class IBDataAgent:
         "get_positions", "get_open_orders",
     })
     _request_counts: dict = {}
-    _last_request_summary: float = 0.0
+    _last_request_summary: float = 0.0  # initialized to time.time() on first use
     _REQUEST_SUMMARY_INTERVAL = 60.0  # seconds
 
     async def _process_request(self, request_id: str, data: dict):
@@ -1507,6 +1507,8 @@ class IBDataAgent:
             if is_quiet:
                 self._request_counts[request_type] = self._request_counts.get(request_type, 0) + 1
                 now = time.time()
+                if self._last_request_summary == 0.0:
+                    self._last_request_summary = now  # initialize on first use
                 if now - self._last_request_summary >= self._REQUEST_SUMMARY_INTERVAL:
                     counts_str = ", ".join(f"{k}={v}" for k, v in sorted(self._request_counts.items()))
                     logger.info(f"[heartbeat] requests in last {int(now - self._last_request_summary)}s: {counts_str}")
