@@ -94,6 +94,8 @@ These are Cursor-only and do NOT need to be synced to `CLAUDE.md` (Claude Code r
 - Contains repo overview, module map, constraints, key commands
 - NOT synced between repos (each has repo-specific content)
 
+**OpenClaw/ClawdBot:** To give ClawdBot the full contract and shared block, use the setup prompt in `docs/agent/OPENCLAW_ONBOARDING_PROMPT.md` (Option A: add an instruction file with embedded shared block; Option B: configure ClawdBot to read `.cursorrules` + `CLAUDE.md` + `docs/agent/AGENTS.md`). Until then, repo-root `AGENTS.md` is repo-specific only.
+
 **`.codex/config.toml`** (both repos):
 - Codex project configuration (model, sandbox mode, doc fallback)
 
@@ -270,6 +272,7 @@ python research/NN_script_name.py
 | `.codex/config.toml` | Both | Codex project configuration |
 | `.cursor/rules/*.mdc` | Both | Domain-specific Cursor rules (7 in ma-tracker-app, 5 in py_proj) |
 | `.claude/commands/*.md` | Both | Claude Code slash commands for common workflows |
+| `docs/agent/OPENCLAW_ONBOARDING_PROMPT.md` | ma-tracker-app (copy to py_proj optional) | Prompt for OpenClaw/ClawdBot setup so it receives shared block and full contract |
 
 ---
 

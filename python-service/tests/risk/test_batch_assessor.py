@@ -1,8 +1,9 @@
 """Tests for batch_assessor: batch request building, result processing."""
 
+import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -12,6 +13,11 @@ from app.risk.batch_assessor import (
     run_batch_assessment,
 )
 from app.risk.model_config import CACHE_MIN_TOKENS
+
+
+def _run(coro):
+    """Run an async coroutine synchronously."""
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 # ---------------------------------------------------------------------------
@@ -160,15 +166,13 @@ def _make_batch(batch_id="batch_123", status="ended", succeeded=1, errored=0, ex
     )
 
 
-@pytest.mark.asyncio
-async def test_run_batch_empty_input():
+def test_run_batch_empty_input():
     """Empty deal list returns empty dict."""
-    result = await run_batch_assessment(None, [])
+    result = _run(run_batch_assessment(None, []))
     assert result == {}
 
 
-@pytest.mark.asyncio
-async def test_run_batch_success():
+def test_run_batch_success():
     """Successful batch returns parsed JSON with _meta."""
     assessment = {
         "grades": {"regulatory": {"grade": "Medium"}},
@@ -193,8 +197,8 @@ async def test_run_batch_success():
         "user_prompt": "Details.",
     }]
 
-    with patch("app.risk.batch_assessor.asyncio.sleep"):
-        results = await run_batch_assessment(mock_client, deal_requests)
+    with patch("app.risk.batch_assessor.asyncio.sleep", new_callable=AsyncMock):
+        results = _run(run_batch_assessment(mock_client, deal_requests))
 
     assert "ATVI" in results
     assert results["ATVI"]["grades"]["regulatory"]["grade"] == "Medium"
@@ -207,8 +211,7 @@ async def test_run_batch_success():
     assert meta["cost_usd"] > 0
 
 
-@pytest.mark.asyncio
-async def test_run_batch_strips_markdown_fences():
+def test_run_batch_strips_markdown_fences():
     """JSON wrapped in ```json fences is correctly parsed."""
     assessment = {"risk": "low"}
     raw = f"```json\n{json.dumps(assessment)}\n```"
@@ -231,15 +234,14 @@ async def test_run_batch_strips_markdown_fences():
         "user_prompt": "Details.",
     }]
 
-    with patch("app.risk.batch_assessor.asyncio.sleep"):
-        results = await run_batch_assessment(mock_client, deal_requests)
+    with patch("app.risk.batch_assessor.asyncio.sleep", new_callable=AsyncMock):
+        results = _run(run_batch_assessment(mock_client, deal_requests))
 
     assert "SAVE" in results
     assert results["SAVE"]["risk"] == "low"
 
 
-@pytest.mark.asyncio
-async def test_run_batch_errored_result():
+def test_run_batch_errored_result():
     """Errored batch result includes error in _meta."""
     mock_client = MagicMock()
     mock_client.messages.batches.create.return_value = _make_batch(status="ended", errored=1)
@@ -255,15 +257,14 @@ async def test_run_batch_errored_result():
         "user_prompt": "Details.",
     }]
 
-    with patch("app.risk.batch_assessor.asyncio.sleep"):
-        results = await run_batch_assessment(mock_client, deal_requests)
+    with patch("app.risk.batch_assessor.asyncio.sleep", new_callable=AsyncMock):
+        results = _run(run_batch_assessment(mock_client, deal_requests))
 
     assert "FAIL" in results
     assert results["FAIL"]["_meta"]["error"] == "batch_errored"
 
 
-@pytest.mark.asyncio
-async def test_run_batch_expired_result():
+def test_run_batch_expired_result():
     """Expired batch result includes error in _meta."""
     mock_client = MagicMock()
     mock_client.messages.batches.create.return_value = _make_batch(status="ended", expired=1)
@@ -279,15 +280,14 @@ async def test_run_batch_expired_result():
         "user_prompt": "Details.",
     }]
 
-    with patch("app.risk.batch_assessor.asyncio.sleep"):
-        results = await run_batch_assessment(mock_client, deal_requests)
+    with patch("app.risk.batch_assessor.asyncio.sleep", new_callable=AsyncMock):
+        results = _run(run_batch_assessment(mock_client, deal_requests))
 
     assert "LATE" in results
     assert results["LATE"]["_meta"]["error"] == "batch_expired"
 
 
-@pytest.mark.asyncio
-async def test_run_batch_cost_is_half():
+def test_run_batch_cost_is_half():
     """Batch cost should be exactly 50% of standard compute_cost."""
     from app.risk.model_config import compute_cost
 
@@ -312,15 +312,14 @@ async def test_run_batch_cost_is_half():
         "user_prompt": "Details.",
     }]
 
-    with patch("app.risk.batch_assessor.asyncio.sleep"):
-        results = await run_batch_assessment(mock_client, deal_requests)
+    with patch("app.risk.batch_assessor.asyncio.sleep", new_callable=AsyncMock):
+        results = _run(run_batch_assessment(mock_client, deal_requests))
 
     batch_cost = results["COST"]["_meta"]["cost_usd"]
     assert abs(batch_cost - standard_cost * 0.5) < 1e-10
 
 
-@pytest.mark.asyncio
-async def test_run_batch_multiple_deals():
+def test_run_batch_multiple_deals():
     """Multiple deals in a single batch all get processed."""
     mock_client = MagicMock()
     mock_client.messages.batches.create.return_value = _make_batch(status="ended", succeeded=3)
@@ -338,8 +337,8 @@ async def test_run_batch_multiple_deals():
         for t in ["AAA", "BBB", "CCC"]
     ]
 
-    with patch("app.risk.batch_assessor.asyncio.sleep"):
-        results = await run_batch_assessment(mock_client, deal_requests)
+    with patch("app.risk.batch_assessor.asyncio.sleep", new_callable=AsyncMock):
+        results = _run(run_batch_assessment(mock_client, deal_requests))
 
     assert len(results) == 3
     assert results["AAA"]["risk"] == "low"
@@ -347,8 +346,7 @@ async def test_run_batch_multiple_deals():
     assert results["CCC"]["risk"] == "high"
 
 
-@pytest.mark.asyncio
-async def test_run_batch_malformed_json():
+def test_run_batch_malformed_json():
     """Malformed JSON in response sets invalid_json error."""
     mock_client = MagicMock()
     mock_client.messages.batches.create.return_value = _make_batch(status="ended", succeeded=1)
@@ -368,8 +366,8 @@ async def test_run_batch_malformed_json():
         "user_prompt": "Details.",
     }]
 
-    with patch("app.risk.batch_assessor.asyncio.sleep"):
-        results = await run_batch_assessment(mock_client, deal_requests)
+    with patch("app.risk.batch_assessor.asyncio.sleep", new_callable=AsyncMock):
+        results = _run(run_batch_assessment(mock_client, deal_requests))
 
     assert "BAD" in results
     assert results["BAD"]["_meta"]["error"] == "invalid_json"

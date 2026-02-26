@@ -68,7 +68,9 @@ When a rule applies to **only one** repo:
 
 ## Onboarding a New Agent
 
-If a new AI tool is introduced:
+**OpenClaw/ClawdBot:** Use the copy-paste prompt in `docs/agent/OPENCLAW_ONBOARDING_PROMPT.md` so ClawdBot receives the shared block and full contract. You can copy that file to py_proj for parity.
+
+If another new AI tool is introduced:
 
 1. Create an instruction file in the format the new tool expects.
 2. Embed the shared block from `docs/agent/SHARED_BLOCK.md` using the standard markers:
