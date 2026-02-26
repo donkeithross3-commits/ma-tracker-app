@@ -791,23 +791,7 @@ export default function DealOptionsPage() {
                 </div>
               )}
 
-              {/* Raw option chain table — always show when we have contracts */}
-              {data.raw_chain && data.raw_chain.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-bold text-gray-300 mb-2">
-                    Option Chain
-                    <span className="text-gray-600 font-normal ml-2 text-xs">
-                      {data.raw_chain.length} contracts
-                    </span>
-                  </h3>
-                  <RawChainTable
-                    contracts={data.raw_chain}
-                    dealPrice={data.deal_price}
-                  />
-                </div>
-              )}
-
-              {/* Strategy category sections */}
+              {/* Strategy category sections — show FIRST (the good stuff) */}
               {hasStrategies &&
                 sortedCategories.map(([catKey, result]) => (
                   <CategorySection
@@ -816,6 +800,25 @@ export default function DealOptionsPage() {
                     result={result as CategoryResult}
                   />
                 ))}
+
+              {/* Raw option chain — collapsible, default closed when strategies exist */}
+              {data.raw_chain && data.raw_chain.length > 0 && (
+                <details open={!hasStrategies}>
+                  <summary className="cursor-pointer select-none text-sm font-bold text-gray-300 py-1 hover:text-gray-100 list-none flex items-center gap-1.5">
+                    <span className="text-gray-500 text-[10px] transition-transform [[open]>&]:rotate-90">▶</span>
+                    Option Chain
+                    <span className="text-gray-600 font-normal text-xs">
+                      {data.raw_chain.length} contracts
+                    </span>
+                  </summary>
+                  <div className="mt-1">
+                    <RawChainTable
+                      contracts={data.raw_chain}
+                      dealPrice={data.deal_price}
+                    />
+                  </div>
+                </details>
+              )}
             </>
           );
         })()}
