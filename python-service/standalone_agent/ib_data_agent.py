@@ -1030,12 +1030,21 @@ class IBDataAgent:
                     parent_state = self.execution_engine._strategies.get(parent)
                     if parent_state and hasattr(parent_state.strategy, "_active_positions"):
                         entry_info = pos.get("entry", {})
+                        instrument = pos.get("instrument", {})
                         parent_state.strategy._active_positions.append({
                             "order_id": entry_info.get("order_id", 0),
                             "entry_price": entry_info.get("price", 0),
                             "quantity": entry_info.get("quantity", 0),
                             "fill_time": entry_info.get("fill_time", 0),
                             "perm_id": entry_info.get("perm_id", 0),
+                            "signal": {
+                                "option_contract": {
+                                    "symbol": instrument.get("symbol", ""),
+                                    "strike": instrument.get("strike", 0),
+                                    "expiry": instrument.get("expiry", ""),
+                                    "right": instrument.get("right", ""),
+                                },
+                            },
                         })
                         if hasattr(parent_state.strategy, "_positions_spawned"):
                             parent_state.strategy._positions_spawned += 1
