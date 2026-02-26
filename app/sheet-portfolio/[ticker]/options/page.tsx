@@ -407,7 +407,71 @@ function ProvenancePill({ type }: { type: "ai" | "live" | "prior-close" }) {
   return <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/80 text-gray-500 font-medium">PRIOR CLOSE</span>;
 }
 
-// ── Raw chain table (traditional options chain view) ─────────────
+// ── Raw chain – card-based bid/ask UI (matches BidAskGrids pattern) ──
+function ContractCard({
+  contract,
+  label,
+  isAtm,
+}: {
+  contract: RawChainContract | undefined;
+  label: string;
+  isAtm: boolean;
+}) {
+  const empty = !contract;
+  return (
+    <div
+      className={`border rounded-lg overflow-hidden flex-1 min-w-[140px] max-w-[220px] ${
+        isAtm
+          ? "border-cyan-700/60 bg-gray-800/60"
+          : "border-gray-700 bg-gray-900"
+      }`}
+    >
+      {/* Label header */}
+      <div
+        className={`px-3 py-1.5 text-center text-xs font-semibold border-b ${
+          isAtm
+            ? "bg-cyan-900/30 text-cyan-300 border-cyan-700/40"
+            : "bg-gray-800 text-gray-300 border-gray-700"
+        }`}
+      >
+        {label}
+      </div>
+      {empty ? (
+        <div className="px-3 py-5 text-center text-gray-700 text-sm">—</div>
+      ) : (
+        <>
+          {/* Ask row (red) */}
+          <div className="bg-red-900/20 px-4 py-2 flex justify-between items-baseline">
+            <span className="text-[11px] text-gray-500 uppercase">Ask</span>
+            <span className="text-base font-mono text-red-400 font-semibold">
+              ${contract.ask.toFixed(2)}
+            </span>
+          </div>
+          {/* Bid row (blue) */}
+          <div className="bg-blue-900/20 px-4 py-2 flex justify-between items-baseline">
+            <span className="text-[11px] text-gray-500 uppercase">Bid</span>
+            <span className="text-base font-mono text-blue-400 font-semibold">
+              ${contract.bid.toFixed(2)}
+            </span>
+          </div>
+          {/* Vol / OI footer */}
+          <div className="px-3 py-1.5 text-xs text-gray-400 text-center border-t border-gray-700 font-mono">
+            V {contract.volume ?? 0}
+            <span className="mx-2 text-gray-700">|</span>
+            OI {(contract.open_interest ?? 0).toLocaleString()}
+          </div>
+          {/* IV footer */}
+          {contract.implied_vol != null && contract.implied_vol > 0 && (
+            <div className="px-3 pb-1.5 text-[11px] text-gray-500 text-center font-mono">
+              IV {(contract.implied_vol * 100).toFixed(0)}%
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function RawChainTable({
   contracts,
   dealPrice,
@@ -425,111 +489,82 @@ function RawChainTable({
     else byExpiry[c.expiry].puts.push(c);
   }
 
-  // Collect all unique strikes across all expirations
   const allStrikes = [...new Set(contracts.map((c) => c.strike))].sort((a, b) => a - b);
-
   const expirations = Object.keys(byExpiry).sort();
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       {expirations.map((expiry) => {
         const { calls, puts } = byExpiry[expiry];
         const dte = parseDte(expiry);
         const callByStrike = new Map(calls.map((c) => [c.strike, c]));
         const putByStrike = new Map(puts.map((c) => [c.strike, c]));
-        // Only show strikes that exist in this expiration
         const strikes = allStrikes.filter(
           (s) => callByStrike.has(s) || putByStrike.has(s)
         );
 
         return (
-          <div
-            key={expiry}
-            className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden"
-          >
-            <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between">
-              <span className="text-sm font-bold text-gray-100">
+          <div key={expiry}>
+            {/* Expiration header */}
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-base font-bold text-gray-100">
                 {formatExpiry(expiry)}{" "}
                 <span className="text-gray-500 font-normal">({dte}d)</span>
-              </span>
-              <span className="text-[11px] text-gray-500">
+              </h4>
+              <span className="text-xs text-gray-500">
                 {calls.length}C / {puts.length}P
               </span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-800/50">
-                  <tr className="border-b border-gray-700">
-                    {/* Calls side */}
-                    <th className="text-right py-1.5 px-2 text-gray-500">OI</th>
-                    <th className="text-right py-1.5 px-2 text-gray-500">Vol</th>
-                    <th className="text-right py-1.5 px-2 text-gray-500">Bid</th>
-                    <th className="text-right py-1.5 px-2 text-gray-500">Ask</th>
-                    <th className="text-right py-1.5 px-2 text-gray-500">IV</th>
-                    {/* Strike */}
-                    <th className="text-center py-1.5 px-2 text-gray-300 font-bold border-x border-gray-700">
-                      Strike
-                    </th>
-                    {/* Puts side */}
-                    <th className="text-right py-1.5 px-2 text-gray-500">IV</th>
-                    <th className="text-right py-1.5 px-2 text-gray-500">Bid</th>
-                    <th className="text-right py-1.5 px-2 text-gray-500">Ask</th>
-                    <th className="text-right py-1.5 px-2 text-gray-500">Vol</th>
-                    <th className="text-right py-1.5 px-2 text-gray-500">OI</th>
-                  </tr>
-                  <tr className="border-b border-gray-700">
-                    <th colSpan={5} className="text-center py-0.5 text-[10px] text-blue-400/60 uppercase tracking-widest">
-                      Calls
-                    </th>
-                    <th className="border-x border-gray-700" />
-                    <th colSpan={5} className="text-center py-0.5 text-[10px] text-orange-400/60 uppercase tracking-widest">
-                      Puts
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {strikes.map((strike) => {
-                    const call = callByStrike.get(strike);
-                    const put = putByStrike.get(strike);
-                    const isAtm =
-                      dealPrice != null &&
-                      Math.abs(strike - dealPrice) <=
-                        (allStrikes.length > 1
-                          ? Math.abs(allStrikes[1] - allStrikes[0]) / 2
-                          : 0.5);
 
-                    return (
-                      <tr
-                        key={strike}
-                        className={`border-b border-gray-800 hover:bg-gray-800/40 ${
-                          isAtm ? "bg-gray-800/30" : ""
+            {/* One row per strike */}
+            <div className="space-y-4">
+              {strikes.map((strike) => {
+                const call = callByStrike.get(strike);
+                const put = putByStrike.get(strike);
+                const isAtm =
+                  dealPrice != null &&
+                  Math.abs(strike - dealPrice) <=
+                    (allStrikes.length > 1
+                      ? Math.abs(allStrikes[1] - allStrikes[0]) / 2
+                      : 0.5);
+
+                const strikeDisplay =
+                  strike % 1 === 0
+                    ? strike.toFixed(0)
+                    : parseFloat(strike.toFixed(2)).toString();
+
+                return (
+                  <div key={strike} className="flex items-stretch gap-3">
+                    {/* Call card */}
+                    <ContractCard
+                      contract={call}
+                      label={`${strikeDisplay}C`}
+                      isAtm={isAtm}
+                    />
+                    {/* Strike center divider */}
+                    <div className="flex flex-col items-center justify-center min-w-[60px]">
+                      <span
+                        className={`text-lg font-bold font-mono ${
+                          isAtm ? "text-cyan-400" : "text-gray-300"
                         }`}
                       >
-                        {/* Call side */}
-                        <Cell val={call?.open_interest} dim />
-                        <Cell val={call?.volume} dim />
-                        <Cell val={call?.bid} dollar green />
-                        <Cell val={call?.ask} dollar />
-                        <Cell val={call?.implied_vol} pct dim />
-                        {/* Strike */}
-                        <td
-                          className={`text-center py-1.5 px-2 font-mono font-bold border-x border-gray-700 ${
-                            isAtm ? "text-cyan-400" : "text-gray-200"
-                          }`}
-                        >
-                          {strike.toFixed(2)}
-                        </td>
-                        {/* Put side */}
-                        <Cell val={put?.implied_vol} pct dim />
-                        <Cell val={put?.bid} dollar green />
-                        <Cell val={put?.ask} dollar />
-                        <Cell val={put?.volume} dim />
-                        <Cell val={put?.open_interest} dim />
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        {strikeDisplay}
+                      </span>
+                      {isAtm && (
+                        <span className="text-[10px] text-cyan-600 mt-0.5">
+                          ATM
+                        </span>
+                      )}
+                    </div>
+                    {/* Put card */}
+                    <ContractCard
+                      contract={put}
+                      label={`${strikeDisplay}P`}
+                      isAtm={isAtm}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
@@ -538,42 +573,6 @@ function RawChainTable({
   );
 }
 
-function Cell({
-  val,
-  dollar,
-  pct,
-  green,
-  dim,
-}: {
-  val?: number | null;
-  dollar?: boolean;
-  pct?: boolean;
-  green?: boolean;
-  dim?: boolean;
-}) {
-  if (val == null || val === 0)
-    return (
-      <td className="text-right py-1.5 px-2 font-mono text-gray-700">-</td>
-    );
-  let display: string;
-  if (pct) display = `${(val * 100).toFixed(0)}%`;
-  else if (dollar) display = val.toFixed(2);
-  else display = val.toLocaleString();
-
-  return (
-    <td
-      className={`text-right py-1.5 px-2 font-mono ${
-        green && val > 0
-          ? "text-green-400"
-          : dim
-            ? "text-gray-500"
-            : "text-gray-300"
-      }`}
-    >
-      {display}
-    </td>
-  );
-}
 
 // ── Main page ──────────────────────────────────────────────────────
 export default function DealOptionsPage() {
