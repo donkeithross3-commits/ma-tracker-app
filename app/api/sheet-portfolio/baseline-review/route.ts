@@ -4,10 +4,13 @@ const PORTFOLIO_SERVICE_URL =
   process.env.PORTFOLIO_SERVICE_URL || process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
 export async function GET(req: NextRequest) {
-  const view = req.nextUrl.searchParams.get("view") || "flagged";
+  // Pass through all query params to the Python service
+  const params = new URLSearchParams();
+  req.nextUrl.searchParams.forEach((value, key) => params.set(key, value));
+  if (!params.has("view")) params.set("view", "flagged");
   try {
     const resp = await fetch(
-      `${PORTFOLIO_SERVICE_URL}/risk/baseline-review-html?view=${encodeURIComponent(view)}`,
+      `${PORTFOLIO_SERVICE_URL}/risk/baseline-review-html?${params.toString()}`,
       { cache: "no-store" }
     );
     if (!resp.ok) {

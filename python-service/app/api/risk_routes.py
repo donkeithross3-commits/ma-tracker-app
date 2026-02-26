@@ -1536,15 +1536,19 @@ async def get_baseline_blind_review(run_id: str):
 # ---------------------------------------------------------------------------
 @router.get("/baseline-review-html", response_class=HTMLResponse)
 async def get_baseline_review_html(
-    view: str = Query("flagged", description="'flagged' or 'index'"),
+    view: str = Query("flagged", description="'flagged', 'index', or 'detail'"),
     run_id: Optional[str] = Query(None, description="Specific run ID (defaults to latest)"),
+    ticker: Optional[str] = Query(None, description="Ticker for detail view"),
+    model: Optional[str] = Query(None, description="Model hint for detail view (opus/sonnet)"),
 ):
     """Serve baseline review as rendered HTML.
 
     ?view=flagged  → flagged deals review page (default)
     ?view=index    → full comparison index page
+    ?view=detail&ticker=X&model=opus → single ticker/model detail
     """
     from app.risk.baseline_report import (
+        generate_detail_html,
         generate_flagged_html,
         generate_index_html,
         get_portfolio_tickers_from_sheet,
@@ -1552,12 +1556,22 @@ async def get_baseline_review_html(
 
     pool = _get_pool()
     try:
+        if view == "detail":
+            if not ticker or not model:
+                raise HTTPException(status_code=400, detail="ticker and model params required for detail view")
+            html = await generate_detail_html(pool, ticker=ticker, model_hint=model, run_id=run_id)
+            if not html:
+                raise HTTPException(status_code=404, detail=f"No result found for {ticker}/{model}")
+            return HTMLResponse(content=html)
+
         portfolio_tickers = await get_portfolio_tickers_from_sheet(pool)
         if view == "index":
             html = await generate_index_html(pool, run_id=run_id, portfolio_tickers=portfolio_tickers)
         else:
             html = await generate_flagged_html(pool, run_id=run_id, portfolio_tickers=portfolio_tickers)
         return HTMLResponse(content=html)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to generate baseline review HTML: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

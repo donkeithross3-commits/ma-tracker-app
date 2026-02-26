@@ -558,10 +558,10 @@ def _build_deal_card(d):
     ticker = d["ticker"]
 
     links = []
-    if d["fname_opus"]:
-        links.append(f'<a href="{d["fname_opus"]}">Opus report</a>')
-    if d["fname_sonnet"]:
-        links.append(f'<a href="{d["fname_sonnet"]}">Sonnet report</a>')
+    if d["model_data"].get("Opus 4.6"):
+        links.append(f'<a href="/api/sheet-portfolio/baseline-review?view=detail&ticker={ticker}&model=opus" target="_blank">Opus report</a>')
+    if d["model_data"].get("Sonnet 4.6"):
+        links.append(f'<a href="/api/sheet-portfolio/baseline-review?view=detail&ticker={ticker}&model=sonnet" target="_blank">Sonnet report</a>')
     links_html = " · ".join(links)
 
     grade_rows = []
@@ -829,4 +829,67 @@ async def generate_index_html(pool, run_id: str | None = None, portfolio_tickers
         owned_count=owned_count,
         not_owned_count=len(tickers) - owned_count,
         rows="\n".join(index_rows),
+    )
+
+
+async def generate_detail_html(pool, ticker: str, model_hint: str, run_id: str | None = None) -> str | None:
+    """Generate a single-ticker, single-model detail page. Returns HTML or None if not found."""
+    async with pool.acquire() as conn:
+        if not run_id:
+            row = await conn.fetchrow(
+                "SELECT id FROM baseline_runs WHERE status = 'completed' ORDER BY created_at DESC LIMIT 1"
+            )
+            if not row:
+                return None
+            run_id = str(row["id"])
+
+        # Match model by hint (opus/sonnet)
+        model_like = f"%{model_hint}%"
+        r = await conn.fetchrow(
+            """SELECT ticker, model, response,
+                      input_tokens, output_tokens, cost_usd, latency_ms,
+                      probability_of_success, investable_assessment, reasoning_depth,
+                      grade_vote, grade_financing, grade_legal, grade_regulatory, grade_mac
+               FROM baseline_model_results
+               WHERE run_id = $1 AND ticker = $2 AND model ILIKE $3
+               LIMIT 1""",
+            _uuid.UUID(run_id), ticker.upper(), model_like,
+        )
+        if not r:
+            return None
+
+    parsed = json.loads(r["response"]) if r["response"] else {}
+    grades = parsed.get("grades", {})
+    ms = model_short(r["model"])
+    cost = float(r["cost_usd"] or 0)
+
+    grade_cards_parts = []
+    for f in FACTORS:
+        g = grades.get(f, {})
+        grade_cards_parts.append(build_grade_card(FACTOR_LABELS[f], g))
+    grade_cards = "\n".join(grade_cards_parts)
+
+    inv = r["investable_assessment"] or parsed.get("investable_assessment", "")
+    prob = r["probability_of_success"]
+    prob_display = f"{float(prob):.0%}" if prob else "—"
+
+    return HTML_TEMPLATE.format(
+        ticker=r["ticker"],
+        model_short=ms,
+        model=r["model"],
+        cost=cost,
+        input_tokens=r["input_tokens"] or 0,
+        output_tokens=r["output_tokens"] or 0,
+        reasoning_depth=r["reasoning_depth"] or "—",
+        investable=inv or "—",
+        inv_class=inv_class(inv),
+        prob_display=prob_display,
+        grade_cards=grade_cards,
+        deal_summary_section=build_section("Deal Summary", parsed.get("deal_summary", "")),
+        investable_reasoning_section=build_section("Investable Reasoning", parsed.get("investable_reasoning", "")),
+        key_risks_section=build_list_section("Key Risks", parsed.get("key_risks", [])),
+        supplemental_section=build_supplemental(parsed),
+        additional_sections="",
+        prev_link="",
+        next_link=f'<a href="/api/sheet-portfolio/baseline-review?view=flagged">← Back to Flagged</a>',
     )
