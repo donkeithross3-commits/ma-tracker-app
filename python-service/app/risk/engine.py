@@ -11,6 +11,7 @@ import re
 import time
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from anthropic import Anthropic
 
@@ -24,6 +25,22 @@ from .prompts import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_json(obj) -> str:
+    """json.dumps that handles Decimal and date types from asyncpg."""
+    return json.dumps(obj, default=_json_default)
+
+
+def _json_default(o):
+    if isinstance(o, Decimal):
+        return float(o)
+    if isinstance(o, (date, datetime)):
+        return o.isoformat()
+    if isinstance(o, uuid.UUID):
+        return str(o)
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
 
 # ---------------------------------------------------------------------------
 # Pool injection (same pattern as portfolio_routes.py)
@@ -1275,12 +1292,12 @@ Keep it actionable and direct."""
                 sheet_comp.get("investable"),
                 float(sheet_comp["prob_success"]) if sheet_comp.get("prob_success") is not None else None,
                 # Discrepancies
-                json.dumps(disc_list) if disc_list else None,
+                _safe_json(disc_list) if disc_list else None,
                 len(disc_list),
                 # Deal summary
                 assessment.get("deal_summary"),
-                json.dumps(assessment.get("key_risks")) if assessment.get("key_risks") else None,
-                json.dumps(assessment.get("watchlist_items")) if assessment.get("watchlist_items") else None,
+                _safe_json(assessment.get("key_risks")) if assessment.get("key_risks") else None,
+                _safe_json(assessment.get("watchlist_items")) if assessment.get("watchlist_items") else None,
                 # Deal metrics
                 float(deal_price) if deal_price is not None else None,
                 float(current_price) if current_price is not None else None,
@@ -1294,8 +1311,8 @@ Keep it actionable and direct."""
                 assessment.get("needs_attention", False),
                 assessment.get("attention_reason"),
                 # Raw data
-                json.dumps(input_data),
-                json.dumps(assessment),
+                _safe_json(input_data),
+                _safe_json(assessment),
                 meta.get("model", self.model),
                 meta.get("tokens_used", 0),
                 meta.get("processing_time_ms", 0),
@@ -1434,7 +1451,7 @@ Keep it actionable and direct."""
                 len(prod_disagreements),
                 material_count,
                 # Full AI response
-                json.dumps(assessment),
+                _safe_json(assessment),
                 assessment_id,
             )
 
