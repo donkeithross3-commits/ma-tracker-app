@@ -407,8 +407,10 @@ function ProvenancePill({ type }: { type: "ai" | "live" | "prior-close" }) {
   return <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/80 text-gray-500 font-medium">PRIOR CLOSE</span>;
 }
 
-// ── Raw chain – card-based bid/ask UI (matches BidAskGrids pattern) ──
-function ContractCard({
+// ── Raw chain – compact bid/ask card grid ──────────────────────────
+
+/** Single contract mini-card: label, ask/bid stacked, vol+OI footer */
+function MiniCard({
   contract,
   label,
   isAtm,
@@ -417,57 +419,45 @@ function ContractCard({
   label: string;
   isAtm: boolean;
 }) {
-  const empty = !contract;
+  if (!contract) {
+    return (
+      <div className="border border-gray-800 rounded bg-gray-900/50 flex flex-col items-center justify-center min-h-[68px]">
+        <span className="text-[11px] text-gray-600">{label}</span>
+        <span className="text-gray-700">—</span>
+      </div>
+    );
+  }
   return (
     <div
-      className={`border rounded-lg overflow-hidden flex-1 min-w-[140px] max-w-[220px] ${
-        isAtm
-          ? "border-cyan-700/60 bg-gray-800/60"
-          : "border-gray-700 bg-gray-900"
+      className={`border rounded overflow-hidden ${
+        isAtm ? "border-cyan-700/50" : "border-gray-700"
       }`}
     >
-      {/* Label header */}
+      {/* Label */}
       <div
-        className={`px-3 py-1.5 text-center text-xs font-semibold border-b ${
+        className={`text-center text-[11px] font-semibold py-0.5 border-b ${
           isAtm
-            ? "bg-cyan-900/30 text-cyan-300 border-cyan-700/40"
-            : "bg-gray-800 text-gray-300 border-gray-700"
+            ? "bg-cyan-900/25 text-cyan-300 border-cyan-800/40"
+            : "bg-gray-800/80 text-gray-400 border-gray-700"
         }`}
       >
         {label}
       </div>
-      {empty ? (
-        <div className="px-3 py-5 text-center text-gray-700 text-sm">—</div>
-      ) : (
-        <>
-          {/* Ask row (red) */}
-          <div className="bg-red-900/20 px-4 py-2 flex justify-between items-baseline">
-            <span className="text-[11px] text-gray-500 uppercase">Ask</span>
-            <span className="text-base font-mono text-red-400 font-semibold">
-              ${contract.ask.toFixed(2)}
-            </span>
-          </div>
-          {/* Bid row (blue) */}
-          <div className="bg-blue-900/20 px-4 py-2 flex justify-between items-baseline">
-            <span className="text-[11px] text-gray-500 uppercase">Bid</span>
-            <span className="text-base font-mono text-blue-400 font-semibold">
-              ${contract.bid.toFixed(2)}
-            </span>
-          </div>
-          {/* Vol / OI footer */}
-          <div className="px-3 py-1.5 text-xs text-gray-400 text-center border-t border-gray-700 font-mono">
-            V {contract.volume ?? 0}
-            <span className="mx-2 text-gray-700">|</span>
-            OI {(contract.open_interest ?? 0).toLocaleString()}
-          </div>
-          {/* IV footer */}
-          {contract.implied_vol != null && contract.implied_vol > 0 && (
-            <div className="px-3 pb-1.5 text-[11px] text-gray-500 text-center font-mono">
-              IV {(contract.implied_vol * 100).toFixed(0)}%
-            </div>
-          )}
-        </>
-      )}
+      {/* Ask / Bid stacked */}
+      <div className="bg-red-900/15 px-2 py-[3px] flex justify-between items-baseline">
+        <span className="text-red-400 font-mono text-sm font-semibold">
+          ${contract.ask.toFixed(2)}
+        </span>
+      </div>
+      <div className="bg-blue-900/15 px-2 py-[3px] flex justify-between items-baseline">
+        <span className="text-blue-400 font-mono text-sm font-semibold">
+          ${contract.bid.toFixed(2)}
+        </span>
+      </div>
+      {/* Vol · OI */}
+      <div className="px-1.5 py-[2px] text-[10px] text-gray-500 text-center font-mono border-t border-gray-800">
+        V {contract.volume ?? 0} · OI {(contract.open_interest ?? 0).toLocaleString()}
+      </div>
     </div>
   );
 }
@@ -481,7 +471,6 @@ function RawChainTable({
 }) {
   if (!contracts || contracts.length === 0) return null;
 
-  // Group by expiration
   const byExpiry: Record<string, { calls: RawChainContract[]; puts: RawChainContract[] }> = {};
   for (const c of contracts) {
     if (!byExpiry[c.expiry]) byExpiry[c.expiry] = { calls: [], puts: [] };
@@ -493,7 +482,7 @@ function RawChainTable({
   const expirations = Object.keys(byExpiry).sort();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {expirations.map((expiry) => {
         const { calls, puts } = byExpiry[expiry];
         const dte = parseDte(expiry);
@@ -504,67 +493,109 @@ function RawChainTable({
         );
 
         return (
-          <div key={expiry}>
-            {/* Expiration header */}
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-base font-bold text-gray-100">
+          <div
+            key={expiry}
+            className="bg-gray-900/50 border border-gray-800 rounded-lg overflow-hidden"
+          >
+            {/* Expiration header bar */}
+            <div className="px-3 py-1.5 bg-gray-800/60 border-b border-gray-700 flex items-center justify-between">
+              <span className="text-sm font-bold text-gray-100">
                 {formatExpiry(expiry)}{" "}
                 <span className="text-gray-500 font-normal">({dte}d)</span>
-              </h4>
-              <span className="text-xs text-gray-500">
+              </span>
+              <span className="text-[11px] text-gray-500">
                 {calls.length}C / {puts.length}P
               </span>
             </div>
 
-            {/* One row per strike */}
-            <div className="space-y-4">
-              {strikes.map((strike) => {
-                const call = callByStrike.get(strike);
-                const put = putByStrike.get(strike);
-                const isAtm =
-                  dealPrice != null &&
-                  Math.abs(strike - dealPrice) <=
-                    (allStrikes.length > 1
-                      ? Math.abs(allStrikes[1] - allStrikes[0]) / 2
-                      : 0.5);
-
-                const strikeDisplay =
-                  strike % 1 === 0
-                    ? strike.toFixed(0)
-                    : parseFloat(strike.toFixed(2)).toString();
-
-                return (
-                  <div key={strike} className="flex items-stretch gap-3">
-                    {/* Call card */}
-                    <ContractCard
-                      contract={call}
-                      label={`${strikeDisplay}C`}
-                      isAtm={isAtm}
-                    />
-                    {/* Strike center divider */}
-                    <div className="flex flex-col items-center justify-center min-w-[60px]">
+            {/* Strike grid: columns = strikes, rows = calls then puts */}
+            <div className="p-2">
+              {/* Header row: strike labels */}
+              <div
+                className="grid gap-2 mb-1"
+                style={{ gridTemplateColumns: `repeat(${strikes.length}, minmax(0, 1fr))` }}
+              >
+                {strikes.map((strike) => {
+                  const isAtm =
+                    dealPrice != null &&
+                    Math.abs(strike - dealPrice) <=
+                      (allStrikes.length > 1
+                        ? Math.abs(allStrikes[1] - allStrikes[0]) / 2
+                        : 0.5);
+                  const sd =
+                    strike % 1 === 0
+                      ? strike.toFixed(0)
+                      : parseFloat(strike.toFixed(2)).toString();
+                  return (
+                    <div key={strike} className="text-center">
                       <span
-                        className={`text-lg font-bold font-mono ${
+                        className={`text-sm font-bold font-mono ${
                           isAtm ? "text-cyan-400" : "text-gray-300"
                         }`}
                       >
-                        {strikeDisplay}
+                        {sd}
                       </span>
                       {isAtm && (
-                        <span className="text-[10px] text-cyan-600 mt-0.5">
-                          ATM
-                        </span>
+                        <span className="text-[9px] text-cyan-600 ml-1">ATM</span>
                       )}
                     </div>
-                    {/* Put card */}
-                    <ContractCard
-                      contract={put}
-                      label={`${strikeDisplay}P`}
+                  );
+                })}
+              </div>
+
+              {/* Calls row */}
+              <div
+                className="grid gap-2 mb-1.5"
+                style={{ gridTemplateColumns: `repeat(${strikes.length}, minmax(0, 1fr))` }}
+              >
+                {strikes.map((strike) => {
+                  const isAtm =
+                    dealPrice != null &&
+                    Math.abs(strike - dealPrice) <=
+                      (allStrikes.length > 1
+                        ? Math.abs(allStrikes[1] - allStrikes[0]) / 2
+                        : 0.5);
+                  const sd =
+                    strike % 1 === 0
+                      ? strike.toFixed(0)
+                      : parseFloat(strike.toFixed(2)).toString();
+                  return (
+                    <MiniCard
+                      key={`c-${strike}`}
+                      contract={callByStrike.get(strike)}
+                      label={`${sd}C`}
                       isAtm={isAtm}
                     />
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+
+              {/* Puts row */}
+              <div
+                className="grid gap-2"
+                style={{ gridTemplateColumns: `repeat(${strikes.length}, minmax(0, 1fr))` }}
+              >
+                {strikes.map((strike) => {
+                  const isAtm =
+                    dealPrice != null &&
+                    Math.abs(strike - dealPrice) <=
+                      (allStrikes.length > 1
+                        ? Math.abs(allStrikes[1] - allStrikes[0]) / 2
+                        : 0.5);
+                  const sd =
+                    strike % 1 === 0
+                      ? strike.toFixed(0)
+                      : parseFloat(strike.toFixed(2)).toString();
+                  return (
+                    <MiniCard
+                      key={`p-${strike}`}
+                      contract={putByStrike.get(strike)}
+                      label={`${sd}P`}
+                      isAtm={isAtm}
+                    />
+                  );
+                })}
+              </div>
             </div>
           </div>
         );
