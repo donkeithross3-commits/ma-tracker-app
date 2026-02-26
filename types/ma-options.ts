@@ -266,6 +266,18 @@ export interface ChainSummary {
   contracts_with_quotes: number;
 }
 
+export interface RawChainContract {
+  symbol: string;
+  strike: number;
+  expiry: string;
+  right: string;
+  bid: number;
+  ask: number;
+  volume: number;
+  open_interest: number;
+  implied_vol: number | null;
+}
+
 export interface OptionsScanResponse {
   ticker: string;
   deal_price?: number;
@@ -283,6 +295,7 @@ export interface OptionsScanResponse {
     put_spread?: CategoryResult;
   };
   chain_summary?: ChainSummary;
+  raw_chain?: RawChainContract[];
   total_opportunities: number;
   scan_time_ms: number;
 }

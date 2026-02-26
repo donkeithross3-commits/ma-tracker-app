@@ -8,6 +8,7 @@ import type {
   OptionsScanErrorCode,
   CategoryResult,
   OpportunityResult,
+  RawChainContract,
 } from "@/types/ma-options";
 
 // ── Category metadata ──────────────────────────────────────────────
@@ -406,6 +407,174 @@ function ProvenancePill({ type }: { type: "ai" | "live" | "prior-close" }) {
   return <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/80 text-gray-500 font-medium">PRIOR CLOSE</span>;
 }
 
+// ── Raw chain table (traditional options chain view) ─────────────
+function RawChainTable({
+  contracts,
+  dealPrice,
+}: {
+  contracts: RawChainContract[];
+  dealPrice?: number;
+}) {
+  if (!contracts || contracts.length === 0) return null;
+
+  // Group by expiration
+  const byExpiry: Record<string, { calls: RawChainContract[]; puts: RawChainContract[] }> = {};
+  for (const c of contracts) {
+    if (!byExpiry[c.expiry]) byExpiry[c.expiry] = { calls: [], puts: [] };
+    if (c.right === "C") byExpiry[c.expiry].calls.push(c);
+    else byExpiry[c.expiry].puts.push(c);
+  }
+
+  // Collect all unique strikes across all expirations
+  const allStrikes = [...new Set(contracts.map((c) => c.strike))].sort((a, b) => a - b);
+
+  const expirations = Object.keys(byExpiry).sort();
+
+  return (
+    <div className="space-y-3">
+      {expirations.map((expiry) => {
+        const { calls, puts } = byExpiry[expiry];
+        const dte = parseDte(expiry);
+        const callByStrike = new Map(calls.map((c) => [c.strike, c]));
+        const putByStrike = new Map(puts.map((c) => [c.strike, c]));
+        // Only show strikes that exist in this expiration
+        const strikes = allStrikes.filter(
+          (s) => callByStrike.has(s) || putByStrike.has(s)
+        );
+
+        return (
+          <div
+            key={expiry}
+            className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden"
+          >
+            <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between">
+              <span className="text-sm font-bold text-gray-100">
+                {formatExpiry(expiry)}{" "}
+                <span className="text-gray-500 font-normal">({dte}d)</span>
+              </span>
+              <span className="text-[11px] text-gray-500">
+                {calls.length}C / {puts.length}P
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-800/50">
+                  <tr className="border-b border-gray-700">
+                    {/* Calls side */}
+                    <th className="text-right py-1.5 px-2 text-gray-500">OI</th>
+                    <th className="text-right py-1.5 px-2 text-gray-500">Vol</th>
+                    <th className="text-right py-1.5 px-2 text-gray-500">Bid</th>
+                    <th className="text-right py-1.5 px-2 text-gray-500">Ask</th>
+                    <th className="text-right py-1.5 px-2 text-gray-500">IV</th>
+                    {/* Strike */}
+                    <th className="text-center py-1.5 px-2 text-gray-300 font-bold border-x border-gray-700">
+                      Strike
+                    </th>
+                    {/* Puts side */}
+                    <th className="text-right py-1.5 px-2 text-gray-500">IV</th>
+                    <th className="text-right py-1.5 px-2 text-gray-500">Bid</th>
+                    <th className="text-right py-1.5 px-2 text-gray-500">Ask</th>
+                    <th className="text-right py-1.5 px-2 text-gray-500">Vol</th>
+                    <th className="text-right py-1.5 px-2 text-gray-500">OI</th>
+                  </tr>
+                  <tr className="border-b border-gray-700">
+                    <th colSpan={5} className="text-center py-0.5 text-[10px] text-blue-400/60 uppercase tracking-widest">
+                      Calls
+                    </th>
+                    <th className="border-x border-gray-700" />
+                    <th colSpan={5} className="text-center py-0.5 text-[10px] text-orange-400/60 uppercase tracking-widest">
+                      Puts
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {strikes.map((strike) => {
+                    const call = callByStrike.get(strike);
+                    const put = putByStrike.get(strike);
+                    const isAtm =
+                      dealPrice != null &&
+                      Math.abs(strike - dealPrice) <=
+                        (allStrikes.length > 1
+                          ? Math.abs(allStrikes[1] - allStrikes[0]) / 2
+                          : 0.5);
+
+                    return (
+                      <tr
+                        key={strike}
+                        className={`border-b border-gray-800 hover:bg-gray-800/40 ${
+                          isAtm ? "bg-gray-800/30" : ""
+                        }`}
+                      >
+                        {/* Call side */}
+                        <Cell val={call?.open_interest} dim />
+                        <Cell val={call?.volume} dim />
+                        <Cell val={call?.bid} dollar green />
+                        <Cell val={call?.ask} dollar />
+                        <Cell val={call?.implied_vol} pct dim />
+                        {/* Strike */}
+                        <td
+                          className={`text-center py-1.5 px-2 font-mono font-bold border-x border-gray-700 ${
+                            isAtm ? "text-cyan-400" : "text-gray-200"
+                          }`}
+                        >
+                          {strike.toFixed(2)}
+                        </td>
+                        {/* Put side */}
+                        <Cell val={put?.implied_vol} pct dim />
+                        <Cell val={put?.bid} dollar green />
+                        <Cell val={put?.ask} dollar />
+                        <Cell val={put?.volume} dim />
+                        <Cell val={put?.open_interest} dim />
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Cell({
+  val,
+  dollar,
+  pct,
+  green,
+  dim,
+}: {
+  val?: number | null;
+  dollar?: boolean;
+  pct?: boolean;
+  green?: boolean;
+  dim?: boolean;
+}) {
+  if (val == null || val === 0)
+    return (
+      <td className="text-right py-1.5 px-2 font-mono text-gray-700">-</td>
+    );
+  let display: string;
+  if (pct) display = `${(val * 100).toFixed(0)}%`;
+  else if (dollar) display = val.toFixed(2);
+  else display = val.toLocaleString();
+
+  return (
+    <td
+      className={`text-right py-1.5 px-2 font-mono ${
+        green && val > 0
+          ? "text-green-400"
+          : dim
+            ? "text-gray-500"
+            : "text-gray-300"
+      }`}
+    >
+      {display}
+    </td>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────
 export default function DealOptionsPage() {
   const params = useParams();
@@ -614,48 +783,61 @@ export default function DealOptionsPage() {
           </div>
         )}
 
-        {/* Chain summary — optionable but no strategies */}
-        {data && data.optionable && data.total_opportunities === 0 && !loading && (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-            <div className="text-sm text-gray-300 font-medium mb-1">
-              Options chain available — no actionable strategies found
-            </div>
-            {data.chain_summary && (
-              <div className="text-xs text-gray-500 space-y-0.5">
-                <div>
-                  {data.chain_summary.total_contracts} contracts across{" "}
-                  {data.chain_summary.expiration_count} expirations
-                  {" "}({data.chain_summary.calls}C / {data.chain_summary.puts}P)
-                </div>
-                <div>
-                  {data.chain_summary.contracts_with_quotes} contracts have bid/ask quotes
-                </div>
-                {data.chain_summary.contracts_with_quotes === 0 && (
-                  <div className="text-yellow-500/80 mt-1">
-                    No contracts are being quoted — this chain is completely illiquid.
+        {/* Raw chain + categories when optionable */}
+        {data && data.optionable && !loading && (() => {
+          const hasStrategies = data.total_opportunities > 0;
+          return (
+            <>
+              {/* When no strategies, show chain summary banner + raw chain */}
+              {!hasStrategies && (
+                <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+                  <div className="text-sm text-gray-300 font-medium mb-1">
+                    Options chain available — no spread or strategy recommendations
                   </div>
-                )}
-                {data.chain_summary.contracts_with_quotes > 0 &&
-                  data.chain_summary.contracts_with_quotes < data.chain_summary.total_contracts * 0.2 && (
-                  <div className="text-yellow-500/80 mt-1">
-                    Very few contracts have active quotes — spreads and strategies can&apos;t be constructed.
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+                  {data.chain_summary && (
+                    <div className="text-xs text-gray-500">
+                      {data.chain_summary.total_contracts} contracts across{" "}
+                      {data.chain_summary.expiration_count} expirations
+                      {" "}({data.chain_summary.calls}C / {data.chain_summary.puts}P)
+                      {data.chain_summary.contracts_with_quotes <
+                        data.chain_summary.total_contracts && (
+                        <span>
+                          {" "}— {data.chain_summary.contracts_with_quotes} with active quotes
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
-        {/* Category sections */}
-        {data &&
-          data.optionable &&
-          sortedCategories.map(([catKey, result]) => (
-            <CategorySection
-              key={catKey}
-              catKey={catKey}
-              result={result as CategoryResult}
-            />
-          ))}
+              {/* Raw option chain table — always show when we have contracts */}
+              {data.raw_chain && data.raw_chain.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold text-gray-300 mb-2">
+                    Option Chain
+                    <span className="text-gray-600 font-normal ml-2 text-xs">
+                      {data.raw_chain.length} contracts
+                    </span>
+                  </h3>
+                  <RawChainTable
+                    contracts={data.raw_chain}
+                    dealPrice={data.deal_price}
+                  />
+                </div>
+              )}
+
+              {/* Strategy category sections */}
+              {hasStrategies &&
+                sortedCategories.map(([catKey, result]) => (
+                  <CategorySection
+                    key={catKey}
+                    catKey={catKey}
+                    result={result as CategoryResult}
+                  />
+                ))}
+            </>
+          );
+        })()}
       </main>
     </div>
   );

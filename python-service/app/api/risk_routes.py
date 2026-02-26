@@ -1338,6 +1338,10 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
         "contracts_with_quotes": len(quoted),
     }
 
+    # Include raw chain contracts sorted by expiry then strike
+    raw_chain = sorted(options, key=lambda c: (c.expiry, c.right, c.strike))
+    raw_contracts = [_option_data_to_dict(c) for c in raw_chain]
+
     scan_time_ms = round((_time.monotonic() - t0) * 1000)
 
     return {
@@ -1350,6 +1354,7 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
         "market_open": market_open,
         "categories": categories,
         "chain_summary": chain_summary,
+        "raw_chain": raw_contracts,
         "total_opportunities": len(all_opps),
         "scan_time_ms": scan_time_ms,
     }
