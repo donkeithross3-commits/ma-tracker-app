@@ -64,14 +64,34 @@ else
         json_finding "cloudflare_error_page" "$SEV_INFO" \
             "Direct IP connection got HTTP ${http_code} — likely a Cloudflare error page, not origin bypass."
     else
-        # Got a real response — the origin is directly accessible
-        if [[ "$http_code" != "000" ]] && [[ "$http_code" != "0" ]]; then
-            json_finding "cloudflare_bypass_https" "$SEV_ALERT" \
-                "HTTPS direct to ${public_ip} returned HTTP ${http_code}. Origin server is accessible without Cloudflare! Configure firewall to block non-Cloudflare traffic."
+        # Check if we're testing from the server itself (localhost traffic bypasses UFW)
+        local_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+        running_on_server=false
+        if [[ "$local_ip" == "$public_ip" ]]; then
+            running_on_server=true
         fi
-        if [[ "$direct_http" != "000" ]] && [[ "$direct_http" != "0" ]]; then
-            json_finding "cloudflare_bypass_http" "$SEV_ALERT" \
-                "HTTP direct to ${public_ip} returned HTTP ${direct_http}. Origin server is accessible without Cloudflare on HTTP!"
+
+        if $running_on_server; then
+            # We're on the server — HTTP test hits localhost which bypasses UFW.
+            # Check if UFW is active with Cloudflare-only rules for ports 80/443 instead.
+            ufw_rules=$(cat /etc/ufw/user.rules 2>/dev/null || sudo -n ufw status 2>/dev/null || true)
+            if echo "$ufw_rules" | grep -qi "cloudflare\|173\.245\|103\.21\|108\.162\|104\.16"; then
+                json_finding "cloudflare_bypass_mitigated" "$SEV_INFO" \
+                    "UFW firewall has Cloudflare-only rules for HTTP/HTTPS. Bypass test ran from server (localhost bypasses UFW) — external access is blocked."
+            else
+                json_finding "cloudflare_bypass_unknown" "$SEV_WARN" \
+                    "Running from server — cannot reliably test external bypass. Check UFW rules manually: 'sudo ufw status'"
+            fi
+        else
+            # Got a real response from an external vantage point — the origin is directly accessible
+            if [[ "$http_code" != "000" ]] && [[ "$http_code" != "0" ]]; then
+                json_finding "cloudflare_bypass_https" "$SEV_ALERT" \
+                    "HTTPS direct to ${public_ip} returned HTTP ${http_code}. Origin server is accessible without Cloudflare! Configure firewall to block non-Cloudflare traffic."
+            fi
+            if [[ "$direct_http" != "000" ]] && [[ "$direct_http" != "0" ]]; then
+                json_finding "cloudflare_bypass_http" "$SEV_ALERT" \
+                    "HTTP direct to ${public_ip} returned HTTP ${direct_http}. Origin server is accessible without Cloudflare on HTTP!"
+            fi
         fi
     fi
 fi

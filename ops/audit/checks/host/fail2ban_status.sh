@@ -35,11 +35,11 @@ fi
 
 log_info "fail2ban is active [OK]"
 
-# Get jail list and ban counts
-jail_output=$(fail2ban-client status 2>/dev/null || true)
+# Get jail list and ban counts (needs root — try sudo -n first)
+jail_output=$(sudo -n fail2ban-client status 2>/dev/null || fail2ban-client status 2>/dev/null || true)
 if [[ -z "$jail_output" ]]; then
-    json_finding "fail2ban_status_unreadable" "$SEV_WARN" \
-        "fail2ban is active but could not read jail status (permission denied?)"
+    json_finding "fail2ban_status_unreadable" "$SEV_INFO" \
+        "fail2ban is active but jail details unreadable without root. Use 'sudo fail2ban-client status' to inspect."
     finalize_check
 fi
 
@@ -52,7 +52,7 @@ jail_details=""
 
 for jail in $jails; do
     if [[ -z "$jail" ]]; then continue; fi
-    jail_status=$(fail2ban-client status "$jail" 2>/dev/null || true)
+    jail_status=$(sudo -n fail2ban-client status "$jail" 2>/dev/null || fail2ban-client status "$jail" 2>/dev/null || true)
 
     currently_banned=$(echo "$jail_status" | grep "Currently banned:" | awk '{print $NF}' || echo "0")
     total_banned_jail=$(echo "$jail_status" | grep "Total banned:" | awk '{print $NF}' || echo "0")

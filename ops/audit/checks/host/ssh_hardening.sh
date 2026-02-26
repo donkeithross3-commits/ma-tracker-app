@@ -14,14 +14,24 @@ SETTINGS_KEYS=( PermitRootLogin PasswordAuthentication PubkeyAuthentication X11F
 SETTINGS_VALS=( no              no                     yes                  no             no                  )
 MAX_AUTH_TRIES=5
 
-# Try sshd -T first (canonical runtime config), fall back to config file
+# Try sshd -T first (canonical runtime config — needs root), fall back to config files
 SSHD_CONFIG=""
 if command -v sshd &>/dev/null; then
     SSHD_CONFIG=$(sshd -T 2>/dev/null || true)
 fi
 
-if [[ -z "$SSHD_CONFIG" ]] && [[ -f /etc/ssh/sshd_config ]]; then
-    SSHD_CONFIG=$(cat /etc/ssh/sshd_config 2>/dev/null || true)
+if [[ -z "$SSHD_CONFIG" ]]; then
+    # sshd -T failed (needs root) — read config files directly
+    # Main config + all drop-in files in sshd_config.d/ (later files override earlier)
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        SSHD_CONFIG=$(cat /etc/ssh/sshd_config 2>/dev/null || true)
+    fi
+    # Append drop-in configs — these override the main config
+    if [[ -d /etc/ssh/sshd_config.d ]]; then
+        for conf in /etc/ssh/sshd_config.d/*.conf; do
+            [[ -f "$conf" ]] && SSHD_CONFIG+=$'\n'"$(cat "$conf" 2>/dev/null || true)"
+        done
+    fi
 fi
 
 if [[ -z "$SSHD_CONFIG" ]]; then

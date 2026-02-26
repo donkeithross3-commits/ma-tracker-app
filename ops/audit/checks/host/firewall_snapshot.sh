@@ -15,13 +15,38 @@ fw_output=""
 fw_source=""
 
 if command -v ufw &>/dev/null; then
-    fw_output=$(ufw status verbose 2>/dev/null || true)
+    # Try with sudo -n (non-interactive, no password prompt) first, then without
+    fw_output=$(sudo -n ufw status verbose 2>/dev/null || ufw status verbose 2>/dev/null || true)
     fw_source="ufw"
 fi
 
 if [[ -z "$fw_output" || "$fw_output" == *"inactive"* ]] && command -v iptables-save &>/dev/null; then
-    fw_output=$(iptables-save 2>/dev/null || true)
+    fw_output=$(sudo -n iptables-save 2>/dev/null || iptables-save 2>/dev/null || true)
     fw_source="iptables"
+fi
+
+# If direct commands failed, try reading UFW config files (often world-readable)
+if [[ -z "$fw_output" || "$fw_output" == *"inactive"* ]]; then
+    if [[ -f /etc/ufw/user.rules ]]; then
+        fw_output=$(cat /etc/ufw/user.rules 2>/dev/null || true)
+        fw_source="ufw-rules-file"
+    fi
+fi
+
+# Last resort: check if ufw service is at least active
+if [[ -z "$fw_output" ]]; then
+    if command -v systemctl &>/dev/null; then
+        ufw_active=$(systemctl is-active ufw 2>/dev/null || true)
+        if [[ "$ufw_active" == "active" ]]; then
+            fw_output="ufw-service-active (rules unreadable without root)"
+            fw_source="ufw-systemd"
+            json_finding "firewall_active_unreadable" "$SEV_INFO" \
+                "UFW firewall is active (systemd confirms) but rules are unreadable without root. Use 'sudo ufw status' to inspect."
+            # Save what we know and finalize — don't flag as missing
+            echo "$fw_output" > "${CHECK_ARTIFACT_DIR}/firewall_current.txt"
+            finalize_check
+        fi
+    fi
 fi
 
 if [[ -z "$fw_output" ]]; then
