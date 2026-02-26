@@ -1025,7 +1025,7 @@ class IBDataAgent:
                     recovered += 1
                     logger.info("Recovered risk manager %s (remaining=%d)", pos_id, rm.remaining_qty)
 
-                    # Populate parent BMC strategy's _active_positions list
+                    # Populate parent BMC strategy's _active_positions list + counter
                     parent = pos.get("parent_strategy", "")
                     parent_state = self.execution_engine._strategies.get(parent)
                     if parent_state and hasattr(parent_state.strategy, "_active_positions"):
@@ -1037,6 +1037,8 @@ class IBDataAgent:
                             "fill_time": entry_info.get("fill_time", 0),
                             "perm_id": entry_info.get("perm_id", 0),
                         })
+                        if hasattr(parent_state.strategy, "_positions_spawned"):
+                            parent_state.strategy._positions_spawned += 1
                 except Exception as e:
                     logger.error("Error recovering position %s: %s", pos_id, e)
             if recovered > 0:

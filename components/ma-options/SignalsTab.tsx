@@ -693,11 +693,14 @@ export default function SignalsTab() {
     const fills: (FillLogEntry & { source: string })[] = [];
     for (const s of riskStrategies) {
       const rm = s.strategy_state as RiskManagerState;
+      // Only collect exit fills from risk managers — entries come from BMC below
       for (const f of rm.fill_log || []) {
-        fills.push({ ...f, source: s.strategy_id });
+        if (f.level !== "entry") {
+          fills.push({ ...f, source: s.strategy_id });
+        }
       }
     }
-    // Add entry fills from BMC positions
+    // Entry fills from BMC positions (single source of truth for entries)
     for (const pos of signal?.active_positions || []) {
       fills.push({
         time: pos.fill_time,
