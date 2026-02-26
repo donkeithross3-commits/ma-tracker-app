@@ -1219,7 +1219,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         with self._commission_lock:
             return self._commission_reports.get(exec_id)
 
-    def fetch_executions_sync(self, timeout_sec: float = 10.0) -> List[dict]:
+    def fetch_executions_sync(self, timeout_sec: float = 10.0, acct_code: str = "") -> List[dict]:
         """Batch fetch all executions from IB for the current session.
 
         Uses reqExecutions() to get historical fills. Returns list of dicts,
@@ -1234,7 +1234,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._batch_exec_req_id = req_id
 
         try:
-            self.reqExecutions(req_id, ExecutionFilter())
+            filt = ExecutionFilter()
+            if acct_code:
+                filt.acctCode = acct_code
+            self.reqExecutions(req_id, filt)
             if not self._batch_exec_done.wait(timeout=timeout_sec):
                 self.logger.warning("fetch_executions_sync: timed out after %.1fs", timeout_sec)
 
