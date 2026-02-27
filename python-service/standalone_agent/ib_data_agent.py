@@ -337,6 +337,10 @@ class IBDataAgent:
                 return await self._handle_execution_remove_ticker(payload)
             elif request_type == "execution_close_position":
                 return await self._handle_close_position(payload)
+            elif request_type == "execution_list_models":
+                return await self._handle_execution_list_models(payload)
+            elif request_type == "execution_swap_model":
+                return await self._handle_execution_swap_model(payload)
             elif request_type == "get_ib_executions":
                 return await self._run_in_thread(self._handle_get_ib_executions_sync, payload)
             else:
@@ -1326,6 +1330,62 @@ class IBDataAgent:
         })
         self.position_store.mark_closed(position_id)
         return {"success": True, "position_id": position_id, "status": "closed"}
+
+    async def _handle_execution_list_models(self, payload: dict) -> dict:
+        """List available models from the registry for a running strategy.
+
+        Payload:
+            strategy_id: str (e.g. "bmc_spy")
+            ticker: str (optional filter, default="" = all)
+        """
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+        if not self.execution_engine.is_running:
+            return {"error": "Execution engine is not running"}
+
+        strategy_id = payload.get("strategy_id", "")
+        ticker = payload.get("ticker", "")
+        if not strategy_id:
+            return {"error": "strategy_id is required"}
+
+        state = self.execution_engine._strategies.get(strategy_id)
+        if state is None:
+            return {"error": f"Strategy {strategy_id} not found"}
+
+        if not hasattr(state.strategy, "list_available_models"):
+            return {"error": f"Strategy {strategy_id} does not support model listing"}
+
+        models = await self._run_in_thread(state.strategy.list_available_models, ticker)
+        return {"models": models, "strategy_id": strategy_id}
+
+    async def _handle_execution_swap_model(self, payload: dict) -> dict:
+        """Hot-swap the model on a running strategy.
+
+        Payload:
+            strategy_id: str (e.g. "bmc_spy")
+            version_id: str (registry version to load)
+        """
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+        if not self.execution_engine.is_running:
+            return {"error": "Execution engine is not running"}
+
+        strategy_id = payload.get("strategy_id", "")
+        version_id = payload.get("version_id", "")
+        if not strategy_id:
+            return {"error": "strategy_id is required"}
+        if not version_id:
+            return {"error": "version_id is required"}
+
+        state = self.execution_engine._strategies.get(strategy_id)
+        if state is None:
+            return {"error": f"Strategy {strategy_id} not found"}
+
+        if not hasattr(state.strategy, "swap_model"):
+            return {"error": f"Strategy {strategy_id} does not support model swapping"}
+
+        result = await self._run_in_thread(state.strategy.swap_model, version_id)
+        return result
 
     # IB account dedicated to automated BMC trading
     IB_ACCT_CODE = "U152133"

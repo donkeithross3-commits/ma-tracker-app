@@ -55,7 +55,7 @@ STATUS_REQUESTS = frozenset({
 EXECUTION_REQUESTS = frozenset({
     "execution_start", "execution_stop", "execution_status", "execution_config",
     "execution_budget", "execution_add_ticker", "execution_remove_ticker",
-    "execution_close_position",
+    "execution_close_position", "execution_list_models", "execution_swap_model",
 })
 
 

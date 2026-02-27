@@ -2077,6 +2077,60 @@ async def relay_execution_close_position(request: ExecutionClosePositionRequest)
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ExecutionListModelsRequest(BaseModel):
+    userId: str
+    strategy_id: str
+    ticker: str = ""  # optional filter
+
+
+@router.post("/relay/execution/list-models")
+async def relay_execution_list_models(request: ExecutionListModelsRequest):
+    """List available models from the registry for a running strategy."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_list_models",
+            payload={"strategy_id": request.strategy_id, "ticker": request.ticker},
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/list-models error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ExecutionSwapModelRequest(BaseModel):
+    userId: str
+    strategy_id: str
+    version_id: str
+
+
+@router.post("/relay/execution/swap-model")
+async def relay_execution_swap_model(request: ExecutionSwapModelRequest):
+    """Hot-swap the model on a running strategy without restart."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_swap_model",
+            payload={"strategy_id": request.strategy_id, "version_id": request.version_id},
+            timeout=15.0,  # model loading can take 50-500ms for joblib
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/swap-model error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---------------------------------------------------------------------------
 # BMC (Big Move Convexity) relay endpoints
 # ---------------------------------------------------------------------------

@@ -424,6 +424,27 @@ export default function SignalsTab() {
   // Currently selected ticker tab for viewing signal details
   const [activeTicker, setActiveTicker] = useState("SPY");
 
+  // ── Model chooser state ──
+  const [modelModalOpen, setModelModalOpen] = useState(false);
+  const [modelList, setModelList] = useState<Array<{
+    version_id: string;
+    model_type: string;
+    created_at: string;
+    status: string;
+    ticker: string;
+    recipe_label: string;
+    target_column: string;
+    dataset_version: string;
+    n_features: number;
+    n_samples: number;
+    tags: string[];
+    metrics: Record<string, number | null>;
+    is_current: boolean;
+  }>>([]);
+  const [modelListLoading, setModelListLoading] = useState(false);
+  const [modelSwapping, setModelSwapping] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+
   // ── Poll signal state ──
   const fetchSignal = useCallback(async () => {
     if (document.hidden) return;
@@ -711,6 +732,59 @@ export default function SignalsTab() {
     });
   };
 
+  // ── Model chooser handlers ──
+  const fetchModelList = useCallback(async () => {
+    const strat = strategies.find(s => s.ticker === activeTicker);
+    if (!strat) return;
+    setModelListLoading(true);
+    setModelError(null);
+    try {
+      const res = await fetch("/api/ma-options/execution/list-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy_id: strat.strategy_id, ticker: activeTicker }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.error) {
+        setModelError(data.error);
+      } else {
+        setModelList(data.models || []);
+        setModelModalOpen(true);
+      }
+    } catch (e: any) {
+      setModelError(e.message || "Failed to fetch models");
+    } finally {
+      setModelListLoading(false);
+    }
+  }, [strategies, activeTicker]);
+
+  const swapModel = useCallback(async (versionId: string) => {
+    const strat = strategies.find(s => s.ticker === activeTicker);
+    if (!strat) return;
+    setModelSwapping(true);
+    setModelError(null);
+    try {
+      const res = await fetch("/api/ma-options/execution/swap-model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy_id: strat.strategy_id, version_id: versionId }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.error) {
+        setModelError(data.error);
+      } else {
+        setModelModalOpen(false);
+        // Telemetry will auto-update on next poll (~5s)
+      }
+    } catch (e: any) {
+      setModelError(e.message || "Failed to swap model");
+    } finally {
+      setModelSwapping(false);
+    }
+  }, [strategies, activeTicker]);
+
   // ── Derived: which tickers have running strategies ──
   const runningTickers = useMemo(
     () => strategies.map(s => s.ticker),
@@ -963,9 +1037,20 @@ export default function SignalsTab() {
             <h3 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
               <span>Current Signal {activeTicker && <span className="text-blue-400">({activeTicker})</span>}</span>
               {signal?.model_version && (
-                <span className="text-[10px] text-gray-600 font-normal" title={`Model: ${signal.model_version}`}>
-                  {signal.model_type}/{signal.model_ticker || "?"}
-                </span>
+                running ? (
+                  <button
+                    onClick={fetchModelList}
+                    disabled={modelListLoading}
+                    className="text-[10px] text-gray-500 hover:text-blue-400 font-normal transition-colors cursor-pointer inline-flex items-center gap-0.5"
+                    title={`Model: ${signal.model_version} — click to browse/swap`}
+                  >
+                    {signal.model_type}/{signal.model_ticker || "?"} {modelListLoading ? "..." : "▾"}
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-gray-600 font-normal" title={`Model: ${signal.model_version}`}>
+                    {signal.model_type}/{signal.model_ticker || "?"}
+                  </span>
+                )
               )}
             </h3>
             {currentSig ? (
@@ -1726,6 +1811,115 @@ export default function SignalsTab() {
           )}
         </div>
       </div>
+
+      {/* ── Model Chooser Modal ── */}
+      {modelModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => { if (!modelSwapping) setModelModalOpen(false); }}
+        >
+          <div
+            className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl w-[700px] max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+              <h3 className="text-sm font-medium text-gray-200">
+                Available Models {activeTicker && <span className="text-blue-400">({activeTicker})</span>}
+              </h3>
+              <button
+                onClick={() => setModelModalOpen(false)}
+                disabled={modelSwapping}
+                className="text-gray-500 hover:text-gray-300 text-lg leading-none px-1"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Error */}
+            {modelError && (
+              <div className="mx-4 mt-2 bg-red-900/30 border border-red-800 text-red-300 text-xs px-2 py-1 rounded">
+                {modelError}
+              </div>
+            )}
+
+            {/* Table */}
+            <div className="overflow-auto flex-1 px-4 py-2">
+              {modelList.length === 0 ? (
+                <div className="text-gray-500 text-sm py-4 text-center">No models found in registry</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-500 border-b border-gray-800">
+                      <th className="text-left py-1.5 px-1">Version</th>
+                      <th className="text-left py-1.5 px-1">Type</th>
+                      <th className="text-left py-1.5 px-1">Recipe</th>
+                      <th className="text-left py-1.5 px-1">Date</th>
+                      <th className="text-left py-1.5 px-1">Status</th>
+                      <th className="text-right py-1.5 px-1">AUC</th>
+                      <th className="text-right py-1.5 px-1">PF</th>
+                      <th className="text-center py-1.5 px-1 w-16">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modelList.map(m => (
+                      <tr
+                        key={m.version_id}
+                        className={`border-b border-gray-800/50 ${m.is_current ? "bg-blue-900/20" : "hover:bg-gray-800/50"}`}
+                      >
+                        <td className="py-1.5 px-1 font-mono text-gray-300" title={m.version_id}>
+                          {m.version_id.length > 20 ? m.version_id.slice(0, 20) + "..." : m.version_id}
+                        </td>
+                        <td className="py-1.5 px-1 text-gray-400">{m.model_type}</td>
+                        <td className="py-1.5 px-1 text-gray-400" title={m.recipe_label}>
+                          {m.recipe_label ? (m.recipe_label.length > 24 ? m.recipe_label.slice(0, 24) + "..." : m.recipe_label) : "\u2014"}
+                        </td>
+                        <td className="py-1.5 px-1 text-gray-500">
+                          {m.created_at ? m.created_at.slice(0, 10) : "\u2014"}
+                        </td>
+                        <td className="py-1.5 px-1">
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                            m.status === "active" ? "bg-green-900/50 text-green-400" :
+                            m.status === "candidate" ? "bg-yellow-900/50 text-yellow-400" :
+                            "bg-gray-800 text-gray-500"
+                          }`}>
+                            {m.status || "unknown"}
+                          </span>
+                        </td>
+                        <td className="py-1.5 px-1 text-right text-gray-300 font-mono">
+                          {m.metrics?.auc_roc != null ? m.metrics.auc_roc.toFixed(3) : "\u2014"}
+                        </td>
+                        <td className="py-1.5 px-1 text-right text-gray-300 font-mono">
+                          {m.metrics?.profit_factor != null ? m.metrics.profit_factor.toFixed(2) : "\u2014"}
+                        </td>
+                        <td className="py-1.5 px-1 text-center">
+                          {m.is_current ? (
+                            <span className="text-[10px] text-blue-400 font-medium">current</span>
+                          ) : (
+                            <button
+                              onClick={() => swapModel(m.version_id)}
+                              disabled={modelSwapping}
+                              className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-900/50 text-blue-300 hover:bg-blue-800/60 border border-blue-700/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {modelSwapping ? "..." : "Load"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-4 py-2 border-t border-gray-800 text-[10px] text-gray-600">
+              {modelList.length} model{modelList.length !== 1 ? "s" : ""} in registry
+              {modelSwapping && <span className="ml-2 text-yellow-500">Swapping model...</span>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

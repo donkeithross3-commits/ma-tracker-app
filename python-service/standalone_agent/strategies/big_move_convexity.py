@@ -270,6 +270,25 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Pending lineage snapshot (built on signal fire, consumed by on_fill)
         self._pending_lineage: Optional[dict] = None
 
+        # Taxonomy identity (populated from ModelVersion in _init_bmc_pipeline)
+        self._family_id: str = ""
+        self._recipe_id: str = ""
+        self._recipe_label: str = ""
+        self._checkpoint_status: str = ""
+        self._target_column: str = ""
+        self._dataset_version: str = ""
+        self._bar_type: str = ""
+
+        # Session tracking
+        self._session_id: str = ""
+        self._segment_idx: int = 0
+        self._signal_counter: int = 0  # per-session signal counter for signal_id
+        self._current_profile_id: str = ""  # tracks current execution profile
+        self._current_profile_label: str = ""
+
+        # Model registry path (stored for hot-swap)
+        self._registry_path: str = ""
+
         # Polygon WS resilience
         self._shutdown_requested: bool = False
         self._polygon_feed_dead: bool = False
@@ -296,6 +315,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
     def on_start(self, config: dict) -> None:
         """Load model, init data pipeline, start Polygon WS background thread."""
         self._start_time = time.time()
+        self._session_id = f"sess:{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         # Merge: _DEFAULTS < ticker profile < user config.
         # This ensures ticker-specific defaults (DTE range, spread limits, etc.)
         # are applied but can be overridden by explicit user config.
@@ -323,14 +343,20 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             self._init_bmc_pipeline(cfg)
             self._start_polygon_ws(cfg)
             self._started = True
+
+            # Compute initial execution profile
+            self._current_profile_id, self._current_profile_label = self._compute_execution_profile(cfg)
+
             logger.info(
                 "BigMoveConvexityStrategy[%s] started: auto_entry=%s, threshold=%.2f, "
-                "interval=%ds, scan=%s-%s, delayed=%s",
+                "interval=%ds, scan=%s-%s, delayed=%s, session=%s, profile=%s",
                 self._ticker,
                 cfg["auto_entry"], cfg["signal_threshold"],
                 cfg["decision_interval_seconds"],
                 cfg["scan_start"], cfg["scan_end"],
                 cfg["use_delayed_data"],
+                self._session_id,
+                self._current_profile_label,
             )
         except Exception as e:
             self._startup_error = str(e)
@@ -348,6 +374,19 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         profile = _get_ticker_profile(self._ticker)
         cfg = {**_DEFAULTS, **profile, **config}
         now = time.time()
+
+        # Detect execution profile changes (segment tracking)
+        # Runs before scan window check so config changes are detected even outside trading window
+        new_profile_id, new_profile_label = self._compute_execution_profile(cfg)
+        if self._current_profile_id and new_profile_id != self._current_profile_id:
+            old_label = self._current_profile_label
+            self._segment_idx += 1
+            self._current_profile_id = new_profile_id
+            self._current_profile_label = new_profile_label
+            self._on_segment_change(old_label, new_profile_label, cfg)
+        elif not self._current_profile_id:
+            self._current_profile_id = new_profile_id
+            self._current_profile_label = new_profile_label
 
         # Check scan window
         if not self._is_in_scan_window(cfg):
@@ -520,6 +559,12 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "model_version": self._model_version,
             "model_ticker": self._model_ticker,
             "model_type": self._model_type,
+            # Taxonomy telemetry
+            "family_id": self._family_id,
+            "recipe_label": self._recipe_label,
+            "session_id": self._session_id,
+            "segment_idx": self._segment_idx,
+            "execution_profile": self._current_profile_label,
         }
 
         # Current signal
@@ -560,6 +605,139 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         return state
 
     # ------------------------------------------------------------------
+    # Hot-swap model management
+    # ------------------------------------------------------------------
+
+    def list_available_models(self, ticker: str = "") -> list[dict]:
+        """List all models in the registry, optionally filtered by ticker.
+
+        Called from agent handler via thread pool (disk I/O for registry read).
+        """
+        if not self._registry_path:
+            return []
+
+        from big_move_convexity.ml.model_registry import ModelRegistry
+
+        registry = ModelRegistry(self._registry_path)
+        all_versions = registry.list_versions()
+
+        result = []
+        for v in all_versions:
+            # Filter by ticker if specified
+            if ticker and v.ticker and v.ticker.upper() != ticker.upper():
+                continue
+
+            entry = {
+                "version_id": v.version_id,
+                "model_type": v.model_type,
+                "created_at": v.created_at,
+                "status": v.status,
+                "ticker": v.ticker,
+                "recipe_label": v.recipe_label,
+                "target_column": v.target_column,
+                "dataset_version": v.dataset_version,
+                "n_features": v.n_features,
+                "n_samples": v.n_samples,
+                "tags": v.tags,
+                "metrics": v.metrics or {},
+                "is_current": v.version_id == self._model_version,
+            }
+            result.append(entry)
+
+        # Sort: current first, then by created_at descending
+        result.sort(key=lambda x: (not x["is_current"], x.get("created_at", "")), reverse=False)
+        result.sort(key=lambda x: x["is_current"], reverse=True)
+
+        return result
+
+    def swap_model(self, version_id: str) -> dict:
+        """Hot-swap the model to a different registry version.
+
+        Atomically replaces self._model under the GIL (single STORE_ATTR op).
+        Called from agent handler via thread pool (disk I/O for model load).
+
+        Returns dict with previous/new version info and swap timing.
+        """
+        if not self._registry_path:
+            return {"error": "No registry path configured"}
+
+        from big_move_convexity.ml.model_registry import ModelRegistry
+
+        t0 = time.time()
+        previous_version = self._model_version
+
+        if version_id == previous_version:
+            return {"error": f"Model {version_id} is already loaded"}
+
+        registry = ModelRegistry(self._registry_path)
+
+        # Validate version exists
+        try:
+            version_meta = registry.get(version_id)
+        except KeyError:
+            return {"error": f"Version {version_id!r} not found in registry"}
+
+        # Validate ticker match (if model has a ticker set)
+        if version_meta.ticker and version_meta.ticker.upper() != self._ticker.upper():
+            return {
+                "error": f"Model ticker mismatch: model is for {version_meta.ticker!r}, "
+                         f"strategy is running {self._ticker!r}"
+            }
+
+        # Load the new model (disk I/O — this is why we run in thread pool)
+        try:
+            new_model = registry.load(version_id)
+        except Exception as e:
+            return {"error": f"Failed to load model {version_id}: {e}"}
+
+        # Update metadata fields first (only read by telemetry/lineage, not eval-hot)
+        self._model_version = version_meta.version_id
+        self._model_ticker = version_meta.ticker
+        self._model_type = new_model.model_type
+        self._family_id = getattr(version_meta, 'family_id', '') or 'bmc-v1'
+        self._recipe_id = getattr(version_meta, 'recipe_id', '')
+        self._recipe_label = getattr(version_meta, 'recipe_label', '')
+        self._checkpoint_status = getattr(version_meta, 'status', '')
+        self._target_column = getattr(version_meta, 'target_column', '')
+        self._dataset_version = getattr(version_meta, 'dataset_version', '')
+        self._bar_type = getattr(version_meta, 'bar_type', '')
+
+        # Cache model metrics
+        self._model_metrics = {}
+        if hasattr(version_meta, 'metrics') and version_meta.metrics:
+            self._model_metrics = {
+                "auc_roc": version_meta.metrics.get("auc_roc"),
+                "profit_factor": version_meta.metrics.get("profit_factor"),
+            }
+
+        # Pre-compute top 20 feature names
+        if hasattr(new_model.model, 'feature_importances_'):
+            importances = new_model.model.feature_importances_
+            sorted_idx = sorted(range(len(importances)), key=lambda i: importances[i], reverse=True)[:20]
+            self._top_feature_names = [new_model.feature_names[i] for i in sorted_idx]
+        else:
+            self._top_feature_names = new_model.feature_names[:20]
+
+        # GIL-atomic swap — single STORE_ATTR bytecode op
+        self._model = new_model
+
+        swap_ms = (time.time() - t0) * 1000
+        logger.info(
+            "Model hot-swapped: %s → %s (type=%s, features=%d, %.1fms)",
+            previous_version, version_id, new_model.model_type,
+            len(new_model.feature_names), swap_ms,
+        )
+
+        return {
+            "success": True,
+            "previous_version": previous_version,
+            "new_version": version_id,
+            "model_type": new_model.model_type,
+            "n_features": len(new_model.feature_names),
+            "swap_time_ms": round(swap_ms, 1),
+        }
+
+    # ------------------------------------------------------------------
     # Internal — BMC pipeline setup
     # ------------------------------------------------------------------
 
@@ -585,6 +763,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         if not registry_path:
             registry_path = os.path.join(_BMC_PATH, "big_move_convexity", "models", "registry")
 
+        self._registry_path = registry_path
         registry = ModelRegistry(registry_path)
         prod_version = registry.get_production(ticker=self._ticker)
         if prod_version is None:
@@ -604,6 +783,15 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             self._model.model_type,
             len(self._model.feature_names),
         )
+
+        # Read taxonomy identity from model version (populated by py_proj training pipeline)
+        self._family_id = getattr(prod_version, 'family_id', '') or 'bmc-v1'
+        self._recipe_id = getattr(prod_version, 'recipe_id', '')
+        self._recipe_label = getattr(prod_version, 'recipe_label', '')
+        self._checkpoint_status = getattr(prod_version, 'status', '')
+        self._target_column = getattr(prod_version, 'target_column', '')
+        self._dataset_version = getattr(prod_version, 'dataset_version', '')
+        self._bar_type = getattr(prod_version, 'bar_type', '')
 
         # Cache model metrics for lineage snapshots
         self._model_metrics = {}
@@ -880,9 +1068,12 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Signal fired!
         self._signals_generated += 1
+        self._signal_counter += 1
+        signal_id = f"sig:{datetime.now().strftime('%Y%m%d-%H%M%S')}-{self._signal_counter:03d}"
+        signal_record["signal_id"] = signal_id
         logger.info(
-            "SIGNAL: direction=%s, probability=%.4f, strength=%.4f",
-            signal.direction, probability, signal.strength,
+            "SIGNAL [%s]: direction=%s, probability=%.4f, strength=%.4f",
+            signal_id, signal.direction, probability, signal.strength,
         )
 
         # Build lineage snapshot on signal fire (WS2) — consumed by on_fill
@@ -1100,6 +1291,71 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             return False
 
     # ------------------------------------------------------------------
+    # Execution profile & segment tracking
+    # ------------------------------------------------------------------
+
+    def _compute_execution_profile(self, cfg: dict) -> tuple[str, str]:
+        """Compute execution profile ID and label from merged config.
+
+        Returns (profile_id_hash, profile_label).
+        """
+        # Keys that define the execution profile
+        profile_keys = {
+            "signal_threshold": cfg.get("signal_threshold", 0.5),
+            "min_signal_strength": cfg.get("min_signal_strength", 0.3),
+            "direction_mode": cfg.get("direction_mode", "both"),
+            "cooldown_minutes": cfg.get("cooldown_minutes", 15),
+            "decision_interval_seconds": cfg.get("decision_interval_seconds", 60),
+            "otm_target_pct": cfg.get("otm_target_pct", 0.20),
+            "contract_budget_usd": cfg.get("contract_budget_usd", 150.0),
+            "max_contracts": cfg.get("max_contracts", 5),
+            "auto_entry": cfg.get("auto_entry", False),
+            "premium_min": cfg.get("premium_min", 0.10),
+            "premium_max": cfg.get("premium_max", 3.00),
+        }
+        # Include risk preset
+        risk_preset = cfg.get("risk_preset", "zero_dte_convexity")
+        profile_keys["risk_preset"] = risk_preset
+
+        # Machine ID: content hash
+        canon = json.dumps(profile_keys, sort_keys=True, default=str)
+        profile_hash = f"ep:{hashlib.sha256(canon.encode()).hexdigest()[:12]}"
+
+        # Human label
+        preset_short = {"zero_dte_convexity": "z0c", "conservative": "con", "custom": "cst"}.get(risk_preset, risk_preset[:3])
+        threshold = int(profile_keys["signal_threshold"] * 100)
+        budget = int(profile_keys["contract_budget_usd"])
+        profile_label = f"ep:{preset_short}-t{threshold}-b{budget}"
+
+        return profile_hash, profile_label
+
+    def _on_segment_change(self, old_profile: str, new_profile: str, cfg: dict) -> None:
+        """Handle execution profile change: log segment_change event."""
+        logger.info(
+            "Segment change: segment=%d, old_profile=%s, new_profile=%s",
+            self._segment_idx, old_profile, new_profile,
+        )
+        # Write segment_change event to signal log
+        try:
+            log_dir = Path(__file__).parent.parent / "signal_logs"
+            log_dir.mkdir(exist_ok=True)
+            log_file = log_dir / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+            event = {
+                "event": "segment_change",
+                "session_id": self._session_id,
+                "segment_idx": self._segment_idx,
+                "old_profile": old_profile,
+                "new_profile": new_profile,
+                "timestamp": datetime.now().isoformat(),
+                "family_id": self._family_id,
+                "model_version": self._model_version,
+            }
+            with open(log_file, "a") as f:
+                f.write(json.dumps(event, default=str) + "\n")
+        except Exception:
+            logger.debug("Failed to write segment_change event", exc_info=True)
+
+    # ------------------------------------------------------------------
     # Signal logging & lineage (WS1, WS2)
     # ------------------------------------------------------------------
 
@@ -1112,6 +1368,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
             entry = {
                 **signal_record,
+                # Taxonomy fields
+                "strategy": "bmc",
+                "family_id": self._family_id,
+                "recipe_id": self._recipe_id,
+                "recipe_label": self._recipe_label,
+                "session_id": self._session_id,
+                "segment_idx": self._segment_idx,
+                "execution_profile_id": self._current_profile_id,
+                "execution_profile_label": self._current_profile_label,
+                # Model identity
                 "model_version": self._model_version,
                 "model_ticker": self._model_ticker,
                 "model_type": self._model_type,
@@ -1146,6 +1412,18 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 pass
 
         return {
+            # Taxonomy identity (6-level hierarchy)
+            "strategy": "bmc",
+            "family_id": self._family_id,
+            "recipe_id": self._recipe_id,
+            "recipe_label": self._recipe_label,
+            "checkpoint_status": self._checkpoint_status,
+            "session_id": self._session_id,
+            "segment_idx": self._segment_idx,
+            "execution_profile_id": self._current_profile_id,
+            "execution_profile_label": self._current_profile_label,
+            "signal_id": signal_record.get("signal_id", ""),
+            # Model identity
             "model_version": self._model_version,
             "model_type": self._model_type,
             "model_ticker": self._model_ticker,
