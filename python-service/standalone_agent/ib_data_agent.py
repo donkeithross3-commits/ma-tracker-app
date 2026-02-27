@@ -1117,6 +1117,17 @@ class IBDataAgent:
                             })
                             if hasattr(parent_state.strategy, "_positions_spawned"):
                                 parent_state.strategy._positions_spawned += 1
+                            # Restore cooldown tracker from the most recent fill time
+                            fill_time = entry_info.get("fill_time", 0)
+                            ticker = instrument.get("symbol", "").upper()
+                            if (
+                                ticker
+                                and hasattr(parent_state.strategy, "_cooldown_tracker")
+                                and fill_time > parent_state.strategy._cooldown_tracker.get(ticker, 0)
+                            ):
+                                parent_state.strategy._cooldown_tracker[ticker] = fill_time
+                                logger.info("Restored cooldown for %s (last fill %.0fs ago)",
+                                            ticker, time.time() - fill_time)
                     except Exception as e:
                         logger.error("Error recovering position %s: %s", pos_id, e)
                 if recovered > 0:
