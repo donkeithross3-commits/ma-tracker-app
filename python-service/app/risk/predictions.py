@@ -9,8 +9,20 @@ import json
 import logging
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
+
+
+def _json_default(o):
+    """Handle Decimal/date/UUID from asyncpg in json.dumps."""
+    if isinstance(o, Decimal):
+        return float(o)
+    if isinstance(o, (date, datetime)):
+        return o.isoformat()
+    if isinstance(o, uuid.UUID):
+        return str(o)
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
 
 VALID_PREDICTION_TYPES = frozenset({
     "deal_closes", "milestone_completion",
@@ -66,58 +78,60 @@ async def store_predictions(
 
     stored = 0
     async with pool.acquire() as conn:
-        for pred in predictions:
-            pred_type = pred.get("type")
-            if pred_type not in VALID_PREDICTION_TYPES:
-                logger.warning("Unknown prediction type: %s", pred_type)
-                continue
+        # Wrap all supersede+insert pairs in a transaction for atomicity
+        async with conn.transaction():
+            for pred in predictions:
+                pred_type = pred.get("type")
+                if pred_type not in VALID_PREDICTION_TYPES:
+                    logger.warning("Unknown prediction type: %s", pred_type)
+                    continue
 
-            probability = pred.get("probability")
-            if probability is None:
-                continue
-            try:
-                probability = float(probability)
-            except (ValueError, TypeError):
-                continue
-            if not (0.0 <= probability <= 1.0):
-                logger.warning("Probability out of range: %s", probability)
-                continue
-
-            confidence = None
-            if pred.get("confidence") is not None:
+                probability = pred.get("probability")
+                if probability is None:
+                    continue
                 try:
-                    confidence = float(pred["confidence"])
+                    probability = float(probability)
                 except (ValueError, TypeError):
-                    pass
+                    continue
+                if not (0.0 <= probability <= 1.0):
+                    logger.warning("Probability out of range: %s", probability)
+                    continue
 
-            by_date = _parse_date(pred.get("by_date"))
-            claim = pred.get("claim", "")
-            evidence = pred.get("evidence", [])
+                confidence = None
+                if pred.get("confidence") is not None:
+                    try:
+                        confidence = float(pred["confidence"])
+                    except (ValueError, TypeError):
+                        pass
 
-            # Supersede previous open predictions of same type for this ticker
-            await conn.execute(
-                """UPDATE deal_predictions
-                   SET status = 'superseded'::prediction_status,
-                       updated_at = NOW()
-                   WHERE ticker = $1
-                     AND prediction_type = $2::prediction_type
-                     AND status = 'open'::prediction_status""",
-                ticker, pred_type,
-            )
+                by_date = _parse_date(pred.get("by_date"))
+                claim = pred.get("claim", "")
+                evidence = pred.get("evidence", [])
 
-            bucket = _get_calibration_bucket(probability)
+                # Supersede previous open predictions of same type for this ticker
+                await conn.execute(
+                    """UPDATE deal_predictions
+                       SET status = 'superseded'::prediction_status,
+                           updated_at = NOW()
+                       WHERE ticker = $1
+                         AND prediction_type = $2::prediction_type
+                         AND status = 'open'::prediction_status""",
+                    ticker, pred_type,
+                )
 
-            await conn.execute(
-                """INSERT INTO deal_predictions
-                   (ticker, assessment_date, assessment_id,
-                    prediction_type, claim, by_date, probability,
-                    confidence, evidence, calibration_bucket)
-                   VALUES ($1, $2, $3,
-                           $4::prediction_type, $5, $6, $7,
-                           $8, $9::jsonb, $10)""",
+                bucket = _get_calibration_bucket(probability)
+
+                await conn.execute(
+                    """INSERT INTO deal_predictions
+                       (ticker, assessment_date, assessment_id,
+                        prediction_type, claim, by_date, probability,
+                        confidence, evidence, calibration_bucket)
+                       VALUES ($1, $2, $3,
+                               $4::prediction_type, $5, $6, $7,
+                               $8, $9::jsonb, $10)""",
                 ticker, assessment_date, assessment_id,
                 pred_type, claim, by_date, probability,
-                confidence, json.dumps(evidence), bucket,
+                confidence, json.dumps(evidence, default=_json_default), bucket,
             )
             stored += 1
 

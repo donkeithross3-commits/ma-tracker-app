@@ -215,7 +215,16 @@ Make 2-5 explicit, falsifiable predictions about this deal. Each prediction must
 - **evidence**: list of 1-3 evidence items (same format as disagreement evidence: source, date, detail)
 
 You MUST include at least one "deal_closes" prediction for every deal.
+You MUST include at least one "spread_direction" or "break_price" prediction.
 If YOUR OPEN PREDICTIONS are shown below, update or supersede them when new evidence changes your view.
+
+### Calibration Guidance (CRITICAL)
+Base-rate: roughly 90% of announced M&A deals close. This means:
+- A probability of 0.90-0.95 is the DEFAULT for a deal with no identified risk factors.
+- Probabilities above 0.95 require STRONG justification (all milestones passed, no open risks).
+- Probabilities below 0.80 require SPECIFIC identified threats (regulatory challenge, financing gap, shareholder opposition).
+- If you assign >0.95 to more than 1 in 5 deals, you are likely overconfident.
+- Spread your predictions across the probability range. Not every deal deserves 0.90+.
 
 ## Three-Signal Triangulation
 

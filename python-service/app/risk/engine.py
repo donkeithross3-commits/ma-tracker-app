@@ -27,6 +27,48 @@ from .prompts import (
 logger = logging.getLogger(__name__)
 
 
+def _extract_json(raw_text: str) -> dict:
+    """Extract a JSON object from Claude's response text.
+
+    Handles common non-compliance:
+    - Markdown ```json ... ``` fences
+    - Preamble/trailing text outside the JSON object
+    - Trailing commas before } or ]
+    """
+    text = raw_text.strip()
+
+    # Strip markdown fences
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+        text = text.strip()
+
+    # First, try direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Find the outermost { ... } to skip preamble/trailing prose
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace >= 0 and last_brace > first_brace:
+        candidate = text[first_brace : last_brace + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+        # Try fixing trailing commas: ,\s*} or ,\s*]
+        fixed = re.sub(r",\s*([}\]])", r"\1", candidate)
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+
+    raise json.JSONDecodeError("No valid JSON object found in response", raw_text, 0)
+
+
 def _safe_json(obj) -> str:
     """json.dumps that handles Decimal and date types from asyncpg."""
     return json.dumps(obj, default=_json_default)
@@ -473,14 +515,9 @@ class RiskAssessmentEngine:
         )
 
         raw_text = response.content[0].text
-        # Strip markdown code fences if present (```json ... ```)
-        stripped = raw_text.strip()
-        if stripped.startswith("```"):
-            stripped = re.sub(r"^```(?:json)?\s*\n?", "", stripped)
-            stripped = re.sub(r"\n?```\s*$", "", stripped)
         try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
+            parsed = _extract_json(raw_text)
+        except (json.JSONDecodeError, ValueError):
             logger.error("Malformed JSON from Claude for %s: %s", ticker, raw_text[:500])
             raise ValueError(f"Claude returned invalid JSON for {ticker}")
 

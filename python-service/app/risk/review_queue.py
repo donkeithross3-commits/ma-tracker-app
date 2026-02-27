@@ -12,9 +12,21 @@ Feature-gated by RISK_REVIEW_QUEUE env var.
 import json
 import logging
 import uuid
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
+
+
+def _json_default(o):
+    """Handle Decimal/date/UUID from asyncpg in json.dumps."""
+    if isinstance(o, Decimal):
+        return float(o)
+    if isinstance(o, (date, datetime)):
+        return o.isoformat()
+    if isinstance(o, uuid.UUID):
+        return str(o)
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
 
 
 async def generate_review_items(pool, run_id: uuid.UUID, run_date: date) -> list[dict]:
@@ -234,7 +246,7 @@ async def _upsert_review_item(
                 assessment_id = EXCLUDED.assessment_id,
                 updated_at = NOW()
         """, ticker, review_date, case_type, priority,
-            json.dumps(context), assessment_id,
+            json.dumps(context, default=_json_default), assessment_id,
         )
         return {
             "ticker": ticker,

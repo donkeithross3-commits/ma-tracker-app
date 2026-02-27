@@ -156,15 +156,11 @@ async def run_batch_assessment(
                 msg = result.result.message
                 raw_text = msg.content[0].text if msg.content else ""
 
-                # Strip markdown fences
-                stripped = raw_text.strip()
-                if stripped.startswith("```"):
-                    stripped = re.sub(r"^```(?:json)?\s*\n?", "", stripped)
-                    stripped = re.sub(r"\n?```\s*$", "", stripped)
-
+                # Parse JSON with robust extraction
                 try:
-                    parsed = json.loads(stripped)
-                except json.JSONDecodeError:
+                    from .engine import _extract_json
+                    parsed = _extract_json(raw_text)
+                except (json.JSONDecodeError, ValueError):
                     logger.error("Malformed JSON in batch for %s: %s", ticker, raw_text[:500])
                     results[ticker] = {
                         "_meta": {"error": "invalid_json", "model": model},
