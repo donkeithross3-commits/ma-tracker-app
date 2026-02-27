@@ -30,9 +30,9 @@ async def get_backfill_candidates(pool) -> list[dict]:
                 sd.detected_at::date AS removed_date,
                 sd.snapshot_id
             FROM sheet_diffs sd
-            LEFT JOIN deal_outcomes do ON do.ticker = sd.ticker
+            LEFT JOIN deal_outcomes dout ON dout.ticker = sd.ticker
             WHERE sd.diff_type = 'removed'
-              AND do.ticker IS NULL
+              AND dout.ticker IS NULL
             ORDER BY sd.ticker, sd.detected_at DESC
         """)
 
