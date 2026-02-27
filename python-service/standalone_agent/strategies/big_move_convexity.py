@@ -88,8 +88,8 @@ _DEFAULTS: dict[str, Any] = {
     "decision_interval_seconds": 60,   # 1 minute
     "max_contracts": 5,
     "contract_budget_usd": 150.0,
-    "scan_start": "13:30",            # HH:MM ET
-    "scan_end": "15:55",
+    "scan_start": "09:35",            # HH:MM ET — all-day trading
+    "scan_end": "15:45",              # 15 min before close for 0DTE safety
     "otm_target_pct": 0.20,           # 20bp OTM
     "auto_entry": False,              # paper trading safety
     "model_registry_path": "",        # auto-resolved if empty
@@ -120,8 +120,8 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.05,               # tight bid-ask ($0.01-$0.03 typical)
         "premium_min": 0.10,
         "premium_max": 3.00,
-        "scan_start": "13:30",
-        "scan_end": "15:55",
+        "scan_start": "09:35",
+        "scan_end": "15:45",
         "contract_budget_usd": 150.0,
         "straddle_richness_max": 1.5,
         "straddle_richness_ideal": 0.9,
@@ -134,7 +134,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "premium_min": 0.05,              # lower premiums (~$30 underlying)
         "premium_max": 1.50,
         "scan_start": "08:30",            # morning session for SLV
-        "scan_end": "13:30",
+        "scan_end": "15:45",              # extended to all-day
         "contract_budget_usd": 50.0,
         "straddle_richness_max": 2.5,     # SLV IV ~2x SPY, higher richness normal
         "straddle_richness_ideal": 1.5,
