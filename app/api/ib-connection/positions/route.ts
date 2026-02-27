@@ -70,6 +70,14 @@ export async function GET(request: NextRequest) {
     }
 
     const data = JSON.parse(text);
+
+    // Filter out managed/advisor accounts that shouldn't appear in IB Trading Tools
+    const EXCLUDED_ACCOUNTS = new Set(["U22621569"]);
+    if (Array.isArray(data)) {
+      const filtered = data.filter((p: any) => !EXCLUDED_ACCOUNTS.has(p.account));
+      return NextResponse.json(filtered);
+    }
+
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error fetching positions:", error);

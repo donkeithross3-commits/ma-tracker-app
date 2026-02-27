@@ -19,7 +19,7 @@ const SUMMARY_COLUMNS: ColumnDef[] = [
   { key: "netTheta", label: "Net \u0398" },
   { key: "pnl", label: "P&L" },
 ];
-const SUMMARY_DEFAULTS = ["ticker", "stockPos", "options", "spot", "notional", "netDelta", "pnl"];
+const SUMMARY_DEFAULTS = ["ticker", "stockPos", "options", "spot", "notional", "netDelta", "netTheta", "pnl"];
 const SUMMARY_LOCKED = ["ticker"];
 
 /* ─── Types ─── */

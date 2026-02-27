@@ -17,6 +17,7 @@ const LEG_COLUMNS: ColumnDef[] = [
   { key: "mktVal", label: "Mkt Val" },
   { key: "pnl", label: "P&L" },
   { key: "delta", label: "Delta" },
+  { key: "theta", label: "Θ" },
 ];
 const LEG_DEFAULTS = LEG_COLUMNS.map((c) => c.key);
 const LEG_LOCKED = ["type", "description"];
@@ -101,6 +102,7 @@ export default function PositionLegTable({
     let totalMktVal = 0;
     let totalPnl = 0;
     let totalDelta = 0;
+    let totalTheta = 0;
     let hasAnyPrice = false;
 
     for (const row of rows) {
@@ -129,8 +131,13 @@ export default function PositionLegTable({
       } else if (isOpt && grks?.delta != null) {
         totalDelta += row.position * grks.delta * mult;
       }
+
+      // Theta
+      if (isOpt && grks?.theta != null) {
+        totalTheta += grks.theta * row.position * mult;
+      }
     }
-    return { totalMktVal, totalPnl, totalDelta, hasAnyPrice };
+    return { totalMktVal, totalPnl, totalDelta, totalTheta, hasAnyPrice };
   }, [rows, legPrices, legGreeks, spotPrice]);
 
   if (rows.length === 0) {
@@ -162,6 +169,7 @@ export default function PositionLegTable({
               {visibleSet.has("mktVal") && <th className="py-1.5 px-2 text-right font-medium">Mkt Val</th>}
               {visibleSet.has("pnl") && <th className="py-1.5 px-2 text-right font-medium">P&L</th>}
               {visibleSet.has("delta") && <th className="py-1.5 px-2 text-right font-medium">Delta</th>}
+              {visibleSet.has("theta") && <th className="py-1.5 px-2 text-right font-medium">Θ</th>}
             </tr>
           </thead>
           <tbody>
@@ -246,6 +254,21 @@ export default function PositionLegTable({
                       {legDelta != null ? legDelta.toFixed(1) : "\u2014"}
                     </td>
                   )}
+                  {visibleSet.has("theta") && (
+                    <td className="py-1.5 px-2 text-right font-mono">
+                      {(() => {
+                        if (!greeks) return "\u2014";
+                        const raw = greeks.theta ?? null;
+                        if (raw === null) return "\u2014";
+                        const val = raw * row.position * mult;
+                        return (
+                          <span className={val < 0 ? "text-red-400" : val > 0 ? "text-green-400" : "text-gray-500"}>
+                            {val.toFixed(2)}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -275,6 +298,13 @@ export default function PositionLegTable({
                 {visibleSet.has("delta") && (
                   <td className="py-2 px-2 text-right font-mono text-gray-200">
                     {totals.totalDelta.toFixed(1)}
+                  </td>
+                )}
+                {visibleSet.has("theta") && (
+                  <td className={`py-2 px-2 text-right font-mono ${
+                    totals.totalTheta < 0 ? "text-red-400" : totals.totalTheta > 0 ? "text-green-400" : "text-gray-400"
+                  }`}>
+                    {totals.totalTheta.toFixed(2)}
                   </td>
                 )}
               </tr>
