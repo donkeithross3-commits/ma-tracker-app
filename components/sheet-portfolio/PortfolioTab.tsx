@@ -715,6 +715,7 @@ export default function PortfolioTab() {
                           <span className="inline-flex items-center gap-1">
                             <Link
                               href={`/sheet-portfolio/${deal.ticker}`}
+                              prefetch={false}
                               className={`hover:underline ${deal.is_excluded ? "text-gray-500 line-through" : "text-blue-400 hover:text-blue-300"}`}
                               title={diff?.diff_type === "modified" ? `Changed: ${Object.keys(diff.changed_fields).join(", ")}` : undefined}
                             >
@@ -722,6 +723,22 @@ export default function PortfolioTab() {
                             </Link>
                             {diff?.diff_type === "added" && (
                               <span className="text-[10px] px-1 py-0.5 rounded bg-green-500/15 text-green-400 leading-none">NEW</span>
+                            )}
+                            {tickerChanges && tickerChanges.length > 0 && (
+                              <span
+                                className={`text-[10px] px-1 py-0.5 rounded leading-none cursor-default ${
+                                  hasWorsened
+                                    ? "bg-red-500/15 text-red-400"
+                                    : "bg-green-500/15 text-green-400"
+                                }`}
+                                title={tickerChanges.map(c => {
+                                  const arrow = c.direction === "worsened" ? "\u2193" : "\u2191";
+                                  const line = `${arrow} ${c.factor}: ${c.old_level} \u2192 ${c.new_level} (${c.direction})`;
+                                  return c.explanation ? `${line}\n  ${c.explanation.slice(0, 120)}${c.explanation.length > 120 ? "..." : ""}` : line;
+                                }).join("\n")}
+                              >
+                                {hasWorsened ? "\u25BC" : "\u25B2"}
+                              </span>
                             )}
                           </span>
                         </td>
