@@ -1,7 +1,7 @@
 {
   "date": "2026-02-27",
   "title": "Feb 27, 2026",
-  "summary": "Hot-swap model chooser for the BMC execution engine, IB Trading Tools rebrand, Manual Trading v2, Event Driven Portfolio gains Curate + Monitor tabs, theta columns, and managed account filtering.",
+  "summary": "Hot-swap model chooser for the BMC execution engine, IB Trading Tools rebrand, Manual Trading v2, Event Driven Portfolio gains Curate + Monitor tabs, theta columns, and greeks pipeline fix.",
   "features": [
     {
       "id": "hot-swap-model-chooser",
@@ -58,16 +58,6 @@
       "title": "Theta Column in Manual v2 Tables",
       "summary": "Net Θ now visible by default in the summary table, and per-leg Θ added to the position legs table with color-coded totals.",
       "description": "Theta was already computed through the greeks pipeline but wasn't surfaced in the tables.\n\n**Summary Table:**\n- Net Θ column added to defaults — visible immediately without toggling the column chooser\n- Negative theta in red, positive in green, matching the delta color convention\n- Sortable like all other columns\n\n**Position Legs Table:**\n- New Θ column shows per-position theta contribution (qty × greek × multiplier)\n- Included in defaults automatically (LEG_DEFAULTS includes all columns)\n- Totals row in the footer shows combined theta across all legs when 2+ positions exist\n- Available in the column chooser for hide/show control",
-      "category": "positions",
-      "project": "ma-options",
-      "image": "",
-      "screenshot": null
-    },
-    {
-      "id": "managed-account-filter",
-      "title": "Managed Account Excluded from IB Trading Tools",
-      "summary": "Advisor-managed IB account (U22621569) is now filtered out at the API level — only your personal account positions and orders appear.",
-      "description": "Users with both a personal and advisor-managed IB account were seeing positions from both accounts merged together in the Manual and Manual v2 tabs. The managed account's positions can't be traded through the dashboard (the advisor manages them), so showing them created confusion.\n\n**What changed:**\n- The `/api/ib-connection/positions` and `/api/ib-connection/open-orders` API routes now filter out account U22621569 before returning data\n- Both the v1 Manual tab and v2 Manual tab benefit from this since they share the same API endpoints\n- No UI changes needed — the managed positions simply no longer appear",
       "category": "positions",
       "project": "ma-options",
       "image": "",
