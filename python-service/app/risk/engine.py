@@ -487,7 +487,7 @@ class RiskAssessmentEngine:
             response = self.anthropic.messages.create(
                 model=model,
                 temperature=0,
-                max_tokens=2800,
+                max_tokens=4096,
                 system=[{
                     "type": "text",
                     "text": sys_text,
@@ -515,10 +515,20 @@ class RiskAssessmentEngine:
         )
 
         raw_text = response.content[0].text
+
+        # Detect truncated responses (max_tokens hit)
+        if response.stop_reason == "max_tokens":
+            logger.warning(
+                "Response truncated for %s (max_tokens hit, %d output tokens). "
+                "Increase max_tokens.",
+                ticker, response.usage.output_tokens,
+            )
+
         try:
             parsed = _extract_json(raw_text)
         except (json.JSONDecodeError, ValueError):
-            logger.error("Malformed JSON from Claude for %s: %s", ticker, raw_text[:500])
+            truncation_note = " [TRUNCATED]" if response.stop_reason == "max_tokens" else ""
+            logger.error("Malformed JSON from Claude for %s%s: %s", ticker, truncation_note, raw_text[:500])
             raise ValueError(f"Claude returned invalid JSON for {ticker}")
 
         # Enrich with metadata
@@ -1053,43 +1063,6 @@ class RiskAssessmentEngine:
             assessment.get("needs_attention", False),
             len(discrepancies), len(score_changes),
         )
-
-    # ------------------------------------------------------------------
-    # Batch assessment
-    # ------------------------------------------------------------------
-    async def _run_batch_assessments(
-        self, api_bucket: list[str], deal_contexts: dict,
-    ) -> dict[str, dict]:
-        """Submit API-needing deals as a batch. Returns {ticker: parsed_response}."""
-        from .batch_assessor import run_batch_assessment
-
-        deal_requests = []
-        for ticker in api_bucket:
-            dc = deal_contexts[ticker]
-            context = dc["context"]
-            prev = dc["prev"]
-            significance = dc["significance"]
-            change_list = dc["change_list"]
-
-            routed_model = get_model_for_significance(significance.value)
-
-            if significance in (ChangeSignificance.MINOR, ChangeSignificance.MODERATE) and prev:
-                system_prompt = RISK_DELTA_SYSTEM_PROMPT
-                user_prompt = build_delta_assessment_prompt(
-                    context, prev, change_list, significance.value,
-                )
-            else:
-                system_prompt = RISK_ASSESSMENT_SYSTEM_PROMPT
-                user_prompt = build_deal_assessment_prompt(context)
-
-            deal_requests.append({
-                "ticker": ticker,
-                "model": routed_model,
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-            })
-
-        return await run_batch_assessment(self.anthropic, deal_requests)
 
     # ------------------------------------------------------------------
     # Run summary generation

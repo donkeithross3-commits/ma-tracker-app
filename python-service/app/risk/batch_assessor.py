@@ -57,7 +57,7 @@ def build_batch_requests(deal_requests: list[dict]) -> list[Request]:
         - model: str (model ID)
         - system_prompt: str
         - user_prompt: str
-        - max_tokens: int (optional, default 2800)
+        - max_tokens: int (optional, default 4096)
     """
     requests = []
     for dr in deal_requests:
@@ -65,7 +65,7 @@ def build_batch_requests(deal_requests: list[dict]) -> list[Request]:
         model = dr["model"]
         system_text = dr["system_prompt"]
         user_prompt = dr["user_prompt"]
-        max_tokens = dr.get("max_tokens", 2800)
+        max_tokens = dr.get("max_tokens", 4096)
 
         system_blocks = _build_system_blocks(system_text, model)
 
@@ -156,12 +156,20 @@ async def run_batch_assessment(
                 msg = result.result.message
                 raw_text = msg.content[0].text if msg.content else ""
 
+                # Detect truncated responses
+                if msg.stop_reason == "max_tokens":
+                    logger.warning(
+                        "Batch response truncated for %s (max_tokens hit, %d output tokens)",
+                        ticker, msg.usage.output_tokens,
+                    )
+
                 # Parse JSON with robust extraction
                 try:
                     from .engine import _extract_json
                     parsed = _extract_json(raw_text)
                 except (json.JSONDecodeError, ValueError):
-                    logger.error("Malformed JSON in batch for %s: %s", ticker, raw_text[:500])
+                    truncation_note = " [TRUNCATED]" if msg.stop_reason == "max_tokens" else ""
+                    logger.error("Malformed JSON in batch for %s%s: %s", ticker, truncation_note, raw_text[:500])
                     results[ticker] = {
                         "_meta": {"error": "invalid_json", "model": model},
                     }
