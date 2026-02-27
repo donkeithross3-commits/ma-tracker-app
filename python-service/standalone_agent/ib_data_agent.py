@@ -488,15 +488,16 @@ class IBDataAgent:
     
     def _handle_get_positions_sync(self, payload: dict) -> dict:
         """Fetch all positions from IB (reqPositions -> position/positionEnd).
-        Filters to IB_ACCT_CODE only (ignores managed accounts)."""
+        Returns positions for ALL managed accounts so multi-user agents work."""
         if not self.scanner or not self.scanner.isConnected():
             return {"error": self._ib_not_connected_error()}
         timeout = float(payload.get("timeout_sec", 15.0))
         try:
             all_positions = self.scanner.get_positions_snapshot(timeout_sec=timeout)
-            positions = [p for p in all_positions if p.get("account") == self.IB_ACCT_CODE]
-            accounts = [self.IB_ACCT_CODE]
-            return {"positions": positions, "accounts": accounts}
+            accounts = sorted(set(p.get("account", "") for p in all_positions if p.get("account")))
+            if not accounts:
+                accounts = list(self.scanner._managed_accounts)
+            return {"positions": all_positions, "accounts": accounts}
         except Exception as e:
             logger.error(f"Error fetching positions: {e}")
             return {"error": str(e)}
