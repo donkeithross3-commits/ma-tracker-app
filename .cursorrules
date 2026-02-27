@@ -55,15 +55,19 @@ The dashboard has a continuous release notes system. Every user-visible change M
 
 ## Deployment (ALWAYS DO THIS AFTER CHANGES)
 
+All deploys go through the flock-gated deploy script (mutual exclusion, memory checks, health verification):
 ```bash
-# Full deploy (Docker rebuild)
-ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
+# Full deploy (Docker rebuild):
+ssh droplet 'DR3_AGENT=cursor bash ~/apps/scripts/deploy.sh web'
 
-# Python-only deploy
-ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && kill $(lsof -t -i :8000) 2>/dev/null; sleep 2 && cd python-service && source .venv/bin/activate && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &'
+# Python-only deploy:
+ssh droplet 'DR3_AGENT=cursor bash ~/apps/scripts/deploy.sh python-service'
+
+# Portfolio container only:
+ssh droplet 'DR3_AGENT=cursor bash ~/apps/scripts/deploy.sh portfolio'
 ```
 
-**Docker rules:** ALWAYS `docker compose build` (not bare `docker build`). ALWAYS `--no-cache`. ALWAYS `--force-recreate`.
+**NEVER run raw `docker compose build` or `docker compose up` on the droplet.** deploy.sh enforces --no-cache, --force-recreate, git pull, and health checks automatically. If it fails with a lock error, another deploy is in progress — wait and retry.
 
 ## Domain Rules (`.cursor/rules/*.mdc`)
 

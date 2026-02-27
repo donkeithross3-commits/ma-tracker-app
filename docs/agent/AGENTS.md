@@ -226,8 +226,8 @@ npm run db:studio    # Prisma Studio GUI
 cd python-service && source venv/bin/activate
 python3 start_server.py  # FastAPI (port 8000)
 
-# Deploy
-ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
+# Deploy (flock-gated — NEVER use raw docker compose commands)
+ssh droplet 'DR3_AGENT=<agent> bash ~/apps/scripts/deploy.sh web'
 ```
 
 ### py_proj

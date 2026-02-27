@@ -64,18 +64,24 @@ When you **complete a task** that changed code in this repo:
 
 1. **Commit** the relevant files with a clear message.
 2. **Push** to `origin main`: `git push origin main`
-3. **Deploy** to production (droplet):
+3. **Deploy** to production via the flock-gated deploy script:
    ```bash
-   ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
+   # Web/full deploy:
+   ssh droplet 'DR3_AGENT=claude bash ~/apps/scripts/deploy.sh web'
+
+   # Python-service-only deploy (no Docker rebuild):
+   ssh droplet 'DR3_AGENT=claude bash ~/apps/scripts/deploy.sh python-service'
+
+   # Portfolio container only:
+   ssh droplet 'DR3_AGENT=claude bash ~/apps/scripts/deploy.sh portfolio'
    ```
    **Do NOT copy repo `data/krj/` into `~/apps/data/krj/` on deploy.** Production KRJ data is owned by the Saturday cron job on the droplet (`/home/don/apps/scripts/run_krj_weekly.sh` — full pipeline: backtester + copy). If deploy runs `cp -r ... data/krj/* ... data/krj/`, it overwrites the job's output with stale repo data and reverts the dashboard to old dates.
 
 Do this **automatically** at the end of the task -- do not wait for the user to ask. The agent has permission to push and deploy.
 
-- If only the Python service changed (no Next.js/agent bundle): use the lighter deploy that restarts uvicorn:
-  ```bash
-  ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && kill $(lsof -t -i :8000) 2>/dev/null; sleep 2 && cd python-service && source .venv/bin/activate && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &'
-  ```
+- `deploy.sh` handles git pull, --no-cache, --force-recreate, and health checks automatically.
+- If the deploy fails with a lock error, another deploy is in progress — wait and retry.
+- **NEVER run raw `docker compose build` or `docker compose up` on the droplet.** Always use `deploy.sh`.
 
 ### Security and Latency Non-Negotiables
 

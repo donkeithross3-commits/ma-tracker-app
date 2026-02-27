@@ -88,11 +88,10 @@ npm run db:studio       # Open Prisma Studio
 cd python-service && source venv/bin/activate
 python3 start_server.py # Start server (port 8000)
 
-# Deploy
-ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && cd ~/apps && docker compose build --no-cache web && docker compose up -d --force-recreate web'
-
-# Python-only deploy (no Docker rebuild)
-ssh droplet 'cd ~/apps/ma-tracker-app && git pull origin main && kill $(lsof -t -i :8000) 2>/dev/null; sleep 2 && cd python-service && source .venv/bin/activate && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &'
+# Deploy (flock-gated — NEVER use raw docker compose commands)
+ssh droplet 'DR3_AGENT=<agent> bash ~/apps/scripts/deploy.sh web'           # Full deploy
+ssh droplet 'DR3_AGENT=<agent> bash ~/apps/scripts/deploy.sh python-service' # Python only
+ssh droplet 'DR3_AGENT=<agent> bash ~/apps/scripts/deploy.sh portfolio'      # Portfolio only
 ```
 
 ---
