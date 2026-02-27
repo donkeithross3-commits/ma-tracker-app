@@ -306,15 +306,6 @@ export default function ManualTradingV2Tab() {
       const ct = res.headers.get("content-type") || "";
       if (!ct.includes("application/json")) return;
       const json = await res.json();
-      // Debug: log raw API response to diagnose greeks pipeline
-      if (json.contracts && Array.isArray(json.contracts)) {
-        for (let i = 0; i < json.contracts.length; i++) {
-          const c = json.contracts[i];
-          if (c) {
-            console.log(`[greeks-debug] ${c.ticker} ${c.expiry} ${c.strike}${c.right}: delta=${c.delta} gamma=${c.gamma} theta=${c.theta} vega=${c.vega} iv=${c.implied_vol}`);
-          }
-        }
-      }
       if (json.contracts && Array.isArray(json.contracts)) {
         setLegPrices((prev) => {
           const next = { ...prev };
