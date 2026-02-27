@@ -1,0 +1,37 @@
+{
+  "date": "2026-02-27",
+  "title": "Feb 27, 2026",
+  "summary": "Homepage reorganized with IB Trading Tools branding, Manual Trading v2 with inline order ticket and net greeks, and Event Driven Portfolio gains Curate + Monitor tabs.",
+  "features": [
+    {
+      "id": "ib-trading-tools-rebrand",
+      "title": "IB Trading Tools Rebrand",
+      "summary": "M&A Options Scanner renamed to IB Trading Tools with restructured tabs: Manual, Manual v2, and Algorithmic.",
+      "description": "The homepage card formerly labeled \"M&A Options Scanner\" is now \"IB Trading Tools\" to better reflect its evolved scope.\n\n**Tab restructure:** The Curate and Monitor tabs (event-driven portfolio curation) have moved to the Event Driven Portfolio page where they belong. The IB Trading Tools page now has three focused tabs:\n- **Manual** — The original Account tab (IBPositionsTab), unchanged\n- **Manual v2** — New inline trading interface with net greeks (see below)\n- **Algorithmic** — The Signals tab for BMC execution controls\n\nThe permission key remains \"ma-options\" so no user permission changes are needed.",
+      "category": "general",
+      "project": "ma-options",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "manual-trading-v2",
+      "title": "Manual Trading v2 — Inline Everything",
+      "summary": "New trading interface: sortable ticker table with net greeks, full-page detail view, and inline order ticket with zero popups.",
+      "description": "A complete redesign of the manual trading workflow, purpose-built for accessibility. Every interaction happens inline — no modals, no overlays, no X buttons to find.\n\n**Ticker Summary Table:**\n- All positions grouped by underlying ticker in a sortable table\n- Columns: Stock position, Options count, Spot price, Notional value, Net Delta, Net Gamma, Net Theta, P&L\n- Click any column header to sort (ascending/descending toggle)\n- Inline add-ticker row with SEC EDGAR autocomplete (no modal)\n- Column chooser for customizing visible columns\n\n**Ticker Detail View:**\n- Click any ticker row to enter a full-page detail view\n- \"← Back to positions\" button (large, clear text, no X icon)\n- Greek summary strip: Net Δ, Stock Δ, Options Δ, Net Γ, Net Θ, Net V\n- Position legs table showing all STK + OPT positions with per-leg delta\n- Click an option leg to pre-fill the order ticket with that contract\n- Working orders filtered to just this ticker, with inline edit/cancel\n\n**Inline Order Ticket:**\n- Rendered in the page flow, not as a fixed overlay\n- BUY/SELL toggle with large color-coded buttons (52px+)\n- Order types: LMT, STP LMT, MOC\n- Quantity input (text-4xl) with delta buttons (+1, +2, +5, +10, +25, +50, +100)\n- Price input (text-4xl) with delta buttons (±0.01, ±0.05, ±0.10, ±0.25, ±0.50)\n- Delta sign (+/−) toggle, TIF (DAY/GTC), Outside RTH toggle\n- **Inline confirmation**: Submit → ticket transitions to confirmation state showing order summary + \"Confirm [BUY/SELL] — Send Order\" / Cancel buttons. No dialog popup.\n\n**Greeks Pipeline:**\n- Delta, gamma, theta, vega, and implied volatility now flow from IB through the agent → relay → frontend pipeline\n- Net delta = stock_qty + Σ(option_qty × contract_delta × 100)\n- Greeks show \"—\" when unavailable (Polygon source or IB disconnected)\n\nThe v1 Manual tab is preserved unchanged as an A/B reference.",
+      "category": "positions",
+      "project": "ma-options",
+      "image": "",
+      "screenshot": null
+    },
+    {
+      "id": "event-driven-portfolio-tabs",
+      "title": "Event Driven Portfolio Gains Curate + Monitor",
+      "summary": "The Curate and Monitor tabs now live under the Event Driven Portfolio page, with the existing portfolio view as the default tab.",
+      "description": "The Event Driven Portfolio page now has three tabs:\n- **Portfolio** (default) — The existing deal table with live prices, risk grades, and AI assessments\n- **Curate** — Deal selector, option chain viewer, and candidate strategy builder (moved from M&A Options Scanner)\n- **Monitor** — Watched spreads with live price monitoring (moved from M&A Options Scanner)\n\nThe page now uses a server/client architecture: the server component fetches scanner deals from Prisma, while the client component wraps everything in IBConnectionProvider so Curate and Monitor tabs can access IB data.\n\nThis reorganization puts event-driven portfolio curation tools where they logically belong — alongside the portfolio data they operate on.",
+      "category": "portfolio",
+      "project": "sheet-portfolio",
+      "image": "",
+      "screenshot": null
+    }
+  ]
+}

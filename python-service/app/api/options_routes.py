@@ -1508,6 +1508,11 @@ class ContractPrice(BaseModel):
     openInterest: int = 0
     bidSize: int = 0
     askSize: int = 0
+    delta: Optional[float] = None
+    gamma: Optional[float] = None
+    theta: Optional[float] = None
+    vega: Optional[float] = None
+    implied_vol: Optional[float] = None
 
 class FetchPricesResponse(BaseModel):
     success: bool
@@ -1618,7 +1623,12 @@ async def relay_fetch_prices(request: FetchPricesRequest) -> FetchPricesResponse
                     bid=c["bid"],
                     ask=c["ask"],
                     mid=c["mid"],
-                    last=c["last"]
+                    last=c["last"],
+                    delta=c.get("delta"),
+                    gamma=c.get("gamma"),
+                    theta=c.get("theta"),
+                    vega=c.get("vega"),
+                    implied_vol=c.get("implied_vol"),
                 ))
             else:
                 contracts.append(None)

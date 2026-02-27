@@ -907,6 +907,11 @@ class IBDataAgent:
                         "ask": opt.ask,
                         "mid": opt.mid_price,
                         "last": opt.last,
+                        "delta": opt.delta if hasattr(opt, 'delta') and opt.delta else None,
+                        "gamma": opt.gamma if hasattr(opt, 'gamma') and opt.gamma else None,
+                        "theta": opt.theta if hasattr(opt, 'theta') and opt.theta else None,
+                        "vega": opt.vega if hasattr(opt, 'vega') and opt.vega else None,
+                        "implied_vol": opt.implied_vol if hasattr(opt, 'implied_vol') and opt.implied_vol else None,
                     }
                 else:
                     results[idx] = None

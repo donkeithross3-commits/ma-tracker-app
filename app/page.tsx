@@ -23,8 +23,8 @@ export default async function Home() {
     {
       key: "ma-options",
       href: "/ma-options",
-      title: "M&A Options Scanner",
-      description: "Merger arbitrage options analysis tool",
+      title: "IB Trading Tools",
+      description: "Manual & algorithmic trading with Interactive Brokers",
       badge: "Beta Testing",
       badgeClasses: "bg-yellow-500/20 text-yellow-400",
       hoverBorder: "hover:border-yellow-500",

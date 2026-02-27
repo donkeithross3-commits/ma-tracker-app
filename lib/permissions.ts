@@ -17,9 +17,9 @@ export const ALL_PROJECTS: Record<ProjectKey, ProjectMeta> = {
     description: "Weekly market signals",
   },
   "ma-options": {
-    label: "M&A Options Scanner",
+    label: "IB Trading Tools",
     path: "/ma-options",
-    description: "Merger arbitrage options analysis tool",
+    description: "Manual & algorithmic trading with Interactive Brokers",
   },
   "sheet-portfolio": {
     label: "Event Driven Portfolio",

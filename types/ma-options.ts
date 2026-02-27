@@ -300,6 +300,15 @@ export interface OptionsScanResponse {
   scan_time_ms: number;
 }
 
+// Greeks returned from IB fetch-prices (null when unavailable, e.g. Polygon source)
+export interface LegGreeks {
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  implied_vol: number | null;
+}
+
 // Scanner Deals - lightweight deal management for options scanner
 export interface ScannerDeal {
   id: string;
