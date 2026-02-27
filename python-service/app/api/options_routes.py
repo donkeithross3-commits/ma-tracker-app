@@ -7,10 +7,27 @@ from pydantic import BaseModel, field_validator
 from datetime import datetime, timedelta
 from typing import List, Optional
 import logging
+import math
 import os
 import re
 import uuid
 import asyncio
+
+
+def _sanitize_for_json(obj):
+    """Replace NaN/Infinity floats with None so FastAPI can serialize.
+
+    IB market data and quote snapshots often contain NaN for prices that
+    haven't been received yet. Standard JSON doesn't support NaN, and
+    FastAPI's JSONResponse raises ValueError on them.
+    """
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    return obj
 
 from ..options.ib_client import IBClient
 from ..options.models import (
@@ -1895,10 +1912,10 @@ async def relay_execution_status(user_id: str = ""):
             allow_fallback_to_any=False,
         )
         if provider and provider.execution_telemetry:
-            return {
+            return _sanitize_for_json({
                 "source": "cached_telemetry",
                 **provider.execution_telemetry,
-            }
+            })
         response_data = await send_request_to_provider(
             request_type="execution_status",
             payload={},
@@ -1908,7 +1925,7 @@ async def relay_execution_status(user_id: str = ""):
         )
         if "error" in response_data:
             raise HTTPException(status_code=500, detail=response_data["error"])
-        return {"source": "direct_query", **response_data}
+        return _sanitize_for_json({"source": "direct_query", **response_data})
     except HTTPException:
         raise
     except Exception as e:
