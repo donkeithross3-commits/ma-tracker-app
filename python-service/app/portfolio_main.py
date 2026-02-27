@@ -81,16 +81,20 @@ async def startup():
     except Exception:
         logger.warning("Could not clean up stale risk runs", exc_info=True)
 
-    # Initialise scheduler
-    from .scheduler.core import get_scheduler
-    from .scheduler import core as scheduler_core
-    from .scheduler.jobs import register_default_jobs
+    # Initialise scheduler (can be disabled with ENABLE_SCHEDULER=false to prevent
+    # duplicate job execution when multiple portfolio service instances are running)
+    if os.environ.get("ENABLE_SCHEDULER", "true").lower() == "true":
+        from .scheduler.core import get_scheduler
+        from .scheduler import core as scheduler_core
+        from .scheduler.jobs import register_default_jobs
 
-    scheduler_core.pool = _pool
-    scheduler = get_scheduler()
-    register_default_jobs(scheduler)
-    scheduler.start()
-    logger.info("APScheduler started with %d jobs", len(scheduler.get_jobs()))
+        scheduler_core.pool = _pool
+        scheduler = get_scheduler()
+        register_default_jobs(scheduler)
+        scheduler.start()
+        logger.info("APScheduler started with %d jobs", len(scheduler.get_jobs()))
+    else:
+        logger.info("Scheduler disabled (ENABLE_SCHEDULER != true)")
 
     logger.info("Portfolio service ready on port 8001")
 

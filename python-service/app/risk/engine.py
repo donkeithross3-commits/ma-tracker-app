@@ -1270,7 +1270,7 @@ Keep it actionable and direct."""
         }
 
         async with self.pool.acquire() as conn:
-            await conn.execute(
+            stored_id = await conn.fetchval(
                 """INSERT INTO deal_risk_assessments (
                     id, assessment_date, ticker,
                     -- Grades
@@ -1342,7 +1342,6 @@ Keep it actionable and direct."""
                     $64, $65, $66
                 )
                 ON CONFLICT (assessment_date, ticker) DO UPDATE SET
-                    id = EXCLUDED.id,
                     vote_grade = EXCLUDED.vote_grade, vote_detail = EXCLUDED.vote_detail, vote_confidence = EXCLUDED.vote_confidence,
                     financing_grade = EXCLUDED.financing_grade, financing_detail = EXCLUDED.financing_detail, financing_confidence = EXCLUDED.financing_confidence,
                     legal_grade = EXCLUDED.legal_grade, legal_detail = EXCLUDED.legal_detail, legal_confidence = EXCLUDED.legal_confidence,
@@ -1370,6 +1369,7 @@ Keep it actionable and direct."""
                     context_hash = EXCLUDED.context_hash, assessment_strategy = EXCLUDED.assessment_strategy, change_significance = EXCLUDED.change_significance,
                     input_tokens = EXCLUDED.input_tokens, output_tokens = EXCLUDED.output_tokens,
                     cache_read_tokens = EXCLUDED.cache_read_tokens, cache_creation_tokens = EXCLUDED.cache_creation_tokens, cost_usd = EXCLUDED.cost_usd
+                RETURNING id
                 """,
                 assessment_id, run_date, ticker,
                 # Grades
@@ -1432,6 +1432,9 @@ Keep it actionable and direct."""
                 meta.get("cache_creation_tokens", 0),
                 meta.get("cost_usd", 0),
             )
+
+        # Use the DB-returned ID (existing row ID on conflict, new UUID on fresh insert)
+        assessment_id = stored_id or assessment_id
 
         # Dual-write: sync to canonical_risk_grades
         try:
