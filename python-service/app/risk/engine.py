@@ -403,6 +403,23 @@ class RiskAssessmentEngine:
                 except Exception:
                     pass  # Table may not exist yet
 
+        # 13. Latest position snapshot (M&A account)
+        try:
+            async with self.pool.acquire() as conn:
+                position = await conn.fetchrow(
+                    """SELECT position_qty, avg_cost FROM deal_position_snapshots
+                       WHERE ticker = $1 AND sec_type = 'STK'
+                       ORDER BY snapshot_date DESC LIMIT 1""",
+                    ticker,
+                )
+            if position:
+                context["position_data"] = {
+                    "position_qty": float(position["position_qty"]),
+                    "avg_cost": float(position["avg_cost"]) if position["avg_cost"] else None,
+                }
+        except Exception:
+            pass  # Table may not exist yet
+
         # Compute options-implied probability
         if ENABLE_ENRICHED_CONTEXT:
             from .signals import compute_options_implied_probability
@@ -624,7 +641,7 @@ class RiskAssessmentEngine:
     # ------------------------------------------------------------------
     # Full morning run
     # ------------------------------------------------------------------
-    async def run_morning_assessment(self, run_date=None, triggered_by="scheduler", run_id=None) -> dict:
+    async def run_morning_assessment(self, run_date=None, triggered_by="scheduler", run_id=None, held_tickers: set[str] | None = None) -> dict:
         """Run the full morning risk assessment for all active deals."""
         if run_date is None:
             run_date = date.today()
@@ -1008,7 +1025,7 @@ class RiskAssessmentEngine:
         outcome_candidates = []
         try:
             from .estimate_tracker import detect_potential_outcomes
-            outcome_candidates = await detect_potential_outcomes(self.pool)
+            outcome_candidates = await detect_potential_outcomes(self.pool, held_tickers=held_tickers)
             if outcome_candidates:
                 logger.info(
                     "Outcome candidates detected: %s",

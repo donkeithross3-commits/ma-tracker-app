@@ -472,10 +472,12 @@ async def score_deal_accuracy(pool, ticker: str):
 # detect_potential_outcomes
 # ---------------------------------------------------------------------------
 
-async def detect_potential_outcomes(pool) -> list[dict]:
+async def detect_potential_outcomes(pool, held_tickers: set[str] | None = None) -> list[dict]:
     """Check for deals that may have closed, broke, or changed status.
 
     Returns candidates for PM confirmation, not auto-recorded outcomes.
+    If held_tickers is provided, candidates that are still held get an
+    ``is_held: True`` flag (surfaced as a "STILL HELD" warning in reports).
     """
     candidates = []
 
@@ -534,6 +536,12 @@ async def detect_potential_outcomes(pool) -> list[dict]:
                     "current_price": float(b["current_price"]),
                     "break_price": float(b["break_price"]),
                 })
+
+    # Flag candidates that are still held in IB M&A account
+    if held_tickers:
+        for c in candidates:
+            if c.get("ticker") in held_tickers:
+                c["is_held"] = True
 
     logger.info("Detected %d potential outcome candidates", len(candidates))
     return candidates

@@ -506,6 +506,22 @@ def build_deal_assessment_prompt(context: dict) -> str:
     if signal_weights_text:
         sections.append(signal_weights_text)
 
+    # Section 18: Position status (M&A account)
+    pos_data = context.get("position_data")
+    if pos_data:
+        qty = pos_data.get("position_qty", 0)
+        avg = pos_data.get("avg_cost")
+        sections.append("## POSITION STATUS")
+        if avg is not None:
+            sections.append(f"Currently held: Yes | {int(qty)} shares @ ${avg:.2f} avg cost")
+        else:
+            sections.append(f"Currently held: Yes | {int(qty)} shares")
+        sections.append("")
+    else:
+        sections.append("## POSITION STATUS")
+        sections.append("Currently held: No (surveillance only)")
+        sections.append("")
+
     return "\n".join(sections)
 
 

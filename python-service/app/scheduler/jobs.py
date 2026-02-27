@@ -223,10 +223,16 @@ async def job_morning_risk_assessment():
         return {"status": "error", "reason": "ANTHROPIC_API_KEY not set"}
 
     engine = RiskAssessmentEngine(pool, api_key)
-    result = await engine.run_morning_assessment(triggered_by="scheduler")
+
+    # Pass held tickers from position snapshot job (if available)
+    import app.scheduler.core as core
+    held_tickers = getattr(core, "_held_tickers", set())
+
+    result = await engine.run_morning_assessment(
+        triggered_by="scheduler", held_tickers=held_tickers,
+    )
 
     # Stash outcome candidates for the report compile step
-    import app.scheduler.core as core
     core._outcome_candidates = result.get("outcome_candidates", []) if result else []
 
     return result
@@ -259,10 +265,12 @@ async def job_morning_report_compile():
     run_data = dict(run)
     assessment_list = [dict(a) for a in assessments]
     outcome_candidates = getattr(core, "_outcome_candidates", [])
+    held_tickers = getattr(core, "_held_tickers", set())
 
     report = format_morning_report(
         run_data, assessment_list, overnight_events,
         outcome_candidates=outcome_candidates,
+        held_tickers=held_tickers,
     )
 
     # Store the report
@@ -355,6 +363,7 @@ async def job_morning_report_deliver():
     core._overnight_events = None
     core._compiled_report = None
     core._outcome_candidates = None
+    core._held_tickers = None
 
     return {"status": "success", "results": results}
 
@@ -559,6 +568,40 @@ def _format_eod_summary(filings: list, risk_changes: list) -> str:
     return "\n".join(lines)
 
 
+@run_job("morning_position_snapshot", "Morning M&A Position Snapshot")
+async def job_morning_position_snapshot():
+    """Fetch IB M&A account positions and snapshot to DB (5:22 AM ET weekdays).
+
+    Runs after sheet ingest (5:15/5:20) and before risk assessment (5:30).
+    Stashes held_tickers on core for downstream pipeline steps.
+    """
+    from app.scheduler.position_tracker import (
+        fetch_ma_positions,
+        get_held_tickers,
+        snapshot_positions,
+    )
+
+    pool = _get_pool()
+    import app.scheduler.core as core
+
+    positions = await fetch_ma_positions()
+    if positions:
+        snap_result = await snapshot_positions(pool, positions)
+    else:
+        snap_result = {"stored": 0, "tickers": []}
+        logger.warning("[position_snapshot] No positions returned (agent may not be connected)")
+
+    # Always query held tickers from DB (may have yesterday's snapshot)
+    held = await get_held_tickers(pool)
+    core._held_tickers = held
+
+    return {
+        "status": "success",
+        "snapshot": snap_result,
+        "held_tickers": sorted(held),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
@@ -581,6 +624,15 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         id="morning_detail_refresh",
         day_of_week="mon-fri",
         hour=5, minute=20,
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        job_morning_position_snapshot,
+        "cron",
+        id="morning_position_snapshot",
+        day_of_week="mon-fri",
+        hour=5, minute=22,
         replace_existing=True,
     )
 

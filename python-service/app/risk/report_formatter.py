@@ -85,6 +85,7 @@ def format_morning_report(
     overnight_events: list[dict],
     options_section: str | None = None,
     outcome_candidates: list[dict] | None = None,
+    held_tickers: set[str] | None = None,
 ) -> dict:
     """Build the morning report.
 
@@ -105,6 +106,7 @@ def format_morning_report(
     subject = f"M&A Portfolio Intelligence Report - {date_str}"
 
     candidates = outcome_candidates or []
+    held = held_tickers or set()
 
     html = _build_html(
         date_str=date_str,
@@ -116,6 +118,7 @@ def format_morning_report(
         flagged=flagged,
         options_section=options_section,
         outcome_candidates=candidates,
+        held_tickers=held,
     )
 
     whatsapp = _build_whatsapp(
@@ -125,6 +128,7 @@ def format_morning_report(
         discrepancies=discrepancies,
         flagged=flagged,
         outcome_candidates=candidates,
+        held_tickers=held,
     )
 
     return {
@@ -175,6 +179,7 @@ def _build_html(
     flagged: list[dict],
     options_section: str | None,
     outcome_candidates: list[dict] | None = None,
+    held_tickers: set[str] | None = None,
 ) -> str:
     parts: list[str] = []
 
@@ -226,9 +231,15 @@ def _build_html(
                 detail_parts.append(f"Current ${c['current_price']:.2f}")
             if c.get("break_price"):
                 detail_parts.append(f"Break ${c['break_price']:.2f}")
+            held_badge = ""
+            if c.get("is_held") or (held_tickers and ticker in held_tickers):
+                held_badge = (
+                    ' <span style="background:#fbbf24;color:#78350f;padding:1px 5px;'
+                    'border-radius:3px;font-size:11px;font-weight:600;">STILL HELD</span>'
+                )
             parts.append(
                 f'<p style="margin:3px 0;font-size:13px;color:#78350f;">'
-                f'{" | ".join(detail_parts)}</p>'
+                f'{" | ".join(detail_parts)}{held_badge}</p>'
             )
         parts.append(
             '<p style="margin:8px 0 0;font-size:11px;color:#92400e;">'
@@ -271,7 +282,7 @@ def _build_html(
 
     # --- Deal-by-Deal Summary Table ---
     parts.append(_section_header("DEAL-BY-DEAL SUMMARY"))
-    parts.append(_build_deal_table(assessments, overnight_events, discrepancies))
+    parts.append(_build_deal_table(assessments, overnight_events, discrepancies, held_tickers=held_tickers))
 
     # --- Options Section (from Plan 2, optional) ---
     if options_section:
@@ -310,10 +321,12 @@ def _build_deal_table(
     assessments: list[dict],
     overnight_events: list[dict],
     discrepancies: list[dict],
+    held_tickers: set[str] | None = None,
 ) -> str:
     """Build the deal-by-deal summary HTML table."""
     event_tickers = {e.get("ticker") for e in overnight_events}
     disc_tickers = {d.get("ticker") for d in discrepancies}
+    held = held_tickers or set()
 
     hdr_style = (
         "padding:6px 8px;font-size:11px;color:#64748b;text-align:center;"
@@ -324,7 +337,7 @@ def _build_deal_table(
     rows = ['<table style="width:100%;border-collapse:collapse;margin:0;">']
     # Header row
     rows.append("<thead><tr>")
-    for col in ["Ticker", "Acquiror", "Spread", "V", "F", "L", "R", "M", "ShV", "ShF", "ShL", "Inv", "Flags"]:
+    for col in ["Ticker", "Own", "Acquiror", "Spread", "V", "F", "L", "R", "M", "ShV", "ShF", "ShL", "Inv", "Flags"]:
         align = "left" if col in ("Ticker", "Acquiror", "Flags") else "center"
         rows.append(f'<th style="{hdr_style}text-align:{align};">{col}</th>')
     rows.append("</tr></thead><tbody>")
@@ -353,8 +366,12 @@ def _build_deal_table(
         inv = a.get("sheet_investable") or ""
         inv_short = "Y" if "yes" in inv.lower() else ("N" if "no" in inv.lower() else "-") if inv else "-"
 
+        own_mark = "&#10003;" if ticker in held else ""
+        own_color = "color:#16a34a;font-weight:600;" if own_mark else ""
+
         rows.append(f"<tr {row_style}>")
         rows.append(f'<td style="{cell_style}text-align:left;font-weight:600;">{ticker}</td>')
+        rows.append(f'<td style="{cell_style}{own_color}">{own_mark}</td>')
         rows.append(f'<td style="{cell_style}text-align:left;font-size:11px;">{acquiror}</td>')
         rows.append(f'<td style="{cell_style}">{spread_str}</td>')
         # Our grades: V, F, L, R, M
@@ -371,7 +388,7 @@ def _build_deal_table(
     rows.append("</tbody></table>")
     rows.append(
         '<p style="font-size:10px;color:#94a3b8;padding:4px 8px;margin:0;">'
-        "V=Vote F=Finance L=Legal R=Regulatory M=MAC | "
+        "Own=IB position held | V=Vote F=Finance L=Legal R=Regulatory M=MAC | "
         "&#9889;=overnight event &#9888;&#65039;=discrepancy &#128314;=needs attention"
         "</p>"
     )
@@ -499,6 +516,7 @@ def _build_whatsapp(
     discrepancies: list[dict],
     flagged: list[dict],
     outcome_candidates: list[dict] | None = None,
+    held_tickers: set[str] | None = None,
 ) -> str:
     """Build condensed WhatsApp summary (max ~1024 chars)."""
     date_str = report_date.strftime("%b %-d")
@@ -518,6 +536,7 @@ def _build_whatsapp(
             "price_converged": "price converged",
             "below_break_price": "below break price",
         }
+        held = held_tickers or set()
         details = []
         for c in outcome_candidates:
             ticker = c.get("ticker", "?")
@@ -525,7 +544,8 @@ def _build_whatsapp(
             price_info = ""
             if c.get("current_price"):
                 price_info = f" ${c['current_price']:.2f}"
-            details.append(f"{ticker} ({signal}{price_info})")
+            held_tag = " HELD" if (c.get("is_held") or ticker in held) else ""
+            details.append(f"{ticker} ({signal}{price_info}{held_tag})")
         lines.append(f"\u26a0\ufe0f *OUTCOMES PENDING:* {', '.join(details)}")
         lines.append("")
 

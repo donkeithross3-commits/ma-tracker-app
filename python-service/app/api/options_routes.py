@@ -1094,6 +1094,36 @@ async def relay_positions(user_id: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/relay/ma-positions")
+async def relay_ma_positions():
+    """
+    Request M&A account (U22596909) positions from ANY connected agent.
+    Server-to-server only (portfolio service → main service). No user_id required.
+    """
+    timer = RequestTimer("relay_ma_positions")
+    logger.info("relay_ma_positions called (server-to-server)")
+    try:
+        timer.stage("registry_check")
+        response_data = await send_request_to_provider(
+            request_type="get_ma_positions",
+            payload={"timeout_sec": 15.0},
+            timeout=20.0,
+            user_id=None,
+            allow_fallback_to_any_provider=True,
+        )
+        timer.stage("provider_roundtrip")
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        position_count = len(response_data.get("positions", []))
+        timer.finish(extra={"positions": position_count})
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay MA positions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class PlaceOrderBody(BaseModel):
     contract: dict = {}
     order: dict = {}

@@ -306,6 +306,8 @@ class IBDataAgent:
                 return await self._handle_test_futures(payload)
             elif request_type == "get_positions":
                 return await self._run_in_thread(self._handle_get_positions_sync, payload)
+            elif request_type == "get_ma_positions":
+                return await self._run_in_thread(self._handle_get_ma_positions_sync, payload)
             elif request_type == "get_open_orders":
                 return await self._run_in_thread(self._handle_get_open_orders_sync, payload)
             elif request_type == "place_order":
@@ -492,6 +494,20 @@ class IBDataAgent:
             return {"positions": positions, "accounts": accounts}
         except Exception as e:
             logger.error(f"Error fetching positions: {e}")
+            return {"error": str(e)}
+
+    def _handle_get_ma_positions_sync(self, payload: dict) -> dict:
+        """Fetch M&A account positions from IB (reqPositions -> position/positionEnd).
+        Filters to MA_ACCT_CODE only (U22596909)."""
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": self._ib_not_connected_error()}
+        timeout = float(payload.get("timeout_sec", 15.0))
+        try:
+            all_positions = self.scanner.get_positions_snapshot(timeout_sec=timeout)
+            positions = [p for p in all_positions if p.get("account") == self.MA_ACCT_CODE]
+            return {"positions": positions, "account": self.MA_ACCT_CODE}
+        except Exception as e:
+            logger.error(f"Error fetching MA positions: {e}")
             return {"error": str(e)}
 
     def _handle_get_open_orders_sync(self, payload: dict) -> dict:
@@ -1308,6 +1324,8 @@ class IBDataAgent:
 
     # IB account dedicated to automated BMC trading
     IB_ACCT_CODE = "U152133"
+    # IB account for M&A merger arbitrage positions
+    MA_ACCT_CODE = "U22596909"
 
     def _handle_get_ib_executions_sync(self, payload: dict) -> dict:
         """Fetch all IB executions for current session, match into round-trip trades, compute P&L."""
@@ -1570,7 +1588,7 @@ class IBDataAgent:
     # Routine polling requests — suppress per-request logging, emit periodic summary
     _QUIET_REQUEST_TYPES = frozenset({
         "execution_status", "ib_status", "check_availability",
-        "get_positions", "get_open_orders",
+        "get_positions", "get_ma_positions", "get_open_orders",
     })
     _request_counts: dict = {}
     _last_request_summary: float = 0.0  # initialized to time.time() on first use
