@@ -51,17 +51,17 @@ async def check_portfolio_edgar_filings(
 
     Returns a summary dict for the job_runs result column.
     """
-    tickers = await _get_active_tickers(pool)
-    if not tickers:
+    tickers_with_names = await _get_active_tickers_with_names(pool)
+    if not tickers_with_names:
         logger.debug("[edgar_portfolio] No active tickers to watch")
         return {"tickers": 0, "new_filings": 0, "alerts": 0}
 
     total_new = 0
     total_alerts = 0
 
-    for ticker in tickers:
+    for ticker, company_name in tickers_with_names:
         try:
-            filings = await _search_edgar(ticker)
+            filings = await _search_edgar(ticker, company_name=company_name)
             if not filings:
                 continue
 
@@ -82,6 +82,8 @@ async def check_portfolio_edgar_filings(
                     impact = None
                     try:
                         impact = await assess_filing_impact(pool, filing, ticker)
+                        if impact:
+                            await _store_filing_impact(pool, ticker, filing, impact)
                     except Exception:
                         logger.error(
                             "[edgar_portfolio] Filing impact assessment failed for %s %s",
@@ -124,9 +126,9 @@ async def check_portfolio_edgar_filings(
 
     logger.info(
         "[edgar_portfolio] Checked %d tickers, %d new filings, %d alerts sent",
-        len(tickers), total_new, total_alerts,
+        len(tickers_with_names), total_new, total_alerts,
     )
-    return {"tickers": len(tickers), "new_filings": total_new, "alerts": total_alerts}
+    return {"tickers": len(tickers_with_names), "new_filings": total_new, "alerts": total_alerts}
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +137,12 @@ async def check_portfolio_edgar_filings(
 
 async def _get_active_tickers(pool) -> List[str]:
     """Return distinct tickers from the latest snapshot that are not excluded."""
+    pairs = await _get_active_tickers_with_names(pool)
+    return [t for t, _n in pairs]
+
+
+async def _get_active_tickers_with_names(pool) -> List[tuple]:
+    """Return (ticker, company_name) pairs from the latest snapshot."""
     async with pool.acquire() as conn:
         snap = await conn.fetchrow(
             """
@@ -148,7 +156,7 @@ async def _get_active_tickers(pool) -> List[str]:
 
         rows = await conn.fetch(
             """
-            SELECT DISTINCT ticker
+            SELECT DISTINCT ON (ticker) ticker, acquiror
             FROM sheet_rows
             WHERE snapshot_id = $1
               AND ticker IS NOT NULL
@@ -156,22 +164,41 @@ async def _get_active_tickers(pool) -> List[str]:
             """,
             snap["id"],
         )
-        return [r["ticker"] for r in rows]
+        return [(r["ticker"], r.get("acquiror")) for r in rows]
 
 
-async def _search_edgar(ticker: str) -> List[Dict[str, Any]]:
-    """Query SEC EFTS for recent filings mentioning ``ticker``.
+async def _search_edgar(
+    ticker: str, company_name: str | None = None
+) -> List[Dict[str, Any]]:
+    """Query SEC EFTS for recent filings mentioning ``ticker`` or ``company_name``.
 
     Searches the last 2 days to avoid gaps between polling intervals.
+    Uses OR query to catch filings that reference company name but not ticker symbol.
+    Filters to M&A-relevant form types to reduce noise.
     """
     date_from = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d")
     date_to = datetime.utcnow().strftime("%Y-%m-%d")
 
+    # Build query: ticker OR company name (if available)
+    query_parts = [f'"{ticker}"']
+    if company_name and len(company_name) > 3:
+        # Use first 2 significant words to avoid overly specific matches
+        name_words = [w for w in company_name.split() if len(w) > 2 and w.upper() not in ("INC", "INC.", "CORP", "CORP.", "LLC", "LTD", "CO", "THE")]
+        if name_words:
+            clean_name = " ".join(name_words[:2])
+            query_parts.append(f'"{clean_name}"')
+
+    query = " OR ".join(query_parts)
+
+    # Filter to M&A-relevant form types
+    form_filter = ",".join(sorted(MATERIAL_FILING_TYPES | {"DEFA14A", "SC TO-T/A", "SC 13D", "SC 13D/A"}))
+
     params = {
-        "q": f'"{ticker}"',
+        "q": query,
         "dateRange": "custom",
         "startdt": date_from,
         "enddt": date_to,
+        "forms": form_filter,
     }
 
     try:
@@ -249,3 +276,42 @@ def _is_material(filing: Dict[str, Any]) -> bool:
     """Determine if a filing is material enough to warrant an alert."""
     filing_type = filing.get("filing_type", "")
     return filing_type in MATERIAL_FILING_TYPES
+
+
+async def _store_filing_impact(
+    pool, ticker: str, filing: Dict[str, Any], impact: Dict[str, Any]
+) -> None:
+    """Persist an AI filing impact assessment to the portfolio_filing_impacts table.
+
+    This feeds back into the morning risk assessment via collect_deal_context().
+    """
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO portfolio_filing_impacts
+                       (ticker, filing_accession, filing_type, filed_at,
+                        impact_level, summary, key_detail,
+                        risk_factor_affected, grade_change_suggested,
+                        action_required)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                   ON CONFLICT DO NOTHING""",
+                ticker,
+                filing.get("accession_number", ""),
+                filing.get("filing_type", ""),
+                filing.get("filing_date", ""),
+                impact.get("impact", "none"),
+                impact.get("summary", ""),
+                impact.get("key_detail", ""),
+                impact.get("risk_factor_affected", "none"),
+                impact.get("grade_change_suggested"),
+                impact.get("action_required", False),
+            )
+        logger.debug(
+            "[edgar_portfolio] Stored filing impact for %s: %s (%s)",
+            ticker, impact.get("impact"), filing.get("filing_type"),
+        )
+    except Exception:
+        logger.error(
+            "[edgar_portfolio] Failed to store filing impact for %s",
+            ticker, exc_info=True,
+        )

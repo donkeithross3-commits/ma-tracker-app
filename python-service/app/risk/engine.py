@@ -420,6 +420,40 @@ class RiskAssessmentEngine:
         except Exception:
             pass  # Table may not exist yet
 
+        # 14. AI filing impact assessments (last 30 days)
+        try:
+            async with self.pool.acquire() as conn:
+                impacts = await conn.fetch(
+                    """SELECT filing_type, impact_level, summary, key_detail,
+                              risk_factor_affected, grade_change_suggested, assessed_at
+                       FROM portfolio_filing_impacts
+                       WHERE ticker = $1 AND assessed_at > NOW() - INTERVAL '30 days'
+                         AND impact_level != 'none'
+                       ORDER BY assessed_at DESC LIMIT 10""",
+                    ticker,
+                )
+            if impacts:
+                context["filing_impacts"] = [dict(i) for i in impacts]
+        except Exception:
+            pass  # Table may not exist yet
+
+        # 15. Recent M&A news articles (last 7 days)
+        try:
+            async with self.pool.acquire() as conn:
+                articles = await conn.fetch(
+                    """SELECT title, publisher, published_at, summary,
+                              risk_factor_affected, relevance_score
+                       FROM deal_news_articles
+                       WHERE ticker = $1
+                         AND published_at > NOW() - INTERVAL '7 days'
+                       ORDER BY published_at DESC LIMIT 10""",
+                    ticker,
+                )
+            if articles:
+                context["news_articles"] = [dict(a) for a in articles]
+        except Exception:
+            pass  # Table may not exist yet
+
         # Compute options-implied probability
         if ENABLE_ENRICHED_CONTEXT:
             from .signals import compute_options_implied_probability

@@ -116,6 +116,21 @@ def compute_context_hash(context: dict) -> str:
     parts.append(f"milestones_pending:{pending}")
     parts.append(f"milestones_completed:{completed}")
 
+    # Filing impact assessments (count + most severe level)
+    filing_impacts = context.get("filing_impacts") or []
+    parts.append(f"impact_count:{len(filing_impacts)}")
+    if filing_impacts:
+        severity_order = {"none": 0, "low": 1, "moderate": 2, "high": 3, "critical": 4}
+        max_impact = max(
+            filing_impacts,
+            key=lambda x: severity_order.get(x.get("impact_level", "none"), 0),
+        )
+        parts.append(f"max_impact:{max_impact.get('impact_level', 'none')}")
+
+    # News article count
+    news = context.get("news_articles") or []
+    parts.append(f"news_count:{len(news)}")
+
     blob = "|".join(parts)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
@@ -132,6 +147,9 @@ def build_context_summary(context: dict) -> dict:
     filings = context.get("recent_filings") or []
     halts = context.get("recent_halts") or []
     diffs = context.get("sheet_diffs") or []
+
+    filing_impacts = context.get("filing_impacts") or []
+    news = context.get("news_articles") or []
 
     return {
         "deal_price": row.get("deal_price"),
@@ -153,6 +171,8 @@ def build_context_summary(context: dict) -> dict:
                                   if m.get("status") == "pending"),
         "milestones_completed": sum(1 for m in (context.get("milestones") or [])
                                     if m.get("status") == "completed"),
+        "impact_count": len(filing_impacts),
+        "news_count": len(news),
     }
 
 
@@ -225,6 +245,20 @@ def classify_changes(context: dict, prev_summary: dict | None) -> tuple[ChangeSi
     new_milestones_completed = current.get("milestones_completed", 0) or 0
     if new_milestones_completed > old_milestones_completed:
         changes.append(f"milestone completed: {old_milestones_completed} -> {new_milestones_completed}")
+        _upgrade(ChangeSignificance.MODERATE)
+
+    # Check new filing impacts
+    old_impacts = prev_summary.get("impact_count", 0) or 0
+    new_impacts = current.get("impact_count", 0) or 0
+    if new_impacts > old_impacts:
+        changes.append(f"new filing impacts: {old_impacts} -> {new_impacts}")
+        _upgrade(ChangeSignificance.MODERATE)
+
+    # Check new news articles
+    old_news = prev_summary.get("news_count", 0) or 0
+    new_news = current.get("news_count", 0) or 0
+    if new_news > old_news:
+        changes.append(f"new news articles: {old_news} -> {new_news}")
         _upgrade(ChangeSignificance.MODERATE)
 
     # Check options-implied probability shift (>5pp)

@@ -177,6 +177,20 @@ async def job_morning_detail_refresh():
     return result
 
 
+@run_job("morning_news_scan", "Morning M&A News Scan")
+async def job_morning_news_scan():
+    """Scan Polygon News API for M&A-relevant articles (5:18 AM ET weekdays).
+
+    Runs after sheet ingest and before risk assessment so fresh news
+    is available in collect_deal_context().
+    """
+    from app.scheduler.news_monitor import scan_all_deal_news
+
+    pool = _get_pool()
+    result = await scan_all_deal_news(pool)
+    return result
+
+
 @run_job("overnight_event_scan", "Overnight Event Scan")
 async def job_overnight_event_scan():
     """Scan for overnight events (5:25 AM ET weekdays)."""
@@ -624,6 +638,15 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         id="morning_detail_refresh",
         day_of_week="mon-fri",
         hour=5, minute=20,
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        job_morning_news_scan,
+        "cron",
+        id="morning_news_scan",
+        day_of_week="mon-fri",
+        hour=5, minute=18,
         replace_existing=True,
     )
 

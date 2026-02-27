@@ -7,6 +7,8 @@ Grade-based system: Low/Medium/High for 5 sheet-aligned factors,
 import os
 from datetime import date
 
+from .research_refresher import _extract_research_sections
+
 RISK_ASSESSMENT_SYSTEM_PROMPT = """You are an expert M&A risk analyst specializing in merger arbitrage.
 You assess the risk profile of pending M&A deals by analyzing multiple risk factors.
 
@@ -235,6 +237,41 @@ When a SIGNAL COMPARISON section is provided, you MUST:
    b. Update your estimate toward the consensus if you lack contrary evidence
 3. Never ignore the options-implied signal — it represents real money at risk
 
+## Risk Factor Analysis Guide
+
+When assessing each factor, look for these specific signals in the filing data and news:
+
+### Vote Risk Signals
+- Proxy filings (DEFM14A, PREM14A): Look for board recommendation, ISS/Glass Lewis opinions, activist positions
+- Keywords: "dissenting shareholders", "proxy contest", "withhold recommendation", "insufficient quorum"
+- Required vote threshold (simple majority vs supermajority) and insider ownership % that pre-commits
+- Go-shop results: competing bids or lack thereof signal shareholder satisfaction
+
+### Financing Risk Signals
+- Commitment letters in 8-K Item 1.01: fully committed vs "highly confident" vs market-flex provisions
+- Keywords: "financing condition", "reverse termination fee", "debt commitment", "bridge loan", "credit facility"
+- Acquirer credit rating changes, leverage multiples, refinancing risk
+- Cash-on-hand vs deal value ratio for all-cash deals
+
+### Legal Risk Signals
+- SC 14D-9 filings: target board recommendation changes, fiduciary out exercises
+- Keywords: "class action", "appraisal rights", "fiduciary duty", "injunction", "TRO", "preliminary injunction"
+- Litigation filed (check for complaint docket numbers in 8-K Item 8.01)
+- Appraisal petition filings (esp. for low-premium deals <20%)
+
+### Regulatory Risk Signals
+- HSR filing date and 30-day waiting period status, second request issuance
+- Keywords: "second request", "consent decree", "divestiture", "remedies", "phase II", "CFIUS"
+- International filings: EC Phase I/II, CMA, ACCC, SAMR timelines
+- Industry-specific regulators: FCC (telecom), FERC (energy), OCC/FDIC (banking)
+
+### MAC Risk Signals
+- Target's quarterly earnings (10-Q/10-K) relative to deal signing date
+- Keywords: "material adverse change", "material adverse effect", "ordinary course", "interim covenants"
+- Revenue/EBITDA trajectory vs projections used in fairness opinion
+- Sector-wide headwinds: compare target's stock to sector ETF since announcement
+- Covenant compliance in credit agreements
+
 Be precise and concise. Base grades and scores on the evidence provided, not speculation.
 If data is missing for a factor, note it and assign a moderate default (Medium grade or score 4-5).
 """
@@ -404,14 +441,13 @@ def build_deal_assessment_prompt(context: dict) -> str:
         sections.append("No recent changes detected.")
         sections.append("")
 
-    # Section 8: Existing AI research
+    # Section 8: Existing AI research (smart extraction of key sections)
     research = context.get("existing_research")
     if research:
         sections.append("## Existing AI Research")
         sections.append(f"Date: {research.get('created_at', 'N/A')}")
         content = research.get("content") or research.get("research_text") or ""
-        if len(content) > 2000:
-            content = content[:2000] + "... [truncated]"
+        content = _extract_research_sections(content, max_chars=2000)
         sections.append(content)
         sections.append("")
 
@@ -520,6 +556,43 @@ def build_deal_assessment_prompt(context: dict) -> str:
     else:
         sections.append("## POSITION STATUS")
         sections.append("Currently held: No (surveillance only)")
+        sections.append("")
+
+    # Section 19: AI filing impact assessments (last 30 days)
+    filing_impacts = context.get("filing_impacts", [])
+    if filing_impacts:
+        sections.append("## AI Filing Impact Assessments (last 30 days)")
+        for fi in filing_impacts:
+            level = (fi.get("impact_level") or "none").upper()
+            sections.append(
+                f"- [{fi.get('filing_type', 'N/A')}] {level}: "
+                f"{fi.get('summary', 'N/A')} "
+                f"(affects: {fi.get('risk_factor_affected', 'N/A')}, "
+                f"grade change: {fi.get('grade_change_suggested') or 'none'})"
+            )
+            if fi.get("key_detail"):
+                sections.append(f"  Key detail: {fi['key_detail']}")
+        sections.append("")
+
+    # Section 20: Recent M&A news articles (last 7 days)
+    news_articles = context.get("news_articles", [])
+    if news_articles:
+        sections.append("## Recent M&A News (last 7 days)")
+        for article in news_articles:
+            pub_date = article.get("published_at")
+            if hasattr(pub_date, "strftime"):
+                pub_date = pub_date.strftime("%Y-%m-%d")
+            sections.append(
+                f"- [{pub_date or 'N/A'}] {article.get('title', 'N/A')} "
+                f"({article.get('publisher', 'N/A')}) "
+                f"— risk factor: {article.get('risk_factor_affected') or 'general'}"
+            )
+            if article.get("summary"):
+                # Include first 200 chars of summary
+                summary = article["summary"][:200]
+                if len(article["summary"]) > 200:
+                    summary += "..."
+                sections.append(f"  {summary}")
         sections.append("")
 
     return "\n".join(sections)
