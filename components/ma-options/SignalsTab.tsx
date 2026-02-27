@@ -814,12 +814,40 @@ export default function SignalsTab() {
     ) as (ExecutionStrategyInfo & { strategy_state: RiskManagerState })[];
     const quotes = executionStatus?.quote_snapshot || {};
 
+    // Track consumed strategy indices so each risk manager matches at most one position.
+    // The old find() approach returned the first match for every position, so when
+    // multiple positions share the same qty (e.g. all x1), only the first risk manager
+    // was ever matched — the rest lost their trailing state, level badges, and quotes.
+    const consumed = new Set<number>();
+
     return signal.active_positions.map(pos => {
-      // Match by entry_price + initial_qty (no explicit FK)
-      const matchedStrategy = riskStrategies.find(
-        s => Math.abs(s.strategy_state.entry_price - pos.entry_price) < 0.005
-          && s.strategy_state.initial_qty === pos.quantity,
-      );
+      // Multi-field match: entry_price + qty + instrument strike from config.
+      // Each matched strategy is consumed so it can't be reused by another position.
+      let matchIdx = -1;
+      const posStrike = pos.signal?.option_contract?.strike;
+      for (let i = 0; i < riskStrategies.length; i++) {
+        if (consumed.has(i)) continue;
+        const s = riskStrategies[i];
+        const priceMatch = Math.abs(s.strategy_state.entry_price - pos.entry_price) < 0.005;
+        const qtyMatch = s.strategy_state.initial_qty === pos.quantity;
+        if (!priceMatch || !qtyMatch) continue;
+        // Tighten match with instrument strike from config when available
+        const configStrike = s.config?.instrument?.strike;
+        if (posStrike != null && configStrike != null) {
+          if (Math.abs(configStrike - posStrike) < 0.005) {
+            matchIdx = i;
+            break;
+          }
+          // Strike mismatch — skip this candidate, try next
+          continue;
+        }
+        // No strike info to compare — accept price+qty match
+        matchIdx = i;
+        break;
+      }
+      if (matchIdx >= 0) consumed.add(matchIdx);
+      const matchedStrategy = matchIdx >= 0 ? riskStrategies[matchIdx] : undefined;
+
       const rm = matchedStrategy?.strategy_state ?? null;
       const strategyId = matchedStrategy?.strategy_id ?? null;
       const quote = rm?.cache_key ? quotes[rm.cache_key] ?? null : null;
@@ -879,6 +907,11 @@ export default function SignalsTab() {
     const ledger = executionStatus?.position_ledger || [];
     const activeLedger = ledger.filter(p => p.status === "active");
     const closedLedger = ledger.filter(p => p.status === "closed");
+    // Fall back to signal-derived position count when ledger is empty
+    // (e.g. position store was reset but BMC still tracks positions in memory)
+    const effectiveActiveCount = activeLedger.length > 0
+      ? activeLedger.length
+      : (signal?.active_positions?.length ?? 0);
     let wins = 0;
     let losses = 0;
     let expired = 0;
@@ -910,7 +943,7 @@ export default function SignalsTab() {
       if (pd.pnlDollar !== null) unrealizedPnl += pd.pnlDollar;
     }
     return {
-      activeCount: activeLedger.length,
+      activeCount: effectiveActiveCount,
       completedCount: closedLedger.length,
       expired,
       wins,
@@ -920,7 +953,7 @@ export default function SignalsTab() {
       netPnl: totalPnl - totalCommission,
       unrealizedPnl,
     };
-  }, [executionStatus?.position_ledger, positionDetails]);
+  }, [executionStatus?.position_ledger, positionDetails, signal?.active_positions]);
 
   const ws = signal?.polygon_ws;
   const bars = signal?.bar_accumulator;

@@ -1561,7 +1561,7 @@ class IBDataAgent:
         from strategies.risk_manager import RiskManagerStrategy
 
         strategy = RiskManagerStrategy()
-        strategy_id = f"bmc_risk_{int(time.time())}"
+        strategy_id = f"bmc_risk_{int(time.time() * 1000)}"
 
         result = self.execution_engine.load_strategy(strategy_id, strategy, risk_config)
         if "error" in result:

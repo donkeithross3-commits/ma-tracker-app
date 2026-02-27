@@ -1234,7 +1234,9 @@ class ExecutionEngine:
         if not self._position_store:
             return []
         from datetime import datetime
-        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+        midnight = datetime.now(et).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         return [
             {
                 "id": p["id"],
@@ -1244,6 +1246,8 @@ class ExecutionEngine:
                 "exit_reason": p.get("exit_reason", ""),
                 "entry": p.get("entry", {}),
                 "instrument": p.get("instrument", {}),
+                "risk_config": p.get("risk_config", {}),
+                "runtime_state": p.get("runtime_state", {}),
                 "fill_log": p.get("fill_log", []),
                 "lineage": p.get("lineage", {}),
             }
