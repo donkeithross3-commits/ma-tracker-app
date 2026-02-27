@@ -52,6 +52,9 @@ python-service/token.json
 # Claude Code session state (local only, don't commit)
 .claude-session
 
+# Cursor IDE
+.cursor/
+
 # Cloudflare Tunnel (local only, don't commit credentials)
 .cloudflared/credentials.json
 .cloudflared/tunnel.log

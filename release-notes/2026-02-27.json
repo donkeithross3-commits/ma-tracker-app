@@ -1,8 +1,18 @@
 {
   "date": "2026-02-27",
   "title": "Feb 27, 2026",
-  "summary": "Homepage reorganized with IB Trading Tools branding, Manual Trading v2 with inline order ticket and net greeks, and Event Driven Portfolio gains Curate + Monitor tabs.",
+  "summary": "Hot-swap model chooser for the BMC execution engine, IB Trading Tools rebrand, Manual Trading v2, and Event Driven Portfolio gains Curate + Monitor tabs.",
   "features": [
+    {
+      "id": "hot-swap-model-chooser",
+      "title": "Hot-Swap Model Chooser (v1.13.0)",
+      "summary": "Browse and load ML models from the dashboard while the execution engine keeps running — zero downtime model switching.",
+      "description": "The Algorithmic (Signals) tab now lets you browse all models in the registry and swap the active model without stopping the engine.\n\n**How it works:**\n- Click the model type label (e.g. \"lightgbm/SPY\") on a running strategy to open the model chooser\n- A compact table shows all available models: version, type, recipe, date, status badge, AUC, and profit factor\n- The currently loaded model is highlighted; click \"Load\" on any other model to hot-swap it in\n- The swap is GIL-atomic — the eval loop never pauses, and the next decision cycle uses the new model immediately\n\n**What's under the hood:**\n- New `execution_list_models` and `execution_swap_model` commands flow through the full 4-layer relay (UI → Next.js → FastAPI → WebSocket → Agent)\n- Model reference is swapped first (thread-safe), then metadata updates follow\n- Decision cycle snapshots model + metadata into locals at the top, so lineage and signal logs always match the exact model used for each prediction\n- Concurrent swap guard prevents double-click races\n- Registry errors are caught gracefully with descriptive messages\n\n**Use case:** Switch between LightGBM tabular models and LSTM sequence models on the fly. Compare model performance in real-time without restarting strategies or losing accumulated bar data and Polygon WS state.",
+      "category": "signals",
+      "project": "ma-options",
+      "image": "",
+      "screenshot": null
+    },
     {
       "id": "ib-trading-tools-rebrand",
       "title": "IB Trading Tools Rebrand",
