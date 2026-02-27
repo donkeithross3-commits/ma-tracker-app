@@ -288,6 +288,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Model registry path (stored for hot-swap)
         self._registry_path: str = ""
+        self._swap_in_progress: bool = False
 
         # Polygon WS resilience
         self._shutdown_requested: bool = False
@@ -616,10 +617,18 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         if not self._registry_path:
             return []
 
+        if not os.path.isdir(self._registry_path):
+            logger.warning("Model registry path not found: %s", self._registry_path)
+            return []
+
         from big_move_convexity.ml.model_registry import ModelRegistry
 
-        registry = ModelRegistry(self._registry_path)
-        all_versions = registry.list_versions()
+        try:
+            registry = ModelRegistry(self._registry_path)
+            all_versions = registry.list_versions()
+        except Exception as e:
+            logger.error("Failed to read model registry at %s: %s", self._registry_path, e)
+            return []
 
         result = []
         for v in all_versions:
@@ -656,11 +665,30 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         Atomically replaces self._model under the GIL (single STORE_ATTR op).
         Called from agent handler via thread pool (disk I/O for model load).
 
+        Thread safety: Model is swapped FIRST, then metadata is updated.
+        This means the eval loop always sees a coherent (model, metadata) pair:
+        either (old model, old metadata) or (new model, new metadata). The brief
+        window of (new model, old metadata) is safe because metadata is only used
+        for informational purposes (telemetry, lineage), and _run_decision_cycle
+        snapshots model+metadata into locals before using them.
+
         Returns dict with previous/new version info and swap timing.
         """
         if not self._registry_path:
             return {"error": "No registry path configured"}
 
+        # Serialize swap operations — prevent concurrent double-swaps
+        if self._swap_in_progress:
+            return {"error": "A model swap is already in progress"}
+        self._swap_in_progress = True
+
+        try:
+            return self._swap_model_inner(version_id)
+        finally:
+            self._swap_in_progress = False
+
+    def _swap_model_inner(self, version_id: str) -> dict:
+        """Inner swap logic, called under _swap_in_progress guard."""
         from big_move_convexity.ml.model_registry import ModelRegistry
 
         t0 = time.time()
@@ -669,7 +697,13 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         if version_id == previous_version:
             return {"error": f"Model {version_id} is already loaded"}
 
-        registry = ModelRegistry(self._registry_path)
+        if not os.path.isdir(self._registry_path):
+            return {"error": f"Registry path not found: {self._registry_path}"}
+
+        try:
+            registry = ModelRegistry(self._registry_path)
+        except Exception as e:
+            return {"error": f"Failed to open registry: {e}"}
 
         # Validate version exists
         try:
@@ -690,7 +724,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         except Exception as e:
             return {"error": f"Failed to load model {version_id}: {e}"}
 
-        # Update metadata fields first (only read by telemetry/lineage, not eval-hot)
+        # Validate loaded model has expected interface
+        if not hasattr(new_model, 'model_type') or not hasattr(new_model, 'feature_names'):
+            return {"error": f"Loaded model {version_id} is missing required attributes (model_type, feature_names)"}
+
+        # GIL-atomic swap FIRST — eval loop sees new model immediately.
+        # Metadata update follows; the brief (new model, old metadata) window is safe
+        # because _run_decision_cycle snapshots both into locals.
+        self._model = new_model
+
+        # Now update metadata (informational — telemetry, lineage)
         self._model_version = version_meta.version_id
         self._model_ticker = version_meta.ticker
         self._model_type = new_model.model_type
@@ -717,9 +760,6 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             self._top_feature_names = [new_model.feature_names[i] for i in sorted_idx]
         else:
             self._top_feature_names = new_model.feature_names[:20]
-
-        # GIL-atomic swap — single STORE_ATTR bytecode op
-        self._model = new_model
 
         swap_ms = (time.time() - t0) * 1000
         logger.info(
@@ -949,6 +989,26 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             logger.warning("Polygon data stale (%.0fs) — skipping decision cycle", bar_age)
             return []
 
+        # ── Snapshot model + metadata (thread safety against hot-swap) ──
+        # A concurrent swap_model() can update self._model and self._model_version
+        # between reads.  By snapshotting everything into locals at the top, we
+        # guarantee that the model used for predict_single() matches the metadata
+        # recorded in lineage and signal logs.  This eliminates the race where a
+        # swap fires mid-cycle and contaminates the lineage with wrong model info.
+        _snap_model = self._model
+        _snap_model_version = self._model_version
+        _snap_model_type = self._model_type
+        _snap_model_ticker = self._model_ticker
+        _snap_family_id = self._family_id
+        _snap_recipe_id = self._recipe_id
+        _snap_recipe_label = self._recipe_label
+        _snap_checkpoint_status = self._checkpoint_status
+        _snap_target_column = self._target_column
+        _snap_dataset_version = self._dataset_version
+        _snap_bar_type = self._bar_type
+        _snap_model_metrics = self._model_metrics
+        _snap_top_feature_names = self._top_feature_names
+
         import pandas as pd
         from big_move_convexity.features.feature_stack import assemble_feature_vector
         from big_move_convexity.ml.inference import predict_single
@@ -1024,8 +1084,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             session_realized_vol=session_realized_vol,
         )
 
-        # Predict
-        prediction = predict_single(self._model, fv.features)
+        # Predict — use snapshot model, not self._model (hot-swap safe)
+        prediction = predict_single(_snap_model, fv.features)
         probability = prediction["probability"]
 
         # Generate signal (with straddle richness gating if configured)
@@ -1057,7 +1117,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._last_signal = signal_record
 
         # Log every decision cycle to JSONL for offline analysis (WS1)
-        self._write_signal_log(signal_record, fv, cfg)
+        # Pass snapshot metadata to ensure log entry matches the model used for prediction
+        _snap_meta = {
+            "family_id": _snap_family_id,
+            "recipe_id": _snap_recipe_id,
+            "recipe_label": _snap_recipe_label,
+            "model_version": _snap_model_version,
+            "model_ticker": _snap_model_ticker,
+            "model_type": _snap_model_type,
+        }
+        self._write_signal_log(signal_record, fv, cfg, _snap_meta)
 
         if signal.direction == "none":
             logger.debug(
@@ -1077,8 +1146,22 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         )
 
         # Build lineage snapshot on signal fire (WS2) — consumed by on_fill
+        # Pass snapshot metadata for thread-safe lineage attribution
+        _snap_lineage_meta = {
+            "family_id": _snap_family_id,
+            "recipe_id": _snap_recipe_id,
+            "recipe_label": _snap_recipe_label,
+            "checkpoint_status": _snap_checkpoint_status,
+            "model_version": _snap_model_version,
+            "model_type": _snap_model_type,
+            "model_ticker": _snap_model_ticker,
+            "model_n_features": len(_snap_model.feature_names) if _snap_model else 0,
+            "model_metrics": _snap_model_metrics,
+            "top_feature_names": _snap_top_feature_names,
+        }
         self._pending_lineage = self._build_lineage_snapshot(
             signal, signal_record, fv, cfg, underlying_price, bars_by_res,
+            model_snapshot=_snap_lineage_meta,
         )
 
         # Check cooldown
@@ -1359,8 +1442,17 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
     # Signal logging & lineage (WS1, WS2)
     # ------------------------------------------------------------------
 
-    def _write_signal_log(self, signal_record: dict, fv, cfg: dict) -> None:
-        """Append decision cycle to daily JSONL for offline analysis."""
+    def _write_signal_log(self, signal_record: dict, fv, cfg: dict,
+                          model_snapshot: Optional[dict] = None) -> None:
+        """Append decision cycle to daily JSONL for offline analysis.
+
+        Args:
+            model_snapshot: Pre-captured model metadata from _run_decision_cycle.
+                Ensures log entries match the exact model used for prediction,
+                even if a hot-swap occurs mid-cycle.  Falls back to self._ fields
+                for callers that don't pass it (backward compat).
+        """
+        ms = model_snapshot or {}
         try:
             log_dir = Path(__file__).parent.parent / "signal_logs"
             log_dir.mkdir(exist_ok=True)
@@ -1368,19 +1460,19 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
             entry = {
                 **signal_record,
-                # Taxonomy fields
+                # Taxonomy fields (prefer snapshot, fall back to self._)
                 "strategy": "bmc",
-                "family_id": self._family_id,
-                "recipe_id": self._recipe_id,
-                "recipe_label": self._recipe_label,
+                "family_id": ms.get("family_id") or self._family_id,
+                "recipe_id": ms.get("recipe_id") or self._recipe_id,
+                "recipe_label": ms.get("recipe_label") or self._recipe_label,
                 "session_id": self._session_id,
                 "segment_idx": self._segment_idx,
                 "execution_profile_id": self._current_profile_id,
                 "execution_profile_label": self._current_profile_label,
-                # Model identity
-                "model_version": self._model_version,
-                "model_ticker": self._model_ticker,
-                "model_type": self._model_type,
+                # Model identity (prefer snapshot)
+                "model_version": ms.get("model_version") or self._model_version,
+                "model_ticker": ms.get("model_ticker") or self._model_ticker,
+                "model_type": ms.get("model_type") or self._model_type,
                 "features": fv.features if fv else {},
                 "nan_features": [
                     k for k, v in (fv.features if fv else {}).items()
@@ -1400,8 +1492,17 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         except Exception:
             logger.debug("Failed to write signal log", exc_info=True)
 
-    def _build_lineage_snapshot(self, signal, signal_record, fv, cfg, underlying_price, bars_by_res):
-        """Build a lineage dict capturing the full decision context for a fired signal."""
+    def _build_lineage_snapshot(self, signal, signal_record, fv, cfg,
+                                underlying_price, bars_by_res,
+                                model_snapshot: Optional[dict] = None):
+        """Build a lineage dict capturing the full decision context for a fired signal.
+
+        Args:
+            model_snapshot: Pre-captured model metadata from _run_decision_cycle.
+                Ensures lineage matches the exact model used for prediction,
+                even if a hot-swap occurs mid-cycle.
+        """
+        ms = model_snapshot or {}
         feature_hash = ""
         if fv and fv.features:
             try:
@@ -1414,21 +1515,21 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         return {
             # Taxonomy identity (6-level hierarchy)
             "strategy": "bmc",
-            "family_id": self._family_id,
-            "recipe_id": self._recipe_id,
-            "recipe_label": self._recipe_label,
-            "checkpoint_status": self._checkpoint_status,
+            "family_id": ms.get("family_id") or self._family_id,
+            "recipe_id": ms.get("recipe_id") or self._recipe_id,
+            "recipe_label": ms.get("recipe_label") or self._recipe_label,
+            "checkpoint_status": ms.get("checkpoint_status") or self._checkpoint_status,
             "session_id": self._session_id,
             "segment_idx": self._segment_idx,
             "execution_profile_id": self._current_profile_id,
             "execution_profile_label": self._current_profile_label,
             "signal_id": signal_record.get("signal_id", ""),
-            # Model identity
-            "model_version": self._model_version,
-            "model_type": self._model_type,
-            "model_ticker": self._model_ticker,
-            "model_n_features": len(self._model.feature_names) if self._model else 0,
-            "model_metrics": self._model_metrics,
+            # Model identity (prefer snapshot for correctness)
+            "model_version": ms.get("model_version") or self._model_version,
+            "model_type": ms.get("model_type") or self._model_type,
+            "model_ticker": ms.get("model_ticker") or self._model_ticker,
+            "model_n_features": ms.get("model_n_features", len(self._model.feature_names) if self._model else 0),
+            "model_metrics": ms.get("model_metrics") or self._model_metrics,
             "signal": {
                 "timestamp": signal_record.get("timestamp"),
                 "direction": signal.direction,
@@ -1448,7 +1549,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 )
             },
             "feature_fingerprint": {
-                "top_features": {name: fv.features.get(name) for name in self._top_feature_names} if fv else {},
+                "top_features": {name: fv.features.get(name) for name in (ms.get("top_feature_names") or self._top_feature_names)} if fv else {},
                 "n_total": fv.n_features if fv else 0,
                 "n_nan": fv.n_nan if fv else 0,
                 "feature_hash": feature_hash,

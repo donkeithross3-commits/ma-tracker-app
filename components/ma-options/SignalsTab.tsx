@@ -443,6 +443,7 @@ export default function SignalsTab() {
   }>>([]);
   const [modelListLoading, setModelListLoading] = useState(false);
   const [modelSwapping, setModelSwapping] = useState(false);
+  const [swappingVersionId, setSwappingVersionId] = useState<string | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
 
   // ── Poll signal state ──
@@ -763,6 +764,7 @@ export default function SignalsTab() {
     const strat = strategies.find(s => s.ticker === activeTicker);
     if (!strat) return;
     setModelSwapping(true);
+    setSwappingVersionId(versionId);
     setModelError(null);
     try {
       const res = await fetch("/api/ma-options/execution/swap-model", {
@@ -775,6 +777,11 @@ export default function SignalsTab() {
       if (data.error) {
         setModelError(data.error);
       } else {
+        // Update model list locally so is_current markers reflect the swap immediately
+        setModelList(prev => prev.map(m => ({
+          ...m,
+          is_current: m.version_id === versionId,
+        })));
         setModelModalOpen(false);
         // Telemetry will auto-update on next poll (~5s)
       }
@@ -782,6 +789,7 @@ export default function SignalsTab() {
       setModelError(e.message || "Failed to swap model");
     } finally {
       setModelSwapping(false);
+      setSwappingVersionId(null);
     }
   }, [strategies, activeTicker]);
 
@@ -1901,7 +1909,7 @@ export default function SignalsTab() {
                               disabled={modelSwapping}
                               className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-900/50 text-blue-300 hover:bg-blue-800/60 border border-blue-700/50 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              {modelSwapping ? "..." : "Load"}
+                              {swappingVersionId === m.version_id ? "Loading..." : modelSwapping ? "..." : "Load"}
                             </button>
                           )}
                         </td>
