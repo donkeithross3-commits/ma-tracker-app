@@ -19,6 +19,8 @@ MA_NEWS_KEYWORDS = {
     "merger", "acquisition", "acquire", "acquirer", "takeover", "buyout",
     "tender offer", "deal", "transaction",
     "regulatory", "antitrust", "ftc", "doj", "cfius",
+    "committee on foreign investment", "national security review",
+    "foreign ownership", "national security",
     "shareholder", "vote", "proxy", "approval",
     "closing", "close", "completion",
     "termination", "break", "walk away",
@@ -199,12 +201,49 @@ async def get_recent_deal_news(
     return [dict(r) for r in rows]
 
 
+async def scan_single_ticker_news(
+    pool, ticker: str, days: int = 3
+) -> Dict[str, Any]:
+    """Scan Polygon news for a single ticker on demand.
+
+    Returns summary dict with raw/filtered/stored counts for diagnostics.
+    """
+    api_key = os.environ.get("POLYGON_API_KEY")
+    if not api_key:
+        return {"error": "no_api_key", "ticker": ticker}
+
+    logger.info("[news_monitor] On-demand scan for %s (days=%d)", ticker, days)
+
+    articles = await fetch_deal_news(ticker, api_key, days=days)
+    raw_count = len(articles)
+
+    relevant = filter_ma_relevant(articles)
+    filtered_count = len(relevant)
+
+    stored = 0
+    if relevant:
+        stored = await store_news_articles(pool, ticker, relevant)
+
+    logger.info(
+        "[news_monitor] %s: %d raw -> %d relevant -> %d new stored",
+        ticker, raw_count, filtered_count, stored,
+    )
+    return {
+        "ticker": ticker,
+        "raw_articles": raw_count,
+        "relevant_articles": filtered_count,
+        "new_stored": stored,
+        "sample_titles": [a.get("title", "")[:100] for a in articles[:5]],
+    }
+
+
 async def scan_all_deal_news(pool) -> Dict[str, Any]:
     """Main job function: scan Polygon news for all active deal tickers.
 
     Returns summary dict for job_runs.
     """
     api_key = os.environ.get("POLYGON_API_KEY")
+    has_key = bool(api_key)
     if not api_key:
         logger.warning("[news_monitor] No POLYGON_API_KEY set, skipping news scan")
         return {"skipped": True, "reason": "no_api_key"}
@@ -227,25 +266,44 @@ async def scan_all_deal_news(pool) -> Dict[str, Any]:
         )
 
     tickers = [r["ticker"] for r in rows]
+    logger.info(
+        "[news_monitor] Starting scan: %d tickers, POLYGON_API_KEY=%s",
+        len(tickers),
+        "set" if has_key else "MISSING",
+    )
     total_stored = 0
+    total_raw = 0
+    total_filtered = 0
 
     for ticker in tickers:
         try:
             articles = await fetch_deal_news(ticker, api_key, days=1)
+            raw_count = len(articles)
+            total_raw += raw_count
             if not articles:
                 continue
             relevant = filter_ma_relevant(articles)
+            total_filtered += len(relevant)
             if relevant:
                 stored = await store_news_articles(pool, ticker, relevant)
                 total_stored += stored
+            else:
+                logger.debug(
+                    "[news_monitor] %s: %d raw articles, 0 passed keyword filter",
+                    ticker, raw_count,
+                )
         except Exception:
             logger.error(
                 "[news_monitor] Error scanning news for %s", ticker, exc_info=True
             )
 
     logger.info(
-        "[news_monitor] Scanned %d tickers, stored %d articles",
-        len(tickers),
-        total_stored,
+        "[news_monitor] Scanned %d tickers: %d raw -> %d relevant -> %d stored",
+        len(tickers), total_raw, total_filtered, total_stored,
     )
-    return {"tickers": len(tickers), "articles_stored": total_stored}
+    return {
+        "tickers": len(tickers),
+        "raw_articles": total_raw,
+        "relevant_articles": total_filtered,
+        "articles_stored": total_stored,
+    }

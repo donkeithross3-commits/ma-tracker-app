@@ -1810,3 +1810,158 @@ async def set_budget_balance(req: BalanceSetRequest):
     except Exception as e:
         logger.error("Failed to set balance: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# News scan (on-demand)
+# ---------------------------------------------------------------------------
+
+@router.post("/news/scan")
+async def scan_ticker_news(ticker: str = Query(..., regex=r"^[A-Z]{1,10}$")):
+    """Trigger an on-demand news scan for a single ticker via Polygon API."""
+    from app.scheduler.news_monitor import scan_single_ticker_news
+
+    pool = _get_pool()
+    try:
+        result = await scan_single_ticker_news(pool, ticker, days=3)
+        return result
+    except Exception as e:
+        logger.error("News scan failed for %s: %s", ticker, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Milestone CRUD
+# ---------------------------------------------------------------------------
+
+class MilestoneCreate(BaseModel):
+    milestone_type: str
+    expected_date: Optional[date] = None
+    status: Optional[str] = "pending"
+    source: Optional[str] = None
+    notes: Optional[str] = None
+    risk_factor_affected: Optional[str] = None
+
+class MilestoneUpdate(BaseModel):
+    status: Optional[str] = None
+    expected_date: Optional[date] = None
+    actual_date: Optional[date] = None
+    notes: Optional[str] = None
+
+
+@router.get("/milestones/{ticker}")
+async def get_milestones(ticker: str):
+    """List all milestones for a ticker."""
+    if not re.match(r"^[A-Z]{1,10}$", ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker")
+    pool = _get_pool()
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT * FROM canonical_deal_milestones
+                   WHERE ticker = $1
+                   ORDER BY COALESCE(expected_date, milestone_date) ASC NULLS LAST""",
+                ticker,
+            )
+        return [_row_to_dict(r) for r in rows]
+    except Exception as e:
+        logger.error("Failed to get milestones for %s: %s", ticker, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/milestones/{ticker}")
+async def create_milestone(ticker: str, body: MilestoneCreate):
+    """Create a new milestone for a ticker."""
+    if not re.match(r"^[A-Z]{1,10}$", ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker")
+    pool = _get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """INSERT INTO canonical_deal_milestones
+                       (ticker, milestone_type, expected_date, status, source, notes, risk_factor_affected)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)
+                   ON CONFLICT (ticker, milestone_type, COALESCE(milestone_date, '1970-01-01'::date))
+                   DO NOTHING
+                   RETURNING *""",
+                ticker,
+                body.milestone_type,
+                body.expected_date,
+                body.status or "pending",
+                body.source,
+                body.notes,
+                body.risk_factor_affected,
+            )
+        if row:
+            return _row_to_dict(row)
+        return {"status": "already_exists", "ticker": ticker, "milestone_type": body.milestone_type}
+    except Exception as e:
+        logger.error("Failed to create milestone for %s: %s", ticker, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/milestones/{milestone_id}")
+async def update_milestone(milestone_id: str, body: MilestoneUpdate):
+    """Update a milestone's status or dates."""
+    try:
+        mid = uuid.UUID(milestone_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid milestone ID")
+    pool = _get_pool()
+    try:
+        updates = []
+        params = [mid]
+        idx = 2
+        if body.status is not None:
+            updates.append(f"status = ${idx}")
+            params.append(body.status)
+            idx += 1
+        if body.expected_date is not None:
+            updates.append(f"expected_date = ${idx}")
+            params.append(body.expected_date)
+            idx += 1
+        if body.actual_date is not None:
+            updates.append(f"actual_date = ${idx}")
+            params.append(body.actual_date)
+            idx += 1
+        if body.notes is not None:
+            updates.append(f"notes = ${idx}")
+            params.append(body.notes)
+            idx += 1
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        updates.append("updated_at = NOW()")
+        sql = f"UPDATE canonical_deal_milestones SET {', '.join(updates)} WHERE id = $1 RETURNING *"
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(sql, *params)
+        if not row:
+            raise HTTPException(status_code=404, detail="Milestone not found")
+        return _row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to update milestone %s: %s", milestone_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/milestones/{milestone_id}")
+async def delete_milestone(milestone_id: str):
+    """Delete a milestone."""
+    try:
+        mid = uuid.UUID(milestone_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid milestone ID")
+    pool = _get_pool()
+    try:
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM canonical_deal_milestones WHERE id = $1", mid
+            )
+        if result == "DELETE 0":
+            raise HTTPException(status_code=404, detail="Milestone not found")
+        return {"status": "deleted", "id": milestone_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete milestone %s: %s", milestone_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

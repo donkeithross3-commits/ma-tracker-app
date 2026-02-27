@@ -99,12 +99,12 @@ def compute_context_hash(context: dict) -> str:
             if key not in ("id", "ticker", "created_at", "updated_at"):
                 parts.append(f"attr:{key}:{_safe_str(attrs.get(key))}")
 
-    # Options-implied probability (bucketed to 2pp to avoid noise)
-    options_prob = context.get("options_implied_probability")
-    if options_prob is not None:
+    # Spread-implied probability (bucketed to 2pp to avoid noise)
+    spread_prob = context.get("spread_implied_probability") or context.get("options_implied_probability")
+    if spread_prob is not None:
         try:
-            bucketed = round(float(options_prob) * 50) / 50  # 2pp buckets
-            parts.append(f"options_prob:{bucketed:.2f}")
+            bucketed = round(float(spread_prob) * 50) / 50  # 2pp buckets
+            parts.append(f"spread_prob:{bucketed:.2f}")
         except (ValueError, TypeError):
             pass
 
@@ -166,7 +166,7 @@ def build_context_summary(context: dict) -> dict:
         "filing_types": sorted(set(f.get("filing_type", "") for f in filings)),
         "halt_count": len(halts),
         "diff_count": len(diffs),
-        "options_prob": context.get("options_implied_probability"),
+        "spread_implied_prob": context.get("spread_implied_probability") or context.get("options_implied_probability"),
         "milestones_pending": sum(1 for m in (context.get("milestones") or [])
                                   if m.get("status") == "pending"),
         "milestones_completed": sum(1 for m in (context.get("milestones") or [])
@@ -182,6 +182,14 @@ def classify_changes(context: dict, prev_summary: dict | None) -> tuple[ChangeSi
     Returns (significance, list_of_change_descriptions).
     """
     if prev_summary is None:
+        # Check if a previous assessment exists but lacks context_summary
+        # (infra migration: context_summary wasn't stored yet).
+        # Use MODERATE to preserve model continuity (Sonnet delta, not Opus full).
+        prev_assessment = context.get("previous_assessment")
+        if prev_assessment:
+            return ChangeSignificance.MODERATE, [
+                "previous assessment exists but lacks context summary (backfill)"
+            ]
         return ChangeSignificance.MAJOR, ["first assessment (no previous data)"]
 
     current = build_context_summary(context)
@@ -261,14 +269,15 @@ def classify_changes(context: dict, prev_summary: dict | None) -> tuple[ChangeSi
         changes.append(f"new news articles: {old_news} -> {new_news}")
         _upgrade(ChangeSignificance.MODERATE)
 
-    # Check options-implied probability shift (>5pp)
+    # Check spread-implied probability shift (>5pp)
+    # Backward compat: check both old key (options_prob) and new key (spread_implied_prob)
     try:
-        old_options = float(prev_summary.get("options_prob") or 0)
-        new_options = float(current.get("options_prob") or 0)
+        old_options = float(prev_summary.get("spread_implied_prob") or prev_summary.get("options_prob") or 0)
+        new_options = float(current.get("spread_implied_prob") or 0)
         if old_options > 0 and new_options > 0:
             options_shift = abs(new_options - old_options)
             if options_shift >= 0.05:
-                changes.append(f"options-implied shift: {old_options:.0%} -> {new_options:.0%}")
+                changes.append(f"spread-implied shift: {old_options:.0%} -> {new_options:.0%}")
                 _upgrade(ChangeSignificance.MODERATE)
     except (ValueError, TypeError):
         pass

@@ -5,9 +5,30 @@ Grade-based system: Low/Medium/High for 5 sheet-aligned factors,
 """
 
 import os
-from datetime import date
+from datetime import date, datetime
+from typing import Optional
 
 from .research_refresher import _extract_research_sections
+
+
+def _parse_date(val) -> Optional[date]:
+    """Safely parse a date from str, date, datetime, or None."""
+    if val is None:
+        return None
+    if isinstance(val, date) and not isinstance(val, datetime):
+        return val
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, str):
+        val = val.strip()
+        if not val or val.lower() in ("n/a", "none", "tbd", "unknown", ""):
+            return None
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%B %d, %Y", "%b %d, %Y"):
+            try:
+                return datetime.strptime(val, fmt).date()
+            except ValueError:
+                continue
+    return None
 
 RISK_ASSESSMENT_SYSTEM_PROMPT = """You are an expert M&A risk analyst specializing in merger arbitrage.
 You assess the risk profile of pending M&A deals by analyzing multiple risk factors.
@@ -41,11 +62,10 @@ For these 3 factors, assign a numeric score from 0 to 10:
 - 7-10: High risk (significant concern)
 
 6. **Market** — Spread behavior, unusual widening, volume anomalies, market sentiment
-7. **Timing** — Days to expected close, outside date proximity, extension risk, delays.
-   IMPORTANT: Calculate exact months from the provided Today's Date to the Expected Close Date.
-   Do NOT estimate timing from training data or general knowledge — use the actual dates provided.
-   If your estimated close timing differs materially from the sheet's Expected Close Date,
-   include a production_disagreement with factor "timing", citing specific filings/dates as evidence.
+7. **Timing** — Use the pre-calculated timing heuristics provided in the context.
+   DO NOT re-calculate months from dates. Focus on: Is the buffer adequate?
+   Are there signs of delay? Is the timeline normal for this deal type?
+   If regulatory milestones are tracked, factor their status into timing risk.
 8. **Competing Bid** — Likelihood of topping bid, strategic interest, go-shop results
 
 ## Grade Comparison (CRITICAL)
@@ -235,7 +255,7 @@ When a SIGNAL COMPARISON section is provided, you MUST:
 2. For each divergence >5pp, either:
    a. Justify YOUR estimate with specific evidence if you disagree with the market/sheet, OR
    b. Update your estimate toward the consensus if you lack contrary evidence
-3. Never ignore the options-implied signal — it represents real money at risk
+3. Never ignore the market-implied signal — it represents real money at risk
 
 ## Risk Factor Analysis Guide
 
@@ -476,16 +496,20 @@ def build_deal_assessment_prompt(context: dict) -> str:
         sections.append(f"Change: {live.get('change', 'N/A')}")
         sections.append("")
 
-    # Section 11: Options-implied probability
-    options_prob = context.get("options_implied_probability")
-    if options_prob is not None:
-        sections.append("## Options-Implied Probability")
-        sections.append(f"Deal Completion Probability: {options_prob * 100:.1f}%")
+    # Section 11: Market-implied probability
+    spread_prob = context.get("spread_implied_probability") or context.get("options_implied_probability")
+    if spread_prob is not None:
+        sections.append("## Market-Implied Probability")
+        sections.append(f"Spread-Implied Probability: {spread_prob * 100:.1f}%  (Formula: 1 - spread/deal_price)")
         options_snap = context.get("options_snapshot")
-        if options_snap:
+        has_options = options_snap and options_snap.get("has_options")
+        if has_options:
+            sections.append("### Real Options Market Data")
             sections.append(f"ATM IV: {options_snap.get('atm_iv', 'N/A')}")
             sections.append(f"Put/Call Ratio: {options_snap.get('put_call_ratio', 'N/A')}")
             sections.append(f"Unusual Volume: {options_snap.get('unusual_volume', 'N/A')}")
+        else:
+            sections.append("(No real options market data available)")
         sections.append("")
 
     # Section 12: Milestone timeline
@@ -498,6 +522,42 @@ def build_deal_assessment_prompt(context: dict) -> str:
             m_date = m.get("expected_date") or m.get("milestone_date") or "N/A"
             affects = m.get("risk_factor_affected") or "N/A"
             sections.append(f"- [{status}] {m_type}: {m_date} (affects: {affects})")
+        sections.append("")
+
+    # Section 12.5: Pre-calculated timing heuristics
+    # (Prevents model-interpretation differences in date arithmetic)
+    today = date.today()
+    details = context.get("deal_details") or {}
+    announce_date = _parse_date(details.get("announce_date"))
+    expected_close = _parse_date(details.get("expected_close_date"))
+    outside_date = _parse_date(details.get("outside_date"))
+
+    timing_lines = []
+    if expected_close:
+        days_to_close = (expected_close - today).days
+        months_to_close = round(days_to_close / 30.44, 1)
+        timing_lines.append(f"Days to Expected Close: {days_to_close}")
+        timing_lines.append(f"Months to Expected Close: {months_to_close}")
+    if outside_date:
+        days_to_outside = (outside_date - today).days
+        months_to_outside = round(days_to_outside / 30.44, 1)
+        timing_lines.append(f"Days to Outside Date: {days_to_outside}")
+        timing_lines.append(f"Months to Outside Date: {months_to_outside}")
+    if expected_close and outside_date:
+        buffer_days = (outside_date - expected_close).days
+        buffer_months = round(buffer_days / 30.44, 1)
+        timing_lines.append(f"Buffer (Close -> Outside): {buffer_months} months ({buffer_days} days)")
+    if announce_date and expected_close:
+        total_span = (expected_close - announce_date).days
+        elapsed = (today - announce_date).days
+        if total_span > 0:
+            pct_elapsed = round(elapsed / total_span * 100, 1)
+            timing_lines.append(f"Timeline Elapsed: {pct_elapsed}% (day {elapsed} of {total_span})")
+
+    if timing_lines:
+        sections.append("## Timing Heuristics (pre-calculated — do NOT re-derive from dates)")
+        for line in timing_lines:
+            sections.append(line)
         sections.append("")
 
     # Section 13: Three-signal comparison

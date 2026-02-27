@@ -1,21 +1,24 @@
 """Signal computation helpers for three-signal triangulation.
 
-Computes options-implied deal completion probability and builds
+Computes spread-implied deal completion probability and builds
 cross-signal comparison data for the morning risk assessment prompt.
 """
 
 
-def compute_options_implied_probability(
+def compute_spread_implied_probability(
     current_price: float | None,
     deal_price: float | None,
 ) -> float | None:
-    """Compute a simple options-implied deal completion probability.
+    """Compute spread-implied deal completion probability.
 
     Formula: 1 - (spread / deal_price)
     Where spread = deal_price - current_price.
 
     If the market prices the stock at $24 and the deal is at $25,
     the spread is $1/$25 = 4%, implying ~96% probability of completion.
+
+    NOTE: This is NOT options-derived. It uses only the price spread.
+    Renamed from compute_options_implied_probability for accuracy.
 
     Returns None if inputs are missing or invalid.
     """
@@ -89,3 +92,7 @@ def build_signal_comparison(
         "consensus": round(mean, 4),
         "divergences": divergences,
     }
+
+
+# Backward-compatible alias
+compute_options_implied_probability = compute_spread_implied_probability

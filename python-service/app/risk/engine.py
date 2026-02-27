@@ -454,15 +454,17 @@ class RiskAssessmentEngine:
         except Exception:
             pass  # Table may not exist yet
 
-        # Compute options-implied probability
+        # Compute spread-implied probability (renamed from options-implied)
         if ENABLE_ENRICHED_CONTEXT:
-            from .signals import compute_options_implied_probability
+            from .signals import compute_spread_implied_probability
 
             current_price = context.get("sheet_row", {}).get("current_price")
             deal_price = context.get("sheet_row", {}).get("deal_price")
-            options_prob = compute_options_implied_probability(current_price, deal_price)
-            if options_prob is not None:
-                context["options_implied_probability"] = options_prob
+            spread_prob = compute_spread_implied_probability(current_price, deal_price)
+            if spread_prob is not None:
+                context["spread_implied_probability"] = spread_prob
+                # Backward-compat alias for existing assessments
+                context["options_implied_probability"] = spread_prob
 
         # Build three-signal comparison
         if ENABLE_ENRICHED_CONTEXT:
@@ -754,6 +756,14 @@ class RiskAssessmentEngine:
                     logger.info("Signal weights available (%d deals)", weights.get("n_deals", 0))
             except Exception as e:
                 logger.warning("Signal weights computation failed: %s", e)
+
+        # --- Phase 0: Seed milestones from deal details (idempotent) ---
+        try:
+            from .milestone_seeder import seed_milestones_for_all
+            ms_result = await seed_milestones_for_all(self.pool, tickers)
+            logger.info("Phase 0: seeded %d milestones", ms_result.get("seeded", 0))
+        except Exception as e:
+            logger.warning("Milestone seeding failed (non-fatal): %s", e)
 
         # --- Phase 1: Collect contexts & classify changes ---
         deal_contexts = {}  # ticker -> (context, ctx_hash, prev, prev_summary, significance, change_list)

@@ -59,9 +59,9 @@ async def check_portfolio_edgar_filings(
     total_new = 0
     total_alerts = 0
 
-    for ticker, company_name in tickers_with_names:
+    for ticker, company_name, target_name in tickers_with_names:
         try:
-            filings = await _search_edgar(ticker, company_name=company_name)
+            filings = await _search_edgar(ticker, company_name=company_name, target_name=target_name)
             if not filings:
                 continue
 
@@ -137,12 +137,16 @@ async def check_portfolio_edgar_filings(
 
 async def _get_active_tickers(pool) -> List[str]:
     """Return distinct tickers from the latest snapshot that are not excluded."""
-    pairs = await _get_active_tickers_with_names(pool)
-    return [t for t, _n in pairs]
+    triples = await _get_active_tickers_with_names(pool)
+    return [t for t, _a, _tgt in triples]
 
 
 async def _get_active_tickers_with_names(pool) -> List[tuple]:
-    """Return (ticker, company_name) pairs from the latest snapshot."""
+    """Return (ticker, acquiror, target_name) triples from the latest snapshot.
+
+    Joins sheet_deal_details to get the target company name, which is critical
+    for EFTS search (e.g., EA -> "Electronic Arts" not just "Silver Lake").
+    """
     async with pool.acquire() as conn:
         snap = await conn.fetchrow(
             """
@@ -156,37 +160,59 @@ async def _get_active_tickers_with_names(pool) -> List[tuple]:
 
         rows = await conn.fetch(
             """
-            SELECT DISTINCT ON (ticker) ticker, acquiror
-            FROM sheet_rows
-            WHERE snapshot_id = $1
-              AND ticker IS NOT NULL
-              AND (is_excluded IS NOT TRUE)
+            SELECT DISTINCT ON (sr.ticker) sr.ticker, sr.acquiror, sdd.target
+            FROM sheet_rows sr
+            LEFT JOIN sheet_deal_details sdd ON sdd.ticker = sr.ticker
+            WHERE sr.snapshot_id = $1
+              AND sr.ticker IS NOT NULL
+              AND (sr.is_excluded IS NOT TRUE)
+            ORDER BY sr.ticker, sdd.fetched_at DESC NULLS LAST
             """,
             snap["id"],
         )
-        return [(r["ticker"], r.get("acquiror")) for r in rows]
+        return [(r["ticker"], r.get("acquiror"), r.get("target")) for r in rows]
 
 
 async def _search_edgar(
-    ticker: str, company_name: str | None = None
+    ticker: str,
+    company_name: str | None = None,
+    target_name: str | None = None,
 ) -> List[Dict[str, Any]]:
-    """Query SEC EFTS for recent filings mentioning ``ticker`` or ``company_name``.
+    """Query SEC EFTS for recent filings mentioning ``ticker``, ``company_name``, or ``target_name``.
 
     Searches the last 2 days to avoid gaps between polling intervals.
     Uses OR query to catch filings that reference company name but not ticker symbol.
     Filters to M&A-relevant form types to reduce noise.
+
+    The target_name is critical: for EA, the acquiror is "Silver Lake" but the
+    target is "Electronic Arts" — SEC filings reference the target name, not just
+    the acquiror.
     """
     date_from = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d")
     date_to = datetime.utcnow().strftime("%Y-%m-%d")
 
-    # Build query: ticker OR company name (if available)
+    # Build query: ticker OR acquiror name OR target name
     query_parts = [f'"{ticker}"']
-    if company_name and len(company_name) > 3:
-        # Use first 2 significant words to avoid overly specific matches
-        name_words = [w for w in company_name.split() if len(w) > 2 and w.upper() not in ("INC", "INC.", "CORP", "CORP.", "LLC", "LTD", "CO", "THE")]
-        if name_words:
-            clean_name = " ".join(name_words[:2])
-            query_parts.append(f'"{clean_name}"')
+
+    def _clean_company_name(name: str | None) -> str | None:
+        """Extract first 2 significant words from a company name."""
+        if not name or len(name) <= 3:
+            return None
+        words = [w for w in name.split() if len(w) > 2 and w.upper() not in (
+            "INC", "INC.", "CORP", "CORP.", "LLC", "LTD", "CO", "THE",
+            "GROUP", "HOLDINGS", "TECHNOLOGIES",
+        )]
+        if words:
+            return " ".join(words[:2])
+        return None
+
+    acquiror_clean = _clean_company_name(company_name)
+    if acquiror_clean:
+        query_parts.append(f'"{acquiror_clean}"')
+
+    target_clean = _clean_company_name(target_name)
+    if target_clean and target_clean != acquiror_clean:
+        query_parts.append(f'"{target_clean}"')
 
     query = " OR ".join(query_parts)
 
