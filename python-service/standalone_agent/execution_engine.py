@@ -296,10 +296,11 @@ class ExecutionEngine:
         self._inflight_order_count = 0
         self._inflight_lock = threading.Lock()
 
-        # ── Entry Budget (two-tier: global cap + per-ticker budgets) ──
+        # ── Entry Budget (three-tier: global cap + per-ticker budgets + risk budget) ──
         self._global_entry_cap: int = 0       # 0 = halted, -1 = unlimited, N = exactly N more
         self._entry_cap_lock = threading.Lock()
         self._total_entries_placed: int = 0   # lifetime counter (never resets)
+        self._risk_budget_usd: float = 0.0    # 0 = disabled, >0 = max total dollar exposure
 
         # ── Flip-flop detection ──
         # strategy_id -> list of submission timestamps
@@ -361,10 +362,17 @@ class ExecutionEngine:
 
     def get_budget_status(self) -> dict:
         """Return full budget state for dashboard display."""
+        current_exposure = self._compute_current_exposure()
         result = {
             "global_entry_cap": self._global_entry_cap,
             "total_entries_placed": self._total_entries_placed,
             "inflight_orders": self._inflight_order_count,
+            "risk_budget_usd": self._risk_budget_usd,
+            "current_exposure_usd": round(current_exposure, 2),
+            "risk_headroom_usd": (
+                round(max(0, self._risk_budget_usd - current_exposure), 2)
+                if self._risk_budget_usd > 0 else -1
+            ),
             "tickers": {},
         }
         for sid, state in self._strategies.items():
@@ -403,6 +411,53 @@ class ExecutionEngine:
         if state.ticker_entry_budget >= 0:
             state.ticker_entry_budget += 1
         state.ticker_entries_placed = max(0, state.ticker_entries_placed - 1)
+
+    # ── Risk Budget (total dollar exposure cap) ──
+
+    def set_risk_budget(self, budget_usd: float) -> dict:
+        """Set the total dollar exposure cap. 0 = disabled (no limit).
+
+        When enabled, new entries are rejected if total active position
+        exposure (entry_price × remaining_qty × multiplier) plus the
+        new entry cost would exceed the budget.
+
+        Args:
+            budget_usd: Maximum total dollar exposure allowed. 0 to disable.
+        Returns:
+            Status dict with exposure snapshot.
+        """
+        self._risk_budget_usd = max(0.0, float(budget_usd))
+        current = self._compute_current_exposure()
+        logger.info(
+            "Risk budget set to $%.0f (current exposure: $%.0f, headroom: $%.0f)",
+            self._risk_budget_usd,
+            current,
+            max(0, self._risk_budget_usd - current) if self._risk_budget_usd > 0 else float("inf"),
+        )
+        return {
+            "risk_budget_usd": self._risk_budget_usd,
+            "current_exposure_usd": round(current, 2),
+            "headroom_usd": round(max(0, self._risk_budget_usd - current), 2) if self._risk_budget_usd > 0 else -1,
+        }
+
+    def _compute_current_exposure(self) -> float:
+        """Sum notional exposure of all active risk manager positions.
+
+        exposure = entry_price × remaining_qty × multiplier
+        for every non-completed bmc_risk_* strategy.
+        """
+        total = 0.0
+        for sid, state in self._strategies.items():
+            if not sid.startswith("bmc_risk_"):
+                continue
+            rm = state.strategy
+            if getattr(rm, "_completed", True) or getattr(rm, "remaining_qty", 0) <= 0:
+                continue
+            entry_price = getattr(rm, "entry_price", 0)
+            remaining = getattr(rm, "remaining_qty", 0)
+            multiplier = float(state.config.get("instrument", {}).get("multiplier", 100))
+            total += entry_price * remaining * multiplier
+        return total
 
     # ── Flip-flop detection ──
 
@@ -870,14 +925,17 @@ class ExecutionEngine:
         """Submit an OrderAction through the safety gate pipeline (non-blocking).
 
         Safety gates (checked in order):
-        1. Entry Budget -- per-ticker + global cap (SKIPPED for exit orders)
-        2. Flip-flop guard -- per-strategy order rate limiter
-        3. Inflight cap -- global cap on orders awaiting TWS ack
+        1. Entry Budget (SKIPPED for exit orders):
+           a. Per-ticker budget
+           b. Global entry cap (order count)
+           c. Risk budget (total dollar exposure cap)
+        2. Flip-flop guard -- per-strategy order rate limiter (SKIPPED for exit orders)
+        3. Inflight cap -- global cap on orders awaiting TWS ack (SKIPPED for exit orders)
         4. Connection gate -- IB connectivity check
 
         Exit orders (is_exit=True, e.g. risk manager trailing stops) bypass
-        Gate 1 entirely — exits protect capital and must never be blocked by
-        entry budget exhaustion.
+        Gates 1-3 entirely — exits protect capital and must never be blocked by
+        entry budget exhaustion, flip-flop detection, or inflight congestion.
 
         The eval thread returns immediately; the order is placed on the
         dedicated order-exec thread.
@@ -910,12 +968,34 @@ class ExecutionEngine:
                 state.errors.append(budget_msg)
                 return
 
-        # ── Gate 2: Flip-flop guard ──
-        if self._check_flipflop(state.strategy_id):
+            # Gate 1c: Risk budget (total dollar exposure cap)
+            if self._risk_budget_usd > 0:
+                est_price = action.limit_price or 0
+                multiplier = float(action.contract_dict.get("multiplier", 100))
+                new_cost = est_price * action.quantity * multiplier
+                current_exposure = self._compute_current_exposure()
+                if (current_exposure + new_cost) > self._risk_budget_usd:
+                    self._refund_entry_cap()
+                    self._refund_ticker_budget(state)
+                    budget_msg = (
+                        f"Risk budget exceeded: ${current_exposure:.0f} + "
+                        f"${new_cost:.0f} > ${self._risk_budget_usd:.0f} limit"
+                    )
+                    logger.warning(
+                        "Risk budget exceeded -- rejecting %s %d x %s for strategy %s "
+                        "(exposure=$%.0f, new=$%.0f, limit=$%.0f)",
+                        action.side.value, action.quantity,
+                        action.contract_dict.get("symbol", "?"), action.strategy_id,
+                        current_exposure, new_cost, self._risk_budget_usd,
+                    )
+                    state.errors.append(budget_msg)
+                    return
+
+        # ── Gate 2: Flip-flop guard (skip for exits — rapid exits are legitimate) ──
+        if is_entry and self._check_flipflop(state.strategy_id):
             # Refund budgets since we're rejecting
-            if is_entry:
-                self._refund_entry_cap()
-                self._refund_ticker_budget(state)
+            self._refund_entry_cap()
+            self._refund_ticker_budget(state)
             flipflop_msg = (
                 f"Flip-flop detected: strategy {state.strategy_id} submitted "
                 f">={self.FLIPFLOP_MAX_ORDERS} orders in {self.FLIPFLOP_WINDOW_SEC}s "
@@ -927,19 +1007,18 @@ class ExecutionEngine:
             state.flipflop_resume_at = time.time() + self.FLIPFLOP_COOLDOWN_SEC
             return
 
-        # ── Gate 3: Inflight cap ──
+        # ── Gate 3: Inflight cap (skip for exits — never block capital-protecting orders) ──
         with self._inflight_lock:
-            if self._inflight_order_count >= self.MAX_INFLIGHT_ORDERS:
-                # Refund entry budgets (only for entries)
-                if is_entry:
-                    self._refund_entry_cap()
-                    self._refund_ticker_budget(state)
+            if is_entry and self._inflight_order_count >= self.MAX_INFLIGHT_ORDERS:
+                # Refund entry budgets
+                self._refund_entry_cap()
+                self._refund_ticker_budget(state)
                 logger.warning(
-                    "Dropping order action for strategy %s: %d orders already in-flight",
+                    "Dropping ENTRY order for strategy %s: %d orders already in-flight",
                     state.strategy_id, self._inflight_order_count,
                 )
                 state.errors.append(
-                    f"Order dropped: {self._inflight_order_count} in-flight (cap={self.MAX_INFLIGHT_ORDERS})"
+                    f"Entry dropped: {self._inflight_order_count} in-flight (cap={self.MAX_INFLIGHT_ORDERS})"
                 )
                 # Notify strategy so it can re-arm the TRIGGERED level
                 try:
@@ -947,6 +1026,7 @@ class ExecutionEngine:
                 except Exception as e2:
                     logger.error("Strategy %s on_order_dead error: %s", state.strategy_id, e2)
                 return
+            # Always increment — exits bypass the cap check but still track inflight count
             self._inflight_order_count += 1
             state.inflight_orders += 1
             state.orders_submitted += 1
@@ -962,8 +1042,9 @@ class ExecutionEngine:
             state.errors.append("Order rejected: IB connection lost")
             return
 
-        # ── Record for flip-flop tracking ──
-        self._record_order_submission(state.strategy_id)
+        # ── Record for flip-flop tracking (entries only — exits don't count) ──
+        if is_entry:
+            self._record_order_submission(state.strategy_id)
 
         logger.info(
             "Strategy %s queuing %s: %s %d x %s @ %s (%s) [inflight=%d, budget=%s]",

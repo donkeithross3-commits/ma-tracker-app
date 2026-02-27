@@ -154,8 +154,15 @@ PRESETS = {
 class RiskManagerStrategy(ExecutionStrategy):
     """Position guardian strategy.
 
-    Monitors a single position and exits portions when stop-loss or
-    profit-taking thresholds are hit. One instance per managed position.
+    Monitors a position (single or aggregated multi-lot) and exits portions
+    when stop-loss or profit-taking thresholds are hit.
+
+    Supports lot aggregation: when BMC buys multiple 1-lot positions in the
+    same contract, they are aggregated into a single risk manager via add_lot()
+    rather than spawning independent managers. This ensures:
+    - One trailing stop for the aggregate position (not 10 competing ones)
+    - Single sell order of N lots instead of N separate 1-lot sells
+    - Correct weighted average entry price
 
     Config keys:
         instrument: dict with IB contract fields (symbol, secType, etc.)
@@ -202,6 +209,9 @@ class RiskManagerStrategy(ExecutionStrategy):
 
         # Rejection counter: level_key -> consecutive rejection count
         self._rejection_counts: Dict[str, int] = {}
+
+        # Lot tracking for aggregate positions (multiple fills same contract)
+        self._lot_entries: List[dict] = []
 
     # ── ExecutionStrategy interface ──
 
@@ -260,6 +270,15 @@ class RiskManagerStrategy(ExecutionStrategy):
         self.entry_price = float(pos.get("entry_price", 0))
         self.is_long = pos.get("side", "LONG").upper() == "LONG"
 
+        # Initialize first lot entry (overwritten by restore_runtime_state if recovering)
+        self._lot_entries = [{
+            "order_id": pos.get("order_id", 0),
+            "entry_price": self.entry_price,
+            "quantity": self.initial_qty,
+            "fill_time": pos.get("fill_time", time.time()),
+            "perm_id": pos.get("perm_id", 0),
+        }]
+
         # Initialize level states
         self._level_states.clear()
         self._pending_orders.clear()
@@ -296,6 +315,54 @@ class RiskManagerStrategy(ExecutionStrategy):
         """Clean up on strategy unload."""
         logger.info("RiskManager stopped for %s (remaining_qty=%d, fills=%d)",
                      self.cache_key, self.remaining_qty, len(self._fill_log))
+
+    # ── Lot aggregation ──
+
+    def add_lot(self, entry_price: float, quantity: int, order_id: int = 0,
+                fill_time: float = 0.0, perm_id: int = 0) -> None:
+        """Aggregate a new lot into this risk manager.
+
+        Called when BMC buys another lot of the same contract that this
+        manager is already guarding. Recomputes weighted average entry
+        and increases position size.
+
+        Trailing activation state is preserved (sticky). The HWM and
+        trail price are price-based, not P&L-based, so adding a lot
+        only affects the P&L% display — not the actual stop behavior.
+
+        Args:
+            entry_price: Fill price of the new lot.
+            quantity: Number of contracts in the new lot.
+            order_id: IB order ID for the new lot.
+            fill_time: Timestamp of the fill (defaults to now).
+            perm_id: IB permanent order ID.
+        """
+        old_qty = self.initial_qty
+        old_avg = self.entry_price
+
+        # Weighted average entry price
+        new_total_qty = old_qty + quantity
+        if new_total_qty > 0:
+            self.entry_price = (old_avg * old_qty + entry_price * quantity) / new_total_qty
+
+        self.initial_qty = new_total_qty
+        self.remaining_qty += quantity
+
+        # Track individual lot for audit/dashboard
+        self._lot_entries.append({
+            "order_id": order_id,
+            "entry_price": entry_price,
+            "quantity": quantity,
+            "fill_time": fill_time or time.time(),
+            "perm_id": perm_id,
+        })
+
+        logger.info(
+            "RiskManager add_lot: %s now %d lots (%d qty) @ avg %.4f "
+            "(added %d @ %.4f, order=%d)",
+            self.cache_key, len(self._lot_entries), self.initial_qty,
+            self.entry_price, quantity, entry_price, order_id,
+        )
 
     def evaluate(self, quotes: Dict[str, "Quote"], config: dict) -> List[OrderAction]:
         """Main evaluation: check stops, profits, trailing stop."""
@@ -518,6 +585,8 @@ class RiskManagerStrategy(ExecutionStrategy):
                 for oid, p in self._pending_orders.items()
             },
             "fill_log": self._fill_log[-20:],  # last 20 fills
+            "lot_entries": self._lot_entries,
+            "total_lots": len(self._lot_entries),
         }
 
     # ── Persistence helpers ──
@@ -526,11 +595,14 @@ class RiskManagerStrategy(ExecutionStrategy):
         """Serialize mutable runtime state for position store persistence."""
         return {
             "remaining_qty": self.remaining_qty,
+            "initial_qty": self.initial_qty,
+            "entry_price": self.entry_price,
             "high_water_mark": self.high_water_mark,
             "trailing_active": self._trailing_active,
             "trailing_stop_price": self._trailing_stop_price,
             "level_states": {k: v.value for k, v in self._level_states.items()},
             "completed": self._completed,
+            "lot_entries": self._lot_entries,
         }
 
     def restore_runtime_state(self, state: dict) -> None:
@@ -541,10 +613,17 @@ class RiskManagerStrategy(ExecutionStrategy):
         and re-submit on the next tick.
         """
         self.remaining_qty = int(state.get("remaining_qty", self.remaining_qty))
+        self.initial_qty = int(state.get("initial_qty", self.initial_qty))
+        self.entry_price = float(state.get("entry_price", self.entry_price))
         self.high_water_mark = float(state.get("high_water_mark", self.high_water_mark))
         self._trailing_active = bool(state.get("trailing_active", self._trailing_active))
         self._trailing_stop_price = float(state.get("trailing_stop_price", self._trailing_stop_price))
         self._completed = bool(state.get("completed", self._completed))
+
+        # Restore lot entries (overrides the single-entry default from on_start)
+        persisted_lots = state.get("lot_entries")
+        if persisted_lots:
+            self._lot_entries = list(persisted_lots)
 
         persisted_levels = state.get("level_states", {})
         for key, value in persisted_levels.items():
@@ -559,8 +638,10 @@ class RiskManagerStrategy(ExecutionStrategy):
                     pass  # unknown state string, keep the on_start default
 
         logger.info(
-            "RiskManager restored: remaining=%d, hwm=%.4f, trailing=%s, levels=%s",
-            self.remaining_qty, self.high_water_mark, self._trailing_active,
+            "RiskManager restored: remaining=%d/%d @ %.4f, hwm=%.4f, "
+            "trailing=%s, lots=%d, levels=%s",
+            self.remaining_qty, self.initial_qty, self.entry_price,
+            self.high_water_mark, self._trailing_active, len(self._lot_entries),
             {k: v.value for k, v in self._level_states.items()},
         )
 

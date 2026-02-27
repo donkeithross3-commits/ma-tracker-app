@@ -130,6 +130,20 @@ class PositionStore:
             pos["lineage"] = lineage
             self._save()
 
+    def update_entry(self, position_id: str, entry_updates: dict) -> None:
+        """Merge updates into a position's entry dict (e.g. aggregated qty/price).
+
+        Used when adding lots to an aggregate risk manager — the entry
+        reflects the current aggregate (total qty, weighted avg price).
+        """
+        with self._lock:
+            pos = self._positions.get(position_id)
+            if pos is None:
+                logger.warning("PositionStore: update_entry for unknown position %s", position_id)
+                return
+            pos.setdefault("entry", {}).update(entry_updates)
+            self._save()
+
     def update_fill_commission(self, position_id: str, exec_id: str, commission_report: dict) -> None:
         """Update a fill's execution_analytics with commission data from IB."""
         with self._lock:

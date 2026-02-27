@@ -1102,40 +1102,58 @@ class IBDataAgent:
                         recovered += 1
                         logger.info("Recovered risk manager %s (remaining=%d)", pos_id, rm.remaining_qty)
 
-                        # Populate parent BMC strategy's _active_positions list + counter
+                        # Populate parent BMC strategy's _active_positions list + counter.
+                        # Aggregate positions have multiple lot_entries — expand each
+                        # into its own _active_positions entry so cooldown and spawn
+                        # counts reflect the actual number of fills.
                         parent = pos.get("parent_strategy", "")
                         parent_state = self.execution_engine._strategies.get(parent)
                         if parent_state and hasattr(parent_state.strategy, "_active_positions"):
-                            entry_info = pos.get("entry", {})
                             instrument = pos.get("instrument", {})
-                            parent_state.strategy._active_positions.append({
-                                "order_id": entry_info.get("order_id", 0),
-                                "entry_price": entry_info.get("price", 0),
-                                "quantity": entry_info.get("quantity", 0),
-                                "fill_time": entry_info.get("fill_time", 0),
-                                "perm_id": entry_info.get("perm_id", 0),
-                                "signal": {
-                                    "option_contract": {
-                                        "symbol": instrument.get("symbol", ""),
-                                        "strike": instrument.get("strike", 0),
-                                        "expiry": instrument.get("expiry", ""),
-                                        "right": instrument.get("right", ""),
-                                    },
-                                },
-                            })
-                            if hasattr(parent_state.strategy, "_positions_spawned"):
-                                parent_state.strategy._positions_spawned += 1
+                            option_contract = {
+                                "symbol": instrument.get("symbol", ""),
+                                "strike": instrument.get("strike", 0),
+                                "expiry": instrument.get("expiry", ""),
+                                "right": instrument.get("right", ""),
+                            }
+                            # Use lot_entries from runtime state if available (aggregated),
+                            # else fall back to the single entry record (pre-aggregation compat)
+                            runtime = pos.get("runtime_state", {})
+                            lot_entries = runtime.get("lot_entries", [])
+                            if not lot_entries:
+                                entry_info = pos.get("entry", {})
+                                lot_entries = [{
+                                    "order_id": entry_info.get("order_id", 0),
+                                    "entry_price": entry_info.get("price", 0),
+                                    "quantity": entry_info.get("quantity", 0),
+                                    "fill_time": entry_info.get("fill_time", 0),
+                                    "perm_id": entry_info.get("perm_id", 0),
+                                }]
+                            for lot in lot_entries:
+                                parent_state.strategy._active_positions.append({
+                                    "order_id": lot.get("order_id", 0),
+                                    "entry_price": lot.get("entry_price", 0),
+                                    "quantity": lot.get("quantity", 0),
+                                    "fill_time": lot.get("fill_time", 0),
+                                    "perm_id": lot.get("perm_id", 0),
+                                    "signal": {"option_contract": option_contract},
+                                })
+                                if hasattr(parent_state.strategy, "_positions_spawned"):
+                                    parent_state.strategy._positions_spawned += 1
                             # Restore cooldown tracker from the most recent fill time
-                            fill_time = entry_info.get("fill_time", 0)
                             ticker = instrument.get("symbol", "").upper()
+                            max_fill_time = max(
+                                (lot.get("fill_time", 0) for lot in lot_entries), default=0
+                            )
                             if (
                                 ticker
+                                and max_fill_time
                                 and hasattr(parent_state.strategy, "_cooldown_tracker")
-                                and fill_time > parent_state.strategy._cooldown_tracker.get(ticker, 0)
+                                and max_fill_time > parent_state.strategy._cooldown_tracker.get(ticker, 0)
                             ):
-                                parent_state.strategy._cooldown_tracker[ticker] = fill_time
+                                parent_state.strategy._cooldown_tracker[ticker] = max_fill_time
                                 logger.info("Restored cooldown for %s (last fill %.0fs ago)",
-                                            ticker, time.time() - fill_time)
+                                            ticker, time.time() - max_fill_time)
                     except Exception as e:
                         logger.error("Error recovering position %s: %s", pos_id, e)
                 if recovered > 0:
@@ -1211,20 +1229,24 @@ class IBDataAgent:
         return self.execution_engine.update_strategy_config(strategy_id, new_config)
 
     async def _handle_execution_budget(self, payload: dict) -> dict:
-        """Set entry budget — either global cap or per-ticker.
+        """Set entry budget — global cap, per-ticker, or risk budget.
 
         Payload:
-            scope: "global" (default) or "ticker"
-            budget: -1=unlimited, 0=halt, N=exactly N entries
+            scope: "global" (default), "ticker", or "risk"
+            budget: -1=unlimited, 0=halt/disable, N=exactly N entries (global/ticker)
+                    or USD dollar amount (risk scope)
             strategy_id: required when scope="ticker"
         """
         if not self.execution_engine:
             return {"error": "Execution engine not initialized"}
 
         scope = payload.get("scope", "global")
-        budget = int(payload.get("budget", 0))
 
-        if scope == "ticker":
+        if scope == "risk":
+            budget_usd = float(payload.get("budget", 0))
+            return self.execution_engine.set_risk_budget(budget_usd)
+        elif scope == "ticker":
+            budget = int(payload.get("budget", 0))
             strategy_id = payload.get("strategy_id", "")
             if not strategy_id:
                 return {"error": "strategy_id is required for scope=ticker"}
@@ -1326,16 +1348,32 @@ class IBDataAgent:
             self.execution_engine.unload_strategy(position_id)
             logger.info("Unloaded risk manager %s for manual close", position_id)
 
-        # Remove from parent BMC strategy's _active_positions list
+        # Remove from parent BMC strategy's _active_positions list.
+        # For aggregate positions, remove ALL lot entries that match
+        # the instrument (symbol + strike + expiry + right).
         parent = pos.get("parent_strategy", "")
         if parent and self.execution_engine:
             parent_state = self.execution_engine._strategies.get(parent)
             if parent_state and hasattr(parent_state.strategy, "_active_positions"):
-                entry_info = pos.get("entry", {})
-                entry_price = entry_info.get("price", 0)
+                instrument = pos.get("instrument", {})
+                close_sym = instrument.get("symbol", "")
+                close_strike = instrument.get("strike", 0)
+                close_expiry = instrument.get("expiry", "")
+                close_right = instrument.get("right", "")
+
+                def _keep(p: dict) -> bool:
+                    oc = p.get("signal", {}).get("option_contract", {})
+                    if not oc:
+                        return True
+                    return not (
+                        oc.get("symbol") == close_sym
+                        and oc.get("strike") == close_strike
+                        and oc.get("expiry") == close_expiry
+                        and oc.get("right") == close_right
+                    )
+
                 parent_state.strategy._active_positions = [
-                    p for p in parent_state.strategy._active_positions
-                    if abs(p.get("entry_price", 0) - entry_price) > 0.005
+                    p for p in parent_state.strategy._active_positions if _keep(p)
                 ]
 
         # Add a manual_close fill entry and mark closed
@@ -1565,10 +1603,15 @@ class IBDataAgent:
         return None
 
     def _spawn_risk_manager_for_bmc(self, risk_config: dict) -> None:
-        """Spawn a RiskManagerStrategy instance for a BMC entry fill.
+        """Spawn or aggregate a RiskManagerStrategy for a BMC entry fill.
 
         Called by BigMoveConvexityStrategy.on_fill() to create a position
         guardian with the zero_dte_convexity preset.
+
+        If an active risk manager already exists for the same contract
+        (symbol + strike + expiry + right), the new lot is aggregated into
+        it via add_lot() rather than spawning a new independent manager.
+        This ensures a single trailing stop for the aggregate position.
         """
         if not self.execution_engine:
             logger.warning("Cannot spawn risk manager: execution engine not initialized")
@@ -1577,6 +1620,16 @@ class IBDataAgent:
         # Extract lineage before passing to risk manager (WS2)
         lineage = risk_config.pop("lineage", None)
 
+        instrument = risk_config.get("instrument", {})
+        pos_info = risk_config.get("position", {})
+
+        # ── Check for existing same-contract risk manager to aggregate into ──
+        existing_sid = self._find_risk_manager_for_contract(instrument)
+        if existing_sid:
+            self._aggregate_lot_into_manager(existing_sid, pos_info, instrument, lineage)
+            return
+
+        # ── No existing manager — create a new one ──
         from strategies.risk_manager import RiskManagerStrategy
 
         strategy = RiskManagerStrategy()
@@ -1588,8 +1641,6 @@ class IBDataAgent:
         else:
             logger.info("Spawned RiskManagerStrategy %s for BMC position", strategy_id)
             # Persist the new position in the store
-            pos_info = risk_config.get("position", {})
-            instrument = risk_config.get("instrument", {})
             symbol = instrument.get("symbol", "").lower()
             self.position_store.add_position(
                 position_id=strategy_id,
@@ -1622,6 +1673,102 @@ class IBDataAgent:
                 self.position_store.update_runtime_state(
                     strategy_id, strategy.get_runtime_snapshot()
                 )
+
+    def _find_risk_manager_for_contract(self, instrument: dict) -> Optional[str]:
+        """Find an active risk manager guarding the same contract.
+
+        Returns the strategy_id if found, None otherwise.
+        """
+        if not self.execution_engine:
+            return None
+
+        # Build contract key from instrument (matches risk_manager.py cache_key format)
+        sec_type = instrument.get("secType", "STK")
+        symbol = instrument.get("symbol", "")
+        if sec_type == "OPT":
+            target_key = (
+                f"{symbol}:{instrument.get('strike', 0)}:"
+                f"{instrument.get('expiry', '')}:{instrument.get('right', '')}"
+            )
+        elif sec_type == "FUT":
+            target_key = f"{symbol}:{instrument.get('expiry', '')}:FUT"
+        else:
+            target_key = symbol
+
+        for sid, state in self.execution_engine._strategies.items():
+            if not sid.startswith("bmc_risk_"):
+                continue
+            rm = state.strategy
+            if (
+                hasattr(rm, "cache_key")
+                and rm.cache_key == target_key
+                and not getattr(rm, "_completed", True)
+                and getattr(rm, "remaining_qty", 0) > 0
+            ):
+                return sid
+        return None
+
+    def _aggregate_lot_into_manager(
+        self,
+        strategy_id: str,
+        pos_info: dict,
+        instrument: dict,
+        lineage: Optional[dict],
+    ) -> None:
+        """Add a new lot to an existing aggregate risk manager.
+
+        Updates the risk manager state, strategy config, position store
+        entry, and records the new fill in the ledger.
+        """
+        state = self.execution_engine._strategies.get(strategy_id)
+        if not state:
+            logger.error("Cannot aggregate: strategy %s not found", strategy_id)
+            return
+
+        rm = state.strategy
+        entry_price = float(pos_info.get("entry_price", 0))
+        quantity = int(pos_info.get("quantity", 0))
+        order_id = pos_info.get("order_id", 0)
+        fill_time = pos_info.get("fill_time", time.time())
+        perm_id = pos_info.get("perm_id", 0)
+
+        # Aggregate into the risk manager
+        rm.add_lot(entry_price, quantity, order_id, fill_time, perm_id)
+
+        # Update the config to reflect new aggregate (for telemetry/recovery)
+        state.config.setdefault("position", {})["quantity"] = rm.initial_qty
+        state.config["position"]["entry_price"] = rm.entry_price
+
+        # Update position store entry to reflect aggregate values
+        self.position_store.update_entry(strategy_id, {
+            "price": rm.entry_price,
+            "quantity": rm.initial_qty,
+        })
+
+        # Record the new entry fill in the ledger
+        self.position_store.add_fill(strategy_id, {
+            "time": fill_time if fill_time else time.time(),
+            "order_id": order_id,
+            "level": "entry",
+            "qty_filled": quantity,
+            "avg_price": entry_price,
+            "remaining_qty": rm.remaining_qty,
+            "pnl_pct": 0.0,
+        })
+
+        # Persist updated runtime state (lot_entries, qty, entry_price)
+        self.position_store.update_runtime_state(
+            strategy_id, rm.get_runtime_snapshot()
+        )
+
+        # Attach lineage if provided (updates to latest signal's lineage)
+        if lineage:
+            self.position_store.set_lineage(strategy_id, lineage)
+
+        logger.info(
+            "Aggregated lot into %s: now %d lots (%d qty) @ avg %.4f",
+            strategy_id, len(rm._lot_entries), rm.initial_qty, rm.entry_price,
+        )
 
     # ── Periodic runtime state persistence ──
 
