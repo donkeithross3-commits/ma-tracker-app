@@ -65,6 +65,26 @@ interface DiffEntry {
   changed_fields: Record<string, { old: string; new: string }>;
 }
 
+interface RiskChange {
+  ticker: string;
+  factor: string;
+  old_level: string;
+  new_level: string;
+  direction: "worsened" | "improved";
+  magnitude: number;
+  change_date: string;
+  explanation?: string;
+}
+
+// Factor name → single-letter label used in riskScoreCell
+const FACTOR_LABEL_MAP: Record<string, string> = {
+  vote: "V",
+  financing: "F",
+  legal: "L",
+  regulatory: "R",
+  mac: "M",
+};
+
 type SortKey = keyof Deal | "__default__";
 
 function riskBadge(risk: string | null) {
@@ -108,10 +128,19 @@ function gradeColor(grade: string | null): string {
   return "text-gray-400";
 }
 
-function riskScoreCell(risk: RiskData | undefined) {
+function riskScoreCell(risk: RiskData | undefined, changes?: RiskChange[]) {
   if (!risk) return <span className="text-gray-600">-</span>;
   const hasAnyGrade = risk.vote_grade || risk.financing_grade || risk.legal_grade || risk.regulatory_grade || risk.mac_grade;
   if (!hasAnyGrade) return <span className="text-gray-600">-</span>;
+
+  // Build a map from factor label (V/F/L/R/M) to the change for that factor
+  const changeByLabel: Record<string, RiskChange> = {};
+  if (changes) {
+    for (const c of changes) {
+      const label = FACTOR_LABEL_MAP[c.factor];
+      if (label) changeByLabel[label] = c;
+    }
+  }
 
   const grades = [
     { label: "V", grade: risk.vote_grade },
@@ -132,12 +161,38 @@ function riskScoreCell(risk: RiskData | undefined) {
 
   return (
     <span className="text-xs font-mono whitespace-nowrap" title={risk.deal_summary || ""}>
-      {grades.map((g, i) => (
-        <span key={i} className={gradeColor(g.grade)}>
-          {g.label}:{abbrev(g.grade)}
-          {i < grades.length - 1 ? " " : ""}
-        </span>
-      ))}
+      {grades.map((g, i) => {
+        const change = changeByLabel[g.label];
+        const arrow = change
+          ? change.direction === "worsened"
+            ? "\u2193"
+            : "\u2191"
+          : null;
+        const arrowColor = change
+          ? change.direction === "worsened"
+            ? "text-red-400"
+            : "text-green-400"
+          : "";
+        const factorName = Object.entries(FACTOR_LABEL_MAP).find(
+          ([, v]) => v === g.label
+        )?.[0];
+        const tooltip = change
+          ? `${factorName}: ${change.old_level} \u2192 ${change.new_level} (${change.direction})`
+          : undefined;
+        return (
+          <span key={i}>
+            <span className={gradeColor(g.grade)}>
+              {g.label}:{abbrev(g.grade)}
+            </span>
+            {arrow && (
+              <span className={arrowColor} title={tooltip}>
+                {arrow}
+              </span>
+            )}
+            {i < grades.length - 1 ? " " : ""}
+          </span>
+        );
+      })}
       {risk.discrepancy_count > 0 && <span className="ml-1" title={`${risk.discrepancy_count} discrepancies`}>&#9888;&#65039;</span>}
       {risk.event_count > 0 && <span className="ml-0.5" title={`${risk.event_count} overnight events`}>&#9889;</span>}
       {risk.needs_attention && <span className="ml-0.5 text-red-400" title={risk.attention_reason || "Needs attention"}>&#9873;</span>}
@@ -218,6 +273,8 @@ export default function PortfolioTab() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [diffMap, setDiffMap] = useState<Record<string, DiffEntry>>({});
+  const [riskChanges, setRiskChanges] = useState<Record<string, RiskChange[]>>({});
+  const [showChangesOnly, setShowChangesOnly] = useState(false);
 
   const freshness = useMarketFreshness(lastRefresh);
 
@@ -227,11 +284,12 @@ export default function PortfolioTab() {
       const dealsUrl = showExcluded
         ? "/api/sheet-portfolio/deals?include_excluded=true"
         : "/api/sheet-portfolio/deals";
-      const [dealsResp, healthResp, riskResp, diffResp] = await Promise.all([
+      const [dealsResp, healthResp, riskResp, diffResp, changesResp] = await Promise.all([
         fetch(dealsUrl),
         fetch("/api/sheet-portfolio/health"),
         fetch("/api/sheet-portfolio/risk"),
         fetch("/api/sheet-portfolio/diff").catch(() => null),
+        fetch("/api/sheet-portfolio/risk-changes").catch(() => null),
       ]);
       if (dealsResp.ok) {
         setDeals(await dealsResp.json());
@@ -256,6 +314,15 @@ export default function PortfolioTab() {
           map[d.ticker] = d;
         }
         setDiffMap(map);
+      }
+      if (changesResp && changesResp.ok) {
+        const changesArr: RiskChange[] = await changesResp.json();
+        const changesMap: Record<string, RiskChange[]> = {};
+        for (const c of changesArr) {
+          if (!changesMap[c.ticker]) changesMap[c.ticker] = [];
+          changesMap[c.ticker].push(c);
+        }
+        setRiskChanges(changesMap);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch data");
@@ -353,7 +420,10 @@ export default function PortfolioTab() {
     }
   }
 
+  const riskChangeCount = Object.keys(riskChanges).length;
+
   const filteredDeals = deals.filter((d) => {
+    if (showChangesOnly && !riskChanges[d.ticker]) return false;
     if (!filter) return true;
     const q = filter.toLowerCase();
     return (
@@ -542,6 +612,21 @@ export default function PortfolioTab() {
                   </strong>
                 </span>
               )}
+              {riskChangeCount > 0 ? (
+                <button
+                  onClick={() => setShowChangesOnly(!showChangesOnly)}
+                  className={`text-xs px-2 py-1 rounded border transition-colors ${
+                    showChangesOnly
+                      ? "border-amber-600 text-amber-400 bg-amber-400/10"
+                      : "border-amber-700/50 text-amber-400 hover:bg-amber-400/10"
+                  }`}
+                  title="Filter to deals with risk grade changes"
+                >
+                  {showChangesOnly ? `Showing ${riskChangeCount} risk changes` : `${riskChangeCount} risk change${riskChangeCount === 1 ? "" : "s"}`}
+                </button>
+              ) : (
+                <span className="text-xs text-gray-600">No risk changes</span>
+              )}
               <button
                 onClick={() => setShowExcluded(!showExcluded)}
                 className={`text-xs px-2 py-1 rounded border transition-colors ${
@@ -607,7 +692,15 @@ export default function PortfolioTab() {
                   {sortedDeals.map((deal, idx) => {
                     const countdown = computeCountdown(deal);
                     const diff = diffMap[deal.ticker];
-                    const diffBorder = diff?.diff_type === "added"
+                    const tickerChanges = riskChanges[deal.ticker];
+                    const hasWorsened = tickerChanges?.some(c => c.direction === "worsened");
+                    const hasImproved = tickerChanges?.some(c => c.direction === "improved");
+                    // Risk change border takes priority over diff border
+                    const rowBorder = hasWorsened
+                      ? "border-l-2 border-red-500/50"
+                      : hasImproved
+                      ? "border-l-2 border-green-500/50"
+                      : diff?.diff_type === "added"
                       ? "border-l-2 border-green-500/60"
                       : diff?.diff_type === "modified"
                       ? "border-l-2 border-amber-500/40"
@@ -615,7 +708,7 @@ export default function PortfolioTab() {
                     return (
                       <tr
                         key={`${deal.ticker}-${idx}`}
-                        className={`border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors ${deal.is_excluded ? "opacity-40" : ""} ${diffBorder}`}
+                        className={`border-b border-gray-800/50 hover:bg-gray-900/50 transition-colors ${deal.is_excluded ? "opacity-40" : ""} ${rowBorder}`}
                       >
                         {/* Ticker */}
                         <td className="py-1.5 px-2 font-mono font-semibold">
@@ -773,7 +866,7 @@ export default function PortfolioTab() {
                         </td>
                         {/* Risk Score */}
                         <td className="py-1.5 px-2 text-center">
-                          {riskScoreCell(riskData[deal.ticker])}
+                          {riskScoreCell(riskData[deal.ticker], riskChanges[deal.ticker])}
                         </td>
                         {/* Exclude toggle */}
                         {showExcluded && (
