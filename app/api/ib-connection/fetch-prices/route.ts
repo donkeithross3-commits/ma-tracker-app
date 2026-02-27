@@ -47,6 +47,14 @@ export async function POST(request: NextRequest) {
     }
 
     const data = JSON.parse(text);
+    // Debug: log greeks from agent response
+    if (data?.contracts && Array.isArray(data.contracts)) {
+      for (const c of data.contracts) {
+        if (c) {
+          console.log(`[fetch-prices greeks] ${c.ticker} ${c.strike}${c.right}: delta=${c.delta} gamma=${c.gamma} theta=${c.theta} vega=${c.vega}`);
+        }
+      }
+    }
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error fetching leg prices:", error);
