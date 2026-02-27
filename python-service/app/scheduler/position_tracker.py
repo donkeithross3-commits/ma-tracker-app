@@ -53,13 +53,17 @@ async def snapshot_positions(pool, positions: list[dict], snapshot_date: date | 
     if snapshot_date is None:
         snapshot_date = date.today()
 
-    stk_positions = [p for p in positions if p.get("secType", "STK") == "STK"]
+    # IB positions nest symbol/secType inside a "contract" dict
     stored = 0
     tickers = []
 
     async with pool.acquire() as conn:
-        for pos in stk_positions:
-            ticker = pos.get("symbol") or pos.get("ticker")
+        for pos in positions:
+            contract = pos.get("contract", {})
+            sec_type = contract.get("secType") or pos.get("secType", "STK")
+            if sec_type != "STK":
+                continue
+            ticker = contract.get("symbol") or pos.get("symbol") or pos.get("ticker")
             if not ticker:
                 continue
             qty = pos.get("position", pos.get("pos", 0))
