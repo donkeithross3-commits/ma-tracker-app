@@ -1527,12 +1527,20 @@ class IBMergerArbScanner(EWrapper, EClient):
         if self.streaming_cache is not None and self.streaming_cache.is_streaming_req_id(reqId):
             self.streaming_cache.update_greeks(reqId, impliedVol, delta, gamma, vega, theta)
             return
-        # Existing scan path (unchanged)
+        # Scan path: store all greeks into option_chain
+        # IB sends 1.7976931348623157e+308 (Double.MAX_VALUE) for "not computed"
+        _IB_SENTINEL = 1e+300  # anything above this is an IB "no value" sentinel
         if reqId in self.option_chain:
-            if impliedVol and impliedVol > 0:
+            if impliedVol is not None and 0 < impliedVol < _IB_SENTINEL:
                 self.option_chain[reqId]['implied_vol'] = impliedVol
-            if delta is not None:
+            if delta is not None and abs(delta) < _IB_SENTINEL:
                 self.option_chain[reqId]['delta'] = delta
+            if gamma is not None and abs(gamma) < _IB_SENTINEL:
+                self.option_chain[reqId]['gamma'] = gamma
+            if theta is not None and abs(theta) < _IB_SENTINEL:
+                self.option_chain[reqId]['theta'] = theta
+            if vega is not None and abs(vega) < _IB_SENTINEL:
+                self.option_chain[reqId]['vega'] = vega
 
     def get_available_expirations(self, ticker: str, contract_id: int = 0) -> List[str]:
         """Get available option expirations and strikes from IB. Waits for End callback (all exchanges).

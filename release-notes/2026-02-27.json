@@ -72,6 +72,16 @@
       "project": "ma-options",
       "image": "",
       "screenshot": null
+    },
+    {
+      "id": "greeks-pipeline-fix",
+      "title": "Greeks Pipeline Fix (v1.14.1)",
+      "summary": "Delta, gamma, theta, and vega now flow correctly from IB through the agent — previously only delta was stored, and all greeks were lost when their value was 0.",
+      "description": "Two bugs in the IB data agent prevented greeks from reaching the dashboard:\n\n**Bug 1 — Missing greeks in callback:** The `tickOptionComputation` callback (which IB fires with all greeks) was only storing `delta` into the option chain data. Gamma, theta, and vega were silently discarded, staying at their initialization value of 0.\n\n**Bug 2 — Truthiness filtering:** The agent used Python truthiness checks (`and opt.delta`) to decide whether to include greeks in the API response. Since 0 is falsy in Python, any greek that stayed at 0 (either from the bug above or because the callback hadn't fired yet) was converted to `null`.\n\n**Bug 3 — IB sentinel values:** IB sends `1.7976931348623157e+308` (Double.MAX_VALUE) when it can't compute a greek. The agent now filters these out instead of passing them through as absurdly large numbers.\n\n**Note:** 0DTE options may still show \"—\" for greeks when IB can't compute them (e.g., after the last computation cycle before expiry). This is expected IB behavior, not a bug.\n\nRequires agent restart to pick up v1.14.1.",
+      "category": "signals",
+      "project": "ma-options",
+      "image": "",
+      "screenshot": null
     }
   ]
 }
