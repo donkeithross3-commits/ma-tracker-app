@@ -88,6 +88,7 @@ interface PositionLedgerEntry {
   status: "active" | "closed";
   created_at: number;
   closed_at: number | null;
+  exit_reason?: string;
   entry: { order_id: number; price: number; quantity: number; fill_time: number; perm_id: number };
   instrument: { symbol: string; strike?: number; expiry?: string; right?: string };
   fill_log: FillLogEntry[];
@@ -880,9 +881,11 @@ export default function SignalsTab() {
     const closedLedger = ledger.filter(p => p.status === "closed");
     let wins = 0;
     let losses = 0;
+    let expired = 0;
     let totalPnl = 0;
     let totalCommission = 0;
     for (const pos of closedLedger) {
+      if (pos.exit_reason === "expired_worthless") expired++;
       const exitFills = (pos.fill_log || []).filter(f => f.level !== "entry");
       const lastFill = exitFills[exitFills.length - 1];
       if (lastFill) {
@@ -909,6 +912,7 @@ export default function SignalsTab() {
     return {
       activeCount: activeLedger.length,
       completedCount: closedLedger.length,
+      expired,
       wins,
       losses,
       totalPnl,       // gross P&L
@@ -1240,6 +1244,7 @@ export default function SignalsTab() {
                         f.level.startsWith("profit") ? "text-green-400" :
                         f.level === "trailing" ? "text-yellow-400" :
                         f.level.startsWith("stop") ? "text-red-400" :
+                        f.level === "expired_worthless" ? "text-red-500" :
                         "text-gray-400";
                       const inst = f.instrument;
                       const contractLabel = inst
@@ -1269,7 +1274,7 @@ export default function SignalsTab() {
           {/* ── Session Summary ── */}
           {((executionStatus?.position_ledger?.length ?? 0) > 0 || (signal?.positions_spawned ?? 0) > 0) && (
             <div className="bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-300 flex items-center gap-2">
-              <span>{sessionSummary.activeCount} active, {sessionSummary.completedCount} closed</span>
+              <span>{sessionSummary.activeCount} active, {sessionSummary.completedCount} closed{sessionSummary.expired > 0 ? ` (${sessionSummary.expired} expired)` : ""}</span>
               {sessionSummary.completedCount > 0 && (
                 <>
                   <span className="text-gray-600">|</span>

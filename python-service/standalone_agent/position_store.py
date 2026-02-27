@@ -91,8 +91,8 @@ class PositionStore:
             pos["fill_log"].append(fill_dict)
             self._save()
 
-    def mark_closed(self, position_id: str) -> None:
-        """Mark a position as closed."""
+    def mark_closed(self, position_id: str, exit_reason: str = "") -> None:
+        """Mark a position as closed with optional exit reason."""
         with self._lock:
             pos = self._positions.get(position_id)
             if pos is None:
@@ -100,8 +100,10 @@ class PositionStore:
                 return
             pos["status"] = "closed"
             pos["closed_at"] = time.time()
+            if exit_reason:
+                pos["exit_reason"] = exit_reason
             self._save()
-        logger.info("PositionStore: marked position %s as closed", position_id)
+        logger.info("PositionStore: marked position %s as closed (reason=%s)", position_id, exit_reason or "unspecified")
 
     def get_active_positions(self) -> List[dict]:
         """Return all positions with status == 'active'."""

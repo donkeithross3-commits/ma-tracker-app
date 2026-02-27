@@ -32,6 +32,7 @@ import signal
 import sys
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
 
@@ -1328,7 +1329,7 @@ class IBDataAgent:
             "remaining_qty": 0,
             "pnl_pct": 0.0,
         })
-        self.position_store.mark_closed(position_id)
+        self.position_store.mark_closed(position_id, exit_reason="manual_close")
         return {"success": True, "position_id": position_id, "status": "closed"}
 
     async def _handle_execution_list_models(self, payload: dict) -> dict:
@@ -1598,6 +1599,104 @@ class IBDataAgent:
                 "pnl_pct": 0.0,
             })
 
+    # ── Expired option cleanup ──
+
+    def _check_expired_positions(self):
+        """Detect options past their expiry date and clean them up.
+
+        Called from the heartbeat loop (~every 20s when engine is active).
+        Uses strict `today > expiry_date` so 0DTE options stay active on
+        expiry day and only get cleaned up the next calendar day.
+        """
+        if not self.execution_engine or not self.execution_engine.is_running:
+            return
+
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        expired_ids = []
+
+        for sid, state in list(self.execution_engine._strategies.items()):
+            if not sid.startswith("bmc_risk_"):
+                continue
+            config = getattr(state, "config", {}) or {}
+            instrument = config.get("instrument", {})
+            expiry_str = instrument.get("expiry", "")
+            if not expiry_str:
+                continue
+            try:
+                expiry_date = datetime.strptime(expiry_str, "%Y%m%d").date()
+            except ValueError:
+                continue
+            if today > expiry_date:
+                expired_ids.append((sid, state, instrument, config))
+
+        for sid, state, instrument, config in expired_ids:
+            self._cleanup_expired_position(sid, state, instrument, config)
+
+    def _cleanup_expired_position(self, sid: str, state, instrument: dict, config: dict):
+        """Clean up a single expired position: cancel orders, unload, record P&L."""
+        try:
+            symbol = instrument.get("symbol", "?")
+            strike = instrument.get("strike", "?")
+            expiry = instrument.get("expiry", "?")
+            label = f"{symbol} {strike} {expiry}"
+
+            # 1. Cancel any working IB orders on this risk manager
+            if hasattr(state.strategy, "_pending_orders"):
+                for oid in list(state.strategy._pending_orders.keys()):
+                    logger.info("Cancelling order %d for expired position %s", oid, sid)
+                    try:
+                        self.scanner.cancelOrder(oid, "")
+                    except Exception as e:
+                        logger.error("Failed to cancel order %d: %s", oid, e)
+
+            # 2. Get entry info from position store for P&L calculation
+            pos = self.position_store.get_position(sid)
+            entry_info = pos.get("entry", {}) if pos else {}
+            entry_price = entry_info.get("price", 0)
+            entry_qty = entry_info.get("quantity", 0)
+            # Use remaining_qty from risk manager if available, else entry qty
+            remaining_qty = getattr(state.strategy, "remaining_qty", entry_qty) or entry_qty
+            multiplier = 100  # standard options multiplier
+            pnl_dollar = -(entry_price * remaining_qty * multiplier)
+
+            # 3. Unload the risk manager strategy (frees streaming market data line)
+            self.execution_engine.unload_strategy(sid)
+            logger.info("Unloaded expired risk manager %s (%s)", sid, label)
+
+            # 4. Remove from parent BMC strategy's _active_positions list
+            if pos:
+                parent = pos.get("parent_strategy", "")
+                if parent and self.execution_engine:
+                    parent_state = self.execution_engine._strategies.get(parent)
+                    if parent_state and hasattr(parent_state.strategy, "_active_positions"):
+                        parent_state.strategy._active_positions = [
+                            p for p in parent_state.strategy._active_positions
+                            if abs(p.get("entry_price", 0) - entry_price) > 0.005
+                        ]
+
+            # 5. Record the expiry fill with P&L
+            self.position_store.add_fill(sid, {
+                "time": time.time(),
+                "order_id": 0,
+                "level": "expired_worthless",
+                "qty_filled": remaining_qty,
+                "avg_price": 0.0,
+                "remaining_qty": 0,
+                "pnl_pct": -100.0,
+                "commission": 0.0,
+            })
+
+            # 6. Mark closed with exit reason
+            self.position_store.mark_closed(sid, exit_reason="expired_worthless")
+
+            logger.info(
+                "Position %s expired worthless — loss $%.2f (0 commission) [%s]",
+                sid, abs(pnl_dollar), label,
+            )
+
+        except Exception as e:
+            logger.error("Error cleaning up expired position %s: %s", sid, e)
+
     async def send_heartbeat(self):
         """Send periodic heartbeats with agent state and execution telemetry."""
         telemetry_counter = 0  # send telemetry every 2nd heartbeat (~20s)
@@ -1622,6 +1721,8 @@ class IBDataAgent:
                         "type": "execution_telemetry",
                         **telemetry
                     }))
+                    # Check for expired options on the same ~20s cadence
+                    self._check_expired_positions()
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")

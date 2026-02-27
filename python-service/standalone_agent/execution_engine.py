@@ -1142,7 +1142,7 @@ class ExecutionEngine:
             # Mark closed if position fully exited
             remaining = getattr(state.strategy, "remaining_qty", None)
             if remaining is not None and remaining <= 0:
-                self._position_store.mark_closed(strategy_id)
+                self._position_store.mark_closed(strategy_id, exit_reason="risk_exit")
         except Exception as e:
             logger.error("Error persisting fill for %s: %s", strategy_id, e)
 
@@ -1223,7 +1223,7 @@ class ExecutionEngine:
         for key, agent_pos in store_positions.items():
             if key not in ib_keys:
                 report["stale_agent"].append({"position_id": agent_pos["id"], "instrument": key})
-                self._position_store.mark_closed(agent_pos["id"])
+                self._position_store.mark_closed(agent_pos["id"], exit_reason="reconciliation")
 
         return report
 
@@ -1241,6 +1241,7 @@ class ExecutionEngine:
                 "status": p.get("status", "active"),
                 "created_at": p.get("created_at", 0),
                 "closed_at": p.get("closed_at"),
+                "exit_reason": p.get("exit_reason", ""),
                 "entry": p.get("entry", {}),
                 "instrument": p.get("instrument", {}),
                 "fill_log": p.get("fill_log", []),
