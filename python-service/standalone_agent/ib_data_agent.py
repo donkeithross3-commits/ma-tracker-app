@@ -74,6 +74,11 @@ _raw_client_id = _env("IB_CLIENT_ID")
 IB_CLIENT_ID = int(_raw_client_id) if _raw_client_id and _raw_client_id.isdigit() else 0
 RELAY_URL = _env("RELAY_URL") or "wss://dr3-dashboard.com/ws/data-provider"
 IB_PROVIDER_KEY = _env("IB_PROVIDER_KEY")
+# Comma-separated IB account codes to exclude from positions/orders (e.g. managed accounts)
+_raw_exclude = _env("IB_EXCLUDE_ACCOUNTS")
+IB_EXCLUDE_ACCOUNTS: set = set(a.strip() for a in _raw_exclude.split(",") if a.strip()) if _raw_exclude else set()
+if IB_EXCLUDE_ACCOUNTS:
+    logger.info("IB_EXCLUDE_ACCOUNTS: %s", IB_EXCLUDE_ACCOUNTS)
 HEARTBEAT_INTERVAL = 10  # seconds
 RECONNECT_DELAY = 5  # seconds
 CACHE_TTL_SECONDS = 60  # How long to cache option chain data
@@ -488,15 +493,17 @@ class IBDataAgent:
     
     def _handle_get_positions_sync(self, payload: dict) -> dict:
         """Fetch all positions from IB (reqPositions -> position/positionEnd).
-        Returns positions for ALL managed accounts so multi-user agents work."""
+        Returns positions for ALL managed accounts, minus any in IB_EXCLUDE_ACCOUNTS."""
         if not self.scanner or not self.scanner.isConnected():
             return {"error": self._ib_not_connected_error()}
         timeout = float(payload.get("timeout_sec", 15.0))
         try:
             all_positions = self.scanner.get_positions_snapshot(timeout_sec=timeout)
+            if IB_EXCLUDE_ACCOUNTS:
+                all_positions = [p for p in all_positions if p.get("account") not in IB_EXCLUDE_ACCOUNTS]
             accounts = sorted(set(p.get("account", "") for p in all_positions if p.get("account")))
             if not accounts:
-                accounts = list(self.scanner._managed_accounts)
+                accounts = [a for a in self.scanner._managed_accounts if a not in IB_EXCLUDE_ACCOUNTS]
             return {"positions": all_positions, "accounts": accounts}
         except Exception as e:
             logger.error(f"Error fetching positions: {e}")
