@@ -329,6 +329,10 @@ class IBDataAgent:
                 return await self._handle_execution_config(payload)
             elif request_type == "execution_budget":
                 return await self._handle_execution_budget(payload)
+            elif request_type == "execution_add_ticker":
+                return await self._handle_execution_add_ticker(payload)
+            elif request_type == "execution_remove_ticker":
+                return await self._handle_execution_remove_ticker(payload)
             elif request_type == "execution_close_position":
                 return await self._handle_close_position(payload)
             elif request_type == "get_ib_executions":
@@ -981,14 +985,18 @@ class IBDataAgent:
     # ── Execution engine request handlers ──
 
     async def _handle_execution_start(self, payload: dict) -> dict:
-        """Start execution engine with strategy configuration."""
+        """Start execution engine with strategy configuration.
+
+        If the engine is already running, just load any new strategies from
+        the payload (backward-compatible additive behavior).
+        """
         if not self.execution_engine:
             return {"error": f"Execution engine not initialized ({self._ib_not_connected_error()})"}
-        if self.execution_engine.is_running:
-            return {"error": "Execution engine is already running"}
+
+        already_running = self.execution_engine.is_running
 
         strategies_config = payload.get("strategies", [])
-        if not strategies_config:
+        if not strategies_config and not already_running:
             return {"error": "No strategies specified in payload"}
 
         results = []
@@ -996,9 +1004,15 @@ class IBDataAgent:
             strategy_id = strat_cfg.get("strategy_id", "")
             strategy_type = strat_cfg.get("strategy_type", "")
             config = strat_cfg.get("config", {})
+            ticker_budget = strat_cfg.get("ticker_budget", -1)
 
             if not strategy_id:
                 results.append({"error": "strategy_id is required"})
+                continue
+
+            # Skip if strategy already loaded (idempotent on running engine)
+            if strategy_id in self.execution_engine._strategies:
+                results.append({"strategy_id": strategy_id, "status": "already_loaded"})
                 continue
 
             # Create strategy instance based on type
@@ -1015,88 +1029,101 @@ class IBDataAgent:
             )
             results.append(result)
 
-        # ── Recover persisted risk manager positions ──
-        recovered = 0
-        active_positions = self.position_store.get_active_positions()
-        if active_positions:
-            from strategies.risk_manager import RiskManagerStrategy
-            for pos in active_positions:
-                pos_id = pos.get("id", "")
-                if not pos_id or pos_id in self.execution_engine._strategies:
-                    continue  # already loaded or invalid
-                stored_config = pos.get("risk_config", {})
-                if not stored_config:
-                    logger.warning("Skipping recovery of %s: no risk_config in store", pos_id)
-                    continue
-                try:
-                    rm = RiskManagerStrategy()
-                    load_result = self.execution_engine.load_strategy(pos_id, rm, stored_config)
-                    if "error" in load_result:
-                        logger.error("Recovery of %s failed: %s", pos_id, load_result["error"])
+            # Set ticker + per-ticker budget on the StrategyState
+            if "error" not in result:
+                state = self.execution_engine._strategies.get(strategy_id)
+                if state:
+                    state.ticker = config.get("ticker", strategy_id.replace("bmc_", "").upper())
+                    if ticker_budget != -1:
+                        state.ticker_entry_budget = ticker_budget
+
+        if not already_running:
+            # ── Recover persisted risk manager positions ──
+            recovered = 0
+            active_positions = self.position_store.get_active_positions()
+            if active_positions:
+                from strategies.risk_manager import RiskManagerStrategy
+                for pos in active_positions:
+                    pos_id = pos.get("id", "")
+                    if not pos_id or pos_id in self.execution_engine._strategies:
+                        continue  # already loaded or invalid
+                    stored_config = pos.get("risk_config", {})
+                    if not stored_config:
+                        logger.warning("Skipping recovery of %s: no risk_config in store", pos_id)
                         continue
-                    # Restore runtime state over fresh on_start defaults
-                    runtime = pos.get("runtime_state", {})
-                    if runtime:
-                        rm.restore_runtime_state(runtime)
-                    # Restore fill log for telemetry display
-                    fill_log = pos.get("fill_log", [])
-                    if fill_log:
-                        rm._fill_log = fill_log
-                    recovered += 1
-                    logger.info("Recovered risk manager %s (remaining=%d)", pos_id, rm.remaining_qty)
+                    try:
+                        rm = RiskManagerStrategy()
+                        load_result = self.execution_engine.load_strategy(pos_id, rm, stored_config)
+                        if "error" in load_result:
+                            logger.error("Recovery of %s failed: %s", pos_id, load_result["error"])
+                            continue
+                        # Restore runtime state over fresh on_start defaults
+                        runtime = pos.get("runtime_state", {})
+                        if runtime:
+                            rm.restore_runtime_state(runtime)
+                        # Restore fill log for telemetry display
+                        fill_log = pos.get("fill_log", [])
+                        if fill_log:
+                            rm._fill_log = fill_log
+                        recovered += 1
+                        logger.info("Recovered risk manager %s (remaining=%d)", pos_id, rm.remaining_qty)
 
-                    # Populate parent BMC strategy's _active_positions list + counter
-                    parent = pos.get("parent_strategy", "")
-                    parent_state = self.execution_engine._strategies.get(parent)
-                    if parent_state and hasattr(parent_state.strategy, "_active_positions"):
-                        entry_info = pos.get("entry", {})
-                        instrument = pos.get("instrument", {})
-                        parent_state.strategy._active_positions.append({
-                            "order_id": entry_info.get("order_id", 0),
-                            "entry_price": entry_info.get("price", 0),
-                            "quantity": entry_info.get("quantity", 0),
-                            "fill_time": entry_info.get("fill_time", 0),
-                            "perm_id": entry_info.get("perm_id", 0),
-                            "signal": {
-                                "option_contract": {
-                                    "symbol": instrument.get("symbol", ""),
-                                    "strike": instrument.get("strike", 0),
-                                    "expiry": instrument.get("expiry", ""),
-                                    "right": instrument.get("right", ""),
+                        # Populate parent BMC strategy's _active_positions list + counter
+                        parent = pos.get("parent_strategy", "")
+                        parent_state = self.execution_engine._strategies.get(parent)
+                        if parent_state and hasattr(parent_state.strategy, "_active_positions"):
+                            entry_info = pos.get("entry", {})
+                            instrument = pos.get("instrument", {})
+                            parent_state.strategy._active_positions.append({
+                                "order_id": entry_info.get("order_id", 0),
+                                "entry_price": entry_info.get("price", 0),
+                                "quantity": entry_info.get("quantity", 0),
+                                "fill_time": entry_info.get("fill_time", 0),
+                                "perm_id": entry_info.get("perm_id", 0),
+                                "signal": {
+                                    "option_contract": {
+                                        "symbol": instrument.get("symbol", ""),
+                                        "strike": instrument.get("strike", 0),
+                                        "expiry": instrument.get("expiry", ""),
+                                        "right": instrument.get("right", ""),
+                                    },
                                 },
-                            },
-                        })
-                        if hasattr(parent_state.strategy, "_positions_spawned"):
-                            parent_state.strategy._positions_spawned += 1
-                except Exception as e:
-                    logger.error("Error recovering position %s: %s", pos_id, e)
-            if recovered > 0:
-                logger.info("Recovered %d risk manager position(s) from store", recovered)
+                            })
+                            if hasattr(parent_state.strategy, "_positions_spawned"):
+                                parent_state.strategy._positions_spawned += 1
+                    except Exception as e:
+                        logger.error("Error recovering position %s: %s", pos_id, e)
+                if recovered > 0:
+                    logger.info("Recovered %d risk manager position(s) from store", recovered)
 
-        # ── IB Reconciliation on startup (WS4) ──
-        try:
-            ib_positions = [
-                p for p in self.scanner.get_positions_snapshot()
-                if p.get("account") == self.IB_ACCT_CODE
-            ]
-            recon = self.execution_engine.reconcile_with_ib(ib_positions)
-            if recon["orphaned_ib"]:
-                logger.warning("IB reconciliation: %d orphaned positions in IB", len(recon["orphaned_ib"]))
-            if recon["stale_agent"]:
-                logger.warning("IB reconciliation: %d stale positions closed", len(recon["stale_agent"]))
-            if recon["adjusted"]:
-                logger.warning("IB reconciliation: %d positions with qty mismatch", len(recon["adjusted"]))
-        except Exception as e:
-            logger.error("IB reconciliation on startup failed: %s", e)
+            # ── IB Reconciliation on startup (WS4) ──
+            try:
+                ib_positions = [
+                    p for p in self.scanner.get_positions_snapshot()
+                    if p.get("account") == self.IB_ACCT_CODE
+                ]
+                recon = self.execution_engine.reconcile_with_ib(ib_positions)
+                if recon["orphaned_ib"]:
+                    logger.warning("IB reconciliation: %d orphaned positions in IB", len(recon["orphaned_ib"]))
+                if recon["stale_agent"]:
+                    logger.warning("IB reconciliation: %d stale positions closed", len(recon["stale_agent"]))
+                if recon["adjusted"]:
+                    logger.warning("IB reconciliation: %d positions with qty mismatch", len(recon["adjusted"]))
+            except Exception as e:
+                logger.error("IB reconciliation on startup failed: %s", e)
 
-        # Start the evaluation loop
-        self.execution_engine.start()
+            # Start the evaluation loop
+            self.execution_engine.start()
+        else:
+            recovered = 0
+            logger.info("Execution engine already running — added %d new strategies", len(results))
 
         return {
             "running": self.execution_engine.is_running,
             "strategies_loaded": results,
             "recovered_positions": recovered,
             "lines_held": self.resource_manager.execution_lines_held,
+            "budget_status": self.execution_engine.get_budget_status(),
         }
 
     async def _handle_execution_stop(self, payload: dict) -> dict:
@@ -1139,11 +1166,94 @@ class IBDataAgent:
         return self.execution_engine.update_strategy_config(strategy_id, new_config)
 
     async def _handle_execution_budget(self, payload: dict) -> dict:
-        """Set the order budget (lifeguard on duty)."""
+        """Set entry budget — either global cap or per-ticker.
+
+        Payload:
+            scope: "global" (default) or "ticker"
+            budget: -1=unlimited, 0=halt, N=exactly N entries
+            strategy_id: required when scope="ticker"
+        """
         if not self.execution_engine:
             return {"error": "Execution engine not initialized"}
+
+        scope = payload.get("scope", "global")
         budget = int(payload.get("budget", 0))
-        return self.execution_engine.set_order_budget(budget)
+
+        if scope == "ticker":
+            strategy_id = payload.get("strategy_id", "")
+            if not strategy_id:
+                return {"error": "strategy_id is required for scope=ticker"}
+            return self.execution_engine.set_ticker_budget(strategy_id, budget)
+        else:
+            return self.execution_engine.set_global_entry_cap(budget)
+
+    async def _handle_execution_add_ticker(self, payload: dict) -> dict:
+        """Add a single ticker/strategy to the running execution engine.
+
+        Payload:
+            strategy_id: str (e.g. "bmc_spy")
+            strategy_type: str (e.g. "big_move_convexity")
+            config: dict (strategy config including "ticker")
+            ticker_budget: int (optional, default -1=unlimited)
+        """
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+        if not self.execution_engine.is_running:
+            return {"error": "Execution engine is not running — call execution_start first"}
+
+        strategy_id = payload.get("strategy_id", "")
+        strategy_type = payload.get("strategy_type", "")
+        config = payload.get("config", {})
+        ticker_budget = int(payload.get("ticker_budget", -1))
+
+        if not strategy_id:
+            return {"error": "strategy_id is required"}
+
+        if strategy_id in self.execution_engine._strategies:
+            return {"error": f"Strategy {strategy_id} is already loaded"}
+
+        strategy = self._create_strategy(strategy_type)
+        if strategy is None:
+            return {"error": f"Unknown strategy_type: {strategy_type}"}
+
+        # Run load_strategy in thread pool (on_start may do blocking I/O)
+        result = await self._run_in_thread(
+            self.execution_engine.load_strategy, strategy_id, strategy, config
+        )
+
+        # Set ticker + per-ticker budget on the StrategyState
+        if "error" not in result:
+            state = self.execution_engine._strategies.get(strategy_id)
+            if state:
+                state.ticker = config.get("ticker", strategy_id.replace("bmc_", "").upper())
+                if ticker_budget != -1:
+                    state.ticker_entry_budget = ticker_budget
+
+        result["budget_status"] = self.execution_engine.get_budget_status()
+        return result
+
+    async def _handle_execution_remove_ticker(self, payload: dict) -> dict:
+        """Remove a single ticker/strategy from the running engine.
+
+        Payload:
+            strategy_id: str (e.g. "bmc_spy")
+
+        Note: Risk managers for this ticker's positions keep running
+        (they are separate strategy_ids like "bmc_risk_*").
+        """
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+
+        strategy_id = payload.get("strategy_id", "")
+        if not strategy_id:
+            return {"error": "strategy_id is required"}
+
+        if strategy_id not in self.execution_engine._strategies:
+            return {"error": f"Strategy {strategy_id} not found"}
+
+        result = self.execution_engine.unload_strategy(strategy_id)
+        result["budget_status"] = self.execution_engine.get_budget_status()
+        return result
 
     async def _handle_close_position(self, payload: dict) -> dict:
         """Manually close a position: unload risk manager, mark closed in store."""

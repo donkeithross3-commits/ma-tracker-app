@@ -620,6 +620,7 @@ class RiskManagerStrategy(ExecutionStrategy):
             tif="DAY",
             outside_rth=bool(exec_cfg.get("outside_rth", False)),
             reason=reason,
+            is_exit=True,  # EXIT orders bypass entry budget
         )
 
     def _register_pending(self, action: OrderAction, level_type: str,

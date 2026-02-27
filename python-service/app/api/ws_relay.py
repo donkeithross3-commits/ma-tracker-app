@@ -54,6 +54,8 @@ STATUS_REQUESTS = frozenset({
 # Execution control requests: only routed to the user's own agent
 EXECUTION_REQUESTS = frozenset({
     "execution_start", "execution_stop", "execution_status", "execution_config",
+    "execution_budget", "execution_add_ticker", "execution_remove_ticker",
+    "execution_close_position",
 })
 
 

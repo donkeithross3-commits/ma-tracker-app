@@ -12,36 +12,31 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { budget, scope, strategy_id } = body;
+    const { strategy_id } = body;
 
-    if (budget === undefined || budget === null) {
+    if (!strategy_id) {
       return NextResponse.json(
-        { error: "budget is required (-1=unlimited, 0=halt, N=allow N entries)" },
+        { error: "strategy_id is required" },
         { status: 400 }
       );
     }
 
-    // Build payload with optional scope + strategy_id for per-ticker budgets
-    const payload: Record<string, unknown> = {
-      userId: user.id,
-      budget: parseInt(String(budget), 10),
-    };
-    if (scope) payload.scope = scope;
-    if (strategy_id) payload.strategy_id = strategy_id;
-
     const response = await fetch(
-      `${PYTHON_SERVICE_URL}/options/relay/execution/budget`,
+      `${PYTHON_SERVICE_URL}/options/relay/execution/remove-ticker`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ userId: user.id, strategy_id }),
       }
     );
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       return NextResponse.json(
-        { error: errorData.detail || `Budget update failed: ${response.status}` },
+        {
+          error:
+            errorData.detail || `Remove ticker failed: ${response.status}`,
+        },
         { status: response.status }
       );
     }
@@ -49,9 +44,9 @@ export async function POST(request: NextRequest) {
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error setting order budget:", error);
+    console.error("Error removing ticker:", error);
     return NextResponse.json(
-      { error: "Failed to set order budget" },
+      { error: "Failed to remove ticker" },
       { status: 500 }
     );
   }

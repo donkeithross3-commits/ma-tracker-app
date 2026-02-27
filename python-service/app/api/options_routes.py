@@ -1922,16 +1922,21 @@ async def relay_execution_config(request: ExecutionConfigRequest):
 
 class ExecutionBudgetRequest(BaseModel):
     userId: str
-    budget: int  # -1 = unlimited, 0 = halt, N>0 = exactly N orders
+    budget: int  # -1 = unlimited, 0 = halt, N>0 = exactly N entries
+    scope: str = "global"  # "global" or "ticker"
+    strategy_id: str = ""  # required when scope="ticker"
 
 
 @router.post("/relay/execution/budget")
 async def relay_execution_budget(request: ExecutionBudgetRequest):
-    """Set the order budget (lifeguard on duty) on the user's agent."""
+    """Set entry budget on the user's agent — either global cap or per-ticker."""
     try:
+        payload = {"budget": request.budget, "scope": request.scope}
+        if request.strategy_id:
+            payload["strategy_id"] = request.strategy_id
         response_data = await send_request_to_provider(
             request_type="execution_budget",
-            payload={"budget": request.budget},
+            payload=payload,
             timeout=10.0,
             user_id=request.userId,
             allow_fallback_to_any_provider=False,
@@ -1943,6 +1948,66 @@ async def relay_execution_budget(request: ExecutionBudgetRequest):
         raise
     except Exception as e:
         logger.error(f"Relay execution/budget error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ExecutionAddTickerRequest(BaseModel):
+    userId: str
+    strategy_id: str
+    strategy_type: str
+    config: dict = {}
+    ticker_budget: int = -1  # -1=unlimited, 0=halt, N=exactly N entries
+
+
+@router.post("/relay/execution/add-ticker")
+async def relay_execution_add_ticker(request: ExecutionAddTickerRequest):
+    """Add a single ticker/strategy to the running execution engine."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_add_ticker",
+            payload={
+                "strategy_id": request.strategy_id,
+                "strategy_type": request.strategy_type,
+                "config": request.config,
+                "ticker_budget": request.ticker_budget,
+            },
+            timeout=30.0,  # on_start may be slow (Polygon WS, bootstrap)
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/add-ticker error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ExecutionRemoveTickerRequest(BaseModel):
+    userId: str
+    strategy_id: str
+
+
+@router.post("/relay/execution/remove-ticker")
+async def relay_execution_remove_ticker(request: ExecutionRemoveTickerRequest):
+    """Remove a single ticker/strategy from the running engine."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_remove_ticker",
+            payload={"strategy_id": request.strategy_id},
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/remove-ticker error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

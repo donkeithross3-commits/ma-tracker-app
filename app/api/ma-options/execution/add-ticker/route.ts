@@ -12,36 +12,34 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { budget, scope, strategy_id } = body;
+    const { strategy_id, strategy_type, config, ticker_budget } = body;
 
-    if (budget === undefined || budget === null) {
+    if (!strategy_id || !strategy_type) {
       return NextResponse.json(
-        { error: "budget is required (-1=unlimited, 0=halt, N=allow N entries)" },
+        { error: "strategy_id and strategy_type are required" },
         { status: 400 }
       );
     }
 
-    // Build payload with optional scope + strategy_id for per-ticker budgets
-    const payload: Record<string, unknown> = {
-      userId: user.id,
-      budget: parseInt(String(budget), 10),
-    };
-    if (scope) payload.scope = scope;
-    if (strategy_id) payload.strategy_id = strategy_id;
-
     const response = await fetch(
-      `${PYTHON_SERVICE_URL}/options/relay/execution/budget`,
+      `${PYTHON_SERVICE_URL}/options/relay/execution/add-ticker`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          userId: user.id,
+          strategy_id,
+          strategy_type,
+          config: config || {},
+          ticker_budget: ticker_budget ?? -1,
+        }),
       }
     );
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       return NextResponse.json(
-        { error: errorData.detail || `Budget update failed: ${response.status}` },
+        { error: errorData.detail || `Add ticker failed: ${response.status}` },
         { status: response.status }
       );
     }
@@ -49,9 +47,9 @@ export async function POST(request: NextRequest) {
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error setting order budget:", error);
+    console.error("Error adding ticker:", error);
     return NextResponse.json(
-      { error: "Failed to set order budget" },
+      { error: "Failed to add ticker" },
       { status: 500 }
     );
   }

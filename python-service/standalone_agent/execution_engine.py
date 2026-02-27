@@ -90,6 +90,7 @@ class OrderAction:
     tif: str = "DAY"  # DAY, GTC, IOC, etc.
     outside_rth: bool = False  # fill outside regular trading hours (pre/post market)
     reason: str = ""  # human-readable explanation for logging/audit
+    is_exit: bool = False  # True for risk manager exits — bypasses entry budget
 
 
 @dataclass
@@ -122,6 +123,10 @@ class StrategyState:
     inflight_orders: int = 0   # currently awaiting TWS acknowledgment
     errors: List[str] = field(default_factory=list)
     flipflop_resume_at: float = 0.0  # timestamp when flip-flop cooldown expires
+    # Per-ticker budget fields
+    ticker: str = ""                    # ticker this strategy trades (empty for risk managers)
+    ticker_entry_budget: int = -1       # -1=unlimited, 0=halted, N=exactly N more entries
+    ticker_entries_placed: int = 0      # lifetime counter for this ticker
 
 
 # ── Strategy interface ──
@@ -291,10 +296,10 @@ class ExecutionEngine:
         self._inflight_order_count = 0
         self._inflight_lock = threading.Lock()
 
-        # ── Order Budget (lifeguard on duty) ──
-        self._order_budget: int = 0       # 0 = halted, -1 = unlimited, N = exactly N more
-        self._order_budget_lock = threading.Lock()
-        self._total_algo_orders: int = 0  # lifetime counter (never resets)
+        # ── Entry Budget (two-tier: global cap + per-ticker budgets) ──
+        self._global_entry_cap: int = 0       # 0 = halted, -1 = unlimited, N = exactly N more
+        self._entry_cap_lock = threading.Lock()
+        self._total_entries_placed: int = 0   # lifetime counter (never resets)
 
         # ── Flip-flop detection ──
         # strategy_id -> list of submission timestamps
@@ -303,44 +308,101 @@ class ExecutionEngine:
         # ── Lifecycle sweep counter ──
         self._tick_count = 0
 
-    # ── Order Budget ──
+    # ── Entry Budget (two-tier) ──
 
-    def set_order_budget(self, budget: int) -> dict:
-        """Set the order budget. Called by operator via UI/API.
+    def set_global_entry_cap(self, cap: int) -> dict:
+        """Set the global entry cap. Called by operator via UI/API.
 
         Args:
-            budget: -1 for unlimited, 0 to halt, N>0 for exactly N orders.
+            cap: -1 for unlimited, 0 to halt, N>0 for exactly N entries.
         Returns:
-            Status dict with new budget value.
+            Status dict with new cap value.
         """
-        with self._order_budget_lock:
-            self._order_budget = budget
-        logger.info("Order budget set to %s (total algo orders lifetime: %d)",
-                     "UNLIMITED" if budget == -1 else budget,
-                     self._total_algo_orders)
+        with self._entry_cap_lock:
+            self._global_entry_cap = cap
+        logger.info("Global entry cap set to %s (total entries lifetime: %d)",
+                     "UNLIMITED" if cap == -1 else cap,
+                     self._total_entries_placed)
         return {
-            "order_budget": budget,
-            "total_algo_orders": self._total_algo_orders,
+            "global_entry_cap": cap,
+            "total_entries_placed": self._total_entries_placed,
+            # Backward-compatible aliases
+            "order_budget": cap,
+            "total_algo_orders": self._total_entries_placed,
         }
 
-    def get_order_budget(self) -> int:
-        """Return current order budget."""
-        with self._order_budget_lock:
-            return self._order_budget
+    def set_order_budget(self, budget: int) -> dict:
+        """Backward-compatible alias for set_global_entry_cap."""
+        return self.set_global_entry_cap(budget)
 
-    def _consume_order_budget(self) -> bool:
-        """Try to consume one unit of order budget. Returns True if allowed."""
-        with self._order_budget_lock:
-            if self._order_budget == -1:
-                self._total_algo_orders += 1
+    def get_order_budget(self) -> int:
+        """Return current global entry cap (backward-compatible name)."""
+        with self._entry_cap_lock:
+            return self._global_entry_cap
+
+    def set_ticker_budget(self, strategy_id: str, budget: int) -> dict:
+        """Set the per-ticker entry budget for a strategy.
+
+        Args:
+            strategy_id: The strategy to configure.
+            budget: -1 for unlimited, 0 to halt, N>0 for exactly N entries.
+        """
+        state = self._strategies.get(strategy_id)
+        if not state:
+            return {"error": f"Strategy {strategy_id} not found"}
+        with self._lock:
+            state.ticker_entry_budget = budget
+        return {
+            "strategy_id": strategy_id,
+            "ticker": state.ticker,
+            "ticker_entry_budget": budget,
+            "ticker_entries_placed": state.ticker_entries_placed,
+        }
+
+    def get_budget_status(self) -> dict:
+        """Return full budget state for dashboard display."""
+        result = {
+            "global_entry_cap": self._global_entry_cap,
+            "total_entries_placed": self._total_entries_placed,
+            "inflight_orders": self._inflight_order_count,
+            "tickers": {},
+        }
+        for sid, state in self._strategies.items():
+            if state.ticker:  # skip risk managers (no ticker)
+                result["tickers"][state.ticker] = {
+                    "strategy_id": sid,
+                    "ticker_entry_budget": state.ticker_entry_budget,
+                    "ticker_entries_placed": state.ticker_entries_placed,
+                    "is_active": state.is_active,
+                }
+        return result
+
+    def _consume_entry_cap(self) -> bool:
+        """Try to consume one unit of global entry cap. Returns True if allowed."""
+        with self._entry_cap_lock:
+            if self._global_entry_cap == -1:
+                self._total_entries_placed += 1
                 return True  # unlimited
-            if self._order_budget <= 0:
+            if self._global_entry_cap <= 0:
                 return False  # exhausted
-            self._order_budget -= 1
-            self._total_algo_orders += 1
-            remaining = self._order_budget
-        logger.info("Order budget consumed: %d remaining", remaining)
+            self._global_entry_cap -= 1
+            self._total_entries_placed += 1
+            remaining = self._global_entry_cap
+        logger.info("Global entry cap consumed: %d remaining", remaining)
         return True
+
+    def _refund_entry_cap(self):
+        """Refund one unit of global entry cap (used when Gates 2-4 reject an entry)."""
+        with self._entry_cap_lock:
+            if self._global_entry_cap >= 0:  # don't refund unlimited
+                self._global_entry_cap += 1
+            self._total_entries_placed = max(0, self._total_entries_placed - 1)
+
+    def _refund_ticker_budget(self, state: "StrategyState"):
+        """Refund one unit of per-ticker budget (used when later gates reject)."""
+        if state.ticker_entry_budget >= 0:
+            state.ticker_entry_budget += 1
+        state.ticker_entries_placed = max(0, state.ticker_entries_placed - 1)
 
     # ── Flip-flop detection ──
 
@@ -399,9 +461,9 @@ class ExecutionEngine:
         self._tick_count = 0
         self._thread = threading.Thread(target=self._evaluation_loop, daemon=True, name="exec-engine")
         self._thread.start()
-        logger.info("ExecutionEngine started (eval_interval=%.3fs, strategies=%d, order_budget=%s)",
+        logger.info("ExecutionEngine started (eval_interval=%.3fs, strategies=%d, global_entry_cap=%s)",
                      self._eval_interval, len(self._strategies),
-                     "UNLIMITED" if self._order_budget == -1 else self._order_budget)
+                     "UNLIMITED" if self._global_entry_cap == -1 else self._global_entry_cap)
 
     def stop(self):
         """Stop the evaluation loop, cancel working orders, drain in-flight, clean up.
@@ -808,30 +870,52 @@ class ExecutionEngine:
         """Submit an OrderAction through the safety gate pipeline (non-blocking).
 
         Safety gates (checked in order):
-        1. Order Budget -- global algo order allowance
+        1. Entry Budget -- per-ticker + global cap (SKIPPED for exit orders)
         2. Flip-flop guard -- per-strategy order rate limiter
         3. Inflight cap -- global cap on orders awaiting TWS ack
         4. Connection gate -- IB connectivity check
 
+        Exit orders (is_exit=True, e.g. risk manager trailing stops) bypass
+        Gate 1 entirely — exits protect capital and must never be blocked by
+        entry budget exhaustion.
+
         The eval thread returns immediately; the order is placed on the
         dedicated order-exec thread.
         """
-        # ── Gate 1: Order Budget ──
-        if not self._consume_order_budget():
-            budget_msg = "Order rejected: order budget exhausted (set budget via UI to allow algo orders)"
-            logger.warning("Budget exhausted -- rejecting %s %d x %s for strategy %s",
-                           action.side.value, action.quantity,
-                           action.contract_dict.get("symbol", "?"), action.strategy_id)
-            state.errors.append(budget_msg)
-            return
+        is_entry = not action.is_exit
+
+        # ── Gate 1: Entry Budget (skip for exits) ──
+        if is_entry:
+            # Gate 1a: Per-ticker budget
+            if state.ticker_entry_budget == 0:
+                budget_msg = f"Order rejected: ticker budget halted for {state.ticker or state.strategy_id}"
+                logger.warning("Ticker budget halted -- rejecting %s %d x %s for strategy %s",
+                               action.side.value, action.quantity,
+                               action.contract_dict.get("symbol", "?"), action.strategy_id)
+                state.errors.append(budget_msg)
+                return
+            # Consume per-ticker budget (tentative — refunded if later gates reject)
+            if state.ticker_entry_budget > 0:
+                state.ticker_entry_budget -= 1
+            state.ticker_entries_placed += 1
+
+            # Gate 1b: Global entry cap
+            if not self._consume_entry_cap():
+                # Refund ticker budget
+                self._refund_ticker_budget(state)
+                budget_msg = "Order rejected: global entry cap exhausted (set budget via UI to allow entries)"
+                logger.warning("Global entry cap exhausted -- rejecting %s %d x %s for strategy %s",
+                               action.side.value, action.quantity,
+                               action.contract_dict.get("symbol", "?"), action.strategy_id)
+                state.errors.append(budget_msg)
+                return
 
         # ── Gate 2: Flip-flop guard ──
         if self._check_flipflop(state.strategy_id):
-            # Refund the budget since we're rejecting
-            with self._order_budget_lock:
-                if self._order_budget >= 0:  # don't refund unlimited
-                    self._order_budget += 1
-                self._total_algo_orders = max(0, self._total_algo_orders - 1)
+            # Refund budgets since we're rejecting
+            if is_entry:
+                self._refund_entry_cap()
+                self._refund_ticker_budget(state)
             flipflop_msg = (
                 f"Flip-flop detected: strategy {state.strategy_id} submitted "
                 f">={self.FLIPFLOP_MAX_ORDERS} orders in {self.FLIPFLOP_WINDOW_SEC}s "
@@ -846,11 +930,10 @@ class ExecutionEngine:
         # ── Gate 3: Inflight cap ──
         with self._inflight_lock:
             if self._inflight_order_count >= self.MAX_INFLIGHT_ORDERS:
-                # Refund budget
-                with self._order_budget_lock:
-                    if self._order_budget >= 0:
-                        self._order_budget += 1
-                    self._total_algo_orders = max(0, self._total_algo_orders - 1)
+                # Refund entry budgets (only for entries)
+                if is_entry:
+                    self._refund_entry_cap()
+                    self._refund_ticker_budget(state)
                 logger.warning(
                     "Dropping order action for strategy %s: %d orders already in-flight",
                     state.strategy_id, self._inflight_order_count,
@@ -873,10 +956,9 @@ class ExecutionEngine:
             with self._inflight_lock:
                 self._inflight_order_count = max(0, self._inflight_order_count - 1)
                 state.inflight_orders = max(0, state.inflight_orders - 1)
-            with self._order_budget_lock:
-                if self._order_budget >= 0:
-                    self._order_budget += 1
-                self._total_algo_orders = max(0, self._total_algo_orders - 1)
+            if is_entry:
+                self._refund_entry_cap()
+                self._refund_ticker_budget(state)
             state.errors.append("Order rejected: IB connection lost")
             return
 
@@ -884,12 +966,13 @@ class ExecutionEngine:
         self._record_order_submission(state.strategy_id)
 
         logger.info(
-            "Strategy %s queuing order: %s %d x %s @ %s (%s) [inflight=%d, budget=%s]",
-            action.strategy_id, action.side.value, action.quantity,
+            "Strategy %s queuing %s: %s %d x %s @ %s (%s) [inflight=%d, budget=%s]",
+            action.strategy_id, "EXIT" if action.is_exit else "ENTRY",
+            action.side.value, action.quantity,
             action.contract_dict.get("symbol", "?"),
             action.limit_price or "MKT", action.reason,
             self._inflight_order_count,
-            "UNL" if self._order_budget == -1 else self._order_budget,
+            "UNL" if self._global_entry_cap == -1 else self._global_entry_cap,
         )
 
         order_dict = {
@@ -1226,8 +1309,11 @@ class ExecutionEngine:
             "available_scan_lines": self._resource_manager.available_for_scan,
             "quote_snapshot": self._cache.get_all_serialized(),
             "active_orders": active_orders_info,
-            "order_budget": self._order_budget,
-            "total_algo_orders": self._total_algo_orders,
+            # Backward-compatible aliases
+            "order_budget": self._global_entry_cap,
+            "total_algo_orders": self._total_entries_placed,
+            # New budget structure
+            "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
             "trade_attribution_summary": attribution_summary,
         }
@@ -1264,7 +1350,10 @@ class ExecutionEngine:
             "inflight_orders_total": self._inflight_order_count,
             "lines_held": self._resource_manager.execution_lines_held,
             "quote_snapshot": self._cache.get_all_serialized(),
-            "order_budget": self._order_budget,
-            "total_algo_orders": self._total_algo_orders,
+            # Backward-compatible aliases
+            "order_budget": self._global_entry_cap,
+            "total_algo_orders": self._total_entries_placed,
+            # New budget structure
+            "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
         }
