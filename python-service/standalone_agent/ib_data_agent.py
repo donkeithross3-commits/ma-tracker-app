@@ -1598,6 +1598,29 @@ class IBDataAgent:
                 "remaining_qty": pos_info.get("quantity", 0),
                 "pnl_pct": 0.0,
             })
+            # Persist initial runtime state (ARMED) so it survives restarts
+            if hasattr(strategy, "get_runtime_snapshot"):
+                self.position_store.update_runtime_state(
+                    strategy_id, strategy.get_runtime_snapshot()
+                )
+
+    # ── Periodic runtime state persistence ──
+
+    def _persist_runtime_states(self):
+        """Snapshot all active risk manager runtime states to the position store.
+
+        Called from the heartbeat loop (~every 20s when engine is active).
+        Ensures ARMED/ACTIVATED/HWM state survives agent restarts.
+        """
+        if not self.execution_engine or not self.position_store:
+            return
+        for sid, state in self.execution_engine._strategies.items():
+            if sid.startswith("bmc_risk_") and hasattr(state.strategy, "get_runtime_snapshot"):
+                try:
+                    snapshot = state.strategy.get_runtime_snapshot()
+                    self.position_store.update_runtime_state(sid, snapshot)
+                except Exception as e:
+                    logger.error("Error persisting runtime state for %s: %s", sid, e)
 
     # ── Expired option cleanup ──
 
@@ -1721,6 +1744,8 @@ class IBDataAgent:
                         "type": "execution_telemetry",
                         **telemetry
                     }))
+                    # Persist risk manager runtime states (~20s cadence)
+                    self._persist_runtime_states()
                     # Check for expired options on the same ~20s cadence
                     self._check_expired_positions()
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
