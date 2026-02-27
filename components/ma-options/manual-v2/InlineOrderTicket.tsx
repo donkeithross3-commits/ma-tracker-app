@@ -288,10 +288,17 @@ export default function InlineOrderTicket({
     );
   }
 
+  // ─── Order type label map ───
+  const ORDER_TYPE_LABELS: Record<StockOrderType, string> = {
+    "LMT": "Limit",
+    "STP LMT": "Stop Limit",
+    "MOC": "MOC",
+  };
+
   // ─── EDITING STATE (default) ───
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-gray-300">
           Order Ticket — {ticker}{optionLabel || " (Stock)"}
         </h3>
@@ -305,265 +312,286 @@ export default function InlineOrderTicket({
         )}
       </div>
 
-      {/* Row 1: BUY/SELL + Order Type + TIF + Outside RTH */}
-      <div className="flex flex-wrap gap-2 items-center">
-        {/* BUY / SELL toggle */}
-        <div className="flex gap-1">
-          <button
-            onClick={() => setAction("BUY")}
-            className={`min-h-[52px] min-w-[60px] px-6 rounded-xl text-xl font-bold transition-colors ${
-              action === "BUY"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-700 text-gray-400 hover:bg-gray-600"
-            }`}
-          >
-            BUY
-          </button>
-          <button
-            onClick={() => setAction("SELL")}
-            className={`min-h-[52px] min-w-[60px] px-6 rounded-xl text-xl font-bold transition-colors ${
-              action === "SELL"
-                ? "bg-red-600 text-white"
-                : "bg-gray-700 text-gray-400 hover:bg-gray-600"
-            }`}
-          >
-            SELL
-          </button>
-        </div>
+      {/* 3-column grid: controls | qty | price */}
+      <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_1fr] gap-4">
 
-        {/* Delta sign toggle */}
-        <div className="flex gap-0.5 border border-gray-700 rounded-lg overflow-hidden">
-          <button
-            onClick={() => setDeltaSign(1)}
-            className={`min-h-[52px] px-3 min-w-[60px] text-xl font-bold ${
-              deltaSign === 1 ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-500"
-            }`}
-          >
-            +
-          </button>
-          <button
-            onClick={() => setDeltaSign(-1)}
-            className={`min-h-[52px] px-3 min-w-[60px] text-xl font-bold ${
-              deltaSign === -1 ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-500"
-            }`}
-          >
-            −
-          </button>
-        </div>
-
-        {/* Order type buttons */}
-        <div className="flex gap-1">
-          {(["LMT", "STP LMT", "MOC"] as StockOrderType[]).map((ot) => (
+        {/* ── Left column: Order controls ── */}
+        <div className="flex flex-col gap-3">
+          {/* BUY / SELL */}
+          <div className="grid grid-cols-2 gap-1.5">
             <button
-              key={ot}
-              onClick={() => setOrderType(ot)}
-              className={`min-h-[52px] px-4 rounded-lg text-base font-bold transition-colors ${
-                orderType === ot
-                  ? "bg-gray-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+              onClick={() => setAction("BUY")}
+              className={`min-h-[52px] rounded-xl text-xl font-bold transition-colors ${
+                action === "BUY"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-700 text-gray-400 hover:bg-gray-600"
               }`}
             >
-              {ot}
+              BUY
             </button>
-          ))}
-        </div>
-
-        {/* TIF buttons */}
-        <div className="flex gap-1">
-          {(["DAY", "GTC"] as StockOrderTif[]).map((t) => (
             <button
-              key={t}
-              onClick={() => setTif(t)}
-              className={`min-h-[52px] px-4 rounded-lg text-base font-bold transition-colors ${
-                tif === t
-                  ? "bg-gray-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+              onClick={() => setAction("SELL")}
+              className={`min-h-[52px] rounded-xl text-xl font-bold transition-colors ${
+                action === "SELL"
+                  ? "bg-red-600 text-white"
+                  : "bg-gray-700 text-gray-400 hover:bg-gray-600"
               }`}
             >
-              {t}
+              SELL
             </button>
-          ))}
-        </div>
+          </div>
 
-        {/* Outside RTH toggle */}
-        <button
-          onClick={() => setOutsideRth((v) => !v)}
-          className={`min-h-[52px] px-4 rounded-lg text-sm font-medium transition-colors ${
-            outsideRth
-              ? "bg-yellow-600/30 text-yellow-400 border border-yellow-600/50"
-              : "bg-gray-800 text-gray-500 hover:bg-gray-700"
-          }`}
-        >
-          {outsideRth ? "Outside RTH: ON" : "Outside RTH: OFF"}
-        </button>
+          {/* Delta sign toggle (+/−) */}
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={() => setDeltaSign(1)}
+              className={`min-h-[44px] rounded-lg text-lg font-bold transition-colors ${
+                deltaSign === 1 ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-500 hover:bg-gray-700"
+              }`}
+            >
+              +
+            </button>
+            <button
+              onClick={() => setDeltaSign(-1)}
+              className={`min-h-[44px] rounded-lg text-lg font-bold transition-colors ${
+                deltaSign === -1 ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-500 hover:bg-gray-700"
+              }`}
+            >
+              −
+            </button>
+          </div>
 
-        {/* Account selector */}
-        {accounts.length > 1 && (
-          <select
-            value={account}
-            onChange={(e) => setAccount(e.target.value)}
-            className="min-h-[52px] px-2 text-sm bg-gray-800 border border-gray-700 rounded-lg text-gray-200"
-          >
-            {accounts.map((a) => (
-              <option key={a} value={a}>{a}</option>
+          {/* Order type — stacked vertically with friendly labels */}
+          <div className="flex flex-col gap-1.5">
+            {(["LMT", "STP LMT", "MOC"] as StockOrderType[]).map((ot) => (
+              <button
+                key={ot}
+                onClick={() => setOrderType(ot)}
+                className={`w-full min-h-[48px] rounded-lg text-base font-bold transition-colors ${
+                  orderType === ot
+                    ? "bg-gray-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                }`}
+              >
+                {ORDER_TYPE_LABELS[ot]}
+              </button>
             ))}
-          </select>
-        )}
-      </div>
+          </div>
 
-      {/* Row 2: Quantity */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <label className="text-base text-gray-300 w-14 font-medium">Qty</label>
+          {/* TIF */}
+          <div className="grid grid-cols-2 gap-1.5">
+            {(["DAY", "GTC"] as StockOrderTif[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTif(t)}
+                className={`min-h-[44px] rounded-lg text-base font-bold transition-colors ${
+                  tif === t
+                    ? "bg-gray-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {/* Outside RTH toggle */}
+          <button
+            onClick={() => setOutsideRth((v) => !v)}
+            className={`w-full min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
+              outsideRth
+                ? "bg-yellow-600/30 text-yellow-400 border border-yellow-600/50"
+                : "bg-gray-800 text-gray-500 hover:bg-gray-700"
+            }`}
+          >
+            {outsideRth ? "RTH: ON" : "RTH: OFF"}
+          </button>
+
+          {/* Account selector (conditional) */}
+          {accounts.length > 1 && (
+            <select
+              value={account}
+              onChange={(e) => setAccount(e.target.value)}
+              className="min-h-[44px] px-2 text-sm bg-gray-800 border border-gray-700 rounded-lg text-gray-200"
+            >
+              {accounts.map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* ── Center column: Quantity ── */}
+        <div className="flex flex-col">
+          <label className="text-sm text-gray-400 mb-1">Qty</label>
           <input
             type="text"
             inputMode="numeric"
             value={qty}
             onChange={(e) => setQty(e.target.value)}
-            className="w-36 min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit"
+            className="w-full min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit mb-2"
           />
-          <button
-            onClick={() => setQty("0")}
-            className="min-h-[60px] px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-xl transition-colors"
-          >
-            Clear
-          </button>
-          <button
-            onClick={() => {
-              const cur = parseInt(qty) || 0;
-              setQty(String(roundStep(cur, getQtyRoundStep(cur), "down")));
-            }}
-            className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
-            title="Round down"
-          >
-            ↓
-          </button>
-          <button
-            onClick={() => {
-              const cur = parseInt(qty) || 0;
-              setQty(String(roundStep(cur, getQtyRoundStep(cur), "up")));
-            }}
-            className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
-            title="Round up"
-          >
-            ↑
-          </button>
-        </div>
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 pl-14">
-          {QTY_DELTAS.map((d) => (
+
+          {/* Utility row: Clear + Round */}
+          <div className="grid grid-cols-3 gap-1.5 mb-2">
             <button
-              key={d}
-              onClick={() => applyQtyDelta(d)}
-              className="min-h-[60px] min-w-[60px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
+              onClick={() => setQty("0")}
+              className="min-h-[48px] bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-lg transition-colors"
             >
-              {deltaSign === 1 ? "+" : "−"}{d}
+              Clear
             </button>
-          ))}
+            <button
+              onClick={() => {
+                const cur = parseInt(qty) || 0;
+                setQty(String(roundStep(cur, getQtyRoundStep(cur), "down")));
+              }}
+              className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              title="Round down"
+            >
+              ↓ Round
+            </button>
+            <button
+              onClick={() => {
+                const cur = parseInt(qty) || 0;
+                setQty(String(roundStep(cur, getQtyRoundStep(cur), "up")));
+              }}
+              className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              title="Round up"
+            >
+              ↑ Round
+            </button>
+          </div>
+
+          {/* Delta buttons — grid-cols-4 fills column width, NOT page width */}
+          <div className="grid grid-cols-4 gap-1.5">
+            {QTY_DELTAS.map((d) => (
+              <button
+                key={d}
+                onClick={() => applyQtyDelta(d)}
+                className="min-h-[52px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
+              >
+                {deltaSign === 1 ? "+" : "−"}{d}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Right column: Price(s) ── */}
+        <div className="flex flex-col">
+          {orderType !== "MOC" ? (
+            <>
+              {/* Limit price */}
+              <label className="text-sm text-gray-400 mb-1">Limit Price</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={lmtPrice}
+                onChange={(e) => setLmtPrice(e.target.value)}
+                className="w-full min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit mb-2"
+              />
+
+              {/* Utility row: Clear + Round */}
+              <div className="grid grid-cols-3 gap-1.5 mb-2">
+                <button
+                  onClick={() => setLmtPrice("0.00")}
+                  className="min-h-[48px] bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-lg transition-colors"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "down").toFixed(2)))}
+                  className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                  title="Round down"
+                >
+                  ↓ Round
+                </button>
+                <button
+                  onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "up").toFixed(2)))}
+                  className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                  title="Round up"
+                >
+                  ↑ Round
+                </button>
+              </div>
+
+              {/* Price delta buttons */}
+              <div className="grid grid-cols-3 gap-1.5">
+                {PRICE_DELTAS.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => applyPriceDelta(setLmtPrice, lmtPrice, d)}
+                    className="min-h-[52px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
+                  >
+                    {deltaSign === 1 ? "+" : "−"}{d >= 0.10 ? d.toFixed(2) : d.toString()}
+                  </button>
+                ))}
+              </div>
+
+              {/* Stop price (only when STP LMT) */}
+              {orderType === "STP LMT" && (
+                <>
+                  <label className="text-sm text-gray-400 mb-1 mt-4">Stop Price</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={stopPrice}
+                    onChange={(e) => setStopPrice(e.target.value)}
+                    className="w-full min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit mb-2"
+                  />
+
+                  <div className="grid grid-cols-3 gap-1.5 mb-2">
+                    <button
+                      onClick={() => setStopPrice("0.00")}
+                      className="min-h-[48px] bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-lg transition-colors"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "down").toFixed(2)))}
+                      className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                      title="Round down"
+                    >
+                      ↓ Round
+                    </button>
+                    <button
+                      onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "up").toFixed(2)))}
+                      className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                      title="Round up"
+                    >
+                      ↑ Round
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {PRICE_DELTAS.map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => applyPriceDelta(setStopPrice, stopPrice, d)}
+                        className="min-h-[52px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
+                      >
+                        {deltaSign === 1 ? "+" : "−"}{d >= 0.10 ? d.toFixed(2) : d.toString()}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            /* MOC: show message instead of empty column */
+            <div className="flex items-center justify-center h-full">
+              <p className="text-sm text-yellow-400/70 text-center">
+                Market on Close<br />No price required
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Row 3: Limit Price (when not MOC) */}
-      {orderType !== "MOC" && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <label className="text-base text-gray-300 w-14 font-medium">Limit</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={lmtPrice}
-              onChange={(e) => setLmtPrice(e.target.value)}
-              className="w-36 min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit"
-            />
-            <button
-              onClick={() => setLmtPrice("0.00")}
-              className="min-h-[60px] px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-xl transition-colors"
-            >
-              Clear
-            </button>
-            <button
-              onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "down").toFixed(2)))}
-              className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
-              title="Round down"
-            >
-              ↓
-            </button>
-            <button
-              onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "up").toFixed(2)))}
-              className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
-              title="Round up"
-            >
-              ↑
-            </button>
-          </div>
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 pl-14">
-            {PRICE_DELTAS.map((d) => (
-              <button
-                key={d}
-                onClick={() => applyPriceDelta(setLmtPrice, lmtPrice, d)}
-                className="min-h-[60px] min-w-[60px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
-              >
-                {deltaSign === 1 ? "+" : "−"}{d >= 0.10 ? d.toFixed(2) : d.toString()}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Row 4: Stop Price (when STP LMT) */}
-      {orderType === "STP LMT" && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <label className="text-base text-gray-300 w-14 font-medium">Stop</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={stopPrice}
-              onChange={(e) => setStopPrice(e.target.value)}
-              className="w-36 min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit"
-            />
-            <button
-              onClick={() => setStopPrice("0.00")}
-              className="min-h-[60px] px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-xl transition-colors"
-            >
-              Clear
-            </button>
-            <button
-              onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "down").toFixed(2)))}
-              className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
-              title="Round down"
-            >
-              ↓
-            </button>
-            <button
-              onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "up").toFixed(2)))}
-              className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
-              title="Round up"
-            >
-              ↑
-            </button>
-          </div>
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 pl-14">
-            {PRICE_DELTAS.map((d) => (
-              <button
-                key={d}
-                onClick={() => applyPriceDelta(setStopPrice, stopPrice, d)}
-                className="min-h-[60px] min-w-[60px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
-              >
-                {deltaSign === 1 ? "+" : "−"}{d >= 0.10 ? d.toFixed(2) : d.toString()}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* MOC disclaimer */}
-      {orderType === "MOC" && (
-        <p className="text-xs text-yellow-400/70">Market on Close — executes at closing price. No limit price required.</p>
-      )}
+      {/* ── Below the grid: summary, errors, submit (full width) ── */}
 
       {/* Order summary */}
       {qty && parseFloat(qty) > 0 && (
-        <p className="text-sm text-gray-400">
+        <p className="text-sm text-gray-400 mt-3">
           {action} <span className="font-bold text-white">{qty}</span> {ticker}{optionLabel}{" "}
           {orderType === "MOC"
             ? "at Market on Close"
@@ -581,14 +609,14 @@ export default function InlineOrderTicket({
 
       {/* Error display */}
       {result?.error && (
-        <p className="text-sm text-red-400">{result.error}</p>
+        <p className="text-sm text-red-400 mt-2">{result.error}</p>
       )}
 
       {/* Submit button */}
       <button
         onClick={handleSubmitClick}
         disabled={submitting || !qty || parseFloat(qty) <= 0}
-        className={`min-h-[60px] w-full px-6 rounded-xl text-xl font-bold text-white transition-colors ${
+        className={`min-h-[60px] w-full px-6 rounded-xl text-xl font-bold text-white transition-colors mt-3 ${
           action === "BUY"
             ? "bg-blue-600 hover:bg-blue-500"
             : "bg-red-600 hover:bg-red-500"
