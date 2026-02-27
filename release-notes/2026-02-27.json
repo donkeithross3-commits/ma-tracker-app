@@ -34,6 +34,16 @@
       "screenshot": null
     },
     {
+      "id": "manual-v2-accessibility-revision",
+      "title": "Manual Trading v2 — Accessibility Revision",
+      "summary": "Larger buttons, Clear buttons, totals row, and merged header — based on direct user testing feedback.",
+      "description": "User testing with the Parkinson's accessibility user revealed the initial v2 buttons were \"compacted but too compact.\" This revision brings v2 to parity with v1's trade ticket gold standard.\n\n**Order Ticket Redesign:**\n- All secondary controls (delta sign, order type, TIF, Outside RTH) increased from 44px to 52px min-height with larger text\n- Qty/Price inputs increased from 52px to 68px min-height with wider fields (w-36)\n- Delta buttons increased from 44px to 60px min-height, now in a responsive grid layout (grid-cols-4 → grid-cols-7)\n- Round up/down arrows increased from 44px to 60px with larger text\n- Submit button increased from 52px to 60px\n- \"Place Another Order\" button properly sized (was 44px/text-sm, now 52px/text-base)\n\n**Clear Buttons (restored from v1):**\n- Each input field (Qty, Limit Price, Stop Price) now has a \"Clear\" button on the same row\n- Qty Clear → sets to \"0\", Price Clear → sets to \"0.00\"\n- Critical for Parkinson's users: \"I typed something wrong, where's the reset?\"\n\n**2-Row Field Layout:**\n- Row A: Label + large input + Clear + Round buttons (always on one line)\n- Row B: Delta button grid that adapts to screen width\n- Delta buttons now get maximum size since they're not competing with the input for horizontal space\n\n**Position Legs Totals Row:**\n- When a ticker has both stock and option positions (2+ rows), a totals row appears in the table footer\n- Shows combined Market Value, P&L (color-coded), and net Delta across all legs\n- Respects column chooser — only visible columns get totals cells\n\n**Header + Greek Strip Merge:**\n- Ticker info (name, price, shares, refresh) and Greek badges now share one row instead of two\n- Greeks are right-aligned, filling the previously empty right side of the header bar\n- Saves one full row of vertical space",
+      "category": "positions",
+      "project": "ma-options",
+      "image": "",
+      "screenshot": null
+    },
+    {
       "id": "event-driven-portfolio-tabs",
       "title": "Event Driven Portfolio Gains Curate + Monitor",
       "summary": "The Curate and Monitor tabs now live under the Event Driven Portfolio page, with the existing portfolio view as the default tab.",

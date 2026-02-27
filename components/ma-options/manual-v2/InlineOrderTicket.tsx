@@ -280,7 +280,7 @@ export default function InlineOrderTicket({
         </p>
         <button
           onClick={resetForNewOrder}
-          className="min-h-[44px] px-4 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
+          className="min-h-[52px] px-6 rounded-lg text-base font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
         >
           Place Another Order
         </button>
@@ -311,7 +311,7 @@ export default function InlineOrderTicket({
         <div className="flex gap-1">
           <button
             onClick={() => setAction("BUY")}
-            className={`min-h-[52px] min-w-[60px] px-4 rounded-xl text-lg font-bold transition-colors ${
+            className={`min-h-[52px] min-w-[60px] px-6 rounded-xl text-xl font-bold transition-colors ${
               action === "BUY"
                 ? "bg-blue-600 text-white"
                 : "bg-gray-700 text-gray-400 hover:bg-gray-600"
@@ -321,7 +321,7 @@ export default function InlineOrderTicket({
           </button>
           <button
             onClick={() => setAction("SELL")}
-            className={`min-h-[52px] min-w-[60px] px-4 rounded-xl text-lg font-bold transition-colors ${
+            className={`min-h-[52px] min-w-[60px] px-6 rounded-xl text-xl font-bold transition-colors ${
               action === "SELL"
                 ? "bg-red-600 text-white"
                 : "bg-gray-700 text-gray-400 hover:bg-gray-600"
@@ -335,7 +335,7 @@ export default function InlineOrderTicket({
         <div className="flex gap-0.5 border border-gray-700 rounded-lg overflow-hidden">
           <button
             onClick={() => setDeltaSign(1)}
-            className={`min-h-[44px] px-3 text-sm font-bold ${
+            className={`min-h-[52px] px-3 min-w-[60px] text-xl font-bold ${
               deltaSign === 1 ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-500"
             }`}
           >
@@ -343,7 +343,7 @@ export default function InlineOrderTicket({
           </button>
           <button
             onClick={() => setDeltaSign(-1)}
-            className={`min-h-[44px] px-3 text-sm font-bold ${
+            className={`min-h-[52px] px-3 min-w-[60px] text-xl font-bold ${
               deltaSign === -1 ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-500"
             }`}
           >
@@ -357,7 +357,7 @@ export default function InlineOrderTicket({
             <button
               key={ot}
               onClick={() => setOrderType(ot)}
-              className={`min-h-[44px] px-3 rounded-lg text-sm font-medium transition-colors ${
+              className={`min-h-[52px] px-4 rounded-lg text-base font-bold transition-colors ${
                 orderType === ot
                   ? "bg-gray-600 text-white"
                   : "bg-gray-800 text-gray-400 hover:bg-gray-700"
@@ -374,7 +374,7 @@ export default function InlineOrderTicket({
             <button
               key={t}
               onClick={() => setTif(t)}
-              className={`min-h-[44px] px-3 rounded-lg text-sm font-medium transition-colors ${
+              className={`min-h-[52px] px-4 rounded-lg text-base font-bold transition-colors ${
                 tif === t
                   ? "bg-gray-600 text-white"
                   : "bg-gray-800 text-gray-400 hover:bg-gray-700"
@@ -388,7 +388,7 @@ export default function InlineOrderTicket({
         {/* Outside RTH toggle */}
         <button
           onClick={() => setOutsideRth((v) => !v)}
-          className={`min-h-[44px] px-3 rounded-lg text-xs font-medium transition-colors ${
+          className={`min-h-[52px] px-4 rounded-lg text-sm font-medium transition-colors ${
             outsideRth
               ? "bg-yellow-600/30 text-yellow-400 border border-yellow-600/50"
               : "bg-gray-800 text-gray-500 hover:bg-gray-700"
@@ -402,7 +402,7 @@ export default function InlineOrderTicket({
           <select
             value={account}
             onChange={(e) => setAccount(e.target.value)}
-            className="min-h-[44px] px-2 text-sm bg-gray-800 border border-gray-700 rounded-lg text-gray-200"
+            className="min-h-[52px] px-2 text-sm bg-gray-800 border border-gray-700 rounded-lg text-gray-200"
           >
             {accounts.map((a) => (
               <option key={a} value={a}>{a}</option>
@@ -412,43 +412,49 @@ export default function InlineOrderTicket({
       </div>
 
       {/* Row 2: Quantity */}
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-400 w-12">Qty</label>
-        <input
-          type="text"
-          inputMode="numeric"
-          value={qty}
-          onChange={(e) => setQty(e.target.value)}
-          className="w-32 min-h-[52px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit"
-        />
-        {/* Rounding buttons */}
-        <button
-          onClick={() => {
-            const cur = parseInt(qty) || 0;
-            setQty(String(roundStep(cur, getQtyRoundStep(cur), "down")));
-          }}
-          className="min-h-[44px] px-2 text-gray-400 hover:text-white bg-gray-800 rounded-lg"
-          title="Round down"
-        >
-          ↓
-        </button>
-        <button
-          onClick={() => {
-            const cur = parseInt(qty) || 0;
-            setQty(String(roundStep(cur, getQtyRoundStep(cur), "up")));
-          }}
-          className="min-h-[44px] px-2 text-gray-400 hover:text-white bg-gray-800 rounded-lg"
-          title="Round up"
-        >
-          ↑
-        </button>
-        {/* Qty delta buttons */}
-        <div className="flex gap-1 flex-wrap">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <label className="text-base text-gray-300 w-14 font-medium">Qty</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            className="w-36 min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit"
+          />
+          <button
+            onClick={() => setQty("0")}
+            className="min-h-[60px] px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-xl transition-colors"
+          >
+            Clear
+          </button>
+          <button
+            onClick={() => {
+              const cur = parseInt(qty) || 0;
+              setQty(String(roundStep(cur, getQtyRoundStep(cur), "down")));
+            }}
+            className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
+            title="Round down"
+          >
+            ↓
+          </button>
+          <button
+            onClick={() => {
+              const cur = parseInt(qty) || 0;
+              setQty(String(roundStep(cur, getQtyRoundStep(cur), "up")));
+            }}
+            className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
+            title="Round up"
+          >
+            ↑
+          </button>
+        </div>
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 pl-14">
           {QTY_DELTAS.map((d) => (
             <button
               key={d}
               onClick={() => applyQtyDelta(d)}
-              className="min-h-[44px] min-w-[44px] px-2 text-sm bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono"
+              className="min-h-[60px] min-w-[60px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
             >
               {deltaSign === 1 ? "+" : "−"}{d}
             </button>
@@ -458,35 +464,43 @@ export default function InlineOrderTicket({
 
       {/* Row 3: Limit Price (when not MOC) */}
       {orderType !== "MOC" && (
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-400 w-12">Limit</label>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={lmtPrice}
-            onChange={(e) => setLmtPrice(e.target.value)}
-            className="w-32 min-h-[52px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit"
-          />
-          <button
-            onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "down").toFixed(2)))}
-            className="min-h-[44px] px-2 text-gray-400 hover:text-white bg-gray-800 rounded-lg"
-            title="Round down"
-          >
-            ↓
-          </button>
-          <button
-            onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "up").toFixed(2)))}
-            className="min-h-[44px] px-2 text-gray-400 hover:text-white bg-gray-800 rounded-lg"
-            title="Round up"
-          >
-            ↑
-          </button>
-          <div className="flex gap-1 flex-wrap">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-base text-gray-300 w-14 font-medium">Limit</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={lmtPrice}
+              onChange={(e) => setLmtPrice(e.target.value)}
+              className="w-36 min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit"
+            />
+            <button
+              onClick={() => setLmtPrice("0.00")}
+              className="min-h-[60px] px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-xl transition-colors"
+            >
+              Clear
+            </button>
+            <button
+              onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "down").toFixed(2)))}
+              className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
+              title="Round down"
+            >
+              ↓
+            </button>
+            <button
+              onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "up").toFixed(2)))}
+              className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
+              title="Round up"
+            >
+              ↑
+            </button>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 pl-14">
             {PRICE_DELTAS.map((d) => (
               <button
                 key={d}
                 onClick={() => applyPriceDelta(setLmtPrice, lmtPrice, d)}
-                className="min-h-[44px] min-w-[44px] px-2 text-sm bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono"
+                className="min-h-[60px] min-w-[60px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
               >
                 {deltaSign === 1 ? "+" : "−"}{d >= 0.10 ? d.toFixed(2) : d.toString()}
               </button>
@@ -497,35 +511,43 @@ export default function InlineOrderTicket({
 
       {/* Row 4: Stop Price (when STP LMT) */}
       {orderType === "STP LMT" && (
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-400 w-12">Stop</label>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={stopPrice}
-            onChange={(e) => setStopPrice(e.target.value)}
-            className="w-32 min-h-[52px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit"
-          />
-          <button
-            onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "down").toFixed(2)))}
-            className="min-h-[44px] px-2 text-gray-400 hover:text-white bg-gray-800 rounded-lg"
-            title="Round down"
-          >
-            ↓
-          </button>
-          <button
-            onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "up").toFixed(2)))}
-            className="min-h-[44px] px-2 text-gray-400 hover:text-white bg-gray-800 rounded-lg"
-            title="Round up"
-          >
-            ↑
-          </button>
-          <div className="flex gap-1 flex-wrap">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-base text-gray-300 w-14 font-medium">Stop</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={stopPrice}
+              onChange={(e) => setStopPrice(e.target.value)}
+              className="w-36 min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit"
+            />
+            <button
+              onClick={() => setStopPrice("0.00")}
+              className="min-h-[60px] px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-xl transition-colors"
+            >
+              Clear
+            </button>
+            <button
+              onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "down").toFixed(2)))}
+              className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
+              title="Round down"
+            >
+              ↓
+            </button>
+            <button
+              onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "up").toFixed(2)))}
+              className="min-h-[60px] px-3 text-lg text-gray-400 hover:text-white bg-gray-800 rounded-lg transition-colors"
+              title="Round up"
+            >
+              ↑
+            </button>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 pl-14">
             {PRICE_DELTAS.map((d) => (
               <button
                 key={d}
                 onClick={() => applyPriceDelta(setStopPrice, stopPrice, d)}
-                className="min-h-[44px] min-w-[44px] px-2 text-sm bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono"
+                className="min-h-[60px] min-w-[60px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
               >
                 {deltaSign === 1 ? "+" : "−"}{d >= 0.10 ? d.toFixed(2) : d.toString()}
               </button>
@@ -566,7 +588,7 @@ export default function InlineOrderTicket({
       <button
         onClick={handleSubmitClick}
         disabled={submitting || !qty || parseFloat(qty) <= 0}
-        className={`min-h-[52px] w-full px-6 rounded-xl text-xl font-bold text-white transition-colors ${
+        className={`min-h-[60px] w-full px-6 rounded-xl text-xl font-bold text-white transition-colors ${
           action === "BUY"
             ? "bg-blue-600 hover:bg-blue-500"
             : "bg-red-600 hover:bg-red-500"

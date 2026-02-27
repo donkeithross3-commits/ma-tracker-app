@@ -96,6 +96,43 @@ export default function PositionLegTable({
   const visibleKeys = useMemo(() => savedCols ?? LEG_DEFAULTS, [savedCols]);
   const visibleSet = useMemo(() => new Set(visibleKeys), [visibleKeys]);
 
+  // Compute totals across all legs
+  const totals = useMemo(() => {
+    let totalMktVal = 0;
+    let totalPnl = 0;
+    let totalDelta = 0;
+    let hasAnyPrice = false;
+
+    for (const row of rows) {
+      const key = legKey(row);
+      const price = legPrices[key];
+      const greeksKey = greeksLegKey(row);
+      const grks = legGreeks[greeksKey];
+      const mult = getMultiplier(row);
+      const isOpt = row.contract.secType === "OPT";
+
+      const lastPrice = isOpt
+        ? (price?.last || price?.mid || 0)
+        : (spotPrice ?? 0);
+
+      if (lastPrice > 0) {
+        hasAnyPrice = true;
+        const mktVal = row.position * lastPrice * mult;
+        const costBasis = row.position * row.avgCost;
+        totalMktVal += mktVal;
+        totalPnl += mktVal - costBasis;
+      }
+
+      // Delta
+      if (row.contract.secType === "STK") {
+        totalDelta += row.position;
+      } else if (isOpt && grks?.delta != null) {
+        totalDelta += row.position * grks.delta * mult;
+      }
+    }
+    return { totalMktVal, totalPnl, totalDelta, hasAnyPrice };
+  }, [rows, legPrices, legGreeks, spotPrice]);
+
   if (rows.length === 0) {
     return <p className="text-sm text-gray-500 py-2">No positions</p>;
   }
@@ -213,6 +250,36 @@ export default function PositionLegTable({
               );
             })}
           </tbody>
+          {rows.length >= 2 && (
+            <tfoot>
+              <tr className="bg-gray-700/30 border-t border-gray-500 font-semibold text-sm">
+                {visibleSet.has("type") && <td className="py-2 px-2 text-gray-300">Totals</td>}
+                {visibleSet.has("description") && <td className="py-2 px-2"></td>}
+                {visibleSet.has("pos") && <td className="py-2 px-2"></td>}
+                {visibleSet.has("avgCost") && <td className="py-2 px-2"></td>}
+                {visibleSet.has("last") && <td className="py-2 px-2"></td>}
+                {visibleSet.has("mktVal") && (
+                  <td className="py-2 px-2 text-right font-mono text-gray-200">
+                    {totals.hasAnyPrice
+                      ? "$" + Math.abs(totals.totalMktVal).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                      : "—"}
+                  </td>
+                )}
+                {visibleSet.has("pnl") && (
+                  <td className={`py-2 px-2 text-right font-mono ${
+                    totals.totalPnl > 0 ? "text-green-400" : totals.totalPnl < 0 ? "text-red-400" : "text-gray-400"
+                  }`}>
+                    {totals.hasAnyPrice ? formatPnl(totals.totalPnl) : "—"}
+                  </td>
+                )}
+                {visibleSet.has("delta") && (
+                  <td className="py-2 px-2 text-right font-mono text-gray-200">
+                    {totals.totalDelta.toFixed(1)}
+                  </td>
+                )}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
