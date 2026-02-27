@@ -1033,10 +1033,17 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         daily_features = self._data_store.get_daily_features(t)
         regime = self._data_store.get_regime_asof(t)
 
-        # Prior close
+        # Prior close — prefer ticker-specific key (bootstrap stores per-ticker
+        # values as "prior_close:{TICKER}"); fall back to top-level which is from
+        # the first bootstrapped ticker (SPY).  Without this, non-SPY tickers
+        # (e.g. SLV at ~$30) would use SPY's prior close (~$580), producing
+        # wildly wrong gap_magnitude and premarket_return in Group B features.
         prior_close = None
         if daily_features:
-            prior_close = daily_features.get("prior_close")
+            prior_close = daily_features.get(
+                f"prior_close:{self._ticker}",
+                daily_features.get("prior_close"),
+            )
 
         # SPY bars for cross-ticker features
         spy_bars = self._data_store.get_completed_bars("time_1m:SPY", before=t)
