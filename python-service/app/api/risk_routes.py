@@ -764,6 +764,72 @@ async def get_pending_outcomes():
 
 
 # ---------------------------------------------------------------------------
+# GET /risk/outcomes/backfill-candidates
+# (must be before /outcomes/{ticker} to avoid matching as a ticker)
+# ---------------------------------------------------------------------------
+@router.get("/outcomes/backfill-candidates")
+async def get_backfill_candidates():
+    """Historical deals removed from tracking sheet that lack recorded outcomes.
+
+    Returns candidates with inferred outcome type based on price at removal.
+    Unlike /outcomes/pending (7-day window), this searches ALL historical removals.
+    """
+    pool = _get_pool()
+    try:
+        from app.risk.outcome_backfill import get_backfill_candidates
+        candidates = await get_backfill_candidates(pool)
+        return {"candidates": candidates, "total": len(candidates)}
+    except Exception as e:
+        logger.error(f"Failed to get backfill candidates: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get backfill candidates: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# POST /risk/outcomes/backfill
+# (must be before /outcomes/{ticker} to avoid matching as a ticker)
+# ---------------------------------------------------------------------------
+class BackfillItem(BaseModel):
+    ticker: str
+    outcome: str  # closed_at_deal, closed_higher, broke, withdrawn, extended, renegotiated
+    outcome_price: float
+    outcome_date: date
+    original_deal_price: Optional[float] = None
+    outcome_notes: Optional[str] = None
+
+
+class BackfillRequest(BaseModel):
+    outcomes: list[BackfillItem]
+
+
+@router.post("/outcomes/backfill")
+async def backfill_outcomes(body: BackfillRequest):
+    """Record multiple historical outcomes in batch.
+
+    Accepts an array of confirmed outcomes from the backfill review.
+    Each triggers accuracy scoring and prediction resolution.
+    """
+    pool = _get_pool()
+
+    valid_outcomes = {"closed_at_deal", "closed_higher", "broke", "withdrawn", "extended", "renegotiated"}
+    for item in body.outcomes:
+        if item.outcome not in valid_outcomes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid outcome '{item.outcome}' for {item.ticker}. "
+                       f"Must be one of: {', '.join(sorted(valid_outcomes))}"
+            )
+
+    try:
+        from app.risk.outcome_backfill import backfill_outcomes as do_backfill
+        confirmed = [item.model_dump() for item in body.outcomes]
+        result = await do_backfill(pool, confirmed)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to backfill outcomes: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to backfill outcomes: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
 # GET /risk/outcomes
 # ---------------------------------------------------------------------------
 @router.get("/outcomes")

@@ -290,6 +290,15 @@ async def record_outcome(pool, ticker: str, outcome: str, outcome_date: date,
     # Score accuracy
     await score_deal_accuracy(pool, ticker)
 
+    # Resolve open predictions for this ticker
+    try:
+        from .predictions import resolve_from_outcome
+        resolved = await resolve_from_outcome(pool, ticker)
+        if resolved:
+            logger.info("Resolved %d predictions for %s", resolved, ticker)
+    except Exception as e:
+        logger.warning("Prediction resolution failed for %s: %s", ticker, e)
+
     logger.info("Recorded outcome for %s: %s at $%.2f on %s", ticker, outcome, outcome_price, outcome_date)
 
 

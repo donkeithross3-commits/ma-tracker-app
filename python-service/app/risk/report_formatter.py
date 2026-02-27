@@ -84,6 +84,7 @@ def format_morning_report(
     assessments: list[dict],
     overnight_events: list[dict],
     options_section: str | None = None,
+    outcome_candidates: list[dict] | None = None,
 ) -> dict:
     """Build the morning report.
 
@@ -103,6 +104,8 @@ def format_morning_report(
 
     subject = f"M&A Portfolio Intelligence Report - {date_str}"
 
+    candidates = outcome_candidates or []
+
     html = _build_html(
         date_str=date_str,
         exec_summary=exec_summary,
@@ -112,6 +115,7 @@ def format_morning_report(
         total_deals=total_deals,
         flagged=flagged,
         options_section=options_section,
+        outcome_candidates=candidates,
     )
 
     whatsapp = _build_whatsapp(
@@ -120,6 +124,7 @@ def format_morning_report(
         overnight_events=overnight_events,
         discrepancies=discrepancies,
         flagged=flagged,
+        outcome_candidates=candidates,
     )
 
     return {
@@ -169,6 +174,7 @@ def _build_html(
     total_deals: int,
     flagged: list[dict],
     options_section: str | None,
+    outcome_candidates: list[dict] | None = None,
 ) -> str:
     parts: list[str] = []
 
@@ -194,6 +200,41 @@ def _build_html(
         f'<div style="padding:12px 20px 16px;font-size:14px;color:#334155;">'
         f'<p style="margin:0;">{_nl_to_br(exec_summary)}</p></div>'
     )
+
+    # --- Outcome Candidates (Action Required) ---
+    if outcome_candidates:
+        parts.append(
+            '<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:6px;'
+            'padding:12px 20px;margin:8px 20px;">'
+            '<h3 style="margin:0 0 8px;font-size:14px;color:#92400e;">'
+            '&#9888;&#65039; ACTION REQUIRED: OUTCOME CANDIDATES</h3>'
+            '<p style="margin:0 0 8px;font-size:12px;color:#78350f;">'
+            'These deals may have closed or broken. Please confirm and record outcomes.</p>'
+        )
+        for c in outcome_candidates:
+            ticker = c.get("ticker", "?")
+            signal = c.get("signal", "unknown")
+            signal_label = {
+                "removed_from_sheet": "Removed from tracking sheet",
+                "price_converged": "Price converged to deal price",
+                "below_break_price": "Trading below break price",
+            }.get(signal, signal)
+            detail_parts = [f"<strong>{ticker}</strong>: {signal_label}"]
+            if c.get("deal_price"):
+                detail_parts.append(f"Deal ${c['deal_price']:.2f}")
+            if c.get("current_price"):
+                detail_parts.append(f"Current ${c['current_price']:.2f}")
+            if c.get("break_price"):
+                detail_parts.append(f"Break ${c['break_price']:.2f}")
+            parts.append(
+                f'<p style="margin:3px 0;font-size:13px;color:#78350f;">'
+                f'{" | ".join(detail_parts)}</p>'
+            )
+        parts.append(
+            '<p style="margin:8px 0 0;font-size:11px;color:#92400e;">'
+            'Record outcomes at: POST /risk/outcomes/&lt;TICKER&gt;</p>'
+            '</div>'
+        )
 
     # --- Overnight Events ---
     if overnight_events:
@@ -457,6 +498,7 @@ def _build_whatsapp(
     overnight_events: list[dict],
     discrepancies: list[dict],
     flagged: list[dict],
+    outcome_candidates: list[dict] | None = None,
 ) -> str:
     """Build condensed WhatsApp summary (max ~1024 chars)."""
     date_str = report_date.strftime("%b %-d")
@@ -468,6 +510,24 @@ def _build_whatsapp(
         f"{len(discrepancies)} discrepancies"
     )
     lines.append("")
+
+    # Outcome candidates (action required)
+    if outcome_candidates:
+        signal_labels = {
+            "removed_from_sheet": "removed from sheet",
+            "price_converged": "price converged",
+            "below_break_price": "below break price",
+        }
+        details = []
+        for c in outcome_candidates:
+            ticker = c.get("ticker", "?")
+            signal = signal_labels.get(c.get("signal", ""), c.get("signal", "?"))
+            price_info = ""
+            if c.get("current_price"):
+                price_info = f" ${c['current_price']:.2f}"
+            details.append(f"{ticker} ({signal}{price_info})")
+        lines.append(f"\u26a0\ufe0f *OUTCOMES PENDING:* {', '.join(details)}")
+        lines.append("")
 
     # Overnight (top 5)
     if overnight_events:

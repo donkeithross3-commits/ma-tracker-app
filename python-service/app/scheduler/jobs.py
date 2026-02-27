@@ -224,6 +224,11 @@ async def job_morning_risk_assessment():
 
     engine = RiskAssessmentEngine(pool, api_key)
     result = await engine.run_morning_assessment(triggered_by="scheduler")
+
+    # Stash outcome candidates for the report compile step
+    import app.scheduler.core as core
+    core._outcome_candidates = result.get("outcome_candidates", []) if result else []
+
     return result
 
 
@@ -253,8 +258,12 @@ async def job_morning_report_compile():
 
     run_data = dict(run)
     assessment_list = [dict(a) for a in assessments]
+    outcome_candidates = getattr(core, "_outcome_candidates", [])
 
-    report = format_morning_report(run_data, assessment_list, overnight_events)
+    report = format_morning_report(
+        run_data, assessment_list, overnight_events,
+        outcome_candidates=outcome_candidates,
+    )
 
     # Store the report
     async with pool.acquire() as conn:
@@ -345,6 +354,7 @@ async def job_morning_report_deliver():
     # Clean up pipeline state
     core._overnight_events = None
     core._compiled_report = None
+    core._outcome_candidates = None
 
     return {"status": "success", "results": results}
 
