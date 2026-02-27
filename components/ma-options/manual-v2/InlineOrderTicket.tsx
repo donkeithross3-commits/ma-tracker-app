@@ -295,6 +295,14 @@ export default function InlineOrderTicket({
     "MOC": "MOC",
   };
 
+  // ─── Delta button color classes (green for +, red for −) ───
+  const deltaColorCls = deltaSign === 1
+    ? "bg-gray-800 hover:bg-gray-700 border border-gray-600 text-green-300"
+    : "bg-gray-800 hover:bg-gray-700 border border-gray-600 text-red-300";
+
+  // ─── Utility button classes (Clear / Round) ───
+  const utilityCls = "min-h-[48px] rounded-lg border border-gray-600 bg-gray-700/80 hover:bg-gray-600 text-gray-200 text-base font-bold transition-colors";
+
   // ─── EDITING STATE (default) ───
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
@@ -323,8 +331,8 @@ export default function InlineOrderTicket({
               onClick={() => setAction("BUY")}
               className={`min-h-[52px] rounded-xl text-xl font-bold transition-colors ${
                 action === "BUY"
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-700 text-gray-400 hover:bg-gray-600"
+                  ? "bg-blue-600 text-white ring-2 ring-blue-400"
+                  : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
               }`}
             >
               BUY
@@ -333,20 +341,22 @@ export default function InlineOrderTicket({
               onClick={() => setAction("SELL")}
               className={`min-h-[52px] rounded-xl text-xl font-bold transition-colors ${
                 action === "SELL"
-                  ? "bg-red-600 text-white"
-                  : "bg-gray-700 text-gray-400 hover:bg-gray-600"
+                  ? "bg-red-600 text-white ring-2 ring-red-400"
+                  : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
               }`}
             >
               SELL
             </button>
           </div>
 
-          {/* Delta sign toggle (+/−) */}
+          {/* Delta sign toggle (+/−) — green/red color-coded */}
           <div className="grid grid-cols-2 gap-1.5">
             <button
               onClick={() => setDeltaSign(1)}
               className={`min-h-[44px] rounded-lg text-lg font-bold transition-colors ${
-                deltaSign === 1 ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-500 hover:bg-gray-700"
+                deltaSign === 1
+                  ? "bg-green-700 text-white ring-2 ring-green-400"
+                  : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
               }`}
             >
               +
@@ -354,7 +364,9 @@ export default function InlineOrderTicket({
             <button
               onClick={() => setDeltaSign(-1)}
               className={`min-h-[44px] rounded-lg text-lg font-bold transition-colors ${
-                deltaSign === -1 ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-500 hover:bg-gray-700"
+                deltaSign === -1
+                  ? "bg-red-700 text-white ring-2 ring-red-400"
+                  : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
               }`}
             >
               −
@@ -369,8 +381,8 @@ export default function InlineOrderTicket({
                 onClick={() => setOrderType(ot)}
                 className={`w-full min-h-[48px] rounded-lg text-base font-bold transition-colors ${
                   orderType === ot
-                    ? "bg-gray-600 text-white"
-                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                    ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
                 }`}
               >
                 {ORDER_TYPE_LABELS[ot]}
@@ -386,8 +398,8 @@ export default function InlineOrderTicket({
                 onClick={() => setTif(t)}
                 className={`min-h-[44px] rounded-lg text-base font-bold transition-colors ${
                   tif === t
-                    ? "bg-gray-600 text-white"
-                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                    ? "bg-indigo-600 text-white ring-2 ring-indigo-400"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-600"
                 }`}
               >
                 {t}
@@ -398,10 +410,10 @@ export default function InlineOrderTicket({
           {/* Outside RTH toggle */}
           <button
             onClick={() => setOutsideRth((v) => !v)}
-            className={`w-full min-h-[44px] rounded-lg text-sm font-medium transition-colors ${
+            className={`w-full min-h-[44px] rounded-lg text-sm font-bold transition-colors ${
               outsideRth
-                ? "bg-yellow-600/30 text-yellow-400 border border-yellow-600/50"
-                : "bg-gray-800 text-gray-500 hover:bg-gray-700"
+                ? "bg-amber-600 text-white ring-2 ring-amber-400"
+                : "bg-gray-800 text-gray-500 hover:bg-gray-700 border border-gray-600"
             }`}
           >
             {outsideRth ? "RTH: ON" : "RTH: OFF"}
@@ -412,7 +424,7 @@ export default function InlineOrderTicket({
             <select
               value={account}
               onChange={(e) => setAccount(e.target.value)}
-              className="min-h-[44px] px-2 text-sm bg-gray-800 border border-gray-700 rounded-lg text-gray-200"
+              className="min-h-[44px] px-2 text-sm bg-gray-800 border border-gray-600 rounded-lg text-gray-200"
             >
               {accounts.map((a) => (
                 <option key={a} value={a}>{a}</option>
@@ -429,15 +441,13 @@ export default function InlineOrderTicket({
             inputMode="numeric"
             value={qty}
             onChange={(e) => setQty(e.target.value)}
-            className="w-full min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit mb-2"
+            placeholder="0"
+            className="w-full min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border-2 border-gray-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono inline-edit mb-2 placeholder-gray-600"
           />
 
           {/* Utility row: Clear + Round */}
           <div className="grid grid-cols-3 gap-1.5 mb-2">
-            <button
-              onClick={() => setQty("0")}
-              className="min-h-[48px] bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-lg transition-colors"
-            >
+            <button onClick={() => setQty("0")} className={utilityCls}>
               Clear
             </button>
             <button
@@ -445,7 +455,7 @@ export default function InlineOrderTicket({
                 const cur = parseInt(qty) || 0;
                 setQty(String(roundStep(cur, getQtyRoundStep(cur), "down")));
               }}
-              className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              className={utilityCls}
               title="Round down"
             >
               ↓ Round
@@ -455,20 +465,20 @@ export default function InlineOrderTicket({
                 const cur = parseInt(qty) || 0;
                 setQty(String(roundStep(cur, getQtyRoundStep(cur), "up")));
               }}
-              className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              className={utilityCls}
               title="Round up"
             >
               ↑ Round
             </button>
           </div>
 
-          {/* Delta buttons — grid-cols-4 fills column width, NOT page width */}
+          {/* Delta buttons — green/red based on sign, grid-cols-4 fills column */}
           <div className="grid grid-cols-4 gap-1.5">
             {QTY_DELTAS.map((d) => (
               <button
                 key={d}
                 onClick={() => applyQtyDelta(d)}
-                className="min-h-[52px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
+                className={`min-h-[52px] text-lg font-bold rounded-lg font-mono transition-colors ${deltaColorCls}`}
               >
                 {deltaSign === 1 ? "+" : "−"}{d}
               </button>
@@ -487,40 +497,38 @@ export default function InlineOrderTicket({
                 inputMode="decimal"
                 value={lmtPrice}
                 onChange={(e) => setLmtPrice(e.target.value)}
-                className="w-full min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit mb-2"
+                placeholder="0.00"
+                className="w-full min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border-2 border-gray-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono inline-edit mb-2 placeholder-gray-600"
               />
 
               {/* Utility row: Clear + Round */}
               <div className="grid grid-cols-3 gap-1.5 mb-2">
-                <button
-                  onClick={() => setLmtPrice("0.00")}
-                  className="min-h-[48px] bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-lg transition-colors"
-                >
+                <button onClick={() => setLmtPrice("0.00")} className={utilityCls}>
                   Clear
                 </button>
                 <button
                   onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "down").toFixed(2)))}
-                  className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                  className={utilityCls}
                   title="Round down"
                 >
                   ↓ Round
                 </button>
                 <button
                   onClick={() => setLmtPrice(String(roundStep(parseFloat(lmtPrice) || 0, getPriceRoundStep(parseFloat(lmtPrice) || 0), "up").toFixed(2)))}
-                  className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                  className={utilityCls}
                   title="Round up"
                 >
                   ↑ Round
                 </button>
               </div>
 
-              {/* Price delta buttons */}
+              {/* Price delta buttons — green/red based on sign */}
               <div className="grid grid-cols-3 gap-1.5">
                 {PRICE_DELTAS.map((d) => (
                   <button
                     key={d}
                     onClick={() => applyPriceDelta(setLmtPrice, lmtPrice, d)}
-                    className="min-h-[52px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
+                    className={`min-h-[52px] text-lg font-bold rounded-lg font-mono transition-colors ${deltaColorCls}`}
                   >
                     {deltaSign === 1 ? "+" : "−"}{d >= 0.10 ? d.toFixed(2) : d.toString()}
                   </button>
@@ -536,26 +544,24 @@ export default function InlineOrderTicket({
                     inputMode="decimal"
                     value={stopPrice}
                     onChange={(e) => setStopPrice(e.target.value)}
-                    className="w-full min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono inline-edit mb-2"
+                    placeholder="0.00"
+                    className="w-full min-h-[68px] px-3 text-4xl font-bold text-center bg-gray-800 border-2 border-gray-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono inline-edit mb-2 placeholder-gray-600"
                   />
 
                   <div className="grid grid-cols-3 gap-1.5 mb-2">
-                    <button
-                      onClick={() => setStopPrice("0.00")}
-                      className="min-h-[48px] bg-gray-700 hover:bg-gray-600 text-gray-300 text-base font-medium rounded-lg transition-colors"
-                    >
+                    <button onClick={() => setStopPrice("0.00")} className={utilityCls}>
                       Clear
                     </button>
                     <button
                       onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "down").toFixed(2)))}
-                      className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                      className={utilityCls}
                       title="Round down"
                     >
                       ↓ Round
                     </button>
                     <button
                       onClick={() => setStopPrice(String(roundStep(parseFloat(stopPrice) || 0, getPriceRoundStep(parseFloat(stopPrice) || 0), "up").toFixed(2)))}
-                      className="min-h-[48px] text-lg text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                      className={utilityCls}
                       title="Round up"
                     >
                       ↑ Round
@@ -567,7 +573,7 @@ export default function InlineOrderTicket({
                       <button
                         key={d}
                         onClick={() => applyPriceDelta(setStopPrice, stopPrice, d)}
-                        className="min-h-[52px] text-lg font-bold bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 font-mono transition-colors"
+                        className={`min-h-[52px] text-lg font-bold rounded-lg font-mono transition-colors ${deltaColorCls}`}
                       >
                         {deltaSign === 1 ? "+" : "−"}{d >= 0.10 ? d.toFixed(2) : d.toString()}
                       </button>
@@ -579,7 +585,7 @@ export default function InlineOrderTicket({
           ) : (
             /* MOC: show message instead of empty column */
             <div className="flex items-center justify-center h-full">
-              <p className="text-sm text-yellow-400/70 text-center">
+              <p className="text-base text-yellow-400/70 text-center font-medium">
                 Market on Close<br />No price required
               </p>
             </div>
@@ -591,8 +597,9 @@ export default function InlineOrderTicket({
 
       {/* Order summary */}
       {qty && parseFloat(qty) > 0 && (
-        <p className="text-sm text-gray-400 mt-3">
-          {action} <span className="font-bold text-white">{qty}</span> {ticker}{optionLabel}{" "}
+        <p className="text-base text-gray-300 mt-3 text-center">
+          <span className={action === "BUY" ? "text-blue-400 font-bold" : "text-red-400 font-bold"}>{action}</span>{" "}
+          <span className="font-bold text-white">{qty}</span> {ticker}{optionLabel}{" "}
           {orderType === "MOC"
             ? "at Market on Close"
             : orderType === "STP LMT"
