@@ -764,6 +764,33 @@ class RiskAssessmentEngine:
                 results.append({"ticker": ticker, "status": "failed", "error": str(e)})
                 logger.error("Failed to collect context for %s: %s", ticker, e, exc_info=True)
 
+        # --- Budget pre-check (after we know how many API calls are needed) ---
+        if api_bucket:
+            try:
+                from .budget import check_budget, DEFAULT_COST_PER_DEAL
+                estimated_run_cost = len(api_bucket) * DEFAULT_COST_PER_DEAL
+                budget_check = await check_budget(self.pool, estimated_run_cost)
+
+                if not budget_check["ok"]:
+                    error_msg = budget_check["warning"]
+                    logger.error("Budget check failed: %s", error_msg)
+                    await self._finish_run(run_id, "failed", error=error_msg)
+                    return {
+                        "run_id": str(run_id),
+                        "status": "budget_blocked",
+                        "total_deals": total_deals,
+                        "api_deals": len(api_bucket),
+                        "estimated_cost": estimated_run_cost,
+                        "balance": budget_check["balance"],
+                        "error": error_msg,
+                    }
+
+                if budget_check["warning"]:
+                    logger.warning("Budget warning: %s", budget_check["warning"])
+            except Exception as e:
+                # Budget check is advisory — don't block runs if the table doesn't exist yet
+                logger.warning("Budget check skipped (non-fatal): %s", e)
+
         # --- Phase 2: Process REUSE deals (no API calls) ---
         for ticker in reuse_bucket:
             try:

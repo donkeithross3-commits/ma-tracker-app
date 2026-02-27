@@ -1665,3 +1665,82 @@ async def get_baseline_review_html(
     except Exception as e:
         logger.error(f"Failed to generate baseline review HTML: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Budget tracking
+# ---------------------------------------------------------------------------
+
+class CreditRequest(BaseModel):
+    amount: float
+    notes: Optional[str] = None
+
+class BalanceSetRequest(BaseModel):
+    balance: float
+    notes: Optional[str] = None
+
+
+@router.get("/budget")
+async def get_budget():
+    """Returns estimated API budget balance and recent cost data."""
+    from app.risk.budget import get_estimated_balance, BUDGET_WARN_USD, BUDGET_MIN_USD
+    pool = _get_pool()
+    try:
+        info = await get_estimated_balance(pool)
+        balance = info["estimated_balance"]
+        warning = None
+        if balance < BUDGET_MIN_USD:
+            warning = f"CRITICAL: Balance ${balance:.2f} is below minimum ${BUDGET_MIN_USD:.2f}"
+        elif balance < BUDGET_WARN_USD:
+            warning = f"LOW: Balance ${balance:.2f} is approaching minimum ${BUDGET_MIN_USD:.2f}"
+        return {
+            **info,
+            "warning": warning,
+            "thresholds": {
+                "warn_usd": BUDGET_WARN_USD,
+                "min_usd": BUDGET_MIN_USD,
+            },
+        }
+    except Exception as e:
+        logger.error("Failed to get budget: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/budget/credit")
+async def add_credit(req: CreditRequest):
+    """Record a credit addition (e.g., user topped up API credits)."""
+    from app.risk.budget import record_credit, get_estimated_balance
+    if req.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    pool = _get_pool()
+    try:
+        result = await record_credit(pool, req.amount, req.notes)
+        info = await get_estimated_balance(pool)
+        return {
+            "status": "recorded",
+            **result,
+            "new_estimated_balance": info["estimated_balance"],
+        }
+    except Exception as e:
+        logger.error("Failed to record credit: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/budget/set")
+async def set_budget_balance(req: BalanceSetRequest):
+    """Set a new balance snapshot (recalibrates when non-tracked usage causes drift)."""
+    from app.risk.budget import set_balance, get_estimated_balance
+    if req.balance < 0:
+        raise HTTPException(status_code=400, detail="Balance cannot be negative")
+    pool = _get_pool()
+    try:
+        result = await set_balance(pool, req.balance, req.notes)
+        info = await get_estimated_balance(pool)
+        return {
+            "status": "balance_set",
+            **result,
+            "new_estimated_balance": info["estimated_balance"],
+        }
+    except Exception as e:
+        logger.error("Failed to set balance: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
