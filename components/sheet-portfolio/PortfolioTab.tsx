@@ -724,22 +724,19 @@ export default function PortfolioTab() {
                             {diff?.diff_type === "added" && (
                               <span className="text-[10px] px-1 py-0.5 rounded bg-green-500/15 text-green-400 leading-none">NEW</span>
                             )}
-                            {tickerChanges && tickerChanges.length > 0 && (
+                            {tickerChanges && tickerChanges.length > 0 && tickerChanges.map((c, ci) => (
                               <span
-                                className={`text-[10px] px-1 py-0.5 rounded leading-none cursor-default ${
-                                  hasWorsened
+                                key={ci}
+                                className={`text-[10px] px-1 py-0.5 rounded leading-none cursor-default whitespace-nowrap ${
+                                  c.direction === "worsened"
                                     ? "bg-red-500/15 text-red-400"
                                     : "bg-green-500/15 text-green-400"
                                 }`}
-                                title={tickerChanges.map(c => {
-                                  const arrow = c.direction === "worsened" ? "\u2193" : "\u2191";
-                                  const line = `${arrow} ${c.factor}: ${c.old_level} \u2192 ${c.new_level} (${c.direction})`;
-                                  return c.explanation ? `${line}\n  ${c.explanation.slice(0, 120)}${c.explanation.length > 120 ? "..." : ""}` : line;
-                                }).join("\n")}
+                                title={`${c.factor}: ${c.old_level} \u2192 ${c.new_level} (${c.direction})${c.explanation ? "\n" + c.explanation.slice(0, 150) : ""}`}
                               >
-                                {hasWorsened ? "\u25BC" : "\u25B2"}
+                                {c.direction === "worsened" ? "\u25BC" : "\u25B2"}{c.factor}
                               </span>
-                            )}
+                            ))}
                           </span>
                         </td>
                         {/* Acquiror */}

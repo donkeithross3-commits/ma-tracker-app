@@ -283,6 +283,17 @@ const SUPPLEMENTAL_FACTORS = [
   { key: "competing_bid", label: "Competing Bid" },
 ] as const;
 
+interface RiskChange {
+  ticker: string;
+  factor: string;
+  old_level: string;
+  new_level: string;
+  direction: "worsened" | "improved";
+  magnitude: number;
+  change_date: string;
+  explanation?: string;
+}
+
 
 function Row({ label, value, color }: { label: string; value: React.ReactNode; color?: string }) {
   return (
@@ -341,6 +352,7 @@ export default function DealDetailPage() {
   const [optionsScanLoading, setOptionsScanLoading] = useState(false);
   const [optionsScanError, setOptionsScanError] = useState(false);
   const [timelineData, setTimelineData] = useState<{ milestones: any[]; announced_date: string | null; expected_close_date: string | null; outside_date: string | null } | null>(null);
+  const [riskChanges, setRiskChanges] = useState<RiskChange[]>([]);
 
   const freshness = useMarketFreshness(lastRefresh);
 
@@ -368,6 +380,16 @@ export default function DealDetailPage() {
     fetch(`/api/sheet-portfolio/v2/deal/${encodeURIComponent(ticker)}/timeline`)
       .then(async (resp) => {
         if (resp.ok) setTimelineData(await resp.json());
+      })
+      .catch(() => {});
+
+    // Fetch risk changes for this ticker (non-blocking)
+    fetch("/api/sheet-portfolio/risk-changes")
+      .then(async (resp) => {
+        if (resp.ok) {
+          const all: RiskChange[] = await resp.json();
+          setRiskChanges(all.filter(c => c.ticker === ticker));
+        }
       })
       .catch(() => {});
   }, [ticker]);
@@ -863,10 +885,58 @@ export default function DealDetailPage() {
           <AccuracyScoreboard ticker={ticker} />
         </div>
 
+        {/* Risk Changes Today Banner */}
+        {riskChanges.length > 0 && (
+          <div className="mt-3 rounded-lg border-2 border-amber-500/40 bg-amber-500/5 px-4 py-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-amber-400 text-lg">&#9888;</span>
+              <h3 className="text-sm font-bold text-amber-300">
+                {riskChanges.length} Risk Grade Change{riskChanges.length !== 1 ? "s" : ""} Today
+              </h3>
+            </div>
+            <div className="space-y-2">
+              {riskChanges.map((c, i) => (
+                <div key={i} className={`flex items-start gap-2 rounded px-3 py-2 ${
+                  c.direction === "worsened" ? "bg-red-500/10 border border-red-500/20" : "bg-green-500/10 border border-green-500/20"
+                }`}>
+                  <span className={`text-lg mt-0.5 ${c.direction === "worsened" ? "text-red-400" : "text-green-400"}`}>
+                    {c.direction === "worsened" ? "\u25BC" : "\u25B2"}
+                  </span>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-200 capitalize">{c.factor.replace(/_/g, " ")}</span>
+                      <span className="font-mono text-xs">
+                        <span className="text-gray-500">{c.old_level}</span>
+                        <span className="text-gray-600 mx-1">&rarr;</span>
+                        <span className={c.direction === "worsened" ? "text-red-400 font-semibold" : "text-green-400 font-semibold"}>{c.new_level}</span>
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wider ${
+                        c.direction === "worsened" ? "bg-red-500/15 text-red-400" : "bg-green-500/15 text-green-400"
+                      }`}>
+                        {c.direction}
+                      </span>
+                    </div>
+                    {c.explanation && (
+                      <p className="text-xs text-gray-400 mt-1 leading-relaxed">{c.explanation}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Risk Assessment */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mt-3 border-l-2 border-l-purple-500/40">
+        <div className={`bg-gray-900 border border-gray-800 rounded-lg p-3 mt-3 border-l-2 ${riskChanges.length > 0 ? "border-l-amber-500/60" : "border-l-purple-500/40"}`}>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-bold text-gray-300 flex items-center gap-1.5">AI Risk Assessment <ProvenancePill type="ai" /></h3>
+            <h3 className="text-sm font-bold text-gray-300 flex items-center gap-1.5">
+              AI Risk Assessment <ProvenancePill type="ai" />
+              {riskChanges.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
+                  {riskChanges.length} CHANGED
+                </span>
+              )}
+            </h3>
             <div className="flex items-center gap-2">
               {riskAssessment?.assessment_date && (
                 <span className="text-xs text-gray-500">
@@ -884,7 +954,13 @@ export default function DealDetailPage() {
           </div>
 
           {riskAssessment ? (
-            <>
+            (() => {
+              // Build a lookup of changed factors for highlighting
+              const changedFactorMap = new Map<string, RiskChange>();
+              for (const c of riskChanges) {
+                changedFactorMap.set(c.factor, c);
+              }
+              return (<>
               {/* Overall summary */}
               <div className="flex items-center gap-3 mb-3 p-2 bg-gray-800/50 rounded">
                 <div className="flex-1">
@@ -908,7 +984,19 @@ export default function DealDetailPage() {
               <div className="grid grid-cols-5 gap-2 mb-3">
                 {GRADE_FACTORS.map(f => {
                   const grade = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_grade`] as string | null;
-                  return <GradeBadge key={f.key} grade={grade} label={f.label} />;
+                  const change = changedFactorMap.get(f.key);
+                  return (
+                    <div key={f.key} className={`relative ${change ? "ring-2 rounded-lg ring-offset-1 ring-offset-gray-900 " + (change.direction === "worsened" ? "ring-red-500/60" : "ring-green-500/60") : ""}`}>
+                      <GradeBadge grade={grade} label={f.label} />
+                      {change && (
+                        <span className={`absolute -top-1.5 -right-1.5 text-[9px] px-1 py-0.5 rounded font-bold leading-none ${
+                          change.direction === "worsened" ? "bg-red-500 text-white" : "bg-green-500 text-white"
+                        }`}>
+                          {change.direction === "worsened" ? "\u25BC" : "\u25B2"}
+                        </span>
+                      )}
+                    </div>
+                  );
                 })}
               </div>
 
@@ -918,7 +1006,23 @@ export default function DealDetailPage() {
                   const grade = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_grade`] as string | null;
                   const confidence = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_confidence`] as number | null;
                   const detail = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_detail`] as string | null;
-                  return <GradeFactorCard key={f.key} label={f.label} grade={grade} confidence={confidence} detail={detail} />;
+                  const change = changedFactorMap.get(f.key);
+                  return (
+                    <div key={f.key} className={change ? `ring-2 rounded-lg ring-offset-1 ring-offset-gray-900 ${change.direction === "worsened" ? "ring-red-500/60" : "ring-green-500/60"}` : ""}>
+                      <GradeFactorCard label={f.label} grade={grade} confidence={confidence} detail={detail} />
+                      {change && (
+                        <div className={`text-[11px] px-2 py-1.5 rounded-b -mt-1 ${
+                          change.direction === "worsened" ? "bg-red-500/10 text-red-300 border-t border-red-500/20" : "bg-green-500/10 text-green-300 border-t border-green-500/20"
+                        }`}>
+                          <span className="font-semibold">Changed today:</span>{" "}
+                          {change.old_level} &rarr; {change.new_level}
+                          {change.explanation && (
+                            <span className="text-gray-400 ml-1">— {change.explanation.length > 120 ? change.explanation.slice(0, 120) + "..." : change.explanation}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
                 })}
               </div>
 
@@ -931,7 +1035,23 @@ export default function DealDetailPage() {
                       const score = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_score`] as number | null;
                       const detail = (riskAssessment as unknown as Record<string, unknown>)[`${f.key}_detail`] as string | null;
                       const timingDisagreement = f.key === "timing" && riskAssessment.ai_response?.production_disagreements?.some(d => d.factor === "timing");
-                      return <SupplementalScoreCard key={f.key} label={f.label} score={score} detail={detail} hasDisagreement={timingDisagreement || false} />;
+                      const change = changedFactorMap.get(f.key);
+                      return (
+                        <div key={f.key} className={change ? `ring-2 rounded-lg ring-offset-1 ring-offset-gray-900 ${change.direction === "worsened" ? "ring-red-500/60" : "ring-green-500/60"}` : ""}>
+                          <SupplementalScoreCard label={f.label} score={score} detail={detail} hasDisagreement={timingDisagreement || false} />
+                          {change && (
+                            <div className={`text-[11px] px-2 py-1.5 rounded-b -mt-1 ${
+                              change.direction === "worsened" ? "bg-red-500/10 text-red-300 border-t border-red-500/20" : "bg-green-500/10 text-green-300 border-t border-green-500/20"
+                            }`}>
+                              <span className="font-semibold">Changed today:</span>{" "}
+                              {change.old_level} &rarr; {change.new_level}
+                              {change.explanation && (
+                                <span className="text-gray-400 ml-1">— {change.explanation.length > 120 ? change.explanation.slice(0, 120) + "..." : change.explanation}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
                     })}
                   </div>
                 </div>
@@ -992,7 +1112,8 @@ export default function DealDetailPage() {
                   </div>
                 </div>
               )}
-            </>
+            </>);
+            })()
           ) : (
             <div className="text-gray-600 text-sm py-6 text-center">
               No risk assessment available yet.
