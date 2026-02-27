@@ -977,6 +977,19 @@ class RiskAssessmentEngine:
             except Exception as e:
                 logger.warning("Review queue population failed: %s", e)
 
+        # Detect potential outcomes (deals removed from sheet, price converged, etc.)
+        outcome_candidates = []
+        try:
+            from .estimate_tracker import detect_potential_outcomes
+            outcome_candidates = await detect_potential_outcomes(self.pool)
+            if outcome_candidates:
+                logger.info(
+                    "Outcome candidates detected: %s",
+                    ", ".join(f"{c['ticker']} ({c['signal']})" for c in outcome_candidates),
+                )
+        except Exception as e:
+            logger.warning("Outcome detection failed: %s", e)
+
         return {
             "run_id": str(run_id),
             "run_date": str(run_date),
@@ -996,6 +1009,7 @@ class RiskAssessmentEngine:
             "batch_mode": batch_used if ENABLE_BATCH_MODE else False,
             "summary": summary,
             "results": results,
+            "outcome_candidates": outcome_candidates,
         }
 
     # ------------------------------------------------------------------
