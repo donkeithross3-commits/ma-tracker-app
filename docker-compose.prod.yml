@@ -13,6 +13,9 @@ services:
       # KRJ data directory - writable for on-demand signals
       # CRITICAL: This path must not change - KRJ data flow depends on it
       - ./data/krj:/app/data/krj
+      # Standalone agent bundle - served via volume mount for zero-downtime updates.
+      # Agent code changes only need `git pull` on host — no image rebuild required.
+      - ./ma-tracker-app/python-service/standalone_agent:/app/python-service/standalone_agent:ro
     # So the container can reach the host (where Python runs on port 8000)
     extra_hosts:
       - "host.docker.internal:host-gateway"

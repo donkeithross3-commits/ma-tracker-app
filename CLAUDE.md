@@ -66,7 +66,10 @@ When you **complete a task** that changed code in this repo:
 2. **Push** to `origin main`: `git push origin main`
 3. **Deploy** to production via the flock-gated deploy script:
    ```bash
-   # Web/full deploy:
+   # Agent-only deploy (zero downtime — git pull, volume mount serves new files):
+   ssh droplet 'DR3_AGENT=claude bash ~/apps/scripts/deploy.sh agent-only'
+
+   # Web/full deploy (frontend/UI changes — Caddy holds requests during restart):
    ssh droplet 'DR3_AGENT=claude bash ~/apps/scripts/deploy.sh web'
 
    # Python-service-only deploy (no Docker rebuild):
@@ -80,6 +83,7 @@ When you **complete a task** that changed code in this repo:
 Do this **automatically** at the end of the task -- do not wait for the user to ask. The agent has permission to push and deploy.
 
 - `deploy.sh` handles git pull, --no-cache, --force-recreate, and health checks automatically.
+- For agent-only changes (standalone_agent/ files), use `deploy.sh agent-only` — zero downtime.
 - If the deploy fails with a lock error, another deploy is in progress — wait and retry.
 - **NEVER run raw `docker compose build` or `docker compose up` on the droplet.** Always use `deploy.sh`.
 
@@ -235,10 +239,9 @@ PostgreSQL (Neon Cloud)    Local IB Agents (users' machines)
   copies of `COPY . .` even after `git pull` updates files on disk.
 - **ALWAYS pass `--force-recreate`** to `docker compose up`. Without it, compose may
   decide the existing container already matches and skip replacement.
-- The standalone agent bundle (`python-service/standalone_agent/`) is copied into the
-  Docker image at build time. The `/api/ma-options/agent-version` endpoint reads
-  `version.txt` from inside the running container, NOT from disk. So a `git pull` alone
-  does nothing -- the image must be rebuilt and the container recreated.
+- The standalone agent bundle (`python-service/standalone_agent/`) is mounted as a
+  read-only Docker volume — NOT baked into the image. Agent changes only need `git pull`
+  on the host (use `deploy.sh agent-only`). No Docker rebuild required.
 - **Static assets (images, PNGs) in `public/` are baked into the Docker image.**
   After regenerating screenshots or other assets, you MUST rebuild + recreate the container.
   Even then, **browsers cache images aggressively** -- if the URL doesn't change, users see
@@ -246,10 +249,11 @@ PostgreSQL (Neon Cloud)    Local IB Agents (users' machines)
   (see `app/changelog/[date]/page.tsx`). Apply the same pattern for any other static assets
   that change after initial deployment.
 
-**`.dockerignore` and the agent bundle:**
-- `python-service/` is excluded from the Docker build context
-- `!python-service/standalone_agent/` re-includes the agent directory
-- This means only `standalone_agent/` is available inside the image -- the rest of `python-service/` is not
+**Agent bundle (volume-mounted, NOT baked into image):**
+- The standalone agent (`python-service/standalone_agent/`) is mounted as a read-only Docker volume
+- Agent updates only need `git pull` on the host — zero downtime, no Docker rebuild
+- Use `deploy.sh agent-only` for agent-only changes
+- The `/api/ma-options/agent-version` endpoint reads `version.txt` from this mount at runtime
 
 ---
 
@@ -405,7 +409,7 @@ User's Browser <---> Next.js API <---> Python Service <--WebSocket--> Local IB A
 When making changes to agent files in `python-service/standalone_agent/`:
 1. Edit the files
 2. **BUMP THE VERSION** in `version.txt` using: `printf "x.y.z" > version.txt`
-3. Deploy as normal -- users' agents auto-update on next startup
+3. Deploy with `deploy.sh agent-only` (zero downtime) -- users' agents auto-update on next startup
 
 Version format: MAJOR.MINOR.PATCH
 - PATCH: Bug fixes, minor improvements (1.0.2 -> 1.0.3)
