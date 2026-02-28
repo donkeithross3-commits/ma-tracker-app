@@ -621,7 +621,15 @@ async def job_morning_position_snapshot():
 # ---------------------------------------------------------------------------
 
 def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
-    """Register all cron jobs on the scheduler."""
+    """Register all cron jobs on the scheduler.
+
+    All jobs use max_instances=1 (at most one concurrent execution) and
+    coalesce=True (if multiple triggers pile up, run once). This prevents
+    the dual-execution bug from Feb 27 where two scheduler instances ran
+    simultaneously and caused FK violations.
+    """
+    # Common safety settings for all jobs
+    _SAFE = {"max_instances": 1, "coalesce": True}
 
     scheduler.add_job(
         job_morning_sheet_ingest,
@@ -630,6 +638,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=5, minute=15,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -639,6 +648,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=5, minute=20,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -648,6 +658,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=5, minute=18,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -657,6 +668,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=5, minute=22,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -666,6 +678,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=5, minute=25,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -675,6 +688,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=5, minute=30,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -684,6 +698,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=5, minute=35,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -693,6 +708,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=5, minute=55,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -702,6 +718,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=6, minute=0,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -712,6 +729,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         hour="6-19",  # 6 AM through 7:xx PM (last fire at 19:55)
         minute="*/5",
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -722,6 +740,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         hour="9-15",  # 9:30 AM through 3:xx PM (last fire at 15:59)
         minute="*",
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -731,6 +750,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="mon-fri",
         hour=16, minute=15,
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -741,6 +761,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         hour="10-15",
         minute="0,30",
         replace_existing=True,
+        **_SAFE,
     )
 
     scheduler.add_job(
@@ -750,6 +771,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         day_of_week="sun",
         hour=3, minute=0,
         replace_existing=True,
+        **_SAFE,
     )
 
     logger.info(

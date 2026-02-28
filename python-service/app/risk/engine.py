@@ -312,13 +312,16 @@ class RiskAssessmentEngine:
                 context["recent_halts"] = []
 
             # 6. Recent sheet diffs (last 7 days)
-            diffs = await conn.fetch(
-                """SELECT * FROM sheet_diffs
-                   WHERE ticker = $1 AND detected_at > CURRENT_DATE - INTERVAL '7 days'
-                   ORDER BY detected_at DESC""",
-                ticker,
-            )
-            context["sheet_diffs"] = [dict(d) for d in diffs]
+            try:
+                diffs = await conn.fetch(
+                    """SELECT * FROM sheet_diffs
+                       WHERE ticker = $1 AND detected_at > CURRENT_DATE - INTERVAL '7 days'
+                       ORDER BY detected_at DESC""",
+                    ticker,
+                )
+                context["sheet_diffs"] = [dict(d) for d in diffs]
+            except Exception:
+                context["sheet_diffs"] = []
 
             # 7. Existing AI research
             try:
@@ -677,11 +680,52 @@ class RiskAssessmentEngine:
     # ------------------------------------------------------------------
     # Full morning run
     # ------------------------------------------------------------------
+    # PostgreSQL advisory lock key for preventing concurrent runs
+    _ADVISORY_LOCK_KEY = 839201  # arbitrary unique int for risk assessment
+
     async def run_morning_assessment(self, run_date=None, triggered_by="scheduler", run_id=None, held_tickers: set[str] | None = None) -> dict:
         """Run the full morning risk assessment for all active deals."""
         if run_date is None:
             run_date = date.today()
 
+        # Acquire a PostgreSQL advisory lock to prevent concurrent runs.
+        # pg_try_advisory_lock is session-level and non-blocking — returns false
+        # if another connection already holds the lock. We hold the connection
+        # for the entire run to keep the lock alive (released in finally block).
+        lock_conn = await self.pool.acquire()
+        try:
+            locked = await lock_conn.fetchval(
+                "SELECT pg_try_advisory_lock($1)", self._ADVISORY_LOCK_KEY
+            )
+        except Exception:
+            await self.pool.release(lock_conn)
+            raise
+        if not locked:
+            await self.pool.release(lock_conn)
+            logger.warning(
+                "Skipping risk assessment — another run is already in progress "
+                "(advisory lock %d held)", self._ADVISORY_LOCK_KEY,
+            )
+            return {
+                "status": "skipped",
+                "reason": "concurrent run in progress (advisory lock held)",
+            }
+
+        try:
+            return await self._run_morning_assessment_inner(
+                run_date, triggered_by, run_id, held_tickers,
+            )
+        finally:
+            try:
+                await lock_conn.fetchval(
+                    "SELECT pg_advisory_unlock($1)", self._ADVISORY_LOCK_KEY
+                )
+            except Exception:
+                pass
+            await self.pool.release(lock_conn)
+
+    async def _run_morning_assessment_inner(self, run_date, triggered_by, run_id, held_tickers) -> dict:
+        """Inner implementation of run_morning_assessment (called under advisory lock)."""
         _run_id_provided = run_id is not None
         if run_id is None:
             run_id = uuid.uuid4()
