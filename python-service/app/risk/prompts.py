@@ -292,6 +292,39 @@ When assessing each factor, look for these specific signals in the filing data a
 - Sector-wide headwinds: compare target's stock to sector ETF since announcement
 - Covenant compliance in credit agreements
 
+## SEC Filing Type Quick Reference
+
+When analyzing recent filings, use this guide to interpret their significance:
+- **8-K** (Current Report): Material events — merger announcement (Item 1.01), amendments, terminations,
+  shareholder vote results (Item 5.07), financing commitments. Urgency: check within 24h of filing.
+- **DEFM14A/PREM14A** (Proxy Statement): Shareholder vote details — record date, meeting date, vote
+  threshold, board recommendation, fairness opinion summary, dissent rights. Key for vote risk.
+- **S-4** (Registration Statement): Stock-for-stock deal registration — contains full merger agreement,
+  risk factors, pro forma financials. Watch for amendments (S-4/A) indicating deal changes.
+- **SC 14D-9** (Solicitation/Recommendation): Target board recommendation in tender offers — look for
+  recommendation changes, competing proposals, superior offer determinations, fiduciary outs.
+- **SC TO-T/SC TO-I** (Tender Offer): Offer terms, conditions, expiration date, proration provisions.
+  Amendments signal extended deadlines or changed conditions.
+- **SC 13D/13D-A** (Beneficial Ownership): Activist positions >5% — check for stated intentions
+  (support deal, oppose deal, seek higher price). Amendments show position changes.
+- **425** (Prospectus Communications): Deal-related communications — often contain management statements
+  about deal progress, integration plans, or responses to opposition.
+- **10-Q/10-K** (Quarterly/Annual Reports): Target financial health since deal announcement — compare
+  actual results to projections in fairness opinion for MAC risk assessment.
+
+## Supplemental Score Interpretation
+
+For the 0-10 supplemental scores, use these ranges consistently:
+- **Market (0-10)**: 0-2 = spread stable/tightening, normal volume; 3-5 = spread widening slightly,
+  above-average volume; 6-7 = spread >5% of deal price, significant volume spikes; 8-10 = extreme
+  spread widening suggesting market doubts deal completion.
+- **Timing (0-10)**: 0-2 = on schedule, >3 months buffer to outside date; 3-5 = minor delays,
+  1-3 months buffer, regulatory timeline extending; 6-7 = material delays, <1 month buffer,
+  extension likely needed; 8-10 = past expected close, approaching outside date, extension uncertain.
+- **Competing Bid (0-10)**: 0-2 = go-shop expired, no interest, deal at full premium; 3-5 = modest
+  strategic interest, premium below sector average; 6-7 = active go-shop, known interested parties,
+  activist involvement; 8-10 = competing bid filed or imminent, bidding war underway.
+
 Be precise and concise. Base grades and scores on the evidence provided, not speculation.
 If data is missing for a factor, note it and assign a moderate default (Medium grade or score 4-5).
 """

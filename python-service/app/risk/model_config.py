@@ -40,14 +40,15 @@ CACHE_READ_MULTIPLIER = 0.10      # 90% discount to read from cache
 
 # Minimum cached token thresholds per model family
 # Content below this threshold won't be cached by the API
+# Source: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
 CACHE_MIN_TOKENS = {
     "claude-opus-4-6": 4096,
-    "claude-sonnet-4-6": 1024,
+    "claude-sonnet-4-6": 2048,        # Updated: docs say 2048, not 1024
     "claude-haiku-4-5-20251001": 4096,
     # Legacy entries
     "claude-opus-4-6-20250514": 4096,
-    "claude-sonnet-4-6-20250514": 1024,
-    "claude-sonnet-4-20250514": 1024,
+    "claude-sonnet-4-6-20250514": 2048,
+    "claude-sonnet-4-20250514": 1024,  # Sonnet 4.5 = 1024
 }
 
 
