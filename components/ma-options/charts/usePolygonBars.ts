@@ -25,9 +25,9 @@ function getDateRange(tf: TimeframeConfig): { from: string; to: string } {
     from = new Date(now);
     from.setDate(from.getDate() - 10);
   } else {
-    // 1 day for minute bars (incl today)
+    // 5 days for minute bars — covers weekends + holiday Mondays
     from = new Date(now);
-    from.setDate(from.getDate() - 1);
+    from.setDate(from.getDate() - 5);
   }
 
   return { from: formatDate(from), to };
