@@ -122,6 +122,48 @@ export interface PositionLedgerEntry {
 /** Widget types in the grid */
 export type WidgetType = "price-chart" | "signal-panel" | "positions-panel";
 
+// ---------------------------------------------------------------------------
+// Layout types (used by grid system and presets)
+// ---------------------------------------------------------------------------
+
+/** Layout item shape (mirrors react-grid-layout's Layout interface) */
+export interface LayoutItem {
+  i: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  minW?: number;
+  minH?: number;
+  maxW?: number;
+  maxH?: number;
+}
+
+export interface LayoutMap {
+  [key: string]: LayoutItem[];
+}
+
+// ---------------------------------------------------------------------------
+// Multi-chart preset types
+// ---------------------------------------------------------------------------
+
+/** Configuration for a single chart widget in a multi-chart layout */
+export interface ChartWidgetConfig {
+  id: string;                    // "chart-a1b2c3d4"
+  type: WidgetType;              // "price-chart" | "signal-panel" | "positions-panel"
+  ticker: string;                // "SPY", "QQQ", etc.
+  timeframe?: TimeframeConfig;   // only for price-chart
+}
+
+/** Named preset of chart widgets + layout */
+export interface ChartPreset {
+  name: string;
+  widgets: ChartWidgetConfig[];
+  gridLayouts: LayoutMap;
+  overlayToggles: OverlayToggles;
+  isBuiltIn?: boolean;
+}
+
 /** Overlay toggle state */
 export interface OverlayToggles {
   showSignals: boolean;

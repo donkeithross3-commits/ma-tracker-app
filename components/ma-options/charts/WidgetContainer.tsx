@@ -1,13 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GripVertical, AlertCircle, Loader2 } from "lucide-react";
+import { GripVertical, AlertCircle, Loader2, X } from "lucide-react";
 
 interface WidgetContainerProps {
   title: string;
   loading?: boolean;
   error?: string | null;
   children: (size: { width: number; height: number }) => React.ReactNode;
+  /** Extra content rendered in the header after the title (e.g., inline controls) */
+  headerExtra?: React.ReactNode;
+  /** If provided, shows a close button that calls this callback */
+  onRemove?: () => void;
 }
 
 const HEADER_HEIGHT = 32;
@@ -17,6 +21,8 @@ export default function WidgetContainer({
   loading = false,
   error = null,
   children,
+  headerExtra,
+  onRemove,
 }: WidgetContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -53,13 +59,28 @@ export default function WidgetContainer({
         className="drag-handle flex items-center gap-1.5 px-2 border-b border-gray-800 cursor-grab active:cursor-grabbing select-none shrink-0"
         style={{ height: HEADER_HEIGHT }}
       >
-        <GripVertical className="h-3.5 w-3.5 text-gray-500" />
+        <GripVertical className="h-3.5 w-3.5 text-gray-500 shrink-0" />
         <span className="text-xs font-medium text-gray-300 truncate">
           {title}
         </span>
-        {loading && (
-          <Loader2 className="h-3 w-3 text-blue-400 animate-spin ml-auto" />
-        )}
+        {headerExtra}
+        <div className="flex items-center gap-1 ml-auto shrink-0">
+          {loading && (
+            <Loader2 className="h-3 w-3 text-blue-400 animate-spin" />
+          )}
+          {onRemove && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+              className="p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-700 transition-colors"
+              title="Remove widget"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content */}
