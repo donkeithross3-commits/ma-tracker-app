@@ -1,6 +1,11 @@
 """News monitor — fetch M&A-relevant news from Polygon for tracked deal tickers.
 
 Used by the morning pipeline to include recent news context in AI risk assessments.
+
+All articles for tracked deal tickers are stored (the ticker itself is the primary
+relevance filter — we're only querying tickers in active M&A deals). M&A keyword
+matching sets the relevance_score so the AI prompt prioritizes the most relevant
+articles, but nothing is discarded.
 """
 
 import logging
@@ -76,9 +81,15 @@ async def fetch_deal_news(
         return []
 
 
-def filter_ma_relevant(articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Filter articles to those containing M&A-relevant keywords."""
-    relevant = []
+def score_relevance(articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Score all articles by M&A keyword relevance.
+
+    Every article gets stored — the ticker is already the primary relevance
+    filter (we only query tickers in active M&A deals).  Keyword matching
+    sets the relevance_score so the AI prompt prioritizes the best articles:
+      - 1+ keyword matches: 0.2 – 1.0 (scaled by match count)
+      - No matches: 0.1 (kept for forensics, low priority in prompt)
+    """
     for article in articles:
         text = (
             (article.get("title") or "") + " " + (article.get("description") or "")
@@ -87,8 +98,14 @@ def filter_ma_relevant(articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if matched:
             article["_matched_keywords"] = matched
             article["_relevance_score"] = min(len(matched) / 5.0, 1.0)
-            relevant.append(article)
-    return relevant
+        else:
+            article["_matched_keywords"] = []
+            article["_relevance_score"] = 0.1
+    return articles
+
+
+# Backward-compatible alias
+filter_ma_relevant = score_relevance
 
 
 def classify_risk_factor(article: Dict[str, Any]) -> Optional[str]:
@@ -122,7 +139,10 @@ def classify_risk_factor(article: Dict[str, Any]) -> Optional[str]:
 async def store_news_articles(
     pool, ticker: str, articles: List[Dict[str, Any]]
 ) -> int:
-    """Upsert M&A-relevant news articles into deal_news_articles.
+    """Upsert news articles for a tracked deal ticker into deal_news_articles.
+
+    All articles are stored (the ticker is the relevance gate). Keyword-matched
+    articles have higher relevance_score for priority in the AI prompt.
 
     Returns number of new articles stored.
     """
@@ -193,7 +213,7 @@ async def get_recent_deal_news(
                FROM deal_news_articles
                WHERE ticker = $1
                  AND published_at > NOW() - make_interval(days => $2)
-               ORDER BY published_at DESC
+               ORDER BY relevance_score DESC, published_at DESC
                LIMIT 10""",
             ticker,
             days,
@@ -217,23 +237,26 @@ async def scan_single_ticker_news(
     articles = await fetch_deal_news(ticker, api_key, days=days)
     raw_count = len(articles)
 
-    relevant = filter_ma_relevant(articles)
-    filtered_count = len(relevant)
+    scored = score_relevance(articles)
+    keyword_matched = sum(1 for a in scored if a.get("_relevance_score", 0) > 0.1)
 
     stored = 0
-    if relevant:
-        stored = await store_news_articles(pool, ticker, relevant)
+    if scored:
+        stored = await store_news_articles(pool, ticker, scored)
 
     logger.info(
-        "[news_monitor] %s: %d raw -> %d relevant -> %d new stored",
-        ticker, raw_count, filtered_count, stored,
+        "[news_monitor] %s: %d raw, %d keyword-matched, %d new stored",
+        ticker, raw_count, keyword_matched, stored,
     )
     return {
         "ticker": ticker,
         "raw_articles": raw_count,
-        "relevant_articles": filtered_count,
+        "keyword_matched": keyword_matched,
         "new_stored": stored,
-        "sample_titles": [a.get("title", "")[:100] for a in articles[:5]],
+        "sample_titles": [
+            {"title": a.get("title", "")[:100], "relevance": a.get("_relevance_score", 0)}
+            for a in sorted(scored, key=lambda x: x.get("_relevance_score", 0), reverse=True)[:5]
+        ],
     }
 
 
@@ -282,28 +305,23 @@ async def scan_all_deal_news(pool) -> Dict[str, Any]:
             total_raw += raw_count
             if not articles:
                 continue
-            relevant = filter_ma_relevant(articles)
-            total_filtered += len(relevant)
-            if relevant:
-                stored = await store_news_articles(pool, ticker, relevant)
-                total_stored += stored
-            else:
-                logger.debug(
-                    "[news_monitor] %s: %d raw articles, 0 passed keyword filter",
-                    ticker, raw_count,
-                )
+            scored = score_relevance(articles)
+            keyword_matched = sum(1 for a in scored if a.get("_relevance_score", 0) > 0.1)
+            total_filtered += keyword_matched
+            stored = await store_news_articles(pool, ticker, scored)
+            total_stored += stored
         except Exception:
             logger.error(
                 "[news_monitor] Error scanning news for %s", ticker, exc_info=True
             )
 
     logger.info(
-        "[news_monitor] Scanned %d tickers: %d raw -> %d relevant -> %d stored",
+        "[news_monitor] Scanned %d tickers: %d raw, %d keyword-matched, %d stored",
         len(tickers), total_raw, total_filtered, total_stored,
     )
     return {
         "tickers": len(tickers),
         "raw_articles": total_raw,
-        "relevant_articles": total_filtered,
+        "keyword_matched": total_filtered,
         "articles_stored": total_stored,
     }

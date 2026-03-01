@@ -441,6 +441,8 @@ class RiskAssessmentEngine:
             pass  # Table may not exist yet
 
         # 15. Recent M&A news articles (last 7 days)
+        # Sort by relevance first (keyword-matched > unmatched), then recency.
+        # This ensures the 10-article limit prioritizes deal-relevant articles.
         try:
             async with self.pool.acquire() as conn:
                 articles = await conn.fetch(
@@ -449,7 +451,7 @@ class RiskAssessmentEngine:
                        FROM deal_news_articles
                        WHERE ticker = $1
                          AND published_at > NOW() - INTERVAL '7 days'
-                       ORDER BY published_at DESC LIMIT 10""",
+                       ORDER BY relevance_score DESC, published_at DESC LIMIT 10""",
                     ticker,
                 )
             if articles:
