@@ -621,6 +621,47 @@ export default function DealDetailPage() {
           </div>
         )}
 
+        {/* Risk Changes Today Banner — top of page for immediate visibility */}
+        {riskChanges.length > 0 && (
+          <div className="mb-3 rounded-lg border-2 border-amber-500/40 bg-amber-500/5 px-4 py-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-amber-400 text-lg">&#9888;</span>
+              <h3 className="text-sm font-bold text-amber-300">
+                {riskChanges.length} Risk Grade Change{riskChanges.length !== 1 ? "s" : ""} Today
+              </h3>
+            </div>
+            <div className="space-y-2">
+              {riskChanges.map((c, i) => (
+                <div key={i} className={`flex items-start gap-2 rounded px-3 py-2 ${
+                  c.direction === "worsened" ? "bg-red-500/10 border border-red-500/20" : "bg-green-500/10 border border-green-500/20"
+                }`}>
+                  <span className={`text-lg mt-0.5 ${c.direction === "worsened" ? "text-red-400" : "text-green-400"}`}>
+                    {c.direction === "worsened" ? "\u25BC" : "\u25B2"}
+                  </span>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-200 capitalize">{c.factor.replace(/_/g, " ")}</span>
+                      <span className="font-mono text-xs">
+                        <span className="text-gray-500">{c.old_level}</span>
+                        <span className="text-gray-600 mx-1">&rarr;</span>
+                        <span className={c.direction === "worsened" ? "text-red-400 font-semibold" : "text-green-400 font-semibold"}>{c.new_level}</span>
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wider ${
+                        c.direction === "worsened" ? "bg-red-500/15 text-red-400" : "bg-green-500/15 text-green-400"
+                      }`}>
+                        {c.direction}
+                      </span>
+                    </div>
+                    {c.explanation && (
+                      <p className="text-xs text-gray-400 mt-1 leading-relaxed">{c.explanation}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Main content: 3-column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
 
@@ -884,47 +925,6 @@ export default function DealDetailPage() {
           <EstimateDivergenceChart ticker={ticker} />
           <AccuracyScoreboard ticker={ticker} />
         </div>
-
-        {/* Risk Changes Today Banner */}
-        {riskChanges.length > 0 && (
-          <div className="mt-3 rounded-lg border-2 border-amber-500/40 bg-amber-500/5 px-4 py-3">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-amber-400 text-lg">&#9888;</span>
-              <h3 className="text-sm font-bold text-amber-300">
-                {riskChanges.length} Risk Grade Change{riskChanges.length !== 1 ? "s" : ""} Today
-              </h3>
-            </div>
-            <div className="space-y-2">
-              {riskChanges.map((c, i) => (
-                <div key={i} className={`flex items-start gap-2 rounded px-3 py-2 ${
-                  c.direction === "worsened" ? "bg-red-500/10 border border-red-500/20" : "bg-green-500/10 border border-green-500/20"
-                }`}>
-                  <span className={`text-lg mt-0.5 ${c.direction === "worsened" ? "text-red-400" : "text-green-400"}`}>
-                    {c.direction === "worsened" ? "\u25BC" : "\u25B2"}
-                  </span>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-gray-200 capitalize">{c.factor.replace(/_/g, " ")}</span>
-                      <span className="font-mono text-xs">
-                        <span className="text-gray-500">{c.old_level}</span>
-                        <span className="text-gray-600 mx-1">&rarr;</span>
-                        <span className={c.direction === "worsened" ? "text-red-400 font-semibold" : "text-green-400 font-semibold"}>{c.new_level}</span>
-                      </span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wider ${
-                        c.direction === "worsened" ? "bg-red-500/15 text-red-400" : "bg-green-500/15 text-green-400"
-                      }`}>
-                        {c.direction}
-                      </span>
-                    </div>
-                    {c.explanation && (
-                      <p className="text-xs text-gray-400 mt-1 leading-relaxed">{c.explanation}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Risk Assessment */}
         <div className={`bg-gray-900 border border-gray-800 rounded-lg p-3 mt-3 border-l-2 ${riskChanges.length > 0 ? "border-l-amber-500/60" : "border-l-purple-500/40"}`}>
