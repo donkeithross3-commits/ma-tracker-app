@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth-api";
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY || "";
 
 // Strict validation patterns
-const TICKER_RE = /^[A-Z]{1,10}$/;
+const TICKER_RE = /^[A-Z][A-Z0-9]{0,9}$/;
 const VALID_TIMESPANS = new Set(["minute", "hour", "day"]);
 
 export async function GET(request: NextRequest) {

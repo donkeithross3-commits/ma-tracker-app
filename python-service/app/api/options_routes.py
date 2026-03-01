@@ -1876,6 +1876,7 @@ class HistoricalBarsRequest(BaseModel):
     whatToShow: str = "TRADES"
     useRTH: bool = False
     userId: Optional[str] = None
+    contractMonth: Optional[str] = None  # e.g. "202603" for ESH6
 
     @field_validator("ticker")
     @classmethod
@@ -1920,6 +1921,7 @@ async def relay_historical_bars(req: HistoricalBarsRequest):
                 "barSize": req.barSize,
                 "whatToShow": req.whatToShow,
                 "useRTH": req.useRTH,
+                "contractMonth": req.contractMonth,
             },
             timeout=35.0,  # Historical data can be slow
             user_id=req.userId,

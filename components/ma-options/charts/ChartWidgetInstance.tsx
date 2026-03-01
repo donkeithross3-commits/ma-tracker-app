@@ -40,6 +40,46 @@ const FUTURES_EXCHANGE: Record<string, string> = {
   ZC: "CBOT", ZS: "CBOT", ZW: "CBOT", ZM: "CBOT", ZL: "CBOT",
 };
 
+// IB futures month codes: F=Jan G=Feb H=Mar J=Apr K=May M=Jun
+//                         N=Jul Q=Aug U=Sep V=Oct X=Nov Z=Dec
+const FUTURES_MONTH_CODES: Record<string, string> = {
+  F: "01", G: "02", H: "03", J: "04", K: "05", M: "06",
+  N: "07", Q: "08", U: "09", V: "10", X: "11", Z: "12",
+};
+
+// Regex: root symbol + month code letter + 1-2 year digits (e.g. ESH6, NQM26, CLZ25)
+const FUTURES_CONTRACT_RE = /^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,2})$/;
+
+/**
+ * Extract the base futures symbol and optional contract month from a ticker.
+ * "ESH6"  → { base: "ES", contractMonth: "202603" }
+ * "NQM26" → { base: "NQ", contractMonth: "202606" }
+ * "ES"    → { base: "ES", contractMonth: null }  (bare root = continuous)
+ * "AAPL"  → { base: "AAPL", contractMonth: null }
+ */
+function parseFuturesTicker(ticker: string): {
+  base: string;
+  contractMonth: string | null;
+} {
+  const m = FUTURES_CONTRACT_RE.exec(ticker);
+  if (m) {
+    const [, base, monthCode, yearDigits] = m;
+    // Only treat as futures contract if the base is a known futures symbol
+    if (FUTURES_SYMBOLS.has(base)) {
+      const month = FUTURES_MONTH_CODES[monthCode];
+      // Convert 1-2 digit year: "6" → "2026", "26" → "2026", "5" → "2025"
+      const year =
+        yearDigits.length === 1
+          ? `202${yearDigits}`
+          : yearDigits.length === 2
+            ? `20${yearDigits}`
+            : yearDigits;
+      return { base, contractMonth: `${year}${month}` };
+    }
+  }
+  return { base: ticker, contractMonth: null };
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -105,11 +145,14 @@ function PriceChartContent({
 }: ChartWidgetInstanceProps) {
   const timeframe = config.timeframe ?? TIMEFRAMES[1]; // 5m default
 
-  // Auto-detect futures instruments
+  // Auto-detect futures instruments — strip month+year suffix for lookup
+  // "ESH6" → base "ES" (in FUTURES_SYMBOLS), contractMonth "202603"
+  // "ES"   → base "ES" (in FUTURES_SYMBOLS), contractMonth null (continuous)
+  const { base: futuresBase, contractMonth } = parseFuturesTicker(config.ticker);
   const isFutures =
-    config.secType === "FUT" || FUTURES_SYMBOLS.has(config.ticker);
+    config.secType === "FUT" || FUTURES_SYMBOLS.has(futuresBase);
   const futuresExchange =
-    config.exchange || FUTURES_EXCHANGE[config.ticker] || "CME";
+    config.exchange || FUTURES_EXCHANGE[futuresBase] || "CME";
 
   // Both hooks always called (React rules) — one is disabled via `enabled`
   const polygonResult = usePolygonBars(config.ticker, {
@@ -123,6 +166,7 @@ function PriceChartContent({
     multiplier: timeframe.multiplier,
     timespan: timeframe.timespan,
     enabled: isFutures,
+    contractMonth: contractMonth ?? undefined,
   });
 
   const { bars, loading, error } = isFutures ? ibResult : polygonResult;

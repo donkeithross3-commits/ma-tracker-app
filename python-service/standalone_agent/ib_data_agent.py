@@ -619,7 +619,13 @@ class IBDataAgent:
         }
 
     def _handle_fetch_historical_bars_sync(self, payload: dict) -> dict:
-        """Fetch historical OHLCV bars from IB for charting."""
+        """Fetch historical OHLCV bars from IB for charting.
+
+        Supports three modes for futures:
+        1. Specific contract: contractMonth="202603" → secType=FUT, lastTradeDateOrContractMonth
+        2. Bare root symbol (e.g. "ES" with no contractMonth) → secType=CONTFUT (continuous)
+        3. Full contract ticker (e.g. "ESH6") with contractMonth parsed by frontend
+        """
         ticker = payload.get("ticker", "").upper()
 
         if not self.scanner or not self.scanner.isConnected():
@@ -640,17 +646,48 @@ class IBDataAgent:
             "ZC": "CBOT", "ZS": "CBOT", "ZW": "CBOT", "ZM": "CBOT", "ZL": "CBOT",
         }
 
+        # IB month codes for parsing contract tickers like "ESH6"
+        _MONTH_CODES = {
+            "F": "01", "G": "02", "H": "03", "J": "04", "K": "05", "M": "06",
+            "N": "07", "Q": "08", "U": "09", "V": "10", "X": "11", "Z": "12",
+        }
+
         from ibapi.contract import Contract
+        import re
         contract = Contract()
 
         sec_type = payload.get("secType", "STK")
         exchange = payload.get("exchange", "")
+        contract_month = payload.get("contractMonth")  # e.g. "202603"
 
         if sec_type == "FUT":
-            contract.symbol = ticker
-            contract.secType = "FUT"
+            # Parse ticker — might be full contract like "ESH6" or bare root "ES"
+            # Try to extract base symbol from full contract ticker
+            fut_match = re.match(r'^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,2})$', ticker)
+            if fut_match and fut_match.group(1) in _FUTURES_EXCHANGE:
+                base_symbol = fut_match.group(1)
+                month_code = fut_match.group(2)
+                year_digits = fut_match.group(3)
+                # Derive contractMonth if not already provided
+                if not contract_month:
+                    month = _MONTH_CODES[month_code]
+                    year = f"202{year_digits}" if len(year_digits) == 1 else f"20{year_digits}"
+                    contract_month = f"{year}{month}"
+                contract.symbol = base_symbol
+            else:
+                contract.symbol = ticker
+
             contract.currency = "USD"
-            contract.exchange = exchange or _FUTURES_EXCHANGE.get(ticker, "CME")
+            contract.exchange = exchange or _FUTURES_EXCHANGE.get(contract.symbol, "CME")
+
+            if contract_month:
+                # Specific contract month — use FUT secType
+                contract.secType = "FUT"
+                contract.lastTradeDateOrContractMonth = contract_month
+            else:
+                # Bare root symbol (e.g. "ES") — use CONTFUT for continuous front-month
+                contract.secType = "CONTFUT"
+
             if payload.get("lastTradeDateOrContractMonth"):
                 contract.lastTradeDateOrContractMonth = payload["lastTradeDateOrContractMonth"]
             if payload.get("multiplier"):
@@ -671,8 +708,9 @@ class IBDataAgent:
         what_to_show = payload.get("whatToShow", "TRADES")
         use_rth = 1 if payload.get("useRTH", False) else 0
 
-        logger.info(f"fetch_historical_bars: {ticker} ({sec_type}) duration={duration} "
-                    f"barSize={bar_size} exchange={contract.exchange}")
+        logger.info(f"fetch_historical_bars: {ticker} ({contract.secType}) symbol={contract.symbol} "
+                    f"duration={duration} barSize={bar_size} exchange={contract.exchange} "
+                    f"contractMonth={getattr(contract, 'lastTradeDateOrContractMonth', 'none')}")
 
         bars = self.scanner.fetch_historical_bars(
             contract, duration=duration, bar_size=bar_size,

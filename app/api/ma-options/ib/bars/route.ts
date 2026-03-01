@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
     const duration = searchParams.get("duration") || "5 D";
     const barSize = searchParams.get("barSize") || "5 mins";
     const useRTH = searchParams.get("useRTH") === "true";
+    const contractMonth = searchParams.get("contractMonth") || "";
 
     if (!ticker) {
       return NextResponse.json(
@@ -59,6 +60,7 @@ export async function GET(request: NextRequest) {
           whatToShow: "TRADES",
           useRTH,
           userId: user.id,
+          ...(contractMonth ? { contractMonth } : {}),
         }),
       }
     );

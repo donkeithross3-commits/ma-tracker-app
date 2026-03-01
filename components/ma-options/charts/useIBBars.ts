@@ -31,6 +31,7 @@ interface UseIBBarsOptions {
   multiplier: number;
   timespan: "minute" | "hour" | "day";
   enabled?: boolean; // default true — set false to skip fetching (React hooks rules)
+  contractMonth?: string; // e.g. "202603" for ESH6 — omit for continuous front-month
 }
 
 interface UseIBBarsResult {
@@ -46,7 +47,7 @@ interface UseIBBarsResult {
 
 export function useIBBars(
   ticker: string,
-  { secType, exchange, multiplier, timespan, enabled = true }: UseIBBarsOptions
+  { secType, exchange, multiplier, timespan, enabled = true, contractMonth }: UseIBBarsOptions
 ): UseIBBarsResult {
   const [bars, setBars] = useState<ChartBar[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +77,7 @@ export function useIBBars(
           exchange,
           duration,
           barSize,
+          ...(contractMonth ? { contractMonth } : {}),
         });
 
         const res = await fetch(`/api/ma-options/ib/bars?${params}`, {
@@ -125,7 +127,7 @@ export function useIBBars(
         if (!isAppend) setLoading(false);
       }
     },
-    [ticker, secType, exchange, multiplier, timespan, enabled]
+    [ticker, secType, exchange, multiplier, timespan, enabled, contractMonth]
   );
 
   // Initial fetch + poll
