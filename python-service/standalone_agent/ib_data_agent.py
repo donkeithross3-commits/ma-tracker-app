@@ -2128,6 +2128,12 @@ class IBDataAgent:
                 await self.websocket.send(json.dumps({"type": "heartbeat"}))
                 # Piggyback agent resource state on every heartbeat cycle
                 state = self.resource_manager.get_state_report()
+                # Include IB connection status so relay can answer status
+                # checks from cache without sending a request through the
+                # congested WebSocket (avoids timeout on page load).
+                state["ib_connected"] = bool(
+                    self.scanner and self.scanner.isConnected()
+                )
                 await self.websocket.send(json.dumps({
                     "type": "agent_state",
                     **state

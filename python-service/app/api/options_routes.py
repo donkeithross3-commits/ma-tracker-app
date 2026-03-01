@@ -1363,15 +1363,19 @@ async def relay_agent_state():
 async def relay_ib_status(user_id: Optional[str] = Query(None)):
     """
     Check IB connection status through WebSocket relay.
-    
-    If user_id is provided, returns connected=true only if that user's own
-    agent has IB connected.  If user_id is omitted (legacy / admin), returns
-    connected=true if ANY provider has IB connected.
+
+    Uses cached heartbeat data from the agent (updated every ~10s) instead
+    of sending a real-time request through the WebSocket. This avoids
+    timeouts when the agent is busy processing other requests (positions,
+    chart data) on page load.
+
+    If user_id is provided, checks that user's agent first, then falls back
+    to any connected agent (cross-user fallback for single-user deployments).
     """
     try:
         registry = get_registry()
         status = registry.get_status()
-        
+
         if status["providers_connected"] == 0:
             logger.info("relay_ib_status: no providers connected")
             return {
@@ -1379,110 +1383,74 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
                 "source": "relay",
                 "message": "No IB data provider connected"
             }
-        
-        # Decide which providers to query
+
+        # Decide which providers to check
         target_user_id = user_id.strip() if user_id else None
-        providers_to_query = status["providers"]
+        providers_to_check = status["providers"]
         if target_user_id:
-            # Try the requesting user's own provider(s) first
             user_providers = [
-                p for p in providers_to_query
+                p for p in providers_to_check
                 if p.get("user_id") == target_user_id
             ]
             if user_providers:
-                providers_to_query = user_providers
+                providers_to_check = user_providers
             else:
                 # Cross-user fallback: single-user deployment — use any connected agent
                 logger.info(
                     f"relay_ib_status: no provider for user {target_user_id}, "
                     f"falling back to all {status['providers_connected']} provider(s)"
                 )
-        
-        logger.info(f"relay_ib_status: querying {len(providers_to_query)} provider(s) (user_filter={target_user_id})")
-        
-        # Query selected providers for their IB status
+
+        # Check cached ib_connected from heartbeat data (instant, no WebSocket round-trip)
         connected_provider = None
-        all_responses = []
-        loop = asyncio.get_running_loop()
-        
-        for provider_info in providers_to_query:
+        provider_statuses = []
+        now = time.time()
+
+        for provider_info in providers_to_check:
             provider_id = provider_info["id"]
             prov_user_id = provider_info.get("user_id")
-            
-            try:
-                # Get the actual provider object
-                provider = await registry.get_provider_by_id(provider_id)
-                if not provider:
-                    logger.warning(f"relay_ib_status: provider {provider_id} no longer in registry, skipping")
-                    continue
-                    
-                # Send ib_status request to this specific provider
-                request_id = str(uuid.uuid4())
-                future = loop.create_future()
-                
-                pending = PendingRequest(
-                    request_id=request_id,
-                    request_type="ib_status",
-                    payload={},
-                    future=future
-                )
-                await registry.add_pending_request(pending)
-                
-                await provider.websocket.send_json({
-                    "type": "request",
-                    "request_id": request_id,
-                    "request_type": "ib_status",
-                    "payload": {}
-                })
-                
-                # Wait for response with short timeout
+            ib_connected = provider_info.get("ib_connected", False)
+            last_hb = provider_info.get("last_heartbeat", "")
+
+            # Consider stale if no heartbeat in 90s (heartbeat interval is ~10s,
+            # timeout is 3x30s=90s — match the existing heartbeat timeout)
+            stale = False
+            if last_hb:
                 try:
-                    response_data = await asyncio.wait_for(future, timeout=5.0)
-                    # Defensive: agent may send success=True but data=None in edge cases
-                    if response_data is None:
-                        response_data = {}
-                    is_connected = response_data.get("connected", False)
-                    all_responses.append({
-                        "provider_id": provider_id,
-                        "user_id": prov_user_id,
-                        "connected": is_connected
-                    })
-                    if is_connected:
-                        connected_provider = provider_id
-                    logger.info(f"relay_ib_status: provider {provider_id} (user={prov_user_id}) -> connected={is_connected}")
-                except asyncio.TimeoutError:
-                    all_responses.append({
-                        "provider_id": provider_id,
-                        "user_id": prov_user_id,
-                        "connected": False,
-                        "error": "timeout"
-                    })
-                    logger.warning(f"relay_ib_status: provider {provider_id} (user={prov_user_id}) -> timeout")
-                finally:
-                    await registry.remove_pending_request(request_id)
-                    
-            except Exception as e:
-                logger.error(f"Error querying provider {provider_id}: {e}")
-                all_responses.append({
-                    "provider_id": provider_id,
-                    "user_id": prov_user_id,
-                    "connected": False,
-                    "error": str(e)
-                })
-        
-        # Return connected if ANY provider has IB connected
+                    from datetime import datetime as dt
+                    hb_time = dt.fromisoformat(last_hb).timestamp()
+                    stale = (now - hb_time) > 90
+                except (ValueError, TypeError):
+                    stale = True
+
+            entry = {
+                "provider_id": provider_id,
+                "user_id": prov_user_id,
+                "connected": ib_connected and not stale,
+                "source": "heartbeat_cache",
+            }
+            if stale:
+                entry["error"] = "heartbeat_stale"
+            provider_statuses.append(entry)
+
+            if ib_connected and not stale:
+                connected_provider = provider_id
+
         is_connected = connected_provider is not None
-        logger.info(f"relay_ib_status: result connected={is_connected} (connected_provider={connected_provider})")
-        
+        logger.info(
+            f"relay_ib_status: result connected={is_connected} "
+            f"(cached, {len(providers_to_check)} provider(s), user_filter={target_user_id})"
+        )
+
         return {
             "connected": is_connected,
             "source": "relay",
             "providers": status["providers"],
-            "provider_statuses": all_responses,
+            "provider_statuses": provider_statuses,
             "connected_provider": connected_provider,
             "message": "IB TWS connected" if is_connected else "IB TWS not connected"
         }
-            
+
     except Exception as e:
         logger.error(f"Relay IB status error: {e}")
         return {

@@ -112,6 +112,9 @@ class DataProvider:
     connected_at: float = field(default_factory=time.time)
     last_heartbeat: float = field(default_factory=time.time)
     is_active: bool = True
+    # IB connection status (updated by agent_state messages every ~10s heartbeat)
+    ib_connected: bool = False
+    ib_connected_at: float = 0.0  # timestamp of last ib_connected=True report
     # Execution engine state (updated by agent_state messages; safe defaults for old agents)
     execution_active: bool = False
     execution_lines_held: int = 0
@@ -272,6 +275,7 @@ class ProviderRegistry:
                     "connected_at": datetime.fromtimestamp(p.connected_at).isoformat(),
                     "last_heartbeat": datetime.fromtimestamp(p.last_heartbeat).isoformat(),
                     "is_active": p.is_active,
+                    "ib_connected": p.ib_connected,
                     "execution_active": p.execution_active,
                     "execution_lines_held": p.execution_lines_held,
                     "available_scan_lines": p.available_scan_lines,
@@ -401,10 +405,17 @@ async def data_provider_websocket(websocket: WebSocket):
                     provider.execution_lines_held = int(msg.get("execution_lines_held", 0))
                     provider.available_scan_lines = int(msg.get("available_scan_lines", 90))
                     provider.accept_external_scans = bool(msg.get("accept_external_scans", True))
+                    # IB connection status (sent since agent v1.19.2)
+                    ib_conn = msg.get("ib_connected")
+                    if ib_conn is not None:
+                        provider.ib_connected = bool(ib_conn)
+                        if provider.ib_connected:
+                            provider.ib_connected_at = time.time()
                     logger.debug(
                         f"Provider {provider_id} state: exec={provider.execution_active}, "
                         f"lines_held={provider.execution_lines_held}, "
-                        f"scan_avail={provider.available_scan_lines}"
+                        f"scan_avail={provider.available_scan_lines}, "
+                        f"ib_connected={provider.ib_connected}"
                     )
                 
                 elif msg_type == "execution_telemetry":
