@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-01",
+  "title": "Week of Feb 24 - Mar 1, 2026",
+  "summary": "Custom charting system with TradingView-quality candlestick charts, signal overlays, and trade markers.",
+  "features": [
+    {
+      "id": "charts-tab",
+      "title": "Custom Charting System",
+      "summary": "TradingView-quality candlestick charts with BMC signal overlays and trade entry/exit markers in a drag-and-drop widget grid",
+      "description": "A new Charts tab in M&A Options brings professional-grade candlestick charts powered by lightweight-charts v5 and Polygon.io market data.\n\nKey features:\n- Full OHLCV candlestick + volume histogram charts for any ticker\n- Timeframe selector: 1m, 5m, 15m, 1h, 1D\n- BMC signal overlay: probability markers (arrows with percentages) and signal histogram showing call/put direction with color intensity\n- Trade markers: entry arrows (green BUY) and exit arrows (colored by P&L) with trailing stop, stop loss, and profit target labels\n- Drag-and-drop widget grid with signal panel and positions panel\n- Layout persistence via localStorage\n- Independent polling: 30s bars, 5s signals, 10s execution (all pause when tab is hidden)\n\nArchitecturally, charts are completely isolated from the trading engine. They read from Polygon.io via a server-side API proxy and overlay signals from the existing BMC/execution polling endpoints. If charts crash, trading is unaffected.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
