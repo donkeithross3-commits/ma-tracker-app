@@ -70,14 +70,26 @@ async def startup():
     set_risk_pool(_pool)
 
     # Mark any stale 'running' risk assessment runs as 'interrupted'
-    # (handles container restarts mid-assessment)
+    # and recover costs from orphaned Anthropic batches
     try:
         async with _pool.acquire() as conn:
-            updated = await conn.execute(
-                "UPDATE risk_assessment_runs SET status = 'interrupted' WHERE status = 'running'"
+            # Find runs with batch_ids that were interrupted
+            stale_runs = await conn.fetch(
+                "SELECT id, batch_id FROM risk_assessment_runs WHERE status = 'running'"
             )
-            if updated and updated != "UPDATE 0":
+            if stale_runs:
+                orphaned_batch_ids = [r["batch_id"] for r in stale_runs if r["batch_id"]]
+                updated = await conn.execute(
+                    "UPDATE risk_assessment_runs SET status = 'interrupted' WHERE status = 'running'"
+                )
                 logger.warning("Marked stale risk runs as interrupted: %s", updated)
+
+                # Recover costs from orphaned batches
+                if orphaned_batch_ids:
+                    try:
+                        await _recover_orphaned_batches(_pool, orphaned_batch_ids)
+                    except Exception as e:
+                        logger.warning("Orphaned batch recovery failed (non-fatal): %s", e)
     except Exception:
         logger.warning("Could not clean up stale risk runs", exc_info=True)
 
@@ -97,6 +109,78 @@ async def startup():
         logger.info("Scheduler disabled (ENABLE_SCHEDULER != true)")
 
     logger.info("Portfolio service ready on port 8001")
+
+
+async def _recover_orphaned_batches(pool, batch_ids: list[str]):
+    """Recover costs from Anthropic batches that completed while we were down.
+
+    When the container restarts mid-batch, the batch keeps running server-side.
+    We get charged but lose the results. This function checks each orphaned
+    batch_id, and if it completed, backfills the costs into api_call_log.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return
+
+    try:
+        from anthropic import Anthropic
+        from .risk.model_config import compute_cost
+        from .risk.api_cost_tracker import log_api_call
+    except ImportError:
+        logger.warning("Cannot import Anthropic SDK for batch recovery")
+        return
+
+    client = Anthropic(api_key=api_key)
+
+    for batch_id in batch_ids:
+        try:
+            batch = client.messages.batches.retrieve(batch_id)
+            if batch.processing_status != "ended":
+                logger.info("Orphaned batch %s still processing, skipping", batch_id)
+                continue
+
+            # Check if we already backfilled this batch
+            async with pool.acquire() as conn:
+                existing = await conn.fetchval(
+                    "SELECT count(*) FROM api_call_log WHERE metadata->>'batch_id' = $1",
+                    batch_id,
+                )
+                if existing > 0:
+                    logger.info("Orphaned batch %s already backfilled (%d rows), skipping", batch_id, existing)
+                    continue
+
+            # Backfill costs from completed batch results
+            recovered = 0
+            total_cost = 0.0
+            for entry in client.messages.batches.results(batch_id):
+                if entry.result.type == "succeeded":
+                    msg = entry.result.message
+                    usage = msg.usage
+                    cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+                    cost = compute_cost(
+                        msg.model, usage.input_tokens, usage.output_tokens,
+                        cache_create, cache_read,
+                    ) * 0.5  # Batch discount
+
+                    ticker = entry.custom_id.replace("risk-", "", 1)
+                    await log_api_call(
+                        pool, source="risk_engine", model=msg.model, ticker=ticker,
+                        input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
+                        cache_creation_tokens=cache_create, cache_read_tokens=cache_read,
+                        cost_usd=cost,
+                        metadata={"batch_id": batch_id, "recovered_orphan": True},
+                    )
+                    recovered += 1
+                    total_cost += cost
+
+            logger.info(
+                "Recovered orphaned batch %s: %d calls, $%.4f total",
+                batch_id, recovered, total_cost,
+            )
+
+        except Exception as e:
+            logger.warning("Failed to recover batch %s: %s", batch_id, e)
 
 
 @app.on_event("shutdown")

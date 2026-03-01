@@ -88,12 +88,16 @@ def build_batch_requests(deal_requests: list[dict]) -> list[Request]:
 async def run_batch_assessment(
     client,
     deal_requests: list[dict],
+    pool=None,
+    run_id=None,
 ) -> dict[str, dict]:
     """Submit deal assessments as a batch and poll for results.
 
     Args:
         client: Anthropic client instance.
         deal_requests: List of dicts with ticker, model, system_prompt, user_prompt.
+        pool: Optional asyncpg pool for tracking batch_id on risk_assessment_runs.
+        run_id: Optional run_id to link the batch to.
 
     Returns:
         Dict mapping ticker to parsed response dict (with _meta).
@@ -116,6 +120,17 @@ async def run_batch_assessment(
 
     batch_id = message_batch.id
     logger.info("Batch %s created, polling for completion...", batch_id)
+
+    # Persist batch_id so we can recover costs if the container restarts
+    if pool and run_id:
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE risk_assessment_runs SET batch_id = $1 WHERE id = $2",
+                    batch_id, run_id,
+                )
+        except Exception as e:
+            logger.warning("Failed to record batch_id (non-fatal): %s", e)
 
     # Poll for completion
     elapsed = 0

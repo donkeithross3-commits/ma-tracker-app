@@ -962,7 +962,7 @@ class RiskAssessmentEngine:
         if ENABLE_BATCH_MODE and len(api_bucket) >= 2:
             try:
                 batch_results = await self._run_batch_assessments(
-                    api_bucket, deal_contexts,
+                    api_bucket, deal_contexts, run_id=run_id,
                 )
                 batch_used = True
             except Exception as e:
@@ -1757,7 +1757,7 @@ Keep it actionable and direct."""
     # Batch and result processing helpers
     # ------------------------------------------------------------------
     async def _run_batch_assessments(
-        self, api_bucket: list[str], deal_contexts: dict,
+        self, api_bucket: list[str], deal_contexts: dict, run_id=None,
     ) -> dict[str, dict]:
         """Submit all API-needing deals as a single batch request.
 
@@ -1797,7 +1797,10 @@ Keep it actionable and direct."""
                 "user_prompt": user_prompt,
             })
 
-        return await run_batch_assessment(self.anthropic, deal_requests)
+        return await run_batch_assessment(
+            self.anthropic, deal_requests,
+            pool=self.pool, run_id=run_id,
+        )
 
     async def _process_assessment_result(
         self,
