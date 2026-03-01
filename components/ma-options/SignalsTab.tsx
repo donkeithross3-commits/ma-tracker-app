@@ -540,18 +540,38 @@ export default function SignalsTab() {
   }, [running, fetchExecutionStatus]);
 
   const handleSetBudget = useCallback(async (budget: number) => {
-    const res = await fetch("/api/ma-options/execution/budget", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ budget }),
-      credentials: "include",
+    // Optimistic update — UI reflects immediately, next poll reconciles
+    let prevBudget: number | undefined;
+    setExecutionStatus(es => {
+      if (!es) return es;
+      prevBudget = es.order_budget;
+      return { ...es, order_budget: budget };
     });
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}));
-      throw new Error(json.error || `Budget update failed: ${res.status}`);
+
+    const rollback = () => {
+      if (prevBudget !== undefined) {
+        const restore = prevBudget;
+        setExecutionStatus(es => es ? { ...es, order_budget: restore } : es);
+      }
+    };
+
+    try {
+      const res = await fetch("/api/ma-options/execution/budget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ budget }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        rollback();
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || `Budget update failed: ${res.status}`);
+      }
+    } catch (e) {
+      rollback();
+      throw e;
     }
-    setTimeout(fetchExecutionStatus, 300);
-  }, [fetchExecutionStatus]);
+  }, []);
 
   // ── IB Execution P&L (on-demand fetch) ──
   interface IBTrade {
@@ -603,6 +623,8 @@ export default function SignalsTab() {
   const handleStart = async () => {
     setLoading(true);
     setError(null);
+    // Optimistic: show running immediately, revert on error
+    setRunning(true);
     try {
       const tickers = enabledTickers.map(t => ({
         ticker: t,
@@ -615,9 +637,12 @@ export default function SignalsTab() {
         credentials: "include",
       });
       const data = await res.json();
-      if (data.error) setError(data.error);
-      else setRunning(true);
+      if (data.error) {
+        setRunning(false);
+        setError(data.error);
+      }
     } catch (e: any) {
+      setRunning(false);
       setError(e.message || "Failed to start");
     } finally {
       setLoading(false);
@@ -628,15 +653,20 @@ export default function SignalsTab() {
   const handleStop = async () => {
     setLoading(true);
     setError(null);
+    // Optimistic: show stopped immediately, revert on error
+    setRunning(false);
     try {
       const res = await fetch("/api/ma-options/execution/stop", {
         method: "POST",
         credentials: "include",
       });
       const data = await res.json();
-      if (data.error) setError(data.error);
-      else setRunning(false);
+      if (data.error) {
+        setRunning(true);
+        setError(data.error);
+      }
     } catch (e: any) {
+      setRunning(true);
       setError(e.message || "Failed to stop");
     } finally {
       setLoading(false);
