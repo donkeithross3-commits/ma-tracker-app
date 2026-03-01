@@ -290,8 +290,8 @@ def _parse_submissions_filings(
         primary_doc = primary_docs[i] if i < len(primary_docs) else ""
         desc = descriptions[i] if i < len(descriptions) else form
 
-        # Build filing URL: use filer CIK from accession number
-        filer_cik = accession.split("-")[0] if accession else company_cik
+        # Build filing URL: use filer CIK from accession number (strip leading zeros)
+        filer_cik = accession.split("-")[0].lstrip("0") if accession else company_cik
         acc_nodash = accession.replace("-", "")
         if primary_doc:
             filing_url = f"https://www.sec.gov/Archives/edgar/data/{filer_cik}/{acc_nodash}/{primary_doc}"

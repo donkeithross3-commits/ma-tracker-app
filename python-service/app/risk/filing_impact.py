@@ -155,6 +155,7 @@ async def _fetch_filing_content(url: str) -> Optional[str]:
     try:
         async with httpx.AsyncClient(
             timeout=20.0,
+            follow_redirects=True,
             headers={
                 "User-Agent": "M&A Tracker alerts@ma-tracker.com",
                 "Accept": "text/html,application/xhtml+xml,text/plain",
