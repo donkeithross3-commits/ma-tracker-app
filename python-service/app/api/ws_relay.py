@@ -501,29 +501,27 @@ async def send_request_to_provider(
         logger.info(f"Routing request to provider for user {user_id}: {provider.provider_id}")
     
     if not provider:
-        # Distinguish between "no agents at all" and "agent connected but for a different user"
-        status = registry.get_status()
-        if status["providers_connected"] == 0:
-            raise HTTPException(
-                status_code=503,
-                detail="No IB data provider connected. Please start the local agent."
-            )
-        else:
-            # Agent(s) connected but none match this user_id
-            connected_users = [p.get("user_id", "?") for p in status["providers"]]
-            logger.warning(
-                f"send_request_to_provider: user_id={user_id} has no matching agent. "
-                f"Connected agents belong to user(s): {connected_users}"
-            )
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "An IB agent is connected, but it belongs to a different account. "
-                    "Make sure you are logged into the dashboard with the same account "
-                    "that generated the agent's API key, or re-download the agent from "
-                    "this account."
-                ),
-            )
+        # No provider matched the strict user_id filter — try cross-user fallback.
+        # This is a single-user deployment: one agent, one IB account, two dashboard logins.
+        if user_id and not allow_fallback_to_any_provider:
+            provider = await registry.get_active_provider(user_id=None, allow_fallback_to_any=True)
+            if provider:
+                logger.info(
+                    f"send_request_to_provider: cross-user fallback for {request_type} "
+                    f"(user={user_id}, provider_user={provider.user_id})"
+                )
+        if not provider:
+            status = registry.get_status()
+            if status["providers_connected"] == 0:
+                raise HTTPException(
+                    status_code=503,
+                    detail="No IB data provider connected. Please start the local agent."
+                )
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="No IB agent available for your request. Please try again."
+                )
 
     # ── Priority-aware throttling for scan requests on execution-active agents ──
     is_scan = request_type in SCAN_REQUESTS
