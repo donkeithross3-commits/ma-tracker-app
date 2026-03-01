@@ -1371,7 +1371,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             hour, minute = now.hour, now.minute
             current_minutes = hour * 60 + minute
 
-            start_parts = cfg.get("scan_start", "13:30").split(":")
+            start_parts = cfg.get("scan_start", "09:30").split(":")
             end_parts = cfg.get("scan_end", "15:55").split(":")
             start_minutes = int(start_parts[0]) * 60 + int(start_parts[1])
             end_minutes = int(end_parts[0]) * 60 + int(end_parts[1])
