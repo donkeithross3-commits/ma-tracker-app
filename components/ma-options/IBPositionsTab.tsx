@@ -372,7 +372,7 @@ interface IBPositionsTabProps {
 export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabProps) {
   const { data: session } = useSession();
   const userAlias = session?.user?.alias ?? null;
-  const { isConnected, lastMessage: connectionMessage } = useIBConnection();
+  const { isConnected, isChecking, lastMessage: connectionMessage } = useIBConnection();
   const { prefs, loaded: prefsLoaded, updatePrefs, getVisibleColumns, setVisibleColumns, isComfort } = useUIPreferences();
 
   /* ── Column visibility: positions table ──
@@ -1552,7 +1552,7 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
   }, {});
   const totalCostBasis = groups.reduce((s, g) => s + g.costBasis, 0);
 
-  if (!isConnected) {
+  if (!isConnected && !isChecking) {
     return (
       <div className="rounded-lg border border-gray-600 bg-gray-800/50 px-4 py-5 text-base text-gray-200">
         <p className="mb-2 font-medium">
