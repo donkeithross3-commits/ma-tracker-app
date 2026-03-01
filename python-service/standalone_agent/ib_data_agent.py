@@ -547,9 +547,9 @@ class IBDataAgent:
         For futures, pass secType="FUT" plus exchange, lastTradeDateOrContractMonth,
         and optionally multiplier in the payload.
 
-        Bare futures root symbols (e.g. "ES" with no contract month) use CONTFUT
-        (IB continuous front-month). Full contract tickers (e.g. "ESH6") are parsed
-        into base symbol + contract month.
+        Bare futures root symbols (e.g. "ES" with no contract month) auto-resolve
+        to the front-month contract. CONTFUT doesn't work with reqMktData — only
+        reqHistoricalData — so we derive YYYYMM for the nearest valid contract.
         """
         ticker = payload.get("ticker", "").upper()
 
@@ -584,6 +584,26 @@ class IBDataAgent:
             "N": "07", "Q": "08", "U": "09", "V": "10", "X": "11", "Z": "12",
         }
 
+        # Quarterly futures symbols (equity indices) — only trade H/M/U/Z months
+        _QUARTERLY_SYMBOLS = {
+            "ES", "NQ", "YM", "RTY", "MES", "MNQ", "M2K", "MYM", "EMD",
+        }
+
+        def _get_front_month(symbol: str) -> str:
+            """Derive front-month YYYYMM for a futures symbol.
+            Quarterly symbols → nearest H(03)/M(06)/U(09)/Z(12).
+            Monthly symbols → current month."""
+            from datetime import datetime as _dt
+            now = _dt.utcnow()
+            if symbol in _QUARTERLY_SYMBOLS:
+                quarters = [3, 6, 9, 12]
+                for q in quarters:
+                    if q >= now.month:
+                        return f"{now.year}{q:02d}"
+                return f"{now.year + 1}03"  # past Dec → next year Mar
+            else:
+                return f"{now.year}{now.month:02d}"
+
         # Build a resolved contract if the caller provided contract metadata
         resolved = None
         sec_type = payload.get("secType", "STK")
@@ -597,8 +617,6 @@ class IBDataAgent:
 
             if con_id:
                 # When conId is available, use ONLY conId + exchange.
-                # Setting other fields (symbol, secType, expiry, multiplier) alongside
-                # conId causes IB to validate ALL of them — any mismatch → error 200.
                 if not exch and sec_type == "FUT":
                     exch = _FUTURES_EXCHANGE.get(ticker, "CME")
                 resolved.conId = con_id
@@ -606,7 +624,7 @@ class IBDataAgent:
                 logger.info(f"fetch_underlying: using conId={con_id} exchange={resolved.exchange} "
                             f"for {ticker} ({sec_type})")
             elif sec_type == "FUT":
-                # Futures contract — parse full tickers (ESH6) and use CONTFUT for bare roots
+                # Futures contract — parse full tickers (ESH6) or auto-resolve front-month
                 contract_month = payload.get("lastTradeDateOrContractMonth", "")
 
                 # Try to parse full contract ticker: ESH6 → base="ES", month="03", year="2026"
@@ -623,24 +641,22 @@ class IBDataAgent:
                 else:
                     resolved.symbol = ticker
 
+                # Auto-derive front-month if no contract month specified
+                if not contract_month:
+                    contract_month = _get_front_month(resolved.symbol)
+
                 if not exch:
                     exch = _FUTURES_EXCHANGE.get(resolved.symbol, "CME")
+
+                resolved.secType = "FUT"
                 resolved.currency = "USD"
                 resolved.exchange = exch
-
-                if contract_month:
-                    # Specific contract month — use FUT
-                    resolved.secType = "FUT"
-                    resolved.lastTradeDateOrContractMonth = contract_month
-                else:
-                    # Bare root symbol (e.g. "ES") — use CONTFUT for continuous front-month
-                    resolved.secType = "CONTFUT"
+                resolved.lastTradeDateOrContractMonth = contract_month
 
                 if payload.get("multiplier"):
                     resolved.multiplier = payload["multiplier"]
                 logger.info(f"fetch_underlying: futures {ticker} → symbol={resolved.symbol} "
-                            f"secType={resolved.secType} month={contract_month or 'continuous'} "
-                            f"exchange={resolved.exchange}")
+                            f"secType=FUT month={contract_month} exchange={resolved.exchange}")
             else:
                 # Non-futures, non-conId (e.g. IND)
                 resolved.symbol = ticker
