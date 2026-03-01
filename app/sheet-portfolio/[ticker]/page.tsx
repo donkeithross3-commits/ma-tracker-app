@@ -662,6 +662,16 @@ export default function DealDetailPage() {
           </div>
         )}
 
+        {/* Sources link */}
+        <div className="mb-3 flex items-center gap-3">
+          <Link
+            href={`/sheet-portfolio/${ticker}/sources`}
+            className="text-xs text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1"
+          >
+            📄 View Filings &amp; News Sources →
+          </Link>
+        </div>
+
         {/* Main content: 3-column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
 

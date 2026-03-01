@@ -1965,3 +1965,117 @@ async def delete_milestone(milestone_id: str):
     except Exception as e:
         logger.error("Failed to delete milestone %s: %s", milestone_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/sources/{ticker}
+# ---------------------------------------------------------------------------
+@router.get("/sources/{ticker}")
+async def get_deal_sources(ticker: str):
+    """Returns all SEC filings (with AI impact assessments) and news articles for a ticker."""
+    pool = _get_pool()
+    ticker = ticker.upper()
+    if not re.match(r"^[A-Z]{1,10}$", ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker")
+    try:
+        async with pool.acquire() as conn:
+            # Filings with optional impact assessments
+            filing_rows = await conn.fetch(
+                """SELECT
+                    f.accession_number,
+                    f.filing_type,
+                    f.company_name,
+                    f.filing_date,
+                    f.filing_url,
+                    f.description,
+                    f.detected_at,
+                    i.impact_level,
+                    i.summary AS impact_summary,
+                    i.key_detail,
+                    i.risk_factor_affected AS impact_risk_factor,
+                    i.grade_change_suggested,
+                    i.action_required
+                FROM portfolio_edgar_filings f
+                LEFT JOIN portfolio_filing_impacts i
+                    ON f.ticker = i.ticker AND f.accession_number = i.filing_accession
+                WHERE f.ticker = $1
+                ORDER BY f.filing_date DESC, f.detected_at DESC""",
+                ticker,
+            )
+
+            # News articles
+            news_rows = await conn.fetch(
+                """SELECT
+                    title, publisher, published_at, article_url,
+                    summary, relevance_score, risk_factor_affected
+                FROM deal_news_articles
+                WHERE ticker = $1
+                ORDER BY published_at DESC""",
+                ticker,
+            )
+
+        # Build filings list with nested impact object
+        filings = []
+        material_count = 0
+        impact_count = 0
+        for r in filing_rows:
+            rd = _row_to_dict(r)
+            impact = None
+            if rd.get("impact_level"):
+                impact = {
+                    "impact_level": rd["impact_level"],
+                    "summary": rd["impact_summary"],
+                    "key_detail": rd["key_detail"],
+                    "risk_factor_affected": rd["impact_risk_factor"],
+                    "grade_change_suggested": rd["grade_change_suggested"],
+                    "action_required": rd["action_required"],
+                }
+                impact_count += 1
+            # Count material filings (those with non-trivial impact)
+            if rd.get("impact_level") and rd["impact_level"] not in ("none", "low"):
+                material_count += 1
+            filings.append({
+                "accession_number": rd["accession_number"],
+                "filing_type": rd["filing_type"],
+                "company_name": rd["company_name"],
+                "filing_date": rd["filing_date"],
+                "filing_url": rd["filing_url"],
+                "description": rd["description"],
+                "detected_at": rd["detected_at"],
+                "impact": impact,
+            })
+
+        # Build news list
+        news = []
+        keyword_matched = 0
+        for r in news_rows:
+            nd = _row_to_dict(r)
+            if nd.get("relevance_score") and nd["relevance_score"] > 0.1:
+                keyword_matched += 1
+            news.append({
+                "title": nd["title"],
+                "publisher": nd["publisher"],
+                "published_at": nd["published_at"],
+                "article_url": nd["article_url"],
+                "summary": nd["summary"],
+                "relevance_score": nd["relevance_score"],
+                "risk_factor_affected": nd["risk_factor_affected"],
+            })
+
+        return {
+            "ticker": ticker,
+            "filings": filings,
+            "news": news,
+            "stats": {
+                "total_filings": len(filings),
+                "material_filings": material_count,
+                "filings_with_impact": impact_count,
+                "total_news": len(news),
+                "keyword_matched_news": keyword_matched,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to fetch sources for %s: %s", ticker, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
