@@ -188,7 +188,7 @@ async def _search_edgar(
     target is "Electronic Arts" — SEC filings reference the target name, not just
     the acquiror.
     """
-    date_from = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d")
+    date_from = (datetime.utcnow() - timedelta(days=14)).strftime("%Y-%m-%d")
     date_to = datetime.utcnow().strftime("%Y-%m-%d")
 
     # Build query: ticker OR acquiror name OR target name
@@ -239,7 +239,12 @@ async def _search_edgar(
     results = []
     for hit in data.get("hits", {}).get("hits", []):
         source = hit.get("_source", {})
-        accession = source.get("file_num", "") or hit.get("_id", "")
+        # file_num can be a list in EFTS responses — normalise to string
+        raw_accession = source.get("file_num", "") or hit.get("_id", "")
+        if isinstance(raw_accession, list):
+            accession = raw_accession[0] if raw_accession else ""
+        else:
+            accession = raw_accession
         filing_type = source.get("form_type", "")
         results.append({
             "accession_number": accession,
