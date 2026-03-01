@@ -1,10 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import * as Tabs from "@radix-ui/react-tabs";
 import IBPositionsTab from "./IBPositionsTab";
 import SignalsTab from "./SignalsTab";
 import ManualTradingV2Tab from "./manual-v2/ManualTradingV2Tab";
+
+// lightweight-charts requires `window` — SSR-safe dynamic import
+const ChartsTab = dynamic(() => import("./charts/ChartsTab"), { ssr: false });
 
 interface OptionsScannerTabsProps {
   /** When "KRJ", default tab is manual; otherwise manual. */
@@ -37,6 +41,12 @@ export default function OptionsScannerTabs({
         >
           Algorithmic
         </Tabs.Trigger>
+        <Tabs.Trigger
+          value="charts"
+          className="px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
+        >
+          Charts
+        </Tabs.Trigger>
       </Tabs.List>
 
       <Tabs.Content value="manual">
@@ -49,6 +59,10 @@ export default function OptionsScannerTabs({
 
       <Tabs.Content value="algorithmic">
         <SignalsTab />
+      </Tabs.Content>
+
+      <Tabs.Content value="charts">
+        <ChartsTab />
       </Tabs.Content>
     </Tabs.Root>
   );
