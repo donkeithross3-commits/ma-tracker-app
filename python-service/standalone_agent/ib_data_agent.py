@@ -1914,6 +1914,20 @@ class IBDataAgent:
                     self._persist_runtime_states()
                     # Check for expired options on the same ~20s cadence
                     self._check_expired_positions()
+                # Sync dirty positions to server for P&L history persistence
+                dirty_positions = self.position_store.drain_dirty()
+                if dirty_positions and self.websocket:
+                    try:
+                        await self.websocket.send(json.dumps({
+                            "type": "position_sync",
+                            "positions": dirty_positions,
+                        }))
+                        logger.info("Position sync: pushed %d dirty positions", len(dirty_positions))
+                    except Exception as sync_err:
+                        logger.warning("Position sync failed: %s — re-dirtying", sync_err)
+                        # Re-dirty so they retry next cycle
+                        for p in dirty_positions:
+                            self.position_store._dirty_ids.add(p["id"])
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")
@@ -2148,10 +2162,13 @@ class IBDataAgent:
                     }))
                     logger.info(f"Reported IB accounts to relay: {ib_accounts}")
 
+                # Mark all positions dirty for full sync on (re)connect
+                self.position_store.mark_all_dirty()
+
                 heartbeat_task = asyncio.create_task(self.send_heartbeat())
                 handler_task = asyncio.create_task(self.message_handler())
                 event_push_task = asyncio.create_task(self._account_event_push_loop())
-                
+
                 logger.info("Agent running - ready to handle requests")
                 logger.info("Press Ctrl+C to stop")
                 

@@ -36,6 +36,7 @@ class PositionStore:
         self._bak_path = path + ".bak"
         self._lock = threading.Lock()
         self._positions: Dict[str, dict] = {}  # id -> position record
+        self._dirty_ids: set = set()  # position IDs needing sync to server
         self._load()
 
     # ── Public API ──
@@ -68,6 +69,7 @@ class PositionStore:
                 "fill_log": [],
             }
             self._positions[position_id] = record
+            self._dirty_ids.add(position_id)
             self._save()
         logger.info("PositionStore: added position %s (%s)", position_id, parent_strategy)
 
@@ -89,6 +91,7 @@ class PositionStore:
                 logger.warning("PositionStore: add_fill for unknown position %s", position_id)
                 return
             pos["fill_log"].append(fill_dict)
+            self._dirty_ids.add(position_id)
             self._save()
 
     def mark_closed(self, position_id: str, exit_reason: str = "") -> None:
@@ -102,6 +105,7 @@ class PositionStore:
             pos["closed_at"] = time.time()
             if exit_reason:
                 pos["exit_reason"] = exit_reason
+            self._dirty_ids.add(position_id)
             self._save()
         logger.info("PositionStore: marked position %s as closed (reason=%s)", position_id, exit_reason or "unspecified")
 
@@ -128,6 +132,7 @@ class PositionStore:
                 logger.warning("PositionStore: set_lineage for unknown position %s", position_id)
                 return
             pos["lineage"] = lineage
+            self._dirty_ids.add(position_id)
             self._save()
 
     def update_entry(self, position_id: str, entry_updates: dict) -> None:
@@ -142,6 +147,7 @@ class PositionStore:
                 logger.warning("PositionStore: update_entry for unknown position %s", position_id)
                 return
             pos.setdefault("entry", {}).update(entry_updates)
+            self._dirty_ids.add(position_id)
             self._save()
 
     def update_fill_commission(self, position_id: str, exec_id: str, commission_report: dict) -> None:
@@ -156,8 +162,33 @@ class PositionStore:
                         fill["execution_analytics"] = {}
                     fill["execution_analytics"]["commission"] = commission_report.get("commission")
                     fill["execution_analytics"]["realized_pnl_ib"] = commission_report.get("realized_pnl")
+                    self._dirty_ids.add(position_id)
                     break
             self._save()
+
+    # ── Sync / Dirty Tracking ──
+
+    def drain_dirty(self) -> List[dict]:
+        """Return position dicts for all dirty IDs and clear the dirty set.
+
+        Thread-safe. Called by the agent heartbeat loop to push changes to the server.
+        """
+        with self._lock:
+            if not self._dirty_ids:
+                return []
+            dirty = []
+            for pid in self._dirty_ids:
+                pos = self._positions.get(pid)
+                if pos is not None:
+                    dirty.append(pos.copy())
+            self._dirty_ids.clear()
+            return dirty
+
+    def mark_all_dirty(self) -> None:
+        """Mark every position as dirty (used on startup for full sync)."""
+        with self._lock:
+            self._dirty_ids = set(self._positions.keys())
+            logger.info("PositionStore: marked all %d positions dirty for sync", len(self._dirty_ids))
 
     # ── Internal ──
 

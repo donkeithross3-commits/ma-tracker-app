@@ -2331,3 +2331,145 @@ async def relay_bmc_signal(user_id: str = ""):
         logger.error(f"Relay bmc-signal error: {e}")
         return {"error": str(e), "signal": None, "strategies": []}
 
+
+# ── P&L History Endpoints (server-side DB, no agent round-trip) ──
+
+
+@router.get("/relay/pnl-history/positions")
+async def relay_pnl_history_positions(
+    user_id: str = Query(""),
+    status: Optional[str] = Query(None),
+    symbol: Optional[str] = Query(None),
+    model_version: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Query algo position history from the database.
+
+    All filters are optional. Returns paginated results ordered by created_at DESC.
+    """
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id required")
+    try:
+        from app.trade_history.database import get_trade_db
+        trade_db = get_trade_db()
+        if not trade_db or not trade_db.pool:
+            raise HTTPException(status_code=503, detail="Trade history database not available")
+
+        positions, total_count = await trade_db.query_positions(
+            user_id=user_id,
+            status=status,
+            symbol=symbol,
+            model_version=model_version,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+            offset=offset,
+        )
+        return _sanitize_for_json({
+            "positions": positions,
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"pnl-history/positions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/relay/pnl-history/positions/{position_id}/fills")
+async def relay_pnl_history_fills(
+    position_id: str,
+    user_id: str = Query(""),
+):
+    """Return all fills for a specific position."""
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id required")
+    try:
+        from app.trade_history.database import get_trade_db
+        trade_db = get_trade_db()
+        if not trade_db or not trade_db.pool:
+            raise HTTPException(status_code=503, detail="Trade history database not available")
+
+        fills = await trade_db.query_fills(user_id, position_id)
+        return _sanitize_for_json({
+            "position_id": position_id,
+            "fills": fills,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"pnl-history/fills error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/relay/pnl-history/summary")
+async def relay_pnl_history_summary(
+    user_id: str = Query(""),
+    group_by: str = Query("date"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+):
+    """Aggregate P&L summary for closed positions.
+
+    group_by: 'date', 'symbol', or 'model_version'
+    """
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id required")
+    if group_by not in ("date", "symbol", "model_version"):
+        raise HTTPException(status_code=400, detail="group_by must be 'date', 'symbol', or 'model_version'")
+    try:
+        from app.trade_history.database import get_trade_db
+        trade_db = get_trade_db()
+        if not trade_db or not trade_db.pool:
+            raise HTTPException(status_code=503, detail="Trade history database not available")
+
+        result = await trade_db.query_summary(
+            user_id=user_id,
+            group_by=group_by,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        return _sanitize_for_json(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"pnl-history/summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class BackfillRequest(BaseModel):
+    userId: str
+    positions: list
+
+
+@router.post("/relay/pnl-history/backfill")
+async def relay_pnl_history_backfill(request: BackfillRequest):
+    """One-time bulk upload of historical positions from position_store.json.
+
+    Body: { userId: "...", positions: [ ...full position_store.json contents... ] }
+    """
+    if not request.userId:
+        raise HTTPException(status_code=400, detail="userId required")
+    try:
+        from app.trade_history.database import get_trade_db
+        trade_db = get_trade_db()
+        if not trade_db or not trade_db.pool:
+            raise HTTPException(status_code=503, detail="Trade history database not available")
+
+        count = await trade_db.upsert_positions(request.userId, request.positions)
+        return {
+            "success": True,
+            "positions_synced": count,
+            "positions_submitted": len(request.positions),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"pnl-history/backfill error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

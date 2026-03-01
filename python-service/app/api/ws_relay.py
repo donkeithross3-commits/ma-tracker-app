@@ -427,7 +427,25 @@ async def data_provider_websocket(websocket: WebSocket):
                         f"Provider {provider_id} account event: "
                         f"{event.get('event')} orderId={event.get('orderId')}"
                     )
-                
+
+                elif msg_type == "position_sync":
+                    # Agent pushes dirty positions for P&L history persistence
+                    positions = msg.get("positions", [])
+                    if positions:
+                        try:
+                            from app.trade_history.database import get_trade_db
+                            trade_db = get_trade_db()
+                            if trade_db and trade_db.pool:
+                                count = await trade_db.upsert_positions(user_id, positions)
+                                logger.debug(
+                                    f"Provider {provider_id} position_sync: "
+                                    f"{count}/{len(positions)} upserted"
+                                )
+                            else:
+                                logger.debug("position_sync received but TradeDatabase not available")
+                        except Exception as e:
+                            logger.error(f"position_sync upsert error: {e}")
+
                 else:
                     logger.warning(f"Unknown message type from provider: {msg_type}")
                     

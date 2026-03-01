@@ -33,6 +33,7 @@ from .api.ws_relay import router as ws_relay_router
 from .api.krj_routes import router as krj_router
 from .api.portfolio_routes import router as portfolio_router
 from .edgar.database import EdgarDatabase
+from .trade_history.database import init_trade_db, shutdown_trade_db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -444,6 +445,15 @@ async def startup_event():
         logger.error(f"Failed to create database pool: {e}")
         logger.warning("API endpoints will create their own connections...")
 
+    # Initialize trade history database (algo P&L persistence)
+    try:
+        logger.info("Creating trade history database pool...")
+        await init_trade_db()
+        logger.info("\u2713 Trade history database pool created")
+    except Exception as e:
+        logger.error(f"Failed to create trade history database pool: {e}")
+        logger.warning("P&L history endpoints will not be available")
+
     # Start Halt Monitoring (commented out until migration is applied)
     # Will auto-start monitoring M&A target tickers for trading halts
     try:
@@ -483,6 +493,14 @@ async def shutdown_event():
             logger.info("✓ Database pool closed")
     except Exception as e:
         logger.error(f"Error closing database pool: {e}")
+
+    # 1b. Close trade history database pool
+    try:
+        logger.info("Closing trade history database pool...")
+        await shutdown_trade_db()
+        logger.info("\u2713 Trade history database pool closed")
+    except Exception as e:
+        logger.error(f"Error closing trade history database pool: {e}")
 
     # 2. Stop Halt Monitor
     try:
