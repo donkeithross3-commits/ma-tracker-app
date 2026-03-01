@@ -291,12 +291,13 @@ class TradeDatabase:
             params.append(model_version)
             idx += 1
         if date_from:
-            conditions.append(f"created_at >= ${idx}::timestamptz")
-            params.append(date_from)
+            conditions.append(f"created_at >= ${idx}")
+            params.append(datetime.fromisoformat(date_from + "T00:00:00+00:00" if "T" not in date_from else date_from))
             idx += 1
         if date_to:
-            conditions.append(f"created_at <= ${idx}::timestamptz")
-            params.append(date_to + "T23:59:59Z" if "T" not in date_to else date_to)
+            conditions.append(f"created_at <= ${idx}")
+            dt_str = date_to + "T23:59:59+00:00" if "T" not in date_to else date_to
+            params.append(datetime.fromisoformat(dt_str))
             idx += 1
 
         where = " AND ".join(conditions)
@@ -362,12 +363,13 @@ class TradeDatabase:
         idx = 2
 
         if date_from:
-            conditions.append(f"created_at >= ${idx}::timestamptz")
-            params.append(date_from)
+            conditions.append(f"created_at >= ${idx}")
+            params.append(datetime.fromisoformat(date_from + "T00:00:00+00:00" if "T" not in date_from else date_from))
             idx += 1
         if date_to:
-            conditions.append(f"created_at <= ${idx}::timestamptz")
-            params.append(date_to + "T23:59:59Z" if "T" not in date_to else date_to)
+            conditions.append(f"created_at <= ${idx}")
+            dt_str = date_to + "T23:59:59+00:00" if "T" not in date_to else date_to
+            params.append(datetime.fromisoformat(dt_str))
             idx += 1
 
         where = " AND ".join(conditions)
