@@ -59,7 +59,8 @@ POLYGON_PRIMARY = os.environ.get("POLYGON_PRIMARY", "true").lower() != "false"
 router = APIRouter(prefix="/options", tags=["options"])
 
 # --- Ticker validation helpers ---
-_TICKER_RE = re.compile(r"^[A-Z]{1,10}$")
+# Allow digits for futures tickers: "6E" (CME Euro FX), "ESH6" (contract month)
+_TICKER_RE = re.compile(r"^[A-Z0-9]{1,10}$")
 
 
 def validate_ticker(ticker: str) -> str:

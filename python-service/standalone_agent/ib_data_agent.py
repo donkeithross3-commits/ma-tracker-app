@@ -543,15 +543,19 @@ class IBDataAgent:
     
     async def _handle_fetch_underlying(self, payload: dict) -> dict:
         """Fetch underlying stock/futures data.
-        
+
         For futures, pass secType="FUT" plus exchange, lastTradeDateOrContractMonth,
         and optionally multiplier in the payload.
+
+        Bare futures root symbols (e.g. "ES" with no contract month) use CONTFUT
+        (IB continuous front-month). Full contract tickers (e.g. "ESH6") are parsed
+        into base symbol + contract month.
         """
         ticker = payload.get("ticker", "").upper()
-        
+
         if not self.scanner or not self.scanner.isConnected():
             return {"error": self._ib_not_connected_error()}
-        
+
         # Futures exchange lookup — IB requires exchange even with conId
         _FUTURES_EXCHANGE = {
             # Metals — COMEX (IB uses "COMEX" exchange, not "NYMEX")
@@ -574,28 +578,71 @@ class IBDataAgent:
             "ZC": "CBOT", "ZS": "CBOT", "ZW": "CBOT", "ZM": "CBOT", "ZL": "CBOT",
         }
 
+        # IB month codes for parsing contract tickers like "ESH6"
+        _MONTH_CODES = {
+            "F": "01", "G": "02", "H": "03", "J": "04", "K": "05", "M": "06",
+            "N": "07", "Q": "08", "U": "09", "V": "10", "X": "11", "Z": "12",
+        }
+
         # Build a resolved contract if the caller provided contract metadata
         resolved = None
         sec_type = payload.get("secType", "STK")
         con_id = int(payload.get("conId", 0) or 0)
         if con_id or (sec_type and sec_type != "STK"):
             from ibapi.contract import Contract
+            import re
             resolved = Contract()
             # Determine exchange: use provided, then lookup table, then CME default
             exch = payload.get("exchange") or ""
-            if not exch and sec_type == "FUT":
-                exch = _FUTURES_EXCHANGE.get(ticker, "CME")
 
             if con_id:
                 # When conId is available, use ONLY conId + exchange.
                 # Setting other fields (symbol, secType, expiry, multiplier) alongside
                 # conId causes IB to validate ALL of them — any mismatch → error 200.
+                if not exch and sec_type == "FUT":
+                    exch = _FUTURES_EXCHANGE.get(ticker, "CME")
                 resolved.conId = con_id
                 resolved.exchange = exch or "SMART"
                 logger.info(f"fetch_underlying: using conId={con_id} exchange={resolved.exchange} "
                             f"for {ticker} ({sec_type})")
+            elif sec_type == "FUT":
+                # Futures contract — parse full tickers (ESH6) and use CONTFUT for bare roots
+                contract_month = payload.get("lastTradeDateOrContractMonth", "")
+
+                # Try to parse full contract ticker: ESH6 → base="ES", month="03", year="2026"
+                fut_match = re.match(r'^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,2})$', ticker)
+                if fut_match and fut_match.group(1) in _FUTURES_EXCHANGE:
+                    base_symbol = fut_match.group(1)
+                    month_code = fut_match.group(2)
+                    year_digits = fut_match.group(3)
+                    if not contract_month:
+                        month = _MONTH_CODES[month_code]
+                        year = f"202{year_digits}" if len(year_digits) == 1 else f"20{year_digits}"
+                        contract_month = f"{year}{month}"
+                    resolved.symbol = base_symbol
+                else:
+                    resolved.symbol = ticker
+
+                if not exch:
+                    exch = _FUTURES_EXCHANGE.get(resolved.symbol, "CME")
+                resolved.currency = "USD"
+                resolved.exchange = exch
+
+                if contract_month:
+                    # Specific contract month — use FUT
+                    resolved.secType = "FUT"
+                    resolved.lastTradeDateOrContractMonth = contract_month
+                else:
+                    # Bare root symbol (e.g. "ES") — use CONTFUT for continuous front-month
+                    resolved.secType = "CONTFUT"
+
+                if payload.get("multiplier"):
+                    resolved.multiplier = payload["multiplier"]
+                logger.info(f"fetch_underlying: futures {ticker} → symbol={resolved.symbol} "
+                            f"secType={resolved.secType} month={contract_month or 'continuous'} "
+                            f"exchange={resolved.exchange}")
             else:
-                # No conId — specify full contract details
+                # Non-futures, non-conId (e.g. IND)
                 resolved.symbol = ticker
                 resolved.secType = sec_type or "STK"
                 resolved.currency = payload.get("currency", "USD")
@@ -607,7 +654,7 @@ class IBDataAgent:
                 logger.info(f"fetch_underlying: using {sec_type} contract for {ticker} "
                             f"expiry={resolved.lastTradeDateOrContractMonth} "
                             f"exchange={resolved.exchange}")
-        
+
         data = self.scanner.fetch_underlying_data(ticker, resolved_contract=resolved)
         return {
             "ticker": ticker,
