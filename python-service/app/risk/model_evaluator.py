@@ -16,6 +16,7 @@ import uuid
 
 from anthropic import Anthropic
 
+from .api_cost_tracker import log_api_call
 from .model_config import MODEL_PRICING, compute_cost, get_pricing
 from .prompts import RISK_ASSESSMENT_SYSTEM_PROMPT, build_deal_assessment_prompt
 
@@ -78,7 +79,7 @@ async def _call_model(anthropic: Anthropic, model: str, prompt: str) -> dict:
     response = anthropic.messages.create(
         model=model,
         temperature=0,
-        max_tokens=2800,
+        max_tokens=4096,
         system=[{
             "type": "text",
             "text": RISK_ASSESSMENT_SYSTEM_PROMPT,
@@ -111,6 +112,8 @@ async def _call_model(anthropic: Anthropic, model: str, prompt: str) -> dict:
         "parsed": parsed,
         "input_tokens": response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,
+        "cache_creation_tokens": cache_creation,
+        "cache_read_tokens": cache_read,
         "cost_usd": cost,
         "latency_ms": elapsed_ms,
     }
@@ -159,6 +162,19 @@ async def run_model_comparison(
 
             result_a = await _call_model(anthropic, model_a, prompt)
             result_b = await _call_model(anthropic, model_b, prompt)
+
+            # Log both calls to unified tracker
+            for _model, _result in [(model_a, result_a), (model_b, result_b)]:
+                try:
+                    await log_api_call(
+                        pool, source="baseline_comparison", model=_model, ticker=ticker,
+                        input_tokens=_result["input_tokens"], output_tokens=_result["output_tokens"],
+                        cache_creation_tokens=_result.get("cache_creation_tokens", 0),
+                        cache_read_tokens=_result.get("cache_read_tokens", 0),
+                        cost_usd=_result["cost_usd"],
+                    )
+                except Exception:
+                    pass
 
             metrics = _compare_responses(result_a["parsed"], result_b["parsed"])
 
@@ -412,6 +428,18 @@ async def run_baseline_comparison(
                 "latency_ms": meta.get("processing_time_ms", 0),
             }
             total_cost += meta.get("cost_usd", 0)
+
+            # Log to unified tracker
+            try:
+                await log_api_call(
+                    pool, source="baseline", model=model, ticker=ticker,
+                    input_tokens=meta.get("input_tokens", 0),
+                    output_tokens=meta.get("output_tokens", 0),
+                    cost_usd=meta.get("cost_usd", 0),
+                    metadata={"run_id": str(run_id), "batch": True},
+                )
+            except Exception:
+                pass
 
         if not ticker_results:
             failed_tickers += 1

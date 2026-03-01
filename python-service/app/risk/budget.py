@@ -2,11 +2,15 @@
 
 The Anthropic API has no programmatic balance endpoint, so we maintain a
 ledger of known balance snapshots and credit additions.  Costs are pulled
-from risk_assessment_runs.total_cost_usd (already tracked by the engine).
+from the unified api_call_log table (covers risk_engine, baseline,
+filing_impact, research_refresher — every Anthropic API call in the system).
+
+Falls back to risk_assessment_runs.total_cost_usd for historical data
+before the api_call_log was deployed.
 
 Balance = last balance_set
         + SUM(credit_added since that snapshot)
-        - SUM(risk run costs since that snapshot)
+        - SUM(api costs since that snapshot)
 """
 
 import logging
@@ -65,38 +69,78 @@ async def get_estimated_balance(pool) -> dict:
         )
         credits_since = float(credits_row["total"])
 
-        # Sum risk run costs since the snapshot
-        costs_row = await conn.fetchrow(
-            """SELECT COALESCE(SUM(total_cost_usd), 0) AS total
-               FROM risk_assessment_runs
-               WHERE started_at > $1 AND total_cost_usd IS NOT NULL""",
-            snapshot_at,
-        )
-        costs_since = float(costs_row["total"])
-
-        # Costs today
+        # Sum costs since the snapshot — prefer api_call_log (comprehensive),
+        # fall back to risk_assessment_runs (legacy, pre-api_call_log)
+        costs_since = 0.0
+        costs_today = 0.0
+        costs_this_week = 0.0
+        costs_by_source = {}
         today_start = datetime.combine(date.today(), datetime.min.time())
-        today_row = await conn.fetchrow(
-            """SELECT COALESCE(SUM(total_cost_usd), 0) AS total
-               FROM risk_assessment_runs
-               WHERE started_at >= $1 AND total_cost_usd IS NOT NULL""",
-            today_start,
-        )
-        costs_today = float(today_row["total"])
-
-        # Costs this week (last 7 days)
         week_start = today_start - timedelta(days=7)
-        week_row = await conn.fetchrow(
-            """SELECT COALESCE(SUM(total_cost_usd), 0) AS total
-               FROM risk_assessment_runs
-               WHERE started_at >= $1 AND total_cost_usd IS NOT NULL""",
-            week_start,
-        )
-        costs_this_week = float(week_row["total"])
+
+        try:
+            # Unified: api_call_log covers ALL call sites
+            costs_row = await conn.fetchrow(
+                """SELECT COALESCE(SUM(cost_usd), 0) AS total
+                   FROM api_call_log WHERE called_at > $1""",
+                snapshot_at,
+            )
+            costs_since = float(costs_row["total"])
+
+            today_row = await conn.fetchrow(
+                """SELECT COALESCE(SUM(cost_usd), 0) AS total
+                   FROM api_call_log WHERE called_at >= $1""",
+                today_start,
+            )
+            costs_today = float(today_row["total"])
+
+            week_row = await conn.fetchrow(
+                """SELECT COALESCE(SUM(cost_usd), 0) AS total
+                   FROM api_call_log WHERE called_at >= $1""",
+                week_start,
+            )
+            costs_this_week = float(week_row["total"])
+
+            # Breakdown by source for debugging
+            source_rows = await conn.fetch(
+                """SELECT source, COALESCE(SUM(cost_usd), 0) AS total
+                   FROM api_call_log WHERE called_at > $1
+                   GROUP BY source ORDER BY total DESC""",
+                snapshot_at,
+            )
+            costs_by_source = {r["source"]: round(float(r["total"]), 4) for r in source_rows}
+
+        except Exception:
+            # api_call_log table may not exist yet (pre-migration)
+            # Fall back to risk_assessment_runs only
+            logger.info("api_call_log not available, falling back to risk_assessment_runs")
+            costs_row = await conn.fetchrow(
+                """SELECT COALESCE(SUM(total_cost_usd), 0) AS total
+                   FROM risk_assessment_runs
+                   WHERE started_at > $1 AND total_cost_usd IS NOT NULL""",
+                snapshot_at,
+            )
+            costs_since = float(costs_row["total"])
+
+            today_row = await conn.fetchrow(
+                """SELECT COALESCE(SUM(total_cost_usd), 0) AS total
+                   FROM risk_assessment_runs
+                   WHERE started_at >= $1 AND total_cost_usd IS NOT NULL""",
+                today_start,
+            )
+            costs_today = float(today_row["total"])
+
+            week_row = await conn.fetchrow(
+                """SELECT COALESCE(SUM(total_cost_usd), 0) AS total
+                   FROM risk_assessment_runs
+                   WHERE started_at >= $1 AND total_cost_usd IS NOT NULL""",
+                week_start,
+            )
+            costs_this_week = float(week_row["total"])
 
         estimated_balance = snapshot_amount + credits_since - costs_since
 
-        return {
+        result = {
             "estimated_balance": round(estimated_balance, 4),
             "last_snapshot_at": snapshot_at.isoformat() if snapshot_at else None,
             "costs_since_snapshot": round(costs_since, 4),
@@ -104,6 +148,9 @@ async def get_estimated_balance(pool) -> dict:
             "costs_today": round(costs_today, 4),
             "costs_this_week": round(costs_this_week, 4),
         }
+        if costs_by_source:
+            result["costs_by_source"] = costs_by_source
+        return result
 
 
 async def record_credit(pool, amount: float, notes: str = None) -> dict:

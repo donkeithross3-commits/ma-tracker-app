@@ -8,6 +8,9 @@ from typing import Any, Dict, Optional
 import httpx
 from anthropic import Anthropic
 
+from .api_cost_tracker import log_api_call
+from .model_config import compute_cost
+
 logger = logging.getLogger(__name__)
 
 FILING_IMPACT_PROMPT = """You are an M&A analyst reviewing a new SEC filing for a pending deal.
@@ -75,13 +78,33 @@ async def assess_filing_impact(
             content=content[:50000],
         )
 
+        model = "claude-sonnet-4-6"
         client = Anthropic(api_key=api_key)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=model,
             max_tokens=300,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
+
+        # Log to unified API call tracker
+        try:
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            cost = compute_cost(
+                model, response.usage.input_tokens, response.usage.output_tokens,
+                cache_creation, cache_read,
+            )
+            await log_api_call(
+                pool, source="filing_impact", model=model, ticker=ticker,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                cache_creation_tokens=cache_creation,
+                cache_read_tokens=cache_read,
+                cost_usd=cost,
+            )
+        except Exception:
+            pass  # Non-fatal
 
         raw = response.content[0].text
         # Strip markdown fences if present

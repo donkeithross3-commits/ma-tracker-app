@@ -16,6 +16,9 @@ from typing import Any, Dict, Optional
 
 from anthropic import Anthropic
 
+from .api_cost_tracker import log_api_call
+from .model_config import compute_cost
+
 logger = logging.getLogger(__name__)
 
 # Staleness threshold: if research is older than this many days, flag for refresh
@@ -261,13 +264,33 @@ async def refresh_research(pool, ticker: str) -> Optional[Dict[str, Any]]:
     )
 
     try:
+        model = "claude-sonnet-4-6"
         client = Anthropic(api_key=api_key)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=model,
             max_tokens=1000,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
+
+        # Log to unified API call tracker
+        try:
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            cost = compute_cost(
+                model, response.usage.input_tokens, response.usage.output_tokens,
+                cache_creation, cache_read,
+            )
+            await log_api_call(
+                pool, source="research_refresher", model=model, ticker=ticker,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                cache_creation_tokens=cache_creation,
+                cache_read_tokens=cache_read,
+                cost_usd=cost,
+            )
+        except Exception:
+            pass  # Non-fatal
 
         raw = response.content[0].text
         if raw.strip().startswith("```"):

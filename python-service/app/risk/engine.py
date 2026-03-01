@@ -599,6 +599,23 @@ class RiskAssessmentEngine:
             "cache_read_tokens": cache_read,
         }
 
+        # Log to unified API call tracker
+        try:
+            from .api_cost_tracker import log_api_call
+            await log_api_call(
+                self.pool,
+                source="risk_engine",
+                model=model,
+                ticker=ticker,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                cache_creation_tokens=cache_creation,
+                cache_read_tokens=cache_read,
+                cost_usd=cost,
+            )
+        except Exception:
+            pass  # Non-fatal
+
         return parsed
 
     # ------------------------------------------------------------------
