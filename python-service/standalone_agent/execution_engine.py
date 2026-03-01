@@ -308,6 +308,9 @@ class ExecutionEngine:
         self._total_entries_placed: int = 0   # lifetime counter (never resets)
         self._risk_budget_usd: float = 0.0    # 0 = disabled, >0 = max total dollar exposure
 
+        # ── Reconnect hold: blocks eval loop until post-reconnect reconciliation ──
+        self._reconnect_hold: bool = False
+
         # ── Flip-flop detection ──
         # strategy_id -> list of submission timestamps
         self._order_timestamps: Dict[str, List[float]] = {}
@@ -464,6 +467,22 @@ class ExecutionEngine:
             multiplier = float(state.config.get("instrument", {}).get("multiplier", 100))
             total += entry_price * remaining * multiplier
         return total
+
+    # ── Reconnect hold ──
+
+    def set_reconnect_hold(self, hold: bool):
+        """Set or clear the reconnect hold flag.
+
+        When True, the eval loop skips all strategy evaluation and Gate 4
+        rejects all orders.  The agent sets this BEFORE calling connect_to_ib()
+        and clears it AFTER post-reconnect reconciliation finishes, ensuring
+        no orders are placed with a stale position view.
+        """
+        self._reconnect_hold = hold
+        if hold:
+            logger.info("Reconnect hold ENGAGED — eval loop paused until reconciliation")
+        else:
+            logger.info("Reconnect hold RELEASED — eval loop resuming")
 
     # ── Flip-flop detection ──
 
@@ -935,6 +954,9 @@ class ExecutionEngine:
         # Check IB connection health
         if self._scanner.connection_lost:
             return  # skip evaluation when IB is disconnected
+        # Hold during reconnect until reconciliation completes
+        if self._reconnect_hold:
+            return
 
         for state in list(self._strategies.values()):
             if not state.is_active:
@@ -1080,15 +1102,16 @@ class ExecutionEngine:
             state.inflight_orders += 1
             state.orders_submitted += 1
 
-        # ── Gate 4: Connection check ──
-        if self._scanner.connection_lost:
+        # ── Gate 4: Connection check (also blocks during reconnect hold) ──
+        if self._scanner.connection_lost or self._reconnect_hold:
             with self._inflight_lock:
                 self._inflight_order_count = max(0, self._inflight_order_count - 1)
                 state.inflight_orders = max(0, state.inflight_orders - 1)
             if is_entry:
                 self._refund_entry_cap()
                 self._refund_ticker_budget(state)
-            state.errors.append("Order rejected: IB connection lost")
+            reason = "IB reconnect hold (awaiting reconciliation)" if self._reconnect_hold else "IB connection lost"
+            state.errors.append(f"Order rejected: {reason}")
             return
 
         # ── Record for flip-flop tracking (entries only — exits don't count) ──
@@ -1467,6 +1490,8 @@ class ExecutionEngine:
             "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
             "trade_attribution_summary": attribution_summary,
+            # Connection health
+            "reconnect_hold": self._reconnect_hold,
         }
 
     def get_telemetry(self) -> dict:

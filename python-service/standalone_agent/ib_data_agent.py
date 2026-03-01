@@ -233,6 +233,12 @@ class IBDataAgent:
             # 60s if never connected (TWS not running on this machine)
             delay = 5.0 if was_previously_connected else 60.0
             MAX_DELAY = 60.0
+            # Engage reconnect hold BEFORE reconnecting — prevents the eval loop
+            # from placing orders with stale position data between the moment IB
+            # clears connection_lost (in nextValidId callback) and when reconciliation
+            # finishes.  Hold is released in the finally block below.
+            if self.execution_engine and self.execution_engine.is_running:
+                self.execution_engine.set_reconnect_hold(True)
             while self.running and self._tws_reconnecting:
                 logger.debug("Attempting TWS reconnect (delay=%.0fs)...", delay)
                 if self.connect_to_ib():
@@ -252,7 +258,7 @@ class IBDataAgent:
                             logger.info("Re-established streaming quote subscriptions")
                     except Exception as e:
                         logger.error("Failed to re-establish streaming subscriptions: %s", e)
-                    # IB Reconciliation on reconnect (WS4)
+                    # IB Reconciliation on reconnect (WS4) — MUST complete before hold is released
                     try:
                         if self.execution_engine and self.execution_engine.is_running:
                             ib_positions = [
@@ -268,6 +274,9 @@ class IBDataAgent:
                                 )
                     except Exception as e:
                         logger.error("Post-reconnect reconciliation failed: %s", e)
+                    # Release reconnect hold — eval loop can resume with fresh position view
+                    if self.execution_engine and self.execution_engine.is_running:
+                        self.execution_engine.set_reconnect_hold(False)
                     # Notify frontend to refetch positions and open orders (orders may have filled while disconnected)
                     try:
                         if self.websocket:
@@ -282,7 +291,17 @@ class IBDataAgent:
                     break
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, MAX_DELAY)
-    
+            # Safety: if we exit the reconnect loop without succeeding (e.g. shutdown),
+            # release the hold so the engine isn't permanently frozen.
+            if self.execution_engine and self._reconnect_hold_needs_release():
+                self.execution_engine.set_reconnect_hold(False)
+
+    def _reconnect_hold_needs_release(self) -> bool:
+        """Check if reconnect hold is still engaged (needs cleanup)."""
+        return (self.execution_engine
+                and self.execution_engine.is_running
+                and self.execution_engine._reconnect_hold)
+
     def disconnect_from_ib(self):
         """Disconnect from IB TWS, stopping execution engine first."""
         if self.execution_engine and self.execution_engine.is_running:
