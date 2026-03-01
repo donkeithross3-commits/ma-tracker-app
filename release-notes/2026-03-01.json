@@ -11,6 +11,15 @@
       "category": "signals",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "pnl-history-tab",
+      "title": "P&L History Tab",
+      "summary": "Historical algo trade performance with grouped aggregations, position detail, and expandable fill rows",
+      "description": "A new P&L History tab on the IB Trading Tools page shows historical algorithmic trade performance from PostgreSQL.\n\nKey features:\n- Summary totals bar: total trades, win rate, gross P&L, commission, and net P&L\n- Group-by selector: toggle between date, symbol, or model version aggregation\n- Clickable summary rows filter the positions table to that group\n- Position detail table with ColumnChooser (14 columns, user-configurable)\n- Expandable rows: click any position to see individual fills with time, level, qty, price, P&L %, commission, and exchange\n- Date range and status filters (closed/active/all)\n- Green/red P&L coloring, exit reason badges (risk/expired/manual), and level badges (entry/trailing/expired)\n- Full comfort mode support via d-table-wrap fluid scaling\n\nAll data comes from the deployed P&L history API (v1.16.0) — zero backend changes needed.",
+      "category": "positions",
+      "image": null,
+      "screenshot": null
     }
   ]
 }

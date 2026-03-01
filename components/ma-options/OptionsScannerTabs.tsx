@@ -7,6 +7,7 @@ import { ExternalLink } from "lucide-react";
 import IBPositionsTab from "./IBPositionsTab";
 import SignalsTab from "./SignalsTab";
 import ManualTradingV2Tab from "./manual-v2/ManualTradingV2Tab";
+import PnlHistoryTab from "./PnlHistoryTab";
 
 // lightweight-charts requires `window` — SSR-safe dynamic import
 const ChartsTab = dynamic(() => import("./charts/ChartsTab"), { ssr: false });
@@ -48,6 +49,12 @@ export default function OptionsScannerTabs({
         >
           Charts
         </Tabs.Trigger>
+        <Tabs.Trigger
+          value="pnl-history"
+          className="px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
+        >
+          P&L History
+        </Tabs.Trigger>
         {activeTab === "charts" && (
           <button
             onClick={() => {
@@ -78,6 +85,10 @@ export default function OptionsScannerTabs({
 
       <Tabs.Content value="charts">
         <ChartsTab />
+      </Tabs.Content>
+
+      <Tabs.Content value="pnl-history">
+        <PnlHistoryTab />
       </Tabs.Content>
     </Tabs.Root>
   );
