@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import re
+import time
 import uuid
 import asyncio
 
@@ -1417,8 +1418,7 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
             stale = False
             if last_hb:
                 try:
-                    from datetime import datetime as dt
-                    hb_time = dt.fromisoformat(last_hb).timestamp()
+                    hb_time = datetime.fromisoformat(last_hb).timestamp()
                     stale = (now - hb_time) > 90
                 except (ValueError, TypeError):
                     stale = True
