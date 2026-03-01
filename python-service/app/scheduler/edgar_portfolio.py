@@ -239,20 +239,26 @@ async def _search_edgar(
     results = []
     for hit in data.get("hits", {}).get("hits", []):
         source = hit.get("_source", {})
-        # file_num can be a list in EFTS responses — normalise to string
-        raw_accession = source.get("file_num", "") or hit.get("_id", "")
-        if isinstance(raw_accession, list):
-            accession = raw_accession[0] if raw_accession else ""
-        else:
-            accession = raw_accession
-        filing_type = source.get("form_type", "")
+        # EFTS field mapping:
+        #   adsh        = accession number (e.g. "0001213900-26-021779")
+        #   form        = filing type (e.g. "8-K")
+        #   display_names = list of company name strings
+        #   file_date   = filing date
+        #   file_description = document description
+        accession = source.get("adsh", "") or hit.get("_id", "")
+        root_forms = source.get("root_forms", [])
+        filing_type = source.get("form", "") or (root_forms[0] if root_forms else "")
+        # Parse company name from display_names (e.g. "Electronic Arts Inc (EA) (CIK ...)")
+        display_names = source.get("display_names", [])
+        company_name = display_names[0].split("(CIK")[0].strip() if display_names else ""
+        filing_url = f"https://www.sec.gov/Archives/edgar/data/{source.get('ciks', [''])[0].lstrip('0') if source.get('ciks') else ''}/{accession.replace('-', '')}/{accession}-index.htm" if accession else ""
         results.append({
             "accession_number": accession,
             "filing_type": filing_type,
-            "company_name": source.get("entity_name", ""),
+            "company_name": company_name,
             "filing_date": source.get("file_date", ""),
-            "filing_url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={accession}&type=&dateb=&owner=include&count=40",
-            "description": source.get("display_names", [""])[0] if source.get("display_names") else "",
+            "filing_url": filing_url,
+            "description": source.get("file_description", "") or (display_names[0] if display_names else ""),
         })
 
     return results
