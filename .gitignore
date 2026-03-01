@@ -36,6 +36,7 @@ yarn-error.log*
 .env.production
 python-service/.env
 python-service/.env.local
+ib-gateway.env
 
 # vercel
 .vercel

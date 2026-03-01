@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 DROPLET_USER="don"
-DROPLET_IP="134.199.204.12"
+DROPLET_IP="192.241.179.9"
 LOCAL_APP_DIR="/Users/donaldross/dev/ma-tracker-app"
 REMOTE_APP_DIR="/home/don/apps/ma-tracker-app"
 REMOTE_BASE_DIR="/home/don/apps"

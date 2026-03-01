@@ -97,6 +97,46 @@ services:
         max-size: "5m"
         max-file: "3"
 
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: ib-gateway
+    restart: always
+    shm_size: '1gb'
+    env_file:
+      - ./ib-gateway.env    # IB credentials (not in repo — see ops/ib-gateway/.env.template)
+    environment:
+      TRADING_MODE: ${IB_TRADING_MODE:-paper}
+      JAVA_HEAP_SIZE: 1024
+      AUTO_RESTART_TIME: "11:45 PM"
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      TWOFA_EXIT_INTERVAL: 120
+      READ_ONLY_API: "no"
+      TIME_ZONE: US/Eastern
+    ports:
+      - "127.0.0.1:4001:4003"   # Live API (localhost only, never expose publicly)
+      - "127.0.0.1:4002:4004"   # Paper API (localhost only)
+      # - "127.0.0.1:5900:5900" # VNC debugging (uncomment when needed)
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+        reservations:
+          memory: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4001 || nc -z 127.0.0.1 4002"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - default
+
   krj-batch:
     build:
       context: ./py_proj

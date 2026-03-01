@@ -1,0 +1,21 @@
+[Unit]
+Description=DR3 IB Trading Agent
+After=docker.service network-online.target
+Wants=docker.service
+
+[Service]
+Type=simple
+User=don
+Group=don
+WorkingDirectory=/home/don/apps/ma-tracker-app/python-service/standalone_agent
+ExecStart=/home/don/apps/ma-tracker-app/python-service/.venv/bin/python ib_data_agent.py
+Restart=always
+RestartSec=10
+Nice=-10
+StandardOutput=append:/home/don/apps/logs/trading-agent.log
+StandardError=append:/home/don/apps/logs/trading-agent.log
+EnvironmentFile=/home/don/apps/ma-tracker-app/python-service/standalone_agent/config.env
+EnvironmentFile=-/home/don/apps/ma-tracker-app/python-service/.env
+
+[Install]
+WantedBy=multi-user.target

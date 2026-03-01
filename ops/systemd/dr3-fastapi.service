@@ -1,0 +1,18 @@
+[Unit]
+Description=DR3 FastAPI Backend (port 8000)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/don/apps/ma-tracker-app/python-service
+Environment=PATH=/home/don/apps/ma-tracker-app/python-service/.venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/don/apps/ma-tracker-app/python-service/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/don/apps/logs/python-backend.log
+StandardError=append:/home/don/apps/logs/python-backend.log
+EnvironmentFile=-/home/don/apps/ma-tracker-app/python-service/.env
+
+[Install]
+WantedBy=default.target
