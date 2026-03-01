@@ -9,6 +9,8 @@ export interface StockQuoteResponse {
   price: number;
   bid: number | null;
   ask: number | null;
+  close: number | null;
+  volume: number | null;
   timestamp: string;
 }
 

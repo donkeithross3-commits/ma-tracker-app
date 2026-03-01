@@ -41,6 +41,9 @@ model User {
   userDealLists      UserDealList[]
   addedScannerDeals  ScannerDeal[]
 
+  // Watchlist relationships
+  watchlists         Watchlist[]
+
   @@map("users")
 }
 
@@ -443,4 +446,38 @@ model UserDealListItem {
   @@index([listId])
   @@index([spreadId])
   @@map("user_deal_list_items")
+}
+
+// ============================================
+// Watchlist Models (Charts page instrument lists)
+// ============================================
+
+model Watchlist {
+  id        String          @id @default(uuid())
+  userId    String          @map("user_id")
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  sortOrder Int             @default(0) @map("sort_order")
+  items     WatchlistItem[]
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("watchlists")
+}
+
+model WatchlistItem {
+  id             String    @id @default(uuid())
+  listId         String    @map("list_id")
+  list           Watchlist @relation(fields: [listId], references: [id], onDelete: Cascade)
+  ticker         String
+  instrumentType String    @default("stock") @map("instrument_type")
+  displayName    String?   @map("display_name")
+  exchange       String?
+  sortOrder      Int       @default(0) @map("sort_order")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@unique([listId, ticker])
+  @@index([listId])
+  @@map("watchlist_items")
 }

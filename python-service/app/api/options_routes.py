@@ -1700,6 +1700,8 @@ class StockQuoteResponse(BaseModel):
     price: float
     bid: Optional[float] = None
     ask: Optional[float] = None
+    close: Optional[float] = None
+    volume: Optional[int] = None
     timestamp: str
 
 @router.post("/relay/stock-quote")
@@ -1777,6 +1779,8 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
             price=price,
             bid=response_data.get("bid"),
             ask=response_data.get("ask"),
+            close=response_data.get("close"),
+            volume=response_data.get("volume"),
             timestamp=datetime.utcnow().isoformat() + "Z"
         )
 

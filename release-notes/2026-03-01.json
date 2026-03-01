@@ -1,8 +1,17 @@
 {
   "date": "2026-03-01",
   "title": "Week of Feb 24 - Mar 1, 2026",
-  "summary": "Custom charting system, P&L history tab, and commission capture fix for complete trade analytics.",
+  "summary": "Instrument watchlist with live IB quotes, custom charting system, P&L history tab, and commission capture fix.",
   "features": [
+    {
+      "id": "watchlist",
+      "title": "Instrument Watchlist",
+      "summary": "Create named watchlists with live IB price data for stocks, indices, and futures on the Charts page",
+      "description": "A new Watchlist tab on the Charts page lets you create and manage named lists of instruments with live price data from Interactive Brokers.\n\nKey features:\n- Create multiple named watchlists (e.g., \"Core Positions\", \"Futures Watch\")\n- Add stocks, indices, and futures with SEC EDGAR ticker autocomplete\n- Live price table: last price, change, change %, volume, bid/ask — all from IB\n- 8-second auto-refresh with smart polling (pauses when tab is hidden)\n- Green/red color coding for positive/negative changes\n- ColumnChooser for user-controlled column visibility\n- Full comfort mode support via d-table fluid scaling\n- Rename, delete, and switch between watchlists\n- Futures support with exchange selector (CME, CBOT, NYMEX, COMEX)\n\nThe watchlist data is stored per-user in the database. Quotes are fetched in batch through the existing IB relay infrastructure — same pipeline used by the trading tools.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    },
     {
       "id": "charts-tab",
       "title": "Custom Charting System",

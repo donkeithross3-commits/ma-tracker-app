@@ -107,6 +107,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.underlying_price = None
         self.underlying_bid = None
         self.underlying_ask = None
+        self.underlying_close = None
+        self.underlying_volume = None
         self.historical_vol = None
         self.contract_details = None
         self.available_expirations = []
@@ -1377,6 +1379,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.underlying_price = None
         self.underlying_bid = None
         self.underlying_ask = None
+        self.underlying_close = None
+        self.underlying_volume = None
         self.historical_vol = None
         self._underlying_200_req_id = None
 
@@ -1428,6 +1432,8 @@ class IBMergerArbScanner(EWrapper, EClient):
             'price': self.underlying_price,
             'bid': self.underlying_bid,
             'ask': self.underlying_ask,
+            'close': self.underlying_close,
+            'volume': self.underlying_volume,
             'volatility': self.historical_vol if self.historical_vol else 0.30
         }
 
@@ -1493,6 +1499,8 @@ class IBMergerArbScanner(EWrapper, EClient):
                     self.underlying_bid = price
                 elif tickType == 2:  # Ask
                     self.underlying_ask = price
+                elif tickType == 9:  # Close (previous day)
+                    self.underlying_close = price
             elif reqId in self.option_chain:
                 if tickType == 1:
                     self.option_chain[reqId]['bid'] = price
@@ -1506,6 +1514,11 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Fast path: streaming cache
         if self.streaming_cache is not None and self.streaming_cache.is_streaming_req_id(reqId):
             self.streaming_cache.update_size(reqId, tickType, size)
+            return
+        # Underlying volume capture
+        if reqId in self.req_id_map and "underlying" in self.req_id_map[reqId]:
+            if tickType == 8:  # Volume
+                self.underlying_volume = size
             return
         # Existing scan path (unchanged)
         if reqId in self.option_chain:

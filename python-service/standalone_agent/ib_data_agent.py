@@ -488,7 +488,9 @@ class IBDataAgent:
             "ticker": ticker,
             "price": data.get("price"),
             "bid": data.get("bid"),
-            "ask": data.get("ask")
+            "ask": data.get("ask"),
+            "close": data.get("close"),
+            "volume": data.get("volume")
         }
     
     def _handle_get_positions_sync(self, payload: dict) -> dict:
