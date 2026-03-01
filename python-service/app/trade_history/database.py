@@ -65,7 +65,10 @@ class TradeDatabase:
     # ── Upsert (called from ws_relay on position_sync) ──
 
     async def upsert_positions(self, user_id: str, positions: List[dict]) -> int:
-        """Upsert a batch of positions + their fills. Returns count upserted."""
+        """Upsert a batch of positions + their fills. Returns count upserted.
+
+        Each position is wrapped in a savepoint so one failure doesn't abort the batch.
+        """
         if not self.pool or not positions:
             return 0
 
@@ -74,8 +77,11 @@ class TradeDatabase:
             async with conn.transaction():
                 for pos in positions:
                     try:
-                        await self._upsert_one_position(conn, user_id, pos)
-                        count += 1
+                        # Savepoint per position: if this one fails, only the
+                        # savepoint rolls back — the outer transaction stays valid.
+                        async with conn.transaction():
+                            await self._upsert_one_position(conn, user_id, pos)
+                            count += 1
                     except Exception as e:
                         logger.error(
                             "Failed to upsert position %s: %s",
@@ -123,6 +129,10 @@ class TradeDatabase:
         # Model version from lineage
         model_version = lineage.get("model_version", "") if lineage else ""
 
+        # Parse agent-side created_at for the DB created_at column (used in queries)
+        agent_created_at_raw = pos.get("created_at")
+        created_at_dt = self._parse_timestamp(agent_created_at_raw)
+
         # Compute P&L from fill_log
         total_gross_pnl, total_commission, total_net_pnl = self._compute_pnl(
             entry_price, entry_quantity, multiplier, fill_log
@@ -143,7 +153,7 @@ class TradeDatabase:
                 exit_reason, closed_at,
                 total_gross_pnl, total_commission, total_net_pnl, multiplier,
                 model_version, lineage, risk_config, runtime_state,
-                agent_created_at, updated_at
+                agent_created_at, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9, $10,
@@ -151,7 +161,7 @@ class TradeDatabase:
                 $14, $15,
                 $16, $17, $18, $19,
                 $20, $21, $22, $23,
-                $24, NOW()
+                $24, COALESCE($25, NOW()), NOW()
             )
             ON CONFLICT (user_id, position_id) DO UPDATE SET
                 status = EXCLUDED.status,
@@ -192,7 +202,8 @@ class TradeDatabase:
             json.dumps(lineage) if lineage else "{}",
             json.dumps(risk_config) if risk_config else "{}",
             json.dumps(runtime_state) if runtime_state else "{}",
-            pos.get("created_at"),
+            agent_created_at_raw,
+            created_at_dt,
         )
 
         # Upsert fills

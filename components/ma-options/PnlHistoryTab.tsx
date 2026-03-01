@@ -214,7 +214,8 @@ export default function PnlHistoryTab() {
 
   // Filters
   const [groupBy, setGroupBy] = useState<GroupBy>("date");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("closed");
+  // Default to "all" with no date filters so historical data shows immediately
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
