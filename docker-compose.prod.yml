@@ -105,7 +105,6 @@ services:
     env_file:
       - ./ib-gateway.env    # IB credentials (not in repo — see ops/ib-gateway/.env.template)
     environment:
-      TRADING_MODE: ${IB_TRADING_MODE:-paper}
       JAVA_HEAP_SIZE: 1024
       AUTO_RESTART_TIME: "11:45 PM"
       TWOFA_TIMEOUT_ACTION: restart

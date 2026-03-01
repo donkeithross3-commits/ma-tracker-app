@@ -53,18 +53,18 @@ if ! nc -z 127.0.0.1 4001 2>/dev/null && ! nc -z 127.0.0.1 4002 2>/dev/null; the
     ERRORS=$((ERRORS + 1))
 fi
 
-# Check 6: Trading agent systemd service
+# Check 6: Trading agent systemd service (system-level, needs sudo)
 echo -n "Trading agent service: "
-if systemctl is-active --quiet dr3-trading-agent 2>/dev/null; then
+if sudo systemctl is-active --quiet dr3-trading-agent 2>/dev/null; then
     echo "ACTIVE"
 else
     echo "INACTIVE"
     ERRORS=$((ERRORS + 1))
 fi
 
-# Check 7: FastAPI service
+# Check 7: FastAPI service (user-level)
 echo -n "FastAPI service: "
-if systemctl is-active --quiet dr3-fastapi 2>/dev/null; then
+if XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user is-active --quiet dr3-fastapi 2>/dev/null; then
     echo "ACTIVE"
 else
     echo "INACTIVE"
