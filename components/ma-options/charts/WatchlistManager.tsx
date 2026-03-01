@@ -139,9 +139,16 @@ export default function WatchlistManager({
     (value: string) => {
       setTickerInput(value);
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => searchTicker(value), 300);
+      // Only use SEC EDGAR autocomplete for stocks — futures/index accept raw ticker
+      if (instrumentType === "stock") {
+        debounceRef.current = setTimeout(() => searchTicker(value), 300);
+      } else {
+        // Clear any stale suggestions from a previous stock search
+        setSuggestions([]);
+        setShowSuggestions(false);
+      }
     },
-    [searchTicker]
+    [searchTicker, instrumentType]
   );
 
   const selectSuggestion = useCallback(
@@ -357,6 +364,11 @@ export default function WatchlistManager({
             onChange={(e) => {
               setInstrumentType(e.target.value);
               if (e.target.value !== "future") setExchange("");
+              // Clear autocomplete when switching away from stock
+              if (e.target.value !== "stock") {
+                setSuggestions([]);
+                setShowSuggestions(false);
+              }
             }}
             className="appearance-none bg-gray-800 text-gray-300 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
           >
@@ -393,7 +405,7 @@ export default function WatchlistManager({
               onFocus={() => {
                 if (suggestions.length > 0) setShowSuggestions(true);
               }}
-              placeholder="Add ticker..."
+              placeholder={instrumentType === "stock" ? "Add ticker..." : instrumentType === "future" ? "e.g. ES, NQ, CL..." : "e.g. SPX, VIX..."}
               className="bg-gray-800 text-gray-100 border border-gray-700 rounded px-2 py-1.5 text-sm w-28 focus:outline-none focus:border-blue-500 inline-edit"
             />
             {searching && (
