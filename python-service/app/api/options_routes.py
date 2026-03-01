@@ -1791,6 +1791,80 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class HistoricalBarsRequest(BaseModel):
+    ticker: str
+    secType: str = "STK"
+    exchange: Optional[str] = None
+    duration: str = "5 D"
+    barSize: str = "5 mins"
+    whatToShow: str = "TRADES"
+    useRTH: bool = False
+    userId: Optional[str] = None
+
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, v: str) -> str:
+        v = v.strip().upper()
+        if not v or len(v) > 10:
+            raise ValueError("Ticker must be 1-10 characters")
+        return v
+
+
+@router.post("/relay/historical-bars")
+async def relay_historical_bars(req: HistoricalBarsRequest):
+    """Fetch historical OHLCV bars via IB agent for charting."""
+    timer = RequestTimer("relay_historical_bars")
+
+    VALID_BAR_SIZES = {"1 min", "5 mins", "15 mins", "1 hour", "1 day"}
+    if req.barSize not in VALID_BAR_SIZES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"barSize must be one of: {', '.join(sorted(VALID_BAR_SIZES))}"
+        )
+
+    registry = get_registry()
+    status = registry.get_status()
+
+    if status["providers_connected"] == 0:
+        raise HTTPException(
+            status_code=503,
+            detail="No IB agent connected — cannot fetch historical bars."
+        )
+
+    timer.mark("provider_found")
+
+    try:
+        response_data = await send_request_to_provider(
+            request_type="fetch_historical_bars",
+            payload={
+                "ticker": req.ticker,
+                "secType": req.secType,
+                "exchange": req.exchange,
+                "duration": req.duration,
+                "barSize": req.barSize,
+                "whatToShow": req.whatToShow,
+                "useRTH": req.useRTH,
+            },
+            timeout=35.0,  # Historical data can be slow
+            user_id=req.userId,
+        )
+
+        timer.mark("agent_response")
+
+        if "error" in response_data:
+            timer.log(extra=f"error={response_data['error']}")
+            raise HTTPException(status_code=502, detail=response_data["error"])
+
+        timer.log(extra=f"bars={response_data.get('count', 0)}")
+        return response_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay historical bars error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/relay/sell-scan")
 async def relay_sell_scan(request: SellScanRequest):
     """

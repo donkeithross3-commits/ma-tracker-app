@@ -38,6 +38,15 @@
       "category": "positions",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "futures-charts",
+      "title": "Futures Charts via IB",
+      "summary": "Candlestick charts now support futures instruments using IB historical data",
+      "description": "Charts automatically detect futures tickers (ES, NQ, CL, GC, etc.) and fetch OHLCV bar data from Interactive Brokers instead of Polygon. Supports all standard timeframes (1m, 5m, 15m, 1h, 1D) with the same 30-second auto-refresh.\n\nFutures symbols are auto-detected from a known list including equity indices (ES, NQ, YM, RTY), energy (CL, NG), metals (GC, SI), treasuries (ZB, ZN), and grains (ZC, ZS, ZW). Exchange routing uses the same mapping as the trading engine. An amber \"IB\" badge appears next to the ticker when chart data comes from Interactive Brokers. Agent v1.19.0.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
     }
   ]
 }

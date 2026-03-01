@@ -368,6 +368,8 @@ class IBDataAgent:
                 return await self._handle_execution_swap_model(payload)
             elif request_type == "get_ib_executions":
                 return await self._run_in_thread(self._handle_get_ib_executions_sync, payload)
+            elif request_type == "fetch_historical_bars":
+                return await self._run_in_thread(self._handle_fetch_historical_bars_sync, payload)
             else:
                 return {"error": f"Unknown request type: {request_type}"}
         except Exception as e:
@@ -511,7 +513,76 @@ class IBDataAgent:
             "close": data.get("close"),
             "volume": data.get("volume")
         }
-    
+
+    def _handle_fetch_historical_bars_sync(self, payload: dict) -> dict:
+        """Fetch historical OHLCV bars from IB for charting."""
+        ticker = payload.get("ticker", "").upper()
+
+        if not self.scanner or not self.scanner.isConnected():
+            return {"error": self._ib_not_connected_error()}
+
+        # Same futures exchange lookup as _handle_fetch_underlying
+        _FUTURES_EXCHANGE = {
+            "SI": "COMEX", "GC": "COMEX", "HG": "COMEX",
+            "SIL": "COMEX", "MGC": "COMEX",
+            "PL": "NYMEX", "PA": "NYMEX",
+            "CL": "NYMEX", "NG": "NYMEX", "RB": "NYMEX", "HO": "NYMEX",
+            "MCL": "NYMEX",
+            "ES": "CME", "NQ": "CME", "RTY": "CME", "MES": "CME", "MNQ": "CME",
+            "M2K": "CME", "EMD": "CME",
+            "YM": "CBOT", "MYM": "CBOT",
+            "ZB": "CBOT", "ZN": "CBOT", "ZF": "CBOT", "ZT": "CBOT",
+            "6E": "CME", "6J": "CME", "6A": "CME", "6B": "CME", "6C": "CME",
+            "ZC": "CBOT", "ZS": "CBOT", "ZW": "CBOT", "ZM": "CBOT", "ZL": "CBOT",
+        }
+
+        from ibapi.contract import Contract
+        contract = Contract()
+
+        sec_type = payload.get("secType", "STK")
+        exchange = payload.get("exchange", "")
+
+        if sec_type == "FUT":
+            contract.symbol = ticker
+            contract.secType = "FUT"
+            contract.currency = "USD"
+            contract.exchange = exchange or _FUTURES_EXCHANGE.get(ticker, "CME")
+            if payload.get("lastTradeDateOrContractMonth"):
+                contract.lastTradeDateOrContractMonth = payload["lastTradeDateOrContractMonth"]
+            if payload.get("multiplier"):
+                contract.multiplier = payload["multiplier"]
+        elif sec_type == "IND":
+            contract.symbol = ticker
+            contract.secType = "IND"
+            contract.currency = "USD"
+            contract.exchange = exchange or "CBOE"
+        else:
+            contract.symbol = ticker
+            contract.secType = "STK"
+            contract.currency = "USD"
+            contract.exchange = exchange or "SMART"
+
+        duration = payload.get("duration", "5 D")
+        bar_size = payload.get("barSize", "5 mins")
+        what_to_show = payload.get("whatToShow", "TRADES")
+        use_rth = 1 if payload.get("useRTH", False) else 0
+
+        logger.info(f"fetch_historical_bars: {ticker} ({sec_type}) duration={duration} "
+                    f"barSize={bar_size} exchange={contract.exchange}")
+
+        bars = self.scanner.fetch_historical_bars(
+            contract, duration=duration, bar_size=bar_size,
+            what_to_show=what_to_show, use_rth=use_rth
+        )
+
+        logger.info(f"fetch_historical_bars: got {len(bars)} bars for {ticker}")
+
+        return {
+            "ticker": ticker,
+            "bars": bars,
+            "count": len(bars),
+        }
+
     def _handle_get_positions_sync(self, payload: dict) -> dict:
         """Fetch all positions from IB (reqPositions -> position/positionEnd).
         Returns positions for ALL managed accounts, minus any in IB_EXCLUDE_ACCOUNTS."""

@@ -1,55 +1,53 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChartBar, TimeframeConfig } from "./types";
+import type { ChartBar } from "./types";
 
 const POLL_INTERVAL_MS = 30_000; // 30s bar refresh
 
-/** Format date as YYYY-MM-DD for Polygon */
-function formatDate(d: Date): string {
-  return d.toISOString().split("T")[0];
+// ---------------------------------------------------------------------------
+// Map Polygon-style timeframe to IB duration/barSize
+// ---------------------------------------------------------------------------
+
+function getIBParams(
+  multiplier: number,
+  timespan: "minute" | "hour" | "day"
+): { duration: string; barSize: string } {
+  if (timespan === "day") return { duration: "1 Y", barSize: "1 day" };
+  if (timespan === "hour") return { duration: "1 M", barSize: "1 hour" };
+  // minute
+  if (multiplier <= 1) return { duration: "1 D", barSize: "1 min" };
+  if (multiplier <= 5) return { duration: "5 D", barSize: "5 mins" };
+  return { duration: "10 D", barSize: "15 mins" };
 }
 
-/** Compute date range based on timeframe */
-function getDateRange(tf: TimeframeConfig): { from: string; to: string } {
-  const now = new Date();
-  const to = formatDate(now);
+// ---------------------------------------------------------------------------
+// Hook interface
+// ---------------------------------------------------------------------------
 
-  let from: Date;
-  if (tf.timespan === "day") {
-    // 6 months for daily
-    from = new Date(now);
-    from.setMonth(from.getMonth() - 6);
-  } else if (tf.timespan === "hour") {
-    // 10 days for hourly
-    from = new Date(now);
-    from.setDate(from.getDate() - 10);
-  } else {
-    // 5 days for minute bars — covers weekends + holiday Mondays
-    from = new Date(now);
-    from.setDate(from.getDate() - 5);
-  }
-
-  return { from: formatDate(from), to };
-}
-
-interface UsePolygonBarsOptions {
+interface UseIBBarsOptions {
+  secType: string;
+  exchange: string;
   multiplier: number;
   timespan: "minute" | "hour" | "day";
   enabled?: boolean; // default true — set false to skip fetching (React hooks rules)
 }
 
-interface UsePolygonBarsResult {
+interface UseIBBarsResult {
   bars: ChartBar[];
   loading: boolean;
   error: string | null;
   refetch: () => void;
 }
 
-export function usePolygonBars(
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
+export function useIBBars(
   ticker: string,
-  { multiplier, timespan, enabled = true }: UsePolygonBarsOptions
-): UsePolygonBarsResult {
+  { secType, exchange, multiplier, timespan, enabled = true }: UseIBBarsOptions
+): UseIBBarsResult {
   const [bars, setBars] = useState<ChartBar[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,24 +68,17 @@ export function usePolygonBars(
       try {
         if (!isAppend) setLoading(true);
 
-        const tf: TimeframeConfig = { multiplier, timespan, label: "" };
-        const range = getDateRange(tf);
-
-        // For append polls, only fetch from last bar time
-        const from = isAppend && lastBarTimeRef.current > 0
-          ? new Date(lastBarTimeRef.current * 1000).toISOString().split("T")[0]
-          : range.from;
+        const { duration, barSize } = getIBParams(multiplier, timespan);
 
         const params = new URLSearchParams({
           ticker,
-          multiplier: String(multiplier),
-          timespan,
-          from,
-          to: range.to,
-          limit: "5000",
+          secType,
+          exchange,
+          duration,
+          barSize,
         });
 
-        const res = await fetch(`/api/ma-options/polygon/bars?${params}`, {
+        const res = await fetch(`/api/ma-options/ib/bars?${params}`, {
           credentials: "include",
           signal: controller.signal,
         });
@@ -107,9 +98,9 @@ export function usePolygonBars(
             for (const bar of newBars) {
               const idx = merged.findIndex((b) => b.time === bar.time);
               if (idx >= 0) {
-                merged[idx] = bar; // Update existing bar
+                merged[idx] = bar;
               } else {
-                merged.push(bar); // Append new bar
+                merged.push(bar);
               }
             }
             merged.sort((a, b) => a.time - b.time);
@@ -134,7 +125,7 @@ export function usePolygonBars(
         if (!isAppend) setLoading(false);
       }
     },
-    [ticker, multiplier, timespan, enabled]
+    [ticker, secType, exchange, multiplier, timespan, enabled]
   );
 
   // Initial fetch + poll

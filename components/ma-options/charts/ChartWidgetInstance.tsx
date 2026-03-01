@@ -7,12 +7,38 @@ import WidgetContainer from "./WidgetContainer";
 import SignalPanel from "./SignalPanel";
 import PositionsPanel from "./PositionsPanel";
 import { usePolygonBars } from "./usePolygonBars";
+import { useIBBars } from "./useIBBars";
 import { useChartSignals } from "./useChartSignals";
 import {
   TIMEFRAMES,
   type ChartWidgetConfig,
   type OverlayToggles,
 } from "./types";
+
+// ---------------------------------------------------------------------------
+// Futures auto-detection — known futures symbols + exchange mapping
+// ---------------------------------------------------------------------------
+
+const FUTURES_SYMBOLS = new Set([
+  "ES", "NQ", "YM", "RTY", "MES", "MNQ", "M2K", "MYM",
+  "CL", "NG", "RB", "HO", "MCL",
+  "GC", "SI", "HG", "SIL", "MGC",
+  "ZB", "ZN", "ZF", "ZT", "UB",
+  "ZC", "ZS", "ZW", "ZM", "ZL",
+  "6E", "6J", "6B", "6A", "6C", "6S",
+  "PL", "PA",
+]);
+
+const FUTURES_EXCHANGE: Record<string, string> = {
+  SI: "COMEX", GC: "COMEX", HG: "COMEX", SIL: "COMEX", MGC: "COMEX",
+  PL: "NYMEX", PA: "NYMEX",
+  CL: "NYMEX", NG: "NYMEX", RB: "NYMEX", HO: "NYMEX", MCL: "NYMEX",
+  ES: "CME", NQ: "CME", RTY: "CME", MES: "CME", MNQ: "CME", M2K: "CME", EMD: "CME",
+  YM: "CBOT", MYM: "CBOT",
+  ZB: "CBOT", ZN: "CBOT", ZF: "CBOT", ZT: "CBOT",
+  "6E": "CME", "6J": "CME", "6A": "CME", "6B": "CME", "6C": "CME",
+  ZC: "CBOT", ZS: "CBOT", ZW: "CBOT", ZM: "CBOT", ZL: "CBOT",
+};
 
 // ---------------------------------------------------------------------------
 // Props
@@ -40,7 +66,7 @@ function InlineTickerInput({
 
   const handleSubmit = useCallback(() => {
     const clean = input.trim().toUpperCase();
-    if (/^[A-Z]{1,10}$/.test(clean) && clean !== value) {
+    if (/^[A-Z0-9]{1,10}$/.test(clean) && clean !== value) {
       onChange(clean);
     } else {
       setInput(value); // Reset on invalid input
@@ -79,10 +105,27 @@ function PriceChartContent({
 }: ChartWidgetInstanceProps) {
   const timeframe = config.timeframe ?? TIMEFRAMES[1]; // 5m default
 
-  const { bars, loading, error } = usePolygonBars(config.ticker, {
+  // Auto-detect futures instruments
+  const isFutures =
+    config.secType === "FUT" || FUTURES_SYMBOLS.has(config.ticker);
+  const futuresExchange =
+    config.exchange || FUTURES_EXCHANGE[config.ticker] || "CME";
+
+  // Both hooks always called (React rules) — one is disabled via `enabled`
+  const polygonResult = usePolygonBars(config.ticker, {
     multiplier: timeframe.multiplier,
     timespan: timeframe.timespan,
+    enabled: !isFutures,
   });
+  const ibResult = useIBBars(config.ticker, {
+    secType: "FUT",
+    exchange: futuresExchange,
+    multiplier: timeframe.multiplier,
+    timespan: timeframe.timespan,
+    enabled: isFutures,
+  });
+
+  const { bars, loading, error } = isFutures ? ibResult : polygonResult;
 
   const { signals, fills } = useChartSignals(config.ticker);
 
@@ -94,6 +137,11 @@ function PriceChartContent({
   const headerExtra = (
     <div className="flex items-center gap-1 ml-1">
       <InlineTickerInput value={config.ticker} onChange={handleTickerChange} />
+      {isFutures && (
+        <span className="text-[9px] font-medium text-amber-400 bg-amber-400/10 px-1 rounded">
+          IB
+        </span>
+      )}
       <div className="flex items-center gap-0">
         {TIMEFRAMES.map((tf) => (
           <button

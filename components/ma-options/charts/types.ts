@@ -151,8 +151,10 @@ export interface LayoutMap {
 export interface ChartWidgetConfig {
   id: string;                    // "chart-a1b2c3d4"
   type: WidgetType;              // "price-chart" | "signal-panel" | "positions-panel"
-  ticker: string;                // "SPY", "QQQ", etc.
+  ticker: string;                // "SPY", "QQQ", "ES", etc.
   timeframe?: TimeframeConfig;   // only for price-chart
+  secType?: string;              // "STK" | "FUT" | "IND" — auto-detected for known futures
+  exchange?: string;             // "CME", "CBOT", etc.
 }
 
 /** Named preset of chart widgets + layout */
