@@ -16,7 +16,7 @@ interface FuturesQuote {
 }
 
 export default function IBConnectionStatus() {
-  const { isConnected, isChecking, lastMessage, checkConnection } = useIBConnection();
+  const { isConnected, isChecking, lastMessage, checkConnection, reconnectIB, isReconnecting } = useIBConnection();
   const [futuresQuote, setFuturesQuote] = useState<FuturesQuote | null>(null);
   const [isFetchingFutures, setIsFetchingFutures] = useState(false);
   const [polygonQuote, setPolygonQuote] = useState<FuturesQuote | null>(null);
@@ -119,12 +119,23 @@ export default function IBConnectionStatus() {
           <button
             onClick={() => checkConnection()}
             className="text-gray-500 hover:text-gray-300"
-            title="Force reconnect to IB TWS"
+            title="Refresh IB connection status"
             disabled={isChecking}
           >
             {isChecking ? "..." : "↻"}
           </button>
-          
+
+          {!isConnected && !isChecking && (
+            <button
+              onClick={reconnectIB}
+              disabled={isReconnecting}
+              className="px-2 py-0.5 bg-amber-700 hover:bg-amber-600 text-amber-100 rounded text-xs disabled:opacity-50"
+              title="Trigger IB reconnect on the agent"
+            >
+              {isReconnecting ? "Reconnecting..." : "Reconnect IB"}
+            </button>
+          )}
+
           {isConnected && (
             <button
               onClick={testFuturesQuote}

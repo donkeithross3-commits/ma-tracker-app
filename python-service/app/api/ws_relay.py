@@ -49,7 +49,7 @@ SCAN_REQUESTS = frozenset({
 })
 # Priority 3: Lightweight status checks, no market-data-line impact
 STATUS_REQUESTS = frozenset({
-    "ib_status", "check_availability",
+    "ib_status", "check_availability", "ib_reconnect",
 })
 # Execution control requests: only routed to the user's own agent
 EXECUTION_REQUESTS = frozenset({

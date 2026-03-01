@@ -1003,12 +1003,10 @@ async def relay_test_futures(user_id: Optional[str] = Query(None)):
                         await registry.remove_pending_request(request_id)
                 except HTTPException:
                     raise
-            raise HTTPException(
-                status_code=503,
-                detail="Your agent is not connected or IB is not connected. Start the local agent and ensure TWS is running."
-            )
-        
-        # No user_id: find first provider with IB connected (legacy behaviour)
+            # Cross-user fallback: user's agent not found, try any provider below
+            logger.info(f"relay_test_futures: no provider for user {target_user_id}, falling back to any provider")
+
+        # Find first provider with IB connected (fallback or no user_id)
         connected_user_id = None
         for provider_info in status["providers"]:
             provider_id = provider_info["id"]
@@ -1386,22 +1384,19 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
         target_user_id = user_id.strip() if user_id else None
         providers_to_query = status["providers"]
         if target_user_id:
-            # Only check the requesting user's own provider(s)
-            providers_to_query = [
+            # Try the requesting user's own provider(s) first
+            user_providers = [
                 p for p in providers_to_query
                 if p.get("user_id") == target_user_id
             ]
-            if not providers_to_query:
-                logger.info(f"relay_ib_status: no provider for user {target_user_id}, {status['providers_connected']} other(s) connected")
-                return {
-                    "connected": False,
-                    "source": "relay",
-                    "message": (
-                        "An IB agent is connected, but it belongs to a different account. "
-                        "Log in with the account that generated the agent API key, "
-                        "or re-download the agent from this account."
-                    ),
-                }
+            if user_providers:
+                providers_to_query = user_providers
+            else:
+                # Cross-user fallback: single-user deployment — use any connected agent
+                logger.info(
+                    f"relay_ib_status: no provider for user {target_user_id}, "
+                    f"falling back to all {status['providers_connected']} provider(s)"
+                )
         
         logger.info(f"relay_ib_status: querying {len(providers_to_query)} provider(s) (user_filter={target_user_id})")
         
@@ -1494,6 +1489,87 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
             "connected": False,
             "source": "error",
             "message": str(e)
+        }
+
+
+@router.post("/relay/ib-reconnect")
+async def relay_ib_reconnect(user_id: Optional[str] = Query(None)):
+    """
+    Trigger IB reconnect on the agent via WebSocket relay.
+    Uses the user's own agent if available, otherwise falls back to any connected agent.
+    """
+    try:
+        registry = get_registry()
+        status = registry.get_status()
+
+        if status["providers_connected"] == 0:
+            return {
+                "success": False,
+                "connected": False,
+                "message": "No IB data provider connected. Cannot reconnect."
+            }
+
+        # Find agent: user's own first, then fallback to any
+        target_user_id = user_id.strip() if user_id else None
+        provider = None
+        if target_user_id:
+            provider = await registry.get_active_provider(user_id=target_user_id, allow_fallback_to_any=False)
+        if not provider:
+            # Cross-user fallback (single-user deployment)
+            if target_user_id:
+                logger.info(f"relay_ib_reconnect: no provider for user {target_user_id}, falling back to any provider")
+            provider = await registry.get_active_provider(allow_fallback_to_any=True)
+
+        if not provider:
+            return {
+                "success": False,
+                "connected": False,
+                "message": "No agent available to reconnect."
+            }
+
+        # Send ib_reconnect request to agent
+        request_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        pending = PendingRequest(
+            request_id=request_id,
+            request_type="ib_reconnect",
+            payload={},
+            future=future
+        )
+        await registry.add_pending_request(pending)
+
+        await provider.websocket.send_json({
+            "type": "request",
+            "request_id": request_id,
+            "request_type": "ib_reconnect",
+            "payload": {}
+        })
+
+        try:
+            response_data = await asyncio.wait_for(future, timeout=15.0)
+            if response_data is None:
+                response_data = {}
+            return {
+                "success": response_data.get("success", False),
+                "connected": response_data.get("connected", False),
+                "message": response_data.get("message", "Unknown response from agent"),
+            }
+        except asyncio.TimeoutError:
+            return {
+                "success": False,
+                "connected": False,
+                "message": "Reconnect timed out (15s). The agent may still be reconnecting."
+            }
+        finally:
+            await registry.remove_pending_request(request_id)
+
+    except Exception as e:
+        logger.error(f"relay_ib_reconnect error: {e}")
+        return {
+            "success": False,
+            "connected": False,
+            "message": f"Error: {str(e)}"
         }
 
 

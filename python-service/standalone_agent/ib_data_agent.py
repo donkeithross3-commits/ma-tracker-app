@@ -366,6 +366,8 @@ class IBDataAgent:
                 return await self._handle_execution_list_models(payload)
             elif request_type == "execution_swap_model":
                 return await self._handle_execution_swap_model(payload)
+            elif request_type == "ib_reconnect":
+                return await self._handle_ib_reconnect()
             elif request_type == "get_ib_executions":
                 return await self._run_in_thread(self._handle_get_ib_executions_sync, payload)
             elif request_type == "fetch_historical_bars":
@@ -413,6 +415,108 @@ class IBDataAgent:
             "last_connected": self._tws_last_connected,
         }
     
+    async def _handle_ib_reconnect(self) -> dict:
+        """Handle dashboard-triggered IB reconnect request.
+
+        Reuses the same post-reconnect logic as _tws_health_loop:
+        engage hold → disconnect stale socket → connect → re-register callbacks →
+        resubscribe quotes → reconcile → release hold.
+        """
+        # Already connected — nothing to do
+        if self.scanner and self.scanner.isConnected() and not self.scanner.connection_lost:
+            return {"success": True, "connected": True, "message": "Already connected to IB"}
+
+        # Already reconnecting via health loop — don't double-trigger
+        if self._tws_reconnecting:
+            return {"success": False, "connected": False, "message": "IB reconnect already in progress"}
+
+        logger.info("Manual IB reconnect triggered from dashboard")
+
+        # Engage reconnect hold if engine is running
+        if self.execution_engine and self.execution_engine.is_running:
+            self.execution_engine.set_reconnect_hold(True)
+
+        try:
+            # Clean up dead socket
+            if self.scanner:
+                try:
+                    self.scanner.disconnect()
+                except Exception:
+                    pass
+
+            # Attempt connection (tries configured port, then alternate)
+            if not self.connect_to_ib():
+                # Release hold on failure
+                if self.execution_engine and self._reconnect_hold_needs_release():
+                    self.execution_engine.set_reconnect_hold(False)
+                return {
+                    "success": False,
+                    "connected": False,
+                    "message": "Failed to connect to IB TWS/Gateway. Ensure it is running."
+                }
+
+            # Re-register account event callback
+            try:
+                loop = asyncio.get_running_loop()
+                self.scanner.set_account_event_callback(
+                    self._make_account_event_callback(loop)
+                )
+            except Exception as e:
+                logger.error("Failed to re-register account event callback: %s", e)
+
+            # Re-establish streaming subscriptions
+            try:
+                if self.quote_cache:
+                    self.quote_cache.resubscribe_all(self.scanner)
+                    logger.info("Re-established streaming quote subscriptions")
+            except Exception as e:
+                logger.error("Failed to re-establish streaming subscriptions: %s", e)
+
+            # IB Reconciliation — MUST complete before hold is released
+            try:
+                if self.execution_engine and self.execution_engine.is_running:
+                    ib_positions = [
+                        p for p in self.scanner.get_positions_snapshot()
+                        if p.get("account") == self.IB_ACCT_CODE
+                    ]
+                    recon = self.execution_engine.reconcile_with_ib(ib_positions)
+                    if recon["stale_agent"] or recon["orphaned_ib"] or recon["adjusted"]:
+                        logger.warning(
+                            "Post-reconnect reconciliation: matched=%d, orphaned=%d, stale=%d, adjusted=%d",
+                            len(recon["matched"]), len(recon["orphaned_ib"]),
+                            len(recon["stale_agent"]), len(recon["adjusted"]),
+                        )
+            except Exception as e:
+                logger.error("Post-reconnect reconciliation failed: %s", e)
+
+            # Release reconnect hold
+            if self.execution_engine and self.execution_engine.is_running:
+                self.execution_engine.set_reconnect_hold(False)
+
+            # Notify frontend
+            try:
+                if self.websocket:
+                    await self.websocket.send(json.dumps({
+                        "type": "account_event",
+                        "event": {"event": "tws_reconnected", "ts": time.time()},
+                    }))
+            except Exception as e:
+                logger.error("Failed to push tws_reconnected: %s", e)
+
+            logger.info("Manual IB reconnect completed successfully")
+            return {"success": True, "connected": True, "message": "Reconnected to IB TWS"}
+
+        except Exception as e:
+            logger.error("Manual IB reconnect failed: %s", e)
+            # Safety: release hold on failure
+            if self.execution_engine and self._reconnect_hold_needs_release():
+                self.execution_engine.set_reconnect_hold(False)
+            return {
+                "success": False,
+                "connected": False,
+                "message": f"Reconnect failed: {str(e)}"
+            }
+
     def _ib_not_connected_error(self) -> str:
         """Return appropriate error string based on connection state."""
         if self._tws_reconnecting:
