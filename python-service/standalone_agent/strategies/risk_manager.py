@@ -103,7 +103,15 @@ PRESETS = {
                 {"trigger_pct": 500, "exit_pct": 25},
                 {"trigger_pct": 1000, "exit_pct": 50},
             ],
-            "trailing_stop": {"enabled": True, "activation_pct": 50, "trail_pct": 25},
+            "trailing_stop": {
+                "enabled": True,
+                "activation_pct": 50,
+                "trail_pct": 25,
+                "exit_tranches": [
+                    {"exit_pct": 50, "trail_pct": 20},
+                    {"exit_pct": 100},
+                ],
+            },
         },
         "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
     },
@@ -116,6 +124,11 @@ PRESETS = {
                 "enabled": True,
                 "activation_pct": 25,   # arm early (sweep: minimal downside vs 50%)
                 "trail_pct": 15,        # 15% below peak (sweep: PF 9.59 vs 3.78 at 25%)
+                "exit_tranches": [
+                    {"exit_pct": 33, "trail_pct": 12},   # 1st trigger: sell 33%, tighten to 12%
+                    {"exit_pct": 50, "trail_pct": 10},    # 2nd trigger: sell 50% of remaining, tighten to 10%
+                    {"exit_pct": 100},                     # 3rd trigger: sell everything left
+                ],
             },
         },
         "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
@@ -213,6 +226,10 @@ class RiskManagerStrategy(ExecutionStrategy):
         # Lot tracking for aggregate positions (multiple fills same contract)
         self._lot_entries: List[dict] = []
 
+        # Trailing stop tranche state (for multi-step scale-out)
+        self._trailing_tranche_idx: int = 0         # which tranche we're on
+        self._trailing_tranche_pending: bool = False  # True while waiting for tranche fill
+
     # ── ExecutionStrategy interface ──
 
     def get_subscriptions(self, config: dict) -> List[dict]:
@@ -288,6 +305,8 @@ class RiskManagerStrategy(ExecutionStrategy):
         self.high_water_mark = self.entry_price
         self._trailing_stop_price = 0.0
         self._trailing_active = False
+        self._trailing_tranche_idx = 0
+        self._trailing_tranche_pending = False
 
         stop_cfg = config.get("stop_loss", {})
         if stop_cfg.get("enabled") and stop_cfg.get("type") == "laddered":
@@ -453,7 +472,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         if pending.level_type == "trailing":
             level_key = "trailing"
 
-        self._fill_log.append({
+        fill_entry = {
             "time": time.time(),
             "order_id": order_id,
             "level": level_key,
@@ -461,21 +480,69 @@ class RiskManagerStrategy(ExecutionStrategy):
             "avg_price": fill_data.get("avgFillPrice", 0),
             "remaining_qty": self.remaining_qty,
             "pnl_pct": self._calc_pnl_pct(fill_data.get("avgFillPrice", 0)),
-        })
+        }
+        # Tag trailing fills with tranche index for audit
+        if pending.level_type == "trailing":
+            fill_entry["tranche_idx"] = self._trailing_tranche_idx
+        self._fill_log.append(fill_entry)
 
         status = fill_data.get("status", "")
         remaining_on_order = fill_data.get("remaining", 1)
 
         if status == "Filled" or remaining_on_order == 0:
-            self._level_states[level_key] = LevelState.FILLED
             self._pending_orders.pop(order_id, None)
             self._rejection_counts.pop(level_key, None)  # reset on success
-            logger.info("RiskManager level %s FILLED (remaining_qty=%d)", level_key, self.remaining_qty)
+
+            # ── Trailing tranche advancement ──
+            if pending.level_type == "trailing" and self._trailing_tranche_pending:
+                self._trailing_tranche_pending = False
+
+                if self.remaining_qty <= 0:
+                    # Position fully exited
+                    self._level_states[level_key] = LevelState.FILLED
+                    self._completed = True
+                    logger.info("RiskManager: position fully exited for %s (trailing tranche %d)",
+                                self.cache_key, self._trailing_tranche_idx)
+                    return
+
+                # Check if more tranches remain
+                config_trail = config.get("profit_taking", {}).get("trailing_stop", {})
+                tranches = config_trail.get("exit_tranches")
+                next_idx = self._trailing_tranche_idx + 1
+
+                if tranches and next_idx < len(tranches):
+                    # Advance to next tranche: tighter trail, re-arm
+                    self._trailing_tranche_idx = next_idx
+                    next_tranche = tranches[next_idx]
+                    next_trail_pct = next_tranche.get("trail_pct", config_trail.get("trail_pct", 10.0))
+
+                    # Recompute trail price from HWM with tighter percentage
+                    if self.is_long:
+                        self._trailing_stop_price = self.high_water_mark * (1.0 - next_trail_pct / 100.0)
+                    else:
+                        self._trailing_stop_price = self.high_water_mark * (1.0 + next_trail_pct / 100.0)
+
+                    self._level_states[level_key] = LevelState.ARMED
+                    logger.info(
+                        "RiskManager trailing tranche %d/%d filled, advancing to tranche %d "
+                        "(trail_pct=%.1f%%, new trail=%.4f, remaining=%d)",
+                        self._trailing_tranche_idx - 1, len(tranches),
+                        self._trailing_tranche_idx, next_trail_pct,
+                        self._trailing_stop_price, self.remaining_qty,
+                    )
+                else:
+                    # Last tranche (or no tranches) — done
+                    self._level_states[level_key] = LevelState.FILLED
+                    logger.info("RiskManager level %s FILLED (final tranche, remaining_qty=%d)",
+                                level_key, self.remaining_qty)
+            else:
+                self._level_states[level_key] = LevelState.FILLED
+                logger.info("RiskManager level %s FILLED (remaining_qty=%d)", level_key, self.remaining_qty)
         else:
             self._level_states[level_key] = LevelState.PARTIAL
             logger.info("RiskManager level %s PARTIAL fill (remaining_qty=%d)", level_key, self.remaining_qty)
 
-        # Check if position is fully exited
+        # Check if position is fully exited (covers non-trailing fills too)
         if self.remaining_qty <= 0:
             self._completed = True
             logger.info("RiskManager: position fully exited for %s", self.cache_key)
@@ -553,6 +620,10 @@ class RiskManagerStrategy(ExecutionStrategy):
         count = self._rejection_counts.get(level_key, 0) + 1
         self._rejection_counts[level_key] = count
 
+        # Clear tranche pending flag on trailing order death (retry same tranche)
+        if pending.level_type == "trailing":
+            self._trailing_tranche_pending = False
+
         if count >= self.MAX_REJECTIONS_PER_LEVEL:
             self._level_states[level_key] = LevelState.FAILED
             logger.error("RiskManager level %s FAILED after %d consecutive rejections: %s",
@@ -587,6 +658,8 @@ class RiskManagerStrategy(ExecutionStrategy):
             "fill_log": self._fill_log[-20:],  # last 20 fills
             "lot_entries": self._lot_entries,
             "total_lots": len(self._lot_entries),
+            "trailing_tranche_idx": self._trailing_tranche_idx,
+            "trailing_tranche_pending": self._trailing_tranche_pending,
         }
 
     # ── Persistence helpers ──
@@ -603,6 +676,8 @@ class RiskManagerStrategy(ExecutionStrategy):
             "level_states": {k: v.value for k, v in self._level_states.items()},
             "completed": self._completed,
             "lot_entries": self._lot_entries,
+            "trailing_tranche_idx": self._trailing_tranche_idx,
+            "trailing_tranche_pending": self._trailing_tranche_pending,
         }
 
     def restore_runtime_state(self, state: dict) -> None:
@@ -619,6 +694,10 @@ class RiskManagerStrategy(ExecutionStrategy):
         self._trailing_active = bool(state.get("trailing_active", self._trailing_active))
         self._trailing_stop_price = float(state.get("trailing_stop_price", self._trailing_stop_price))
         self._completed = bool(state.get("completed", self._completed))
+
+        # Restore trailing tranche state
+        self._trailing_tranche_idx = int(state.get("trailing_tranche_idx", 0))
+        self._trailing_tranche_pending = False  # pending orders are dead after restart
 
         # Restore lot entries (overrides the single-entry default from on_start)
         persisted_lots = state.get("lot_entries")
@@ -639,9 +718,10 @@ class RiskManagerStrategy(ExecutionStrategy):
 
         logger.info(
             "RiskManager restored: remaining=%d/%d @ %.4f, hwm=%.4f, "
-            "trailing=%s, lots=%d, levels=%s",
+            "trailing=%s, tranche_idx=%d, lots=%d, levels=%s",
             self.remaining_qty, self.initial_qty, self.entry_price,
-            self.high_water_mark, self._trailing_active, len(self._lot_entries),
+            self.high_water_mark, self._trailing_active,
+            self._trailing_tranche_idx, len(self._lot_entries),
             {k: v.value for k, v in self._level_states.items()},
         )
 
@@ -794,7 +874,12 @@ class RiskManagerStrategy(ExecutionStrategy):
 
     def _check_trailing_stop(self, config: dict, pnl_pct: float,
                              current_price: float, quote) -> Optional[OrderAction]:
-        """Check trailing stop. Returns an OrderAction or None."""
+        """Check trailing stop. Returns an OrderAction or None.
+
+        Supports optional exit_tranches for progressive scale-out:
+        each trigger exits a percentage and tightens the trail for the
+        next tranche. Without tranches, exits 100% (backward compatible).
+        """
         profit_cfg = config.get("profit_taking", {})
         trail_cfg = profit_cfg.get("trailing_stop", {})
         if not trail_cfg.get("enabled"):
@@ -805,7 +890,16 @@ class RiskManagerStrategy(ExecutionStrategy):
             return None
 
         activation_pct = trail_cfg.get("activation_pct", 0)
-        trail_pct = trail_cfg.get("trail_pct", 10.0)
+        base_trail_pct = trail_cfg.get("trail_pct", 10.0)
+
+        # Resolve effective trail_pct from current tranche (or base for backward compat)
+        tranches = trail_cfg.get("exit_tranches")
+        if tranches and self._trailing_tranche_idx < len(tranches):
+            tranche = tranches[self._trailing_tranche_idx]
+            trail_pct = tranche.get("trail_pct", base_trail_pct)
+        else:
+            trail_pct = base_trail_pct
+            tranche = None
 
         # Check activation
         if not self._trailing_active:
@@ -822,17 +916,38 @@ class RiskManagerStrategy(ExecutionStrategy):
                 self._trailing_stop_price = new_trail
             # Check trigger
             if current_price <= self._trailing_stop_price:
-                qty = self.remaining_qty
+                # Determine exit qty from tranche config
+                if tranche is not None:
+                    exit_pct = tranche.get("exit_pct", 100)
+                    is_last = (self._trailing_tranche_idx >= len(tranches) - 1)
+                    qty = self._compute_exit_qty(exit_pct, is_last)
+                    total_tranches = len(tranches)
+                else:
+                    qty = self.remaining_qty
+                    total_tranches = 0
+
                 exec_cfg = config.get("execution", {})
+                if total_tranches > 0:
+                    reason = (
+                        f"Trailing stop tranche {self._trailing_tranche_idx}/{total_tranches}: "
+                        f"exit {tranche.get('exit_pct', 100)}%, trail={trail_pct}%, "
+                        f"price={current_price:.4f} <= trail={self._trailing_stop_price:.4f} "
+                        f"(hwm={self.high_water_mark:.4f})"
+                    )
+                else:
+                    reason = (
+                        f"Trailing stop: price={current_price:.4f} <= trail={self._trailing_stop_price:.4f} "
+                        f"(hwm={self.high_water_mark:.4f}, trail_pct={trail_pct}%)"
+                    )
+
                 action = self._make_order_action(
                     qty, exec_cfg.get("stop_order_type", "MKT"),
-                    current_price, quote, config,
-                    f"Trailing stop: price={current_price:.4f} <= trail={self._trailing_stop_price:.4f} "
-                    f"(hwm={self.high_water_mark:.4f}, trail_pct={trail_pct}%)"
+                    current_price, quote, config, reason,
                 )
                 self._level_states[key] = LevelState.TRIGGERED
-                logger.info("RiskManager TRAILING STOP triggered: price=%.4f trail=%.4f",
-                            current_price, self._trailing_stop_price)
+                self._trailing_tranche_pending = True
+                logger.info("RiskManager TRAILING STOP triggered (tranche %d): price=%.4f trail=%.4f qty=%d",
+                            self._trailing_tranche_idx, current_price, self._trailing_stop_price, qty)
                 return action
         else:
             # Short: trailing stop goes up from low water mark
@@ -840,16 +955,37 @@ class RiskManagerStrategy(ExecutionStrategy):
             if self._trailing_stop_price == 0 or new_trail < self._trailing_stop_price:
                 self._trailing_stop_price = new_trail
             if current_price >= self._trailing_stop_price:
-                qty = self.remaining_qty
+                # Determine exit qty from tranche config
+                if tranche is not None:
+                    exit_pct = tranche.get("exit_pct", 100)
+                    is_last = (self._trailing_tranche_idx >= len(tranches) - 1)
+                    qty = self._compute_exit_qty(exit_pct, is_last)
+                    total_tranches = len(tranches)
+                else:
+                    qty = self.remaining_qty
+                    total_tranches = 0
+
                 exec_cfg = config.get("execution", {})
+                if total_tranches > 0:
+                    reason = (
+                        f"Trailing stop tranche {self._trailing_tranche_idx}/{total_tranches} (short): "
+                        f"exit {tranche.get('exit_pct', 100)}%, trail={trail_pct}%, "
+                        f"price={current_price:.4f} >= trail={self._trailing_stop_price:.4f} "
+                        f"(hwm={self.high_water_mark:.4f})"
+                    )
+                else:
+                    reason = (
+                        f"Trailing stop (short): price={current_price:.4f} >= trail={self._trailing_stop_price:.4f}"
+                    )
+
                 action = self._make_order_action(
                     qty, exec_cfg.get("stop_order_type", "MKT"),
-                    current_price, quote, config,
-                    f"Trailing stop (short): price={current_price:.4f} >= trail={self._trailing_stop_price:.4f}"
+                    current_price, quote, config, reason,
                 )
                 self._level_states[key] = LevelState.TRIGGERED
-                logger.info("RiskManager TRAILING STOP (short) triggered: price=%.4f trail=%.4f",
-                            current_price, self._trailing_stop_price)
+                self._trailing_tranche_pending = True
+                logger.info("RiskManager TRAILING STOP (short) triggered (tranche %d): price=%.4f trail=%.4f qty=%d",
+                            self._trailing_tranche_idx, current_price, self._trailing_stop_price, qty)
                 return action
 
         return None
