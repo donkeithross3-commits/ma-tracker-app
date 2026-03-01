@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth-api";
+import { filterByAccount } from "../account-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,10 @@ export async function GET(request: NextRequest) {
     }
 
     const data = JSON.parse(text);
+    // Filter out excluded accounts for this user (e.g. managed accounts)
+    if (data.positions && Array.isArray(data.positions)) {
+      data.positions = filterByAccount(userId, data.positions);
+    }
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error fetching positions:", error);

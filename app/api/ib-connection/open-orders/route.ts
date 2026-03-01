@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth-api";
+import { filterByAccount } from "../account-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,10 @@ export async function GET(_request: NextRequest) {
     }
 
     const data = JSON.parse(text);
+    // Filter out excluded accounts for this user (e.g. managed accounts)
+    if (data.orders && Array.isArray(data.orders)) {
+      data.orders = filterByAccount(userId, data.orders);
+    }
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error fetching open orders:", error);
