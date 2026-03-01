@@ -64,6 +64,16 @@
       "screenshot": null
     },
     {
+      "id": "multi-user-ib-accounts",
+      "title": "Multi-User IB Account Support",
+      "summary": "IB agents now work for any user's TWS accounts, with per-user managed account filtering on the server.",
+      "description": "The IB data agent previously hardcoded a single account code, so only one user's positions would load. Now the agent returns positions and orders for all managed accounts reported by TWS.\n\n**Server-side account filtering:** Users with advisor-managed sub-accounts can have specific accounts excluded at the API layer — no configuration needed on the user's machine. The KRJ user's managed account (U22621569) is filtered server-side, showing only their personal account (U127613).\n\n**What changed:**\n- Agent `get_positions` no longer filters to a hardcoded account — returns all TWS positions\n- Next.js API routes apply per-user exclusions via `account-filter.ts` before returning data to the browser\n- Both v1 Manual and v2 Manual tabs benefit since they share the same API endpoints",
+      "category": "positions",
+      "project": "ma-options",
+      "image": "",
+      "screenshot": null
+    },
+    {
       "id": "greeks-pipeline-fix",
       "title": "Greeks Pipeline Fix (v1.14.1)",
       "summary": "Delta, gamma, theta, and vega now flow correctly from IB through the agent — previously only delta was stored, and all greeks were lost when their value was 0.",
