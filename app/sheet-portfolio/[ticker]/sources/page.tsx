@@ -72,6 +72,16 @@ function truncate(s: string | null, max: number): string {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+function cleanCompanyName(name: string | null): string {
+  if (!name) return "—";
+  // Strip "(TICKER)" and "(CIK ...)" suffixes from SEC display names
+  return name
+    .replace(/\s*\(CIK\s*\d+\)\s*/gi, "")
+    .replace(/\s*\([A-Z]{1,5}(?:,\s*[A-Z]{1,10})*\)\s*/g, "")
+    .replace(/\s+$/, "")
+    .trim() || name;
+}
+
 function impactColor(level: string | null): {
   bg: string;
   text: string;
@@ -364,8 +374,8 @@ export default function DealSourcesPage() {
                                   </span>
                                 )}
                               </td>
-                              <td className="py-2 px-2 text-gray-300">
-                                {truncate(f.company_name, 30)}
+                              <td className="py-2 px-2 text-gray-300" title={f.company_name ?? ""}>
+                                {truncate(cleanCompanyName(f.company_name), 35)}
                               </td>
                               <td className="py-2 px-2">
                                 <span

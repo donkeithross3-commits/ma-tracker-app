@@ -1,14 +1,17 @@
 """
 EDGAR portfolio filing watcher.
 
-Queries SEC EDGAR full-text search (EFTS) for new filings related to
-tickers in the active deal portfolio. Material filings (8-K Item 1.01,
-proxy amendments, etc.) trigger email alerts via MessagingService.
+Primary source: SEC EDGAR submissions API (CIK-based) for complete, accurate
+filings from target and acquiror companies. Supplements with EFTS full-text
+search for third-party filings mentioning the deal.
+
+Material filings (8-K Item 1.01, proxy amendments, etc.) trigger email alerts
+via MessagingService.
 """
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -17,27 +20,36 @@ from app.services.messaging import MessagingService
 
 logger = logging.getLogger(__name__)
 
-# SEC EDGAR EFTS full-text search endpoint
-EFTS_BASE = "https://efts.sec.gov/LATEST/search-index"
-
 # SEC requires a User-Agent header with contact info
 SEC_HEADERS = {
     "User-Agent": "M&A Tracker alerts@ma-tracker.com",
     "Accept": "application/json",
 }
 
-# Filing types considered "material" for active M&A deals
-MATERIAL_FILING_TYPES = {
-    "8-K",       # Current report (Items 1.01, 8.01)
-    "8-K/A",     # Amended current report
-    "SC TO",     # Tender offer
-    "SC 14D-9",  # Target response to tender offer
-    "DEFM14A",   # Definitive proxy for merger
-    "PREM14A",   # Preliminary proxy for merger
-    "S-4",       # Registration for business combination
-    "S-4/A",     # Amended registration
-    "425",       # Business combination communications
+# M&A-relevant form types to keep from the submissions API
+MA_FORM_TYPES = {
+    # Deal structure / registration
+    "S-4", "S-4/A",
+    "425",                    # Business combination communications
+    # Tender offers
+    "SC TO-T", "SC TO-T/A", "SC TO-I", "SC TO-I/A",
+    "SC 14D-9", "SC 14D-9/A",
+    # Merger proxies
+    "DEFM14A", "PREM14A", "DEFC14A", "DFAN14A", "DEFA14A",
+    # Ownership / activist
+    "SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A",
+    # Current reports (material events)
+    "8-K", "8-K/A",
 }
+
+# Subset that triggers alerts
+MATERIAL_FILING_TYPES = {
+    "8-K", "8-K/A", "SC TO-T", "SC TO-T/A", "SC 14D-9", "SC 14D-9/A",
+    "DEFM14A", "PREM14A", "S-4", "S-4/A", "425",
+}
+
+# Module-level CIK cache: ticker -> (cik_int, company_title)
+_cik_cache: Dict[str, Tuple[int, str]] = {}
 
 
 async def check_portfolio_edgar_filings(
@@ -46,22 +58,26 @@ async def check_portfolio_edgar_filings(
 ) -> Dict[str, Any]:
     """Check EDGAR for new filings related to tracked deal tickers.
 
-    This is designed to be called by the ``edgar_filing_check`` scheduled
-    job (every 5 minutes during extended market hours).
+    Uses SEC submissions API (CIK-based) for reliable, complete filings.
+    Falls back to announce_date for historical lookback on first run.
 
     Returns a summary dict for the job_runs result column.
     """
-    tickers_with_names = await _get_active_tickers_with_names(pool)
-    if not tickers_with_names:
+    tickers_with_context = await _get_active_tickers_with_context(pool)
+    if not tickers_with_context:
         logger.debug("[edgar_portfolio] No active tickers to watch")
         return {"tickers": 0, "new_filings": 0, "alerts": 0}
+
+    # Ensure CIK cache is loaded
+    await _ensure_cik_cache()
 
     total_new = 0
     total_alerts = 0
 
-    for ticker, company_name, target_name in tickers_with_names:
+    for ctx in tickers_with_context:
+        ticker = ctx["ticker"]
         try:
-            filings = await _search_edgar(ticker, company_name=company_name, target_name=target_name)
+            filings = await _fetch_deal_filings(ctx)
             if not filings:
                 continue
 
@@ -109,7 +125,6 @@ async def check_portfolio_edgar_filings(
                                 impact_level=impact.get("impact"),
                             )
                         else:
-                            # Fallback: no AI assessment, send basic alert
                             await messaging.send_filing_alert(
                                 filing=filing,
                                 deal=deal_info,
@@ -126,9 +141,9 @@ async def check_portfolio_edgar_filings(
 
     logger.info(
         "[edgar_portfolio] Checked %d tickers, %d new filings, %d alerts sent",
-        len(tickers_with_names), total_new, total_alerts,
+        len(tickers_with_context), total_new, total_alerts,
     )
-    return {"tickers": len(tickers_with_names), "new_filings": total_new, "alerts": total_alerts}
+    return {"tickers": len(tickers_with_context), "new_filings": total_new, "alerts": total_alerts}
 
 
 # ---------------------------------------------------------------------------
@@ -137,15 +152,14 @@ async def check_portfolio_edgar_filings(
 
 async def _get_active_tickers(pool) -> List[str]:
     """Return distinct tickers from the latest snapshot that are not excluded."""
-    triples = await _get_active_tickers_with_names(pool)
-    return [t for t, _a, _tgt in triples]
+    contexts = await _get_active_tickers_with_context(pool)
+    return [c["ticker"] for c in contexts]
 
 
-async def _get_active_tickers_with_names(pool) -> List[tuple]:
-    """Return (ticker, acquiror, target_name) triples from the latest snapshot.
+async def _get_active_tickers_with_context(pool) -> List[Dict[str, Any]]:
+    """Return deal context dicts for all active tickers.
 
-    Joins sheet_deal_details to get the target company name, which is critical
-    for EFTS search (e.g., EA -> "Electronic Arts" not just "Silver Lake").
+    Each dict has: ticker, acquiror, target, announce_date.
     """
     async with pool.acquire() as conn:
         snap = await conn.fetchrow(
@@ -160,7 +174,9 @@ async def _get_active_tickers_with_names(pool) -> List[tuple]:
 
         rows = await conn.fetch(
             """
-            SELECT DISTINCT ON (sr.ticker) sr.ticker, sr.acquiror, sdd.target
+            SELECT DISTINCT ON (sr.ticker)
+                sr.ticker, sr.acquiror,
+                sdd.target, sdd.announce_date
             FROM sheet_rows sr
             LEFT JOIN sheet_deal_details sdd ON sdd.ticker = sr.ticker
             WHERE sr.snapshot_id = $1
@@ -170,99 +186,244 @@ async def _get_active_tickers_with_names(pool) -> List[tuple]:
             """,
             snap["id"],
         )
-        return [(r["ticker"], r.get("acquiror"), r.get("target")) for r in rows]
+        return [
+            {
+                "ticker": r["ticker"],
+                "acquiror": r.get("acquiror"),
+                "target": r.get("target"),
+                "announce_date": r.get("announce_date"),
+            }
+            for r in rows
+        ]
 
 
-async def _search_edgar(
-    ticker: str,
-    company_name: str | None = None,
-    target_name: str | None = None,
-) -> List[Dict[str, Any]]:
-    """Query SEC EFTS for recent filings mentioning ``ticker``, ``company_name``, or ``target_name``.
+# ---------------------------------------------------------------------------
+# CIK lookup (SEC company_tickers.json)
+# ---------------------------------------------------------------------------
 
-    Searches the last 2 days to avoid gaps between polling intervals.
-    Uses OR query to catch filings that reference company name but not ticker symbol.
-    Filters to M&A-relevant form types to reduce noise.
+async def _ensure_cik_cache() -> None:
+    """Load the SEC ticker→CIK mapping into module-level cache (once)."""
+    global _cik_cache
+    if _cik_cache:
+        return
 
-    The target_name is critical: for EA, the acquiror is "Silver Lake" but the
-    target is "Electronic Arts" — SEC filings reference the target name, not just
-    the acquiror.
-    """
-    date_from = (datetime.utcnow() - timedelta(days=14)).strftime("%Y-%m-%d")
-    date_to = datetime.utcnow().strftime("%Y-%m-%d")
-
-    # Build query: ticker OR acquiror name OR target name
-    query_parts = [f'"{ticker}"']
-
-    def _clean_company_name(name: str | None) -> str | None:
-        """Extract first 2 significant words from a company name."""
-        if not name or len(name) <= 3:
-            return None
-        words = [w for w in name.split() if len(w) > 2 and w.upper() not in (
-            "INC", "INC.", "CORP", "CORP.", "LLC", "LTD", "CO", "THE",
-            "GROUP", "HOLDINGS", "TECHNOLOGIES",
-        )]
-        if words:
-            return " ".join(words[:2])
-        return None
-
-    acquiror_clean = _clean_company_name(company_name)
-    if acquiror_clean:
-        query_parts.append(f'"{acquiror_clean}"')
-
-    target_clean = _clean_company_name(target_name)
-    if target_clean and target_clean != acquiror_clean:
-        query_parts.append(f'"{target_clean}"')
-
-    query = " OR ".join(query_parts)
-
-    # Filter to M&A-relevant form types
-    form_filter = ",".join(sorted(MATERIAL_FILING_TYPES | {"DEFA14A", "SC TO-T/A", "SC 13D", "SC 13D/A"}))
-
-    params = {
-        "q": query,
-        "dateRange": "custom",
-        "startdt": date_from,
-        "enddt": date_to,
-        "forms": form_filter,
-    }
-
+    url = "https://www.sec.gov/files/company_tickers.json"
     try:
         async with httpx.AsyncClient(timeout=15.0, headers=SEC_HEADERS) as client:
-            resp = await client.get(EFTS_BASE, params=params)
+            resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
+        _cik_cache = {
+            v["ticker"]: (v["cik_str"], v.get("title", ""))
+            for v in data.values()
+            if v.get("ticker")
+        }
+        logger.info("[edgar_portfolio] Loaded CIK cache: %d tickers", len(_cik_cache))
     except Exception:
-        logger.error("[edgar_portfolio] EFTS request failed for %s", ticker, exc_info=True)
-        return []
+        logger.error("[edgar_portfolio] Failed to load CIK cache", exc_info=True)
+
+
+def _get_cik(ticker: str) -> Optional[int]:
+    """Return CIK for a ticker, or None if not found."""
+    entry = _cik_cache.get(ticker)
+    return entry[0] if entry else None
+
+
+def _get_company_title(ticker: str) -> str:
+    """Return SEC company title for a ticker."""
+    entry = _cik_cache.get(ticker)
+    return entry[1] if entry else ""
+
+
+# ---------------------------------------------------------------------------
+# SEC submissions API — primary filing source
+# ---------------------------------------------------------------------------
+
+async def _fetch_submissions(cik: int) -> Optional[Dict[str, Any]]:
+    """Fetch filings from SEC submissions API for a CIK."""
+    padded = str(cik).zfill(10)
+    url = f"https://data.sec.gov/submissions/CIK{padded}.json"
+    try:
+        async with httpx.AsyncClient(timeout=15.0, headers=SEC_HEADERS) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception:
+        logger.warning("[edgar_portfolio] Submissions API failed for CIK %s", padded)
+        return None
+
+
+def _parse_submissions_filings(
+    data: Dict[str, Any],
+    date_from: str,
+    company_name: str,
+) -> List[Dict[str, Any]]:
+    """Parse filings from submissions API response.
+
+    The ``filings.recent`` object has parallel arrays (column-store format).
+    We filter by form type and date, then build filing dicts.
+    """
+    recent = data.get("filings", {}).get("recent", {})
+    accessions = recent.get("accessionNumber", [])
+    forms = recent.get("form", [])
+    dates = recent.get("filingDate", [])
+    primary_docs = recent.get("primaryDocument", [])
+    descriptions = recent.get("primaryDocDescription", [])
+
+    # The CIK for URL construction
+    company_cik = str(data.get("cik", "")).lstrip("0")
 
     results = []
-    for hit in data.get("hits", {}).get("hits", []):
-        source = hit.get("_source", {})
-        # EFTS field mapping:
-        #   adsh        = accession number (e.g. "0001213900-26-021779")
-        #   form        = filing type (e.g. "8-K")
-        #   display_names = list of company name strings
-        #   file_date   = filing date
-        #   file_description = document description
-        accession = source.get("adsh", "") or hit.get("_id", "")
-        root_forms = source.get("root_forms", [])
-        filing_type = source.get("form", "") or (root_forms[0] if root_forms else "")
-        # Parse company name from display_names (e.g. "Electronic Arts Inc (EA) (CIK ...)")
-        display_names = source.get("display_names", [])
-        company_name = display_names[0].split("(CIK")[0].strip() if display_names else ""
-        filing_url = f"https://www.sec.gov/Archives/edgar/data/{source.get('ciks', [''])[0].lstrip('0') if source.get('ciks') else ''}/{accession.replace('-', '')}/{accession}-index.htm" if accession else ""
+    for i in range(len(accessions)):
+        form = forms[i] if i < len(forms) else ""
+        filing_date = dates[i] if i < len(dates) else ""
+
+        # Filter: M&A form types only
+        if form not in MA_FORM_TYPES:
+            continue
+
+        # Filter: only filings after the deal announcement
+        if filing_date < date_from:
+            continue
+
+        accession = accessions[i]
+        primary_doc = primary_docs[i] if i < len(primary_docs) else ""
+        desc = descriptions[i] if i < len(descriptions) else form
+
+        # Build filing URL: use filer CIK from accession number
+        filer_cik = accession.split("-")[0] if accession else company_cik
+        acc_nodash = accession.replace("-", "")
+        if primary_doc:
+            filing_url = f"https://www.sec.gov/Archives/edgar/data/{filer_cik}/{acc_nodash}/{primary_doc}"
+        else:
+            filing_url = f"https://www.sec.gov/Archives/edgar/data/{filer_cik}/{acc_nodash}/{accession}-index.htm"
+
         results.append({
             "accession_number": accession,
-            "filing_type": filing_type,
+            "filing_type": form,
             "company_name": company_name,
-            "filing_date": source.get("file_date", ""),
+            "filing_date": filing_date,
             "filing_url": filing_url,
-            "description": source.get("file_description", "") or (display_names[0] if display_names else ""),
+            "description": desc or form,
         })
 
     return results
 
+
+async def _fetch_deal_filings(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Fetch all M&A-relevant filings for a deal from SEC submissions API.
+
+    Searches both the target company and acquiror company filings.
+    Uses announce_date for historical lookback (defaults to 180 days).
+    """
+    ticker = ctx["ticker"]
+    acquiror_name = ctx.get("acquiror")
+    target_name = ctx.get("target")
+    announce_date = ctx.get("announce_date")
+
+    # Determine date cutoff — go back to deal announcement
+    if announce_date:
+        # Start 7 days before announcement to catch pre-announcement filings
+        if isinstance(announce_date, str):
+            try:
+                dt = datetime.strptime(announce_date, "%Y-%m-%d")
+            except ValueError:
+                dt = datetime.utcnow() - timedelta(days=180)
+        else:
+            dt = announce_date if hasattr(announce_date, 'strftime') else datetime.utcnow() - timedelta(days=180)
+        date_from = (dt - timedelta(days=7)).strftime("%Y-%m-%d")
+    else:
+        date_from = (datetime.utcnow() - timedelta(days=180)).strftime("%Y-%m-%d")
+
+    all_filings = []
+    seen_accessions = set()
+
+    # 1. Target company filings (the ticker itself)
+    target_cik = _get_cik(ticker)
+    if target_cik:
+        company_title = _clean_company_title(_get_company_title(ticker))
+        data = await _fetch_submissions(target_cik)
+        if data:
+            filings = _parse_submissions_filings(data, date_from, company_title)
+            for f in filings:
+                if f["accession_number"] not in seen_accessions:
+                    seen_accessions.add(f["accession_number"])
+                    all_filings.append(f)
+            logger.debug(
+                "[edgar_portfolio] %s target CIK %s: %d filings since %s",
+                ticker, target_cik, len(filings), date_from,
+            )
+
+    # 2. Acquiror company filings (if acquiror is a public company)
+    if acquiror_name:
+        acquiror_ticker = _extract_ticker_from_name(acquiror_name)
+        if acquiror_ticker and acquiror_ticker != ticker:
+            acq_cik = _get_cik(acquiror_ticker)
+            if acq_cik:
+                acq_title = _clean_company_title(_get_company_title(acquiror_ticker))
+                data = await _fetch_submissions(acq_cik)
+                if data:
+                    filings = _parse_submissions_filings(data, date_from, acq_title)
+                    for f in filings:
+                        if f["accession_number"] not in seen_accessions:
+                            seen_accessions.add(f["accession_number"])
+                            all_filings.append(f)
+                    logger.debug(
+                        "[edgar_portfolio] %s acquiror %s CIK %s: %d filings",
+                        ticker, acquiror_ticker, acq_cik, len(filings),
+                    )
+
+    if not all_filings:
+        logger.debug("[edgar_portfolio] %s: no CIK found or no filings", ticker)
+
+    return all_filings
+
+
+def _extract_ticker_from_name(name: str) -> Optional[str]:
+    """Try to extract a ticker from an acquiror name.
+
+    Handles formats like "Silver Lake / EA" or "AAPL" or "Broadcom Inc (AVGO)".
+    Returns None if no clear ticker can be extracted.
+    """
+    if not name:
+        return None
+    # If the name is itself a valid ticker (all caps, short)
+    cleaned = name.strip().upper()
+    if len(cleaned) <= 5 and cleaned.isalpha() and cleaned in _cik_cache:
+        return cleaned
+    # Check for ticker in parentheses
+    import re
+    m = re.search(r'\(([A-Z]{1,5})\)', name)
+    if m and m.group(1) in _cik_cache:
+        return m.group(1)
+    return None
+
+
+def _clean_company_title(title: str) -> str:
+    """Clean SEC company title for display.
+
+    Converts "ELECTRONIC ARTS INC." → "Electronic Arts Inc."
+    """
+    if not title:
+        return ""
+    # Title-case but preserve known abbreviations
+    words = title.split()
+    result = []
+    for w in words:
+        if w.upper() in ("INC.", "INC", "CORP.", "CORP", "LLC", "LTD.", "LTD", "LP", "L.P."):
+            result.append(w.capitalize())
+        elif w.upper() in ("II", "III", "IV"):
+            result.append(w.upper())
+        elif len(w) <= 2 and w.upper() == w:
+            result.append(w.upper())
+        else:
+            result.append(w.capitalize())
+    return " ".join(result)
+
+
+# ---------------------------------------------------------------------------
+# Storage & filtering
+# ---------------------------------------------------------------------------
 
 async def _filter_new_filings(
     pool, ticker: str, filings: List[Dict[str, Any]]
@@ -318,10 +479,7 @@ def _is_material(filing: Dict[str, Any]) -> bool:
 async def _store_filing_impact(
     pool, ticker: str, filing: Dict[str, Any], impact: Dict[str, Any]
 ) -> None:
-    """Persist an AI filing impact assessment to the portfolio_filing_impacts table.
-
-    This feeds back into the morning risk assessment via collect_deal_context().
-    """
+    """Persist an AI filing impact assessment to the portfolio_filing_impacts table."""
     try:
         async with pool.acquire() as conn:
             await conn.execute(
