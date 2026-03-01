@@ -998,6 +998,25 @@ class RiskAssessmentEngine:
                             strategy = "full"
                             full_deals += 1
 
+                        # Log batch result to unified API call tracker
+                        try:
+                            from .api_cost_tracker import log_api_call
+                            bmeta = assessment.get("_meta", {})
+                            await log_api_call(
+                                self.pool,
+                                source="risk_engine",
+                                model=bmeta.get("model", "unknown"),
+                                ticker=ticker,
+                                input_tokens=bmeta.get("input_tokens", 0),
+                                output_tokens=bmeta.get("output_tokens", 0),
+                                cache_creation_tokens=bmeta.get("cache_creation_tokens", 0),
+                                cache_read_tokens=bmeta.get("cache_read_tokens", 0),
+                                cost_usd=bmeta.get("cost_usd", 0),
+                                metadata={"batch_id": bmeta.get("batch_id")},
+                            )
+                        except Exception:
+                            pass  # Non-fatal
+
                 if assessment is None:
                     # Sequential fallback (or batch not used)
                     if significance in (ChangeSignificance.MINOR, ChangeSignificance.MODERATE) and prev:
@@ -1280,6 +1299,27 @@ Keep it actionable and direct."""
             max_tokens=1500,
             messages=[{"role": "user", "content": summary_prompt}],
         )
+
+        # Log summary generation to unified tracker
+        try:
+            from .api_cost_tracker import log_api_call
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            cost = compute_cost(
+                self.summary_model, response.usage.input_tokens,
+                response.usage.output_tokens, cache_creation, cache_read,
+            )
+            await log_api_call(
+                self.pool, source="risk_summary", model=self.summary_model,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                cache_creation_tokens=cache_creation,
+                cache_read_tokens=cache_read,
+                cost_usd=cost,
+                metadata={"run_id": str(run_id)},
+            )
+        except Exception:
+            pass  # Non-fatal
 
         return response.content[0].text
 
