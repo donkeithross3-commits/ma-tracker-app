@@ -270,7 +270,9 @@ def _parse_submissions_filings(
     primary_docs = recent.get("primaryDocument", [])
     descriptions = recent.get("primaryDocDescription", [])
 
-    # The CIK for URL construction
+    # The registrant's CIK for URL construction — SEC archives filings under
+    # the registrant's CIK, NOT the filer's CIK (which may be a filing agent
+    # like "EDGARFILINGS LTD").
     company_cik = str(data.get("cik", "")).lstrip("0")
 
     results = []
@@ -290,13 +292,13 @@ def _parse_submissions_filings(
         primary_doc = primary_docs[i] if i < len(primary_docs) else ""
         desc = descriptions[i] if i < len(descriptions) else form
 
-        # Build filing URL: use filer CIK from accession number (strip leading zeros)
-        filer_cik = accession.split("-")[0].lstrip("0") if accession else company_cik
+        # Build filing URL: always use the company (registrant) CIK, not the
+        # filer CIK from the accession prefix (which may be a filing agent).
         acc_nodash = accession.replace("-", "")
         if primary_doc:
-            filing_url = f"https://www.sec.gov/Archives/edgar/data/{filer_cik}/{acc_nodash}/{primary_doc}"
+            filing_url = f"https://www.sec.gov/Archives/edgar/data/{company_cik}/{acc_nodash}/{primary_doc}"
         else:
-            filing_url = f"https://www.sec.gov/Archives/edgar/data/{filer_cik}/{acc_nodash}/{accession}-index.htm"
+            filing_url = f"https://www.sec.gov/Archives/edgar/data/{company_cik}/{acc_nodash}/{accession}-index.htm"
 
         results.append({
             "accession_number": accession,
