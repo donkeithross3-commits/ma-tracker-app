@@ -1,13 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports
-import RGL from "react-grid-layout";
-const RGLModule = RGL as any;
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   RotateCcw,
-  Eye,
-  EyeOff,
   BarChart3,
   TrendingUp,
   LineChart,
@@ -21,11 +16,12 @@ import { usePolygonBars } from "./usePolygonBars";
 import { useChartSignals } from "./useChartSignals";
 import {
   DEFAULT_LAYOUTS,
-  GRID_BREAKPOINTS,
   GRID_COLS,
   ROW_HEIGHT,
   GRID_MARGIN,
   LAYOUT_STORAGE_KEY,
+  type LayoutItem,
+  type LayoutMap,
 } from "./defaultLayouts";
 import { TIMEFRAMES, type OverlayToggles, type TimeframeConfig } from "./types";
 
@@ -33,32 +29,58 @@ import { TIMEFRAMES, type OverlayToggles, type TimeframeConfig } from "./types";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
-// react-grid-layout CJS/ESM interop
-const Responsive = RGLModule.Responsive || RGLModule.default?.Responsive || RGLModule;
-const WidthProvider = RGLModule.WidthProvider || RGLModule.default?.WidthProvider;
+// ---------------------------------------------------------------------------
+// Dynamic import of react-grid-layout (CJS/ESM safe)
+// We use the Responsive component with manual width measurement instead
+// of WidthProvider HOC which has interop issues.
+// ---------------------------------------------------------------------------
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Layouts = { [P: string]: any[] };
-const ResponsiveGridLayout = WidthProvider ? WidthProvider(Responsive) : Responsive;
+let RGLResponsive: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const RGL = require("react-grid-layout");
+  RGLResponsive = RGL.Responsive || RGL.default?.Responsive || RGL;
+} catch {
+  // Will be caught at render time
+}
 
 // ---------------------------------------------------------------------------
 // Layout persistence
 // ---------------------------------------------------------------------------
-function loadSavedLayouts(): Layouts | null {
+function loadSavedLayouts(): LayoutMap | null {
   try {
     const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Validate structure: must have at least one breakpoint with arrays
+      if (parsed && typeof parsed === "object") {
+        const keys = Object.keys(parsed);
+        if (keys.length > 0 && Array.isArray(parsed[keys[0]])) {
+          return parsed;
+        }
+      }
+    }
   } catch {
     // corrupt localStorage — fall back to defaults
   }
   return null;
 }
 
-function saveLayouts(layouts: Layouts) {
+function saveLayouts(layouts: LayoutMap) {
   try {
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layouts));
   } catch {
     // localStorage full or unavailable — ignore
   }
+}
+
+// ---------------------------------------------------------------------------
+// Pick breakpoint from container width
+// ---------------------------------------------------------------------------
+function getBreakpoint(width: number): "lg" | "md" | "sm" {
+  if (width >= 1200) return "lg";
+  if (width >= 996) return "md";
+  return "sm";
 }
 
 // ---------------------------------------------------------------------------
@@ -69,8 +91,12 @@ export default function ChartsTab() {
   const [ticker, setTicker] = useState("SPY");
   const [tickerInput, setTickerInput] = useState("SPY");
 
-  // Timeframe state
-  const [timeframe, setTimeframe] = useState<TimeframeConfig>(TIMEFRAMES[1]); // 5m default
+  // Timeframe state — default to 1D on weekends so chart shows data
+  const [timeframe, setTimeframe] = useState<TimeframeConfig>(() => {
+    const day = new Date().getDay();
+    const isWeekend = day === 0 || day === 6;
+    return isWeekend ? TIMEFRAMES[4] : TIMEFRAMES[1]; // 1D on weekends, 5m on weekdays
+  });
 
   // Overlay toggles
   const [overlayToggles, setOverlayToggles] = useState<OverlayToggles>({
@@ -80,9 +106,26 @@ export default function ChartsTab() {
   });
 
   // Grid layouts
-  const [layouts, setLayouts] = useState<Layouts>(
+  const [layouts, setLayouts] = useState<LayoutMap>(
     () => loadSavedLayouts() || DEFAULT_LAYOUTS
   );
+
+  // Measure container width for grid (replaces WidthProvider)
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const measure = () => {
+      if (containerRef.current) {
+        setContainerWidth(containerRef.current.offsetWidth);
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   // Data hooks
   const { bars, loading: barsLoading, error: barsError } = usePolygonBars(
@@ -97,6 +140,10 @@ export default function ChartsTab() {
     engineRunning,
     activePositionCount,
   } = useChartSignals(ticker);
+
+  // Current breakpoint + cols
+  const breakpoint = getBreakpoint(containerWidth);
+  const cols = GRID_COLS[breakpoint];
 
   // Handlers
   const handleTickerSubmit = useCallback(() => {
@@ -113,9 +160,12 @@ export default function ChartsTab() {
     [handleTickerSubmit]
   );
 
-  const handleLayoutChange = useCallback((_: unknown, allLayouts: Layouts) => {
-    setLayouts(allLayouts);
-    saveLayouts(allLayouts);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleLayoutChange = useCallback((currentLayout: any[], allLayouts: any) => {
+    if (allLayouts && typeof allLayouts === "object") {
+      setLayouts(allLayouts);
+      saveLayouts(allLayouts);
+    }
   }, []);
 
   const handleResetLayout = useCallback(() => {
@@ -130,6 +180,16 @@ export default function ChartsTab() {
   const toggleOverlay = useCallback((key: keyof OverlayToggles) => {
     setOverlayToggles((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
+
+  // Compute grid item dimensions for fallback
+  const colWidth = containerWidth > 0
+    ? (containerWidth - GRID_MARGIN[0] * (cols + 1)) / cols
+    : 0;
+
+  const getItemStyle = (item: LayoutItem): React.CSSProperties => ({
+    width: "100%",
+    height: "100%",
+  });
 
   return (
     <div className="flex flex-col gap-2">
@@ -219,65 +279,74 @@ export default function ChartsTab() {
       </div>
 
       {/* Grid layout */}
-      <ResponsiveGridLayout
-        className="layout"
-        layouts={layouts}
-        breakpoints={GRID_BREAKPOINTS}
-        cols={GRID_COLS}
-        rowHeight={ROW_HEIGHT}
-        margin={GRID_MARGIN}
-        draggableHandle=".drag-handle"
-        onLayoutChange={handleLayoutChange}
-        useCSSTransforms
-        compactType="vertical"
-      >
-        {/* Price Chart */}
-        <div key="price-chart">
-          <WidgetContainer
-            title={`${ticker} — ${timeframe.label}`}
-            loading={barsLoading}
-            error={barsError}
+      <div ref={containerRef}>
+        {containerWidth > 0 && RGLResponsive ? (
+          <RGLResponsive
+            className="layout"
+            layouts={layouts}
+            breakpoints={{ lg: 1200, md: 996, sm: 768 }}
+            cols={GRID_COLS}
+            rowHeight={ROW_HEIGHT}
+            width={containerWidth}
+            margin={GRID_MARGIN}
+            draggableHandle=".drag-handle"
+            onLayoutChange={handleLayoutChange}
+            useCSSTransforms
+            compactType="vertical"
           >
-            {({ width, height }) => (
-              <ChartWidget
-                bars={bars}
-                width={width}
-                height={height}
-                signals={signals}
-                fills={fills}
-                overlayToggles={overlayToggles}
-                ticker={ticker}
-              />
-            )}
-          </WidgetContainer>
-        </div>
+            {/* Price Chart */}
+            <div key="price-chart" style={{ width: "100%", height: "100%" }}>
+              <WidgetContainer
+                title={`${ticker} — ${timeframe.label}`}
+                loading={barsLoading}
+                error={barsError}
+              >
+                {({ width, height }) => (
+                  <ChartWidget
+                    bars={bars}
+                    width={width}
+                    height={height}
+                    signals={signals}
+                    fills={fills}
+                    overlayToggles={overlayToggles}
+                    ticker={ticker}
+                  />
+                )}
+              </WidgetContainer>
+            </div>
 
-        {/* Signal Panel */}
-        <div key="signal-panel">
-          <WidgetContainer title="Signal">
-            {() => (
-              <SignalPanel
-                currentSignal={currentSignal}
-                signals={signals}
-                engineRunning={engineRunning}
-                ticker={ticker}
-              />
-            )}
-          </WidgetContainer>
-        </div>
+            {/* Signal Panel */}
+            <div key="signal-panel" style={{ width: "100%", height: "100%" }}>
+              <WidgetContainer title="Signal">
+                {() => (
+                  <SignalPanel
+                    currentSignal={currentSignal}
+                    signals={signals}
+                    engineRunning={engineRunning}
+                    ticker={ticker}
+                  />
+                )}
+              </WidgetContainer>
+            </div>
 
-        {/* Positions Panel */}
-        <div key="positions-panel">
-          <WidgetContainer title="Positions">
-            {() => (
-              <PositionsPanel
-                fills={fills}
-                activePositionCount={activePositionCount}
-              />
-            )}
-          </WidgetContainer>
-        </div>
-      </ResponsiveGridLayout>
+            {/* Positions Panel */}
+            <div key="positions-panel" style={{ width: "100%", height: "100%" }}>
+              <WidgetContainer title="Positions">
+                {() => (
+                  <PositionsPanel
+                    fills={fills}
+                    activePositionCount={activePositionCount}
+                  />
+                )}
+              </WidgetContainer>
+            </div>
+          </RGLResponsive>
+        ) : (
+          <div className="text-sm text-gray-500 py-8 text-center">
+            Loading chart grid...
+          </div>
+        )}
+      </div>
     </div>
   );
 }
