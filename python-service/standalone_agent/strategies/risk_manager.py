@@ -116,17 +116,17 @@ PRESETS = {
         "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
     },
     "zero_dte_convexity": {
-        "stop_loss": {"enabled": False, "type": "none"},  # hold losers to expiry
+        "stop_loss": {"enabled": True, "type": "simple", "trigger_pct": -80.0},  # sweep v1.17.2: 80% SL beats hold-to-expiry (PF 1.86 vs 1.09)
         "profit_taking": {
             "enabled": True,
             "targets": [],  # exit sweep: ladders hurt P&L by cutting fat-tail winners
             "trailing_stop": {
                 "enabled": True,
-                "activation_pct": 25,   # arm early (sweep: minimal downside vs 50%)
-                "trail_pct": 15,        # 15% below peak (sweep: PF 9.59 vs 3.78 at 25%)
+                "activation_pct": 50,   # sweep v1.17.2: PF 1.86 @ 50% vs 1.09 @ 25%
+                "trail_pct": 30,        # 30% below peak (sweep: wider initial trail + tight tranches)
                 "exit_tranches": [
-                    {"exit_pct": 33, "trail_pct": 12},   # 1st trigger: sell 33%, tighten to 12%
-                    {"exit_pct": 50, "trail_pct": 10},    # 2nd trigger: sell 50% of remaining, tighten to 10%
+                    {"exit_pct": 33, "trail_pct": 8},    # 1st trigger: sell 33%, tighten to 8% (was 12%)
+                    {"exit_pct": 50, "trail_pct": 5},     # 2nd trigger: sell 50% of remaining, tighten to 5% (was 10%)
                     {"exit_pct": 100},                     # 3rd trigger: sell everything left
                 ],
             },
