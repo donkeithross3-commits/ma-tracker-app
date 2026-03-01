@@ -24,7 +24,7 @@ This codebase is ONE HALF of a two-repo system. Both repos serve https://dr3-das
 | `ma-tracker-app` | Next.js dashboard, FastAPI backend, IB agent | `main` | TypeScript / Python |
 | `py_proj` | KRJ backtester, market state pipelines, research | `cursor-dev` | Python |
 
-**Shared infra:** Droplet `134.199.204.12` (SSH alias: `droplet`), Neon PostgreSQL, Docker.
+**Shared infra:** Droplet `192.241.179.9` (SSH alias: `droplet`), Neon PostgreSQL, Docker.
 
 ### Multi-Device Sync
 

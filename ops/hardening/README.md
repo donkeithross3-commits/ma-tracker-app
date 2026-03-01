@@ -1,6 +1,6 @@
 # Droplet Hardening — ma-tracker-app
 
-Hardening configs for the production droplet (134.199.204.12). Addresses the security audit findings: SSH misconfiguration, no firewall, no intrusion prevention, and Cloudflare bypass via direct IP access.
+Hardening configs for the production droplet (192.241.179.9). Addresses the security audit findings: SSH misconfiguration, no firewall, no intrusion prevention, and Cloudflare bypass via direct IP access.
 
 ## What Each Config Does
 
@@ -29,10 +29,10 @@ Drop-in config loaded by Ubuntu 22+'s sshd Include directive:
 
 ```bash
 # 1. Copy the ops/hardening directory to the droplet
-scp -r ops/hardening don@134.199.204.12:/tmp/hardening
+scp -r ops/hardening don@192.241.179.9:/tmp/hardening
 
 # 2. SSH into the droplet (keep this session open!)
-ssh don@134.199.204.12
+ssh don@192.241.179.9
 
 # 3. Preview what will happen (no changes made)
 sudo bash /tmp/hardening/apply.sh --dry-run
@@ -41,7 +41,7 @@ sudo bash /tmp/hardening/apply.sh --dry-run
 sudo bash /tmp/hardening/apply.sh
 
 # 5. In a NEW terminal, verify SSH still works
-ssh don@134.199.204.12
+ssh don@192.241.179.9
 
 # 6. Only close the original session after confirming step 5 works
 ```
@@ -64,7 +64,7 @@ sudo fail2ban-client status sshd
 # Expected: Shows jail is active with 0 currently banned (unless there are attackers)
 
 # Test Cloudflare-only access (from outside the droplet)
-curl -I http://134.199.204.12
+curl -I http://192.241.179.9
 # Expected: Connection refused (direct IP blocked by UFW)
 ```
 

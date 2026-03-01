@@ -29,7 +29,7 @@ This document governs all AI coding agents (Claude Code, Cursor, or any future t
 | Resource | Details |
 |----------|---------|
 | **Production** | https://dr3-dashboard.com |
-| **Droplet** | 134.199.204.12 (SSH alias: `droplet`) |
+| **Droplet** | 192.241.179.9 (SSH alias: `droplet`) |
 | **Database** | Neon PostgreSQL (shared by both repos) |
 | **Docker** | `ma-tracker-app` runs in Docker on the droplet; `py_proj` runs bare on the droplet |
 | **Data exchange** | `py_proj` writes to `~/apps/data/krj/` on the droplet; Docker mounts this into the Next.js container |

@@ -10,7 +10,7 @@
 # Usage:
 #   ./scripts/check-relay-status.sh                         # local Python at localhost:8000
 #   PYTHON_URL=http://localhost:8000 ./scripts/check-relay-status.sh
-#   PYTHON_URL=http://134.199.204.12:8000 ./scripts/check-relay-status.sh  # from your machine to droplet (if 8000 is exposed)
+#   PYTHON_URL=http://192.241.179.9:8000 ./scripts/check-relay-status.sh  # from your machine to droplet (if 8000 is exposed)
 #   NEXT_URL=https://dr3-dashboard.com ./scripts/check-relay-status.sh     # 3–4 require login; curl will get redirect
 
 set -e

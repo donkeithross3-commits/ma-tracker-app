@@ -4,7 +4,7 @@
 # Run this on the droplet: ssh droplet then bash setup-caddy-https.sh
 #
 # Prerequisites:
-# 1. Cloudflare DNS configured (A record for @ pointing to 134.199.204.12)
+# 1. Cloudflare DNS configured (A record for @ pointing to 192.241.179.9)
 # 2. Cloudflare SSL/TLS set to "Full (strict)"
 # 3. Origin certificate files uploaded to /home/don/ (origin.pem and origin-key.pem)
 #
@@ -152,6 +152,6 @@ echo "  curl -I https://dr3-dashboard.com/krj"
 echo "  curl -I https://dr3-dashboard.com/ma-options"
 echo
 echo "Port 3000 should now be blocked externally:"
-echo "  curl -I http://134.199.204.12:3000 --connect-timeout 5"
+echo "  curl -I http://192.241.179.9:3000 --connect-timeout 5"
 echo "  (should timeout or refuse connection)"
 echo
