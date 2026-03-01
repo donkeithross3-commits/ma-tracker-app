@@ -289,6 +289,12 @@ class ExecutionEngine:
         # Order event queue: filled by scanner callbacks, drained by eval loop
         self._order_event_queue: queue.Queue = queue.Queue()
 
+        # exec_id routing for commission capture:
+        #   order_id → exec_id (set from execDetails, used by _persist_fill)
+        #   exec_id → strategy_id (for routing commission reports)
+        self._order_exec_ids: Dict[int, str] = {}
+        self._exec_id_to_position: Dict[str, str] = {}
+
         # Non-blocking order placement: single-worker executor + inflight counter
         self._order_executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="order-exec",
@@ -494,8 +500,16 @@ class ExecutionEngine:
             self._order_event_queue.put(("status", order_id, status_data))
 
     def on_scanner_exec_details(self, order_id: int, exec_data: dict):
-        """Listener for execDetails. Same pattern as on_scanner_order_status."""
-        if order_id in self._order_strategy_map:
+        """Listener for execDetails and commissionReport callbacks.
+
+        Commission reports arrive with order_id=0 (IB only provides exec_id).
+        We allow them through unconditionally so the engine can route them
+        via the _exec_id_to_position map.
+        """
+        if exec_data.get("_commission_report"):
+            # Commission report: always enqueue (order_id=0)
+            self._order_event_queue.put(("commission", order_id, exec_data))
+        elif order_id in self._order_strategy_map:
             self._order_event_queue.put(("exec", order_id, exec_data))
 
     # ── Lifecycle ──
@@ -578,6 +592,8 @@ class ExecutionEngine:
         with self._active_orders_lock:
             self._active_orders.clear()
         self._order_timestamps.clear()
+        self._order_exec_ids.clear()
+        self._exec_id_to_position.clear()
 
         # 6. Drain event queue
         while not self._order_event_queue.empty():
@@ -761,6 +777,23 @@ class ExecutionEngine:
             event_type, order_id, data = event
             events_processed += 1
 
+            # Commission events arrive with order_id=0 — route via exec_id map
+            if event_type == "commission":
+                cr = data.get("_commission_report", {})
+                cr_exec_id = data.get("execId", "")
+                position_id = self._exec_id_to_position.get(cr_exec_id)
+                if position_id and cr_exec_id and self._position_store:
+                    self._position_store.update_fill_commission(
+                        position_id, cr_exec_id, cr
+                    )
+                    logger.info("Commission captured (event-driven) for exec %s → %s: $%.4f rpnl=$%.2f",
+                                cr_exec_id, position_id,
+                                cr.get("commission", 0), cr.get("realized_pnl", 0))
+                elif cr_exec_id:
+                    logger.debug("Commission for unmapped exec %s — deferred polling will pick it up",
+                                 cr_exec_id)
+                continue
+
             strategy_id = self._order_strategy_map.get(order_id)
             if not strategy_id:
                 continue
@@ -840,10 +873,26 @@ class ExecutionEngine:
                         )
 
             elif event_type == "exec":
-                # execDetails provides per-fill data (enrichment, not primary trigger)
-                # We log it for audit but don't drive state off it
-                logger.info("Strategy %s execDetails for order %d: %s",
-                            strategy_id, order_id, data)
+                # execDetails: capture exec_id for commission routing
+                exec_id = data.get("execId", "")
+                if exec_id and strategy_id:
+                    self._order_exec_ids[order_id] = exec_id
+                    self._exec_id_to_position[exec_id] = strategy_id
+                    # Update the fill in position_store with the real exec_id
+                    # (the fill was likely already persisted with exec_id="" from orderStatus)
+                    if self._position_store:
+                        updated = self._position_store.update_fill_exec_id(
+                            strategy_id, order_id, exec_id
+                        )
+                        if updated:
+                            logger.info("Backfilled exec_id=%s on fill for order %d (%s)",
+                                        exec_id, order_id, strategy_id)
+                            # Now try deferred commission pickup with the real exec_id
+                            self._order_executor.submit(
+                                self._deferred_commission_update, strategy_id, exec_id,
+                            )
+                logger.info("Strategy %s execDetails for order %d: execId=%s",
+                            strategy_id, order_id, data.get("execId", ""))
 
         if events_processed > 0:
             logger.debug("Drained %d order events", events_processed)
@@ -1177,11 +1226,13 @@ class ExecutionEngine:
         if self._position_store is None or not strategy_id.startswith("bmc_risk_"):
             return
         try:
-            exec_id = fill_data.get("execId", "")
+            order_id = fill_data.get("orderId", 0)
+            # orderStatus doesn't carry execId — check our execDetails map
+            exec_id = fill_data.get("execId", "") or self._order_exec_ids.get(order_id, "")
             # Build fill dict for the ledger
             fill_dict = {
                 "time": time.time(),
-                "order_id": fill_data.get("orderId", 0),
+                "order_id": order_id,
                 "exec_id": exec_id,
                 "level": "exit",
                 "qty_filled": int(fill_data.get("filled", 0)),
@@ -1209,7 +1260,12 @@ class ExecutionEngine:
                 })
             self._position_store.add_fill(strategy_id, fill_dict)
 
-            # Deferred commission pickup (WS3): schedule async lookup
+            # Map exec_id for commission routing (if we got it from execDetails)
+            if exec_id:
+                self._exec_id_to_position[exec_id] = strategy_id
+
+            # Deferred commission pickup (fallback): schedule async lookup
+            # Primary path is event-driven via the "commission" handler in _drain_events
             if exec_id:
                 self._order_executor.submit(
                     self._deferred_commission_update, strategy_id, exec_id,
@@ -1227,17 +1283,26 @@ class ExecutionEngine:
         except Exception as e:
             logger.error("Error persisting fill for %s: %s", strategy_id, e)
 
-    def _deferred_commission_update(self, position_id: str, exec_id: str, timeout: float = 2.0):
-        """Wait briefly for IB commissionReport, then update fill record."""
+    def _deferred_commission_update(self, position_id: str, exec_id: str, timeout: float = 5.0):
+        """Wait briefly for IB commissionReport, then update fill record.
+
+        This is a fallback path — the primary mechanism is event-driven via
+        the "commission" handler in _drain_order_events.  This polling catches
+        any commission reports that arrive before the exec_id → position mapping
+        is established (race condition), or when the event-driven path misses.
+        """
         deadline = time.time() + timeout
         while time.time() < deadline:
             report = self._scanner.get_commission_report(exec_id)
             if report:
                 self._position_store.update_fill_commission(position_id, exec_id, report)
-                logger.debug("Commission for exec %s: $%.4f", exec_id, report.get("commission", 0))
+                logger.info("Commission captured (deferred poll) for exec %s → %s: $%.4f rpnl=$%.2f",
+                            exec_id, position_id,
+                            report.get("commission", 0), report.get("realized_pnl", 0))
                 return
             time.sleep(0.1)
-        logger.debug("No commission report for exec %s within %.1fs", exec_id, timeout)
+        logger.warning("No commission report for exec %s within %.1fs (position %s)",
+                       exec_id, timeout, position_id)
 
     # ── IB Reconciliation (WS4) ──
 

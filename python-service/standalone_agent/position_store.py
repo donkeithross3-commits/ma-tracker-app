@@ -150,6 +150,25 @@ class PositionStore:
             self._dirty_ids.add(position_id)
             self._save()
 
+    def update_fill_exec_id(self, position_id: str, order_id: int, exec_id: str) -> bool:
+        """Retroactively set exec_id on a fill matched by order_id.
+
+        Called when execDetails arrives (which has execId) after orderStatus
+        already persisted the fill with exec_id="".  Returns True if a fill
+        was updated.
+        """
+        with self._lock:
+            pos = self._positions.get(position_id)
+            if not pos:
+                return False
+            for fill in reversed(pos.get("fill_log", [])):
+                if fill.get("order_id") == order_id and not fill.get("exec_id"):
+                    fill["exec_id"] = exec_id
+                    self._dirty_ids.add(position_id)
+                    self._save()
+                    return True
+            return False
+
     def update_fill_commission(self, position_id: str, exec_id: str, commission_report: dict) -> None:
         """Update a fill's execution_analytics with commission data from IB."""
         with self._lock:
