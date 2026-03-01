@@ -1243,12 +1243,12 @@ class IBDataAgent:
             return {"error": "Execution engine not initialized"}
 
         scope = payload.get("scope", "global")
+        budget = int(payload.get("budget", 0))
 
         if scope == "risk":
             budget_usd = float(payload.get("budget", 0))
             return self.execution_engine.set_risk_budget(budget_usd)
         elif scope == "ticker":
-            budget = int(payload.get("budget", 0))
             strategy_id = payload.get("strategy_id", "")
             if not strategy_id:
                 return {"error": "strategy_id is required for scope=ticker"}
