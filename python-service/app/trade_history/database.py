@@ -420,22 +420,22 @@ class TradeDatabase:
             gk = item.get("group_key")
             if hasattr(gk, "isoformat"):
                 item["group_key"] = gk.isoformat()
-            # Convert Decimal to float
+            # Convert Decimal to float (None-safe)
             for k in ("total_gross_pnl", "total_commission", "total_net_pnl", "win_rate"):
-                if item.get(k) is not None:
-                    item[k] = float(item[k])
-            item["trades"] = int(item.get("trades", 0))
-            item["wins"] = int(item.get("wins", 0))
+                v = item.get(k)
+                item[k] = float(v) if v is not None else 0.0
+            item["trades"] = int(item.get("trades") or 0)
+            item["wins"] = int(item.get("wins") or 0)
             summary.append(item)
 
         totals = {}
         if totals_row:
             totals = dict(totals_row)
             for k in ("total_gross_pnl", "total_commission", "total_net_pnl", "win_rate"):
-                if totals.get(k) is not None:
-                    totals[k] = float(totals[k])
-            totals["trades"] = int(totals.get("trades", 0))
-            totals["wins"] = int(totals.get("wins", 0))
+                v = totals.get(k)
+                totals[k] = float(v) if v is not None else 0.0
+            totals["trades"] = int(totals.get("trades") or 0)
+            totals["wins"] = int(totals.get("wins") or 0)
 
         return {"summary": summary, "totals": totals}
 
