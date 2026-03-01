@@ -1,7 +1,7 @@
 {
   "date": "2026-03-01",
   "title": "Week of Feb 24 - Mar 1, 2026",
-  "summary": "Custom charting system with TradingView-quality candlestick charts, signal overlays, and trade markers.",
+  "summary": "Custom charting system, P&L history tab, and commission capture fix for complete trade analytics.",
   "features": [
     {
       "id": "charts-tab",
@@ -17,6 +17,15 @@
       "title": "P&L History Tab",
       "summary": "Historical algo trade performance with grouped aggregations, position detail, and expandable fill rows",
       "description": "A new P&L History tab on the IB Trading Tools page shows historical algorithmic trade performance from PostgreSQL.\n\nKey features:\n- Summary totals bar: total trades, win rate, gross P&L, commission, and net P&L\n- Group-by selector: toggle between date, symbol, or model version aggregation\n- Clickable summary rows filter the positions table to that group\n- Position detail table with ColumnChooser (14 columns, user-configurable)\n- Expandable rows: click any position to see individual fills with time, level, qty, price, P&L %, commission, and exchange\n- Date range and status filters (closed/active/all)\n- Green/red P&L coloring, exit reason badges (risk/expired/manual), and level badges (entry/trailing/expired)\n- Full comfort mode support via d-table-wrap fluid scaling\n\nAll data comes from the deployed P&L history API (v1.16.0) — zero backend changes needed.",
+      "category": "positions",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "commission-capture-fix",
+      "title": "Commission & P&L Capture Fix",
+      "summary": "Fixed two bugs preventing commission and realized P&L from being stored in the trade history pipeline",
+      "description": "Two bugs in the execution engine prevented commission data from being captured and stored:\n\n1. The fill persistence code read execId from IB's orderStatus callback, which never includes it — only the execDetails callback carries execId. Every fill was stored with an empty exec_id, so the deferred commission lookup never matched.\n\n2. IB's commissionReport callback was routed through the exec_details_listeners with order_id=0. The engine's guard clause dropped these events since order_id 0 was never in the strategy map.\n\nThe fix adds a three-path commission capture system:\n- Event-driven: commission events are now classified as a distinct event type and routed directly via an exec_id → position map\n- execDetails enrichment: when execDetails arrives, the engine retroactively sets exec_id on the fill and triggers a deferred commission poll\n- Fallback polling: the existing deferred poll now works correctly with real exec_ids (timeout increased from 2s to 5s)\n\nThis means all future trades will have commission costs and IB-reported realized P&L captured in the P&L History tab. Agent v1.17.1.",
       "category": "positions",
       "image": null,
       "screenshot": null
