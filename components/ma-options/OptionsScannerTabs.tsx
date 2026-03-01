@@ -3,6 +3,7 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import * as Tabs from "@radix-ui/react-tabs";
+import { ExternalLink } from "lucide-react";
 import IBPositionsTab from "./IBPositionsTab";
 import SignalsTab from "./SignalsTab";
 import ManualTradingV2Tab from "./manual-v2/ManualTradingV2Tab";
@@ -47,6 +48,20 @@ export default function OptionsScannerTabs({
         >
           Charts
         </Tabs.Trigger>
+        {activeTab === "charts" && (
+          <button
+            onClick={() => {
+              const params = new URLSearchParams(window.location.search);
+              const preset = params.get("preset");
+              const url = preset ? `/charts?preset=${encodeURIComponent(preset)}` : "/charts";
+              window.open(url, "_blank");
+            }}
+            className="px-1.5 py-1 text-gray-500 hover:text-gray-200 transition-colors"
+            title="Open charts in standalone window"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
+        )}
       </Tabs.List>
 
       <Tabs.Content value="manual">

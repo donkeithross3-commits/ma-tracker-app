@@ -30,6 +30,15 @@ export default async function Home() {
       hoverBorder: "hover:border-yellow-500",
     },
     {
+      key: "ma-options",
+      href: "/charts",
+      title: "Charts",
+      description: "Standalone multi-chart workspace for multi-monitor setups",
+      badge: "Beta Testing",
+      badgeClasses: "bg-cyan-500/20 text-cyan-400",
+      hoverBorder: "hover:border-cyan-500",
+    },
+    {
       key: "sheet-portfolio",
       href: "/sheet-portfolio",
       title: "Event Driven Portfolio",

@@ -73,6 +73,7 @@ export const authConfig: NextAuthConfig = {
         projectKey = "krj"
       } else if (
         pathname === "/ma-options" || pathname.startsWith("/ma-options/") ||
+        pathname === "/charts" || pathname.startsWith("/charts/") ||
         pathname === "/deals" || pathname.startsWith("/deals/") ||
         pathname === "/portfolio" || pathname.startsWith("/portfolio/") ||
         pathname === "/edgar" || pathname.startsWith("/edgar/") ||

@@ -54,8 +54,10 @@ export function getProjectKeyFromPath(pathname: string): string | null {
 
   // /ma-options or /ma-options/... -> "ma-options"
   // Also gate related sub-projects that are part of the M&A Options product:
-  // /deals, /portfolio, /edgar, /intelligence, /staging, /rumored-deals
+  // /charts, /deals, /portfolio, /edgar, /intelligence, /staging, /rumored-deals
   if (pathname === "/ma-options" || pathname.startsWith("/ma-options/"))
+    return "ma-options"
+  if (pathname === "/charts" || pathname.startsWith("/charts/"))
     return "ma-options"
   if (pathname === "/deals" || pathname.startsWith("/deals/"))
     return "ma-options"
