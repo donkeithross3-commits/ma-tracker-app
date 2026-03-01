@@ -123,7 +123,7 @@ services:
         reservations:
           memory: 1g
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 4001 || nc -z 127.0.0.1 4002"]
+      test: ["CMD-SHELL", "bash -c \"echo > /dev/tcp/127.0.0.1/4001 || echo > /dev/tcp/127.0.0.1/4002\""]
       interval: 30s
       timeout: 5s
       retries: 3
