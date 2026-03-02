@@ -677,7 +677,13 @@ class RiskAssessmentEngine:
             old_score = float(old_score)
             magnitude = abs(new_score - old_score)
 
-            if magnitude >= 0.5:
+            old_level = _score_to_level(old_score)
+            new_level = _score_to_level(new_score)
+
+            # Only flag when the display level actually changes —
+            # a 0.5-point numeric shift within the same 2-point bucket
+            # (e.g. 2.5→3.2, both "moderate") is invisible to the user.
+            if magnitude >= 0.5 and old_level != new_level:
                 if new_score > old_score:
                     direction = "worsened"
                 else:
@@ -687,8 +693,8 @@ class RiskAssessmentEngine:
                     "factor": factor,
                     "old_score": old_score,
                     "new_score": new_score,
-                    "old_level": _score_to_level(old_score),
-                    "new_level": _score_to_level(new_score),
+                    "old_level": old_level,
+                    "new_level": new_level,
                     "direction": direction,
                     "magnitude": round(magnitude, 2),
                     "explanation": factor_data.get("detail", ""),
