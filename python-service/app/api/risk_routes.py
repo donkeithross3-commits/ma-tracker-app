@@ -2096,10 +2096,17 @@ async def get_deal_sources(ticker: str):
 async def run_news_scoring_experiment_endpoint(
     ticker_filter: Optional[str] = Query(None, description="Comma-separated tickers"),
     max_articles: Optional[int] = Query(None, description="Max articles to score"),
+    methods: Optional[str] = Query(
+        None,
+        description="Comma-separated methods to run. "
+        "Available: heuristic_v1, heuristic_v2, haiku, sonnet_judge, "
+        "sonnet_titles_only, sonnet_filtered_ranked, sonnet_bucket_sort. "
+        "Default: all available methods.",
+    ),
 ):
     """Run the news relevance scoring experiment (heuristic vs AI).
 
-    Scores all articles with heuristic_v1, heuristic_v2, Haiku AI, and Sonnet judge.
+    Scores articles with selected methods and compares against Sonnet judge.
     Returns run_id and comparison metrics.
     """
     pool = _get_pool()
@@ -2108,6 +2115,11 @@ async def run_news_scoring_experiment_endpoint(
     tickers = None
     if ticker_filter:
         tickers = [t.strip().upper() for t in ticker_filter.split(",") if t.strip()]
+
+    # Parse methods filter
+    method_list = None
+    if methods:
+        method_list = [m.strip() for m in methods.split(",") if m.strip()]
 
     # Get Anthropic client for AI scoring methods
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -2126,8 +2138,11 @@ async def run_news_scoring_experiment_endpoint(
             client=client,
             ticker_filter=tickers,
             max_articles=max_articles,
+            methods=method_list,
         )
         return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("News scoring experiment failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

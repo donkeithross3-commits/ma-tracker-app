@@ -1,13 +1,16 @@
 """News Relevance Scoring Experiment — Heuristic vs AI.
 
-Compares three scoring methods against a Sonnet ground-truth judge to determine
+Compares scoring methods against a Sonnet ground-truth judge to determine
 which approach best selects the 10 most risk-relevant news articles per deal ticker.
 
 Methods:
-  A. heuristic_v1 — current keyword count / 5.0
-  B. heuristic_v2 — source-weighted, title-aware, noise-penalized
-  C. haiku       — Haiku AI scoring via batch API
-  D. sonnet_judge — Sonnet ground-truth with richer deal context
+  A. heuristic_v1      — current keyword count / 5.0
+  B. heuristic_v2      — source-weighted, title-aware, noise-penalized
+  C. haiku             — Haiku AI scoring via batch API (1 req per article)
+  D. sonnet_judge      — Sonnet ground-truth with richer deal context (1 req per article)
+  E. sonnet_titles_only    — One prompt per ticker, all titles, ranked top 10
+  F. sonnet_filtered_ranked — Heuristic pre-filter to top 30, Sonnet comparative rank
+  G. sonnet_bucket_sort     — One prompt per ticker, 3-bucket categorical sort
 
 All results stored in news_scoring_runs / news_scoring_results for SQL analysis.
 """
@@ -41,6 +44,23 @@ SONNET_MODEL = "claude-sonnet-4-6"
 
 BATCH_POLL_INTERVAL = 30  # seconds
 BATCH_TIMEOUT = 3600  # 1 hour
+
+# All available methods
+ALL_METHODS = [
+    "heuristic_v1", "heuristic_v2", "haiku", "sonnet_judge",
+    "sonnet_titles_only", "sonnet_filtered_ranked", "sonnet_bucket_sort",
+]
+HEURISTIC_METHODS = {"heuristic_v1", "heuristic_v2"}
+AI_METHODS = {"haiku", "sonnet_judge", "sonnet_titles_only",
+              "sonnet_filtered_ranked", "sonnet_bucket_sort"}
+# Methods compared against sonnet_judge for metrics
+COMPARATIVE_METHODS = [
+    "heuristic_v1", "heuristic_v2", "haiku",
+    "sonnet_titles_only", "sonnet_filtered_ranked", "sonnet_bucket_sort",
+]
+
+# Max articles to send to filtered_ranked per ticker (pre-filtered by heuristic_v2)
+FILTERED_RANKED_TOP_N = 30
 
 # --- Enhanced Heuristic Weights (Method B) ---
 
@@ -217,6 +237,79 @@ Respond in JSON:
 
 
 # ---------------------------------------------------------------------------
+# Method E prompt: Titles-only comparative ranking
+# ---------------------------------------------------------------------------
+
+TITLES_ONLY_PROMPT = """You are an expert merger arbitrage analyst. Your task is to identify which news articles are most relevant to a specific M&A deal's risk assessment.
+
+DEAL: {ticker} — {acquirer} acquiring {target} at ${deal_price}/share
+Current risk grades: {risk_summary}
+
+Rank the following articles by relevance to THIS M&A deal's risk assessment.
+Return the top 10 most relevant article numbers with scores (0.0-1.0) and the primary risk factor each article affects.
+
+Scoring guide:
+- 0.9-1.0: Material deal events (regulatory action, bid change, amendment, lawsuit, vote result)
+- 0.7-0.8: Deal-specific developments (filing update, timeline change, financing terms)
+- 0.5-0.6: Deal-related context (analyst commentary, spread discussion)
+- 0.3-0.4: Tangentially related (industry M&A trends mentioning this deal)
+- Below 0.3: Not relevant — do NOT include in the top 10
+
+Articles:
+{article_list}
+
+Return ONLY the top 10 most relevant articles as a JSON array. If fewer than 10 are relevant, return fewer.
+JSON: [{{"id": 1, "score": 0.85, "risk_factor": "financing"}}, ...]"""
+
+
+# ---------------------------------------------------------------------------
+# Method F prompt: Filtered ranked (title + summary)
+# ---------------------------------------------------------------------------
+
+FILTERED_RANKED_PROMPT = """You are an expert merger arbitrage analyst. These articles were pre-filtered as potentially relevant to a specific M&A deal. Your task is to rank the most important ones for a risk assessment.
+
+DEAL: {ticker} — {acquirer} acquiring {target} at ${deal_price}/share
+Current risk grades: {risk_summary}
+
+Rank the top 10 articles by importance to a risk assessment. Score each 0.0-1.0.
+
+Scoring guide:
+- 0.9-1.0: Material deal events (regulatory action, bid change, amendment, lawsuit, vote result, financing terms)
+- 0.7-0.8: Deal-specific developments (filing update, timeline change, position disclosure)
+- 0.5-0.6: Deal-related context (analyst commentary, spread discussion, market impact)
+- 0.3-0.4: Tangentially related (mentions deal but no new information)
+- Below 0.3: Not actually relevant — do NOT include
+
+Articles:
+{article_list}
+
+Return ONLY the top 10 most relevant articles as a JSON array. If fewer than 10 are relevant, return fewer.
+JSON: [{{"id": 1, "score": 0.85, "risk_factor": "financing"}}, ...]"""
+
+
+# ---------------------------------------------------------------------------
+# Method G prompt: Bucket sort
+# ---------------------------------------------------------------------------
+
+BUCKET_SORT_PROMPT = """You are an expert merger arbitrage analyst. Sort these news articles into three categories based on their relevance to a specific M&A deal's risk assessment.
+
+DEAL: {ticker} — {acquirer} acquiring {target} at ${deal_price}/share
+Current risk grades: {risk_summary}
+
+CRITICAL: Contains material deal events that could change a risk grade (regulatory action, bid change, amendment, lawsuit, vote result, financing terms, closing date change)
+RELEVANT: About this deal with useful context (timeline update, analyst take, spread commentary, position disclosure)
+NOISE: Not about this deal, generic market commentary, wrong company, listicle, or no actionable information
+
+Articles:
+{article_list}
+
+Return a JSON object with three arrays of article numbers:
+JSON: {{"critical": [1, 7, 12], "relevant": [3, 5, 8, 15, 22], "noise": [2, 4, 6, 9, 10, 11, ...]}}
+
+IMPORTANT: Every article number must appear in exactly one category. Do not omit any."""
+
+
+# ---------------------------------------------------------------------------
 # JSON extraction (reuse from engine.py pattern)
 # ---------------------------------------------------------------------------
 
@@ -251,6 +344,56 @@ def _extract_json(raw_text: str) -> dict:
             return json.loads(fixed)
         except json.JSONDecodeError:
             pass
+
+    raise json.JSONDecodeError("No valid JSON found", raw_text, 0)
+
+
+def _extract_json_or_array(raw_text: str):
+    """Extract a JSON object or array from an AI response."""
+    text = raw_text.strip()
+
+    # Strip markdown fences
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+        text = text.strip()
+
+    # Direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Find outermost braces or brackets
+    first_brace = text.find("{")
+    first_bracket = text.find("[")
+    last_brace = text.rfind("}")
+    last_bracket = text.rfind("]")
+
+    # Try array first if [ appears before {
+    if first_bracket >= 0 and (first_brace < 0 or first_bracket < first_brace):
+        if last_bracket > first_bracket:
+            candidate = text[first_bracket:last_bracket + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                fixed = re.sub(r",\s*([}\]])", r"\1", candidate)
+                try:
+                    return json.loads(fixed)
+                except json.JSONDecodeError:
+                    pass
+
+    # Try object
+    if first_brace >= 0 and last_brace > first_brace:
+        candidate = text[first_brace:last_brace + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            fixed = re.sub(r",\s*([}\]])", r"\1", candidate)
+            try:
+                return json.loads(fixed)
+            except json.JSONDecodeError:
+                pass
 
     raise json.JSONDecodeError("No valid JSON found", raw_text, 0)
 
@@ -689,6 +832,556 @@ async def _run_batch_and_collect(
 
 
 # ---------------------------------------------------------------------------
+# Ticker-level batch runner (for Methods E, F, G)
+# ---------------------------------------------------------------------------
+
+async def _run_ticker_batch_and_collect(
+    client: Anthropic,
+    requests: list[Request],
+    ticker_article_map: dict[str, list[dict]],
+    model: str,
+    method: str,
+    pool,
+    parse_fn,
+) -> list[dict]:
+    """Submit a batch with one request per ticker, parse multi-article responses.
+
+    Args:
+        client: Anthropic client
+        requests: Batch request objects (one per ticker)
+        ticker_article_map: custom_id -> list of article dicts for that ticker
+        model: Model ID for cost computation
+        method: Method name for logging
+        pool: DB pool for cost tracking
+        parse_fn: Callable(raw_text, articles) -> list[dict] of per-article results
+    """
+    if not requests:
+        return []
+
+    logger.info("[news_scoring] Submitting %s ticker batch: %d requests", method, len(requests))
+    t0 = time.monotonic()
+
+    try:
+        message_batch = client.messages.batches.create(requests=requests)
+    except Exception as e:
+        logger.error("[news_scoring] Failed to create %s batch: %s", method, e)
+        raise
+
+    batch_id = message_batch.id
+    logger.info("[news_scoring] %s batch %s created, polling...", method, batch_id)
+
+    # Poll
+    elapsed = 0
+    while elapsed < BATCH_TIMEOUT:
+        await asyncio.sleep(BATCH_POLL_INTERVAL)
+        elapsed = time.monotonic() - t0
+        try:
+            message_batch = client.messages.batches.retrieve(batch_id)
+        except Exception as e:
+            logger.warning("[news_scoring] %s batch poll error: %s", method, e)
+            continue
+
+        counts = message_batch.request_counts
+        logger.info(
+            "[news_scoring] %s batch %s: %d ok, %d processing, %d err, %d expired",
+            method, batch_id, counts.succeeded, counts.processing,
+            counts.errored, counts.expired,
+        )
+        if message_batch.processing_status == "ended":
+            break
+    else:
+        logger.error("[news_scoring] %s batch %s timed out", method, batch_id)
+
+    total_ms = int((time.monotonic() - t0) * 1000)
+
+    # Collect results
+    all_results = []
+    total_cost = 0.0
+    succeeded = 0
+    failed = 0
+
+    try:
+        for result in client.messages.batches.results(batch_id):
+            custom_id = result.custom_id
+            articles = ticker_article_map.get(custom_id, [])
+            if not articles:
+                continue
+
+            if result.result.type == "succeeded":
+                msg = result.result.message
+                raw_text = msg.content[0].text if msg.content else ""
+                usage = msg.usage
+                cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+
+                # Batch = 50% discount
+                cost = compute_cost(
+                    model, usage.input_tokens, usage.output_tokens,
+                    cache_creation, cache_read,
+                ) * 0.5
+                total_cost += cost
+
+                # Cost per article for this ticker
+                cost_per_article = cost / max(len(articles), 1)
+
+                try:
+                    parsed_results = parse_fn(raw_text, articles)
+                    succeeded += 1
+                    # Attach token/cost info to each result
+                    for r in parsed_results:
+                        r["model"] = model
+                        r["input_tokens"] = usage.input_tokens // max(len(articles), 1)
+                        r["output_tokens"] = usage.output_tokens // max(len(articles), 1)
+                        r["cost_usd"] = cost_per_article
+                    all_results.extend(parsed_results)
+                except Exception as e:
+                    logger.warning(
+                        "[news_scoring] %s parse failed for %s: %s (raw: %s)",
+                        method, custom_id, e, raw_text[:300],
+                    )
+                    failed += 1
+                    # Score all articles in this ticker as 0
+                    for art in articles:
+                        all_results.append({
+                            "article_id": art["id"],
+                            "ticker": art["ticker"],
+                            "relevance_score": None,
+                            "risk_factor": None,
+                            "is_about_deal": None,
+                            "information_type": None,
+                            "reasoning": f"Parse failed: {str(e)[:200]}",
+                            "raw_response": {"error": "parse_failed", "text": raw_text[:500]},
+                            "model": model,
+                            "input_tokens": usage.input_tokens // max(len(articles), 1),
+                            "output_tokens": usage.output_tokens // max(len(articles), 1),
+                            "cost_usd": cost_per_article,
+                        })
+            else:
+                # errored or expired
+                failed += 1
+                err_type = result.result.type
+                for art in articles:
+                    all_results.append({
+                        "article_id": art["id"],
+                        "ticker": art["ticker"],
+                        "relevance_score": None,
+                        "risk_factor": None,
+                        "is_about_deal": None,
+                        "information_type": None,
+                        "reasoning": f"Batch {err_type}",
+                        "raw_response": {"error": err_type},
+                        "model": model,
+                        "input_tokens": None,
+                        "output_tokens": None,
+                        "cost_usd": None,
+                    })
+
+    except Exception as e:
+        logger.error("[news_scoring] Failed processing %s batch results: %s", method, e)
+
+    logger.info(
+        "[news_scoring] %s ticker batch done: %d ok, %d failed, $%.4f, %dms",
+        method, succeeded, failed, total_cost, total_ms,
+    )
+
+    # Log cost to unified tracker
+    if pool and total_cost > 0:
+        total_input = sum(r.get("input_tokens") or 0 for r in all_results)
+        total_output = sum(r.get("output_tokens") or 0 for r in all_results)
+        await log_api_call(
+            pool,
+            source="news_scoring",
+            model=model,
+            input_tokens=total_input,
+            output_tokens=total_output,
+            cost_usd=total_cost,
+            metadata={
+                "method": method,
+                "batch_id": batch_id,
+                "tickers": len(requests),
+                "articles": sum(len(arts) for arts in ticker_article_map.values()),
+                "succeeded": succeeded,
+                "failed": failed,
+            },
+        )
+
+    return all_results
+
+
+# ---------------------------------------------------------------------------
+# Helper: group articles by ticker
+# ---------------------------------------------------------------------------
+
+def _group_by_ticker(articles: list[dict]) -> dict[str, list[dict]]:
+    """Group articles by ticker, preserving order."""
+    by_ticker: dict[str, list[dict]] = {}
+    for art in articles:
+        by_ticker.setdefault(art["ticker"], []).append(art)
+    return by_ticker
+
+
+# ---------------------------------------------------------------------------
+# Method E: Sonnet titles-only comparative ranking
+# ---------------------------------------------------------------------------
+
+async def _score_sonnet_titles_only(
+    client: Anthropic,
+    articles: list[dict],
+    deal_context: dict[str, dict],
+    pool,
+) -> list[dict]:
+    """Method E: One prompt per ticker, all titles, ranked top 10."""
+    if not articles:
+        return []
+
+    by_ticker = _group_by_ticker(articles)
+    requests = []
+    ticker_article_map: dict[str, list[dict]] = {}
+
+    for ticker, ticker_arts in by_ticker.items():
+        deal = deal_context.get(ticker, {})
+        custom_id = f"titles-{ticker}"
+
+        # Build numbered article list
+        article_lines = []
+        for idx, art in enumerate(ticker_arts, 1):
+            title = (art.get("title") or "Untitled").strip()
+            article_lines.append(f"{idx}. {title}")
+
+        prompt = TITLES_ONLY_PROMPT.format(
+            ticker=ticker,
+            acquirer=deal.get("acquirer", "Unknown"),
+            target=deal.get("target", "Unknown"),
+            deal_price=deal.get("deal_price", "N/A"),
+            risk_summary=deal.get("risk_summary", "N/A"),
+            article_list="\n".join(article_lines),
+        )
+
+        requests.append(
+            Request(
+                custom_id=custom_id,
+                params=MessageCreateParamsNonStreaming(
+                    model=SONNET_MODEL,
+                    temperature=0,
+                    max_tokens=400,
+                    messages=[{"role": "user", "content": prompt}],
+                ),
+            )
+        )
+        ticker_article_map[custom_id] = ticker_arts
+
+    def parse_ranked_response(raw_text: str, articles_list: list[dict]) -> list[dict]:
+        """Parse ranked top-10 response, assign 0.0 to unmentioned articles."""
+        parsed = _extract_json_or_array(raw_text)
+
+        # Handle both array and object-with-array responses
+        if isinstance(parsed, dict):
+            # Look for an array value in the dict
+            for v in parsed.values():
+                if isinstance(v, list):
+                    parsed = v
+                    break
+
+        if not isinstance(parsed, list):
+            raise ValueError(f"Expected array, got {type(parsed).__name__}")
+
+        # Build id -> score/risk_factor map (1-indexed article IDs in response)
+        scored = {}
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            art_idx = item.get("id")
+            if isinstance(art_idx, int) and 1 <= art_idx <= len(articles_list):
+                score = item.get("score", 0.0)
+                if isinstance(score, (int, float)):
+                    score = max(0.0, min(1.0, float(score)))
+                else:
+                    score = 0.5
+                scored[art_idx] = {
+                    "score": score,
+                    "risk_factor": item.get("risk_factor"),
+                }
+
+        # Produce results for ALL articles, unmentioned get 0.0
+        results = []
+        for idx, art in enumerate(articles_list, 1):
+            info = scored.get(idx)
+            results.append({
+                "article_id": art["id"],
+                "ticker": art["ticker"],
+                "relevance_score": info["score"] if info else 0.0,
+                "risk_factor": info["risk_factor"] if info else None,
+                "is_about_deal": None,
+                "information_type": None,
+                "reasoning": f"Ranked #{idx}" if info else None,
+                "raw_response": None,
+            })
+        return results
+
+    return await _run_ticker_batch_and_collect(
+        client, requests, ticker_article_map, SONNET_MODEL,
+        "sonnet_titles_only", pool, parse_ranked_response,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Method F: Sonnet filtered ranked (heuristic pre-filter + comparative rank)
+# ---------------------------------------------------------------------------
+
+async def _score_sonnet_filtered_ranked(
+    client: Anthropic,
+    articles: list[dict],
+    deal_context: dict[str, dict],
+    pool,
+    heuristic_v2_results: list[dict] | None = None,
+) -> list[dict]:
+    """Method F: Heuristic v2 pre-filters to top 30 per ticker, Sonnet ranks those.
+
+    If heuristic_v2_results is not provided, runs heuristic_v2 internally.
+    Articles not in the top 30 (or not selected by Sonnet) get score 0.0.
+    """
+    if not articles:
+        return []
+
+    # Run heuristic_v2 if not provided
+    if heuristic_v2_results is None:
+        heuristic_v2_results = _score_heuristic_v2(articles, deal_context)
+
+    # Build article ID -> heuristic score
+    h2_scores = {r["article_id"]: r.get("relevance_score", 0.0) for r in heuristic_v2_results}
+
+    by_ticker = _group_by_ticker(articles)
+    requests = []
+    ticker_article_map: dict[str, list[dict]] = {}  # custom_id -> top-30 articles
+    ticker_all_articles: dict[str, list[dict]] = {}  # custom_id -> ALL articles
+
+    for ticker, ticker_arts in by_ticker.items():
+        deal = deal_context.get(ticker, {})
+        custom_id = f"filtered-{ticker}"
+
+        # Sort by heuristic_v2 score, take top N
+        sorted_arts = sorted(
+            ticker_arts,
+            key=lambda a: h2_scores.get(a["id"], 0.0),
+            reverse=True,
+        )
+        top_arts = sorted_arts[:FILTERED_RANKED_TOP_N]
+
+        # Build numbered article list with date, title, publisher, summary
+        article_lines = []
+        for idx, art in enumerate(top_arts, 1):
+            title = (art.get("title") or "Untitled").strip()
+            publisher = art.get("publisher") or "Unknown"
+            pub_date = ""
+            if art.get("published_at"):
+                pub_str = str(art["published_at"])[:10]
+                pub_date = f"[{pub_str}] "
+            summary = (art.get("summary") or "")[:100].strip()
+            line = f"{idx}. {pub_date}{title} | {publisher}"
+            if summary:
+                line += f"\n   Summary: {summary}"
+            article_lines.append(line)
+
+        prompt = FILTERED_RANKED_PROMPT.format(
+            ticker=ticker,
+            acquirer=deal.get("acquirer", "Unknown"),
+            target=deal.get("target", "Unknown"),
+            deal_price=deal.get("deal_price", "N/A"),
+            risk_summary=deal.get("risk_summary", "N/A"),
+            article_list="\n".join(article_lines),
+        )
+
+        requests.append(
+            Request(
+                custom_id=custom_id,
+                params=MessageCreateParamsNonStreaming(
+                    model=SONNET_MODEL,
+                    temperature=0,
+                    max_tokens=400,
+                    messages=[{"role": "user", "content": prompt}],
+                ),
+            )
+        )
+        ticker_article_map[custom_id] = top_arts
+        ticker_all_articles[custom_id] = ticker_arts
+
+    def parse_filtered_response(raw_text: str, top_articles: list[dict]) -> list[dict]:
+        """Parse ranked response, include ALL articles (unranked get 0.0)."""
+        parsed = _extract_json_or_array(raw_text)
+
+        if isinstance(parsed, dict):
+            for v in parsed.values():
+                if isinstance(v, list):
+                    parsed = v
+                    break
+
+        if not isinstance(parsed, list):
+            raise ValueError(f"Expected array, got {type(parsed).__name__}")
+
+        # Map 1-indexed IDs to scores
+        scored = {}
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            art_idx = item.get("id")
+            if isinstance(art_idx, int) and 1 <= art_idx <= len(top_articles):
+                score = item.get("score", 0.0)
+                if isinstance(score, (int, float)):
+                    score = max(0.0, min(1.0, float(score)))
+                else:
+                    score = 0.5
+                scored[art_idx] = {
+                    "score": score,
+                    "risk_factor": item.get("risk_factor"),
+                }
+
+        # Build set of scored article IDs
+        scored_ids = set()
+        results = []
+        for idx, art in enumerate(top_articles, 1):
+            info = scored.get(idx)
+            scored_ids.add(art["id"])
+            results.append({
+                "article_id": art["id"],
+                "ticker": art["ticker"],
+                "relevance_score": info["score"] if info else 0.0,
+                "risk_factor": info["risk_factor"] if info else None,
+                "is_about_deal": None,
+                "information_type": None,
+                "reasoning": f"Filtered rank #{idx}" if info else "Pre-filtered, unranked",
+                "raw_response": None,
+            })
+
+        return results
+
+    # Run batch
+    batch_results = await _run_ticker_batch_and_collect(
+        client, requests, ticker_article_map, SONNET_MODEL,
+        "sonnet_filtered_ranked", pool, parse_filtered_response,
+    )
+
+    # Add 0.0 scores for articles NOT in the top-30 pre-filter
+    scored_ids = {r["article_id"] for r in batch_results}
+    for art in articles:
+        if art["id"] not in scored_ids:
+            batch_results.append({
+                "article_id": art["id"],
+                "ticker": art["ticker"],
+                "relevance_score": 0.0,
+                "risk_factor": None,
+                "is_about_deal": None,
+                "information_type": None,
+                "reasoning": "Below heuristic pre-filter threshold",
+                "raw_response": None,
+                "model": None,
+                "input_tokens": None,
+                "output_tokens": None,
+                "cost_usd": None,
+            })
+
+    return batch_results
+
+
+# ---------------------------------------------------------------------------
+# Method G: Sonnet bucket sort
+# ---------------------------------------------------------------------------
+
+async def _score_sonnet_bucket_sort(
+    client: Anthropic,
+    articles: list[dict],
+    deal_context: dict[str, dict],
+    pool,
+) -> list[dict]:
+    """Method G: One prompt per ticker, sort all articles into 3 buckets."""
+    if not articles:
+        return []
+
+    by_ticker = _group_by_ticker(articles)
+    requests = []
+    ticker_article_map: dict[str, list[dict]] = {}
+
+    for ticker, ticker_arts in by_ticker.items():
+        deal = deal_context.get(ticker, {})
+        custom_id = f"bucket-{ticker}"
+
+        # Build numbered article list (titles only)
+        article_lines = []
+        for idx, art in enumerate(ticker_arts, 1):
+            title = (art.get("title") or "Untitled").strip()
+            article_lines.append(f"{idx}. {title}")
+
+        prompt = BUCKET_SORT_PROMPT.format(
+            ticker=ticker,
+            acquirer=deal.get("acquirer", "Unknown"),
+            target=deal.get("target", "Unknown"),
+            deal_price=deal.get("deal_price", "N/A"),
+            risk_summary=deal.get("risk_summary", "N/A"),
+            article_list="\n".join(article_lines),
+        )
+
+        requests.append(
+            Request(
+                custom_id=custom_id,
+                params=MessageCreateParamsNonStreaming(
+                    model=SONNET_MODEL,
+                    temperature=0,
+                    max_tokens=300,
+                    messages=[{"role": "user", "content": prompt}],
+                ),
+            )
+        )
+        ticker_article_map[custom_id] = ticker_arts
+
+    # Bucket -> score mapping
+    BUCKET_SCORES = {"critical": 1.0, "relevant": 0.6, "noise": 0.1}
+
+    def parse_bucket_response(raw_text: str, articles_list: list[dict]) -> list[dict]:
+        """Parse bucket sort response, assign scores based on bucket."""
+        parsed = _extract_json_or_array(raw_text)
+
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Expected object with buckets, got {type(parsed).__name__}")
+
+        # Normalize bucket keys to lowercase
+        buckets = {}
+        for k, v in parsed.items():
+            k_lower = k.lower().strip()
+            if k_lower in BUCKET_SCORES and isinstance(v, list):
+                buckets[k_lower] = set()
+                for item in v:
+                    if isinstance(item, int):
+                        buckets[k_lower].add(item)
+
+        # Map article index -> bucket
+        idx_to_bucket = {}
+        for bucket_name, indices in buckets.items():
+            for idx in indices:
+                if 1 <= idx <= len(articles_list):
+                    idx_to_bucket[idx] = bucket_name
+
+        # Produce results for ALL articles
+        results = []
+        for idx, art in enumerate(articles_list, 1):
+            bucket = idx_to_bucket.get(idx, "noise")  # Default unmentioned to noise
+            results.append({
+                "article_id": art["id"],
+                "ticker": art["ticker"],
+                "relevance_score": BUCKET_SCORES.get(bucket, 0.1),
+                "risk_factor": None,
+                "is_about_deal": bucket != "noise",
+                "information_type": bucket,
+                "reasoning": f"Bucket: {bucket}",
+                "raw_response": None,
+            })
+        return results
+
+    return await _run_ticker_batch_and_collect(
+        client, requests, ticker_article_map, SONNET_MODEL,
+        "sonnet_bucket_sort", pool, parse_bucket_response,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Deal context fetcher
 # ---------------------------------------------------------------------------
 
@@ -890,8 +1583,13 @@ async def _compute_comparison_metrics(run_id: str, pool) -> dict:
         )
         ticker_list = [r["ticker"] for r in tickers]
 
-        # For each method (excluding sonnet_judge), compare against judge
-        methods = ["heuristic_v1", "heuristic_v2", "haiku"]
+        # Discover all methods in this run (excluding sonnet_judge itself)
+        method_rows = await conn.fetch(
+            """SELECT DISTINCT method FROM news_scoring_results
+               WHERE run_id = $1 AND method != 'sonnet_judge'""",
+            uuid.UUID(run_id),
+        )
+        methods = [r["method"] for r in method_rows]
         for method in methods:
             method_metrics = {
                 "top10_overlaps": [],
@@ -1052,25 +1750,44 @@ async def run_news_scoring_experiment(
     client: Anthropic | None = None,
     ticker_filter: list[str] | None = None,
     max_articles: int | None = None,
+    methods: list[str] | None = None,
 ) -> dict:
-    """Run the full news scoring experiment.
+    """Run the news scoring experiment with selected methods.
 
-    Steps:
-    1. Fetch all articles (optionally filtered by ticker / capped)
-    2. Score with heuristic_v1 (baseline reproduction)
-    3. Score with heuristic_v2 (enhanced)
-    4. Score with Haiku batch (if client provided)
-    5. Score with Sonnet judge batch (if client provided)
-    6. Store all results
-    7. Compute comparison metrics
+    Args:
+        pool: asyncpg connection pool
+        client: Anthropic client (required for AI methods)
+        ticker_filter: Optional list of tickers to filter articles
+        max_articles: Optional cap on total articles
+        methods: Optional list of method names to run. Default = all available.
+                 Available: heuristic_v1, heuristic_v2, haiku, sonnet_judge,
+                            sonnet_titles_only, sonnet_filtered_ranked, sonnet_bucket_sort
 
     Returns summary dict with run_id, metrics, costs.
     """
-    run_id = str(uuid.uuid4())
-    methods_used = ["heuristic_v1", "heuristic_v2"]
-    if client:
-        methods_used.extend(["haiku", "sonnet_judge"])
+    # Determine which methods to run
+    if methods:
+        # Validate
+        invalid = [m for m in methods if m not in ALL_METHODS]
+        if invalid:
+            raise ValueError(f"Unknown methods: {invalid}. Valid: {ALL_METHODS}")
+        methods_to_run = methods
+    else:
+        # Default: heuristics + AI methods if client available
+        methods_to_run = list(HEURISTIC_METHODS)
+        if client:
+            methods_to_run.extend(sorted(AI_METHODS))
 
+    # AI methods need a client
+    ai_requested = [m for m in methods_to_run if m in AI_METHODS]
+    if ai_requested and not client:
+        logger.warning(
+            "[news_scoring] No Anthropic client — skipping AI methods: %s",
+            ai_requested,
+        )
+        methods_to_run = [m for m in methods_to_run if m not in AI_METHODS]
+
+    run_id = str(uuid.uuid4())
     t0 = time.monotonic()
 
     # Create run record
@@ -1080,17 +1797,18 @@ async def run_news_scoring_experiment(
                (id, description, methods, config)
                VALUES ($1, $2, $3, $4::jsonb)""",
             uuid.UUID(run_id),
-            f"News scoring experiment: {', '.join(methods_used)}",
-            methods_used,
+            f"News scoring experiment: {', '.join(methods_to_run)}",
+            methods_to_run,
             json.dumps({
                 "ticker_filter": ticker_filter,
                 "max_articles": max_articles,
                 "haiku_model": HAIKU_MODEL,
                 "sonnet_model": SONNET_MODEL,
+                "methods_requested": methods_to_run,
             }),
         )
 
-    logger.info("[news_scoring] Starting experiment %s", run_id)
+    logger.info("[news_scoring] Starting experiment %s with methods: %s", run_id, methods_to_run)
 
     # Fetch articles
     articles = await _fetch_articles(pool, ticker_filter, max_articles)
@@ -1115,21 +1833,25 @@ async def run_news_scoring_experiment(
     logger.info("[news_scoring] Deal context loaded for %d tickers", len(deal_context))
 
     total_cost = 0.0
+    v2_results = None  # Cache for filtered_ranked reuse
 
     # --- Method A: Heuristic v1 ---
-    logger.info("[news_scoring] Running heuristic_v1...")
-    v1_results = _score_heuristic_v1(articles)
-    stored = await _store_results(pool, run_id, "heuristic_v1", v1_results, articles_by_id)
-    logger.info("[news_scoring] heuristic_v1: %d scored, %d stored", len(v1_results), stored)
+    if "heuristic_v1" in methods_to_run:
+        logger.info("[news_scoring] Running heuristic_v1...")
+        v1_results = _score_heuristic_v1(articles)
+        stored = await _store_results(pool, run_id, "heuristic_v1", v1_results, articles_by_id)
+        logger.info("[news_scoring] heuristic_v1: %d scored, %d stored", len(v1_results), stored)
 
     # --- Method B: Heuristic v2 ---
-    logger.info("[news_scoring] Running heuristic_v2...")
-    v2_results = _score_heuristic_v2(articles, deal_context)
-    stored = await _store_results(pool, run_id, "heuristic_v2", v2_results, articles_by_id)
-    logger.info("[news_scoring] heuristic_v2: %d scored, %d stored", len(v2_results), stored)
+    if "heuristic_v2" in methods_to_run or "sonnet_filtered_ranked" in methods_to_run:
+        logger.info("[news_scoring] Running heuristic_v2...")
+        v2_results = _score_heuristic_v2(articles, deal_context)
+        if "heuristic_v2" in methods_to_run:
+            stored = await _store_results(pool, run_id, "heuristic_v2", v2_results, articles_by_id)
+            logger.info("[news_scoring] heuristic_v2: %d scored, %d stored", len(v2_results), stored)
 
     # --- Method C: Haiku batch ---
-    if client:
+    if "haiku" in methods_to_run and client:
         logger.info("[news_scoring] Running Haiku batch...")
         try:
             haiku_results = await _score_haiku_batch(client, articles, deal_context, pool)
@@ -1144,7 +1866,7 @@ async def run_news_scoring_experiment(
             logger.error("[news_scoring] Haiku batch failed: %s", e, exc_info=True)
 
     # --- Method D: Sonnet judge ---
-    if client:
+    if "sonnet_judge" in methods_to_run and client:
         logger.info("[news_scoring] Running Sonnet judge batch...")
         try:
             sonnet_results = await _score_sonnet_judge(client, articles, deal_context, pool)
@@ -1157,6 +1879,53 @@ async def run_news_scoring_experiment(
             )
         except Exception as e:
             logger.error("[news_scoring] Sonnet judge batch failed: %s", e, exc_info=True)
+
+    # --- Method E: Sonnet titles only ---
+    if "sonnet_titles_only" in methods_to_run and client:
+        logger.info("[news_scoring] Running sonnet_titles_only batch...")
+        try:
+            titles_results = await _score_sonnet_titles_only(client, articles, deal_context, pool)
+            stored = await _store_results(pool, run_id, "sonnet_titles_only", titles_results, articles_by_id)
+            titles_cost = sum(r.get("cost_usd") or 0 for r in titles_results)
+            total_cost += titles_cost
+            logger.info(
+                "[news_scoring] sonnet_titles_only: %d scored, %d stored, $%.4f",
+                len(titles_results), stored, titles_cost,
+            )
+        except Exception as e:
+            logger.error("[news_scoring] sonnet_titles_only batch failed: %s", e, exc_info=True)
+
+    # --- Method F: Sonnet filtered ranked ---
+    if "sonnet_filtered_ranked" in methods_to_run and client:
+        logger.info("[news_scoring] Running sonnet_filtered_ranked batch...")
+        try:
+            filtered_results = await _score_sonnet_filtered_ranked(
+                client, articles, deal_context, pool, v2_results,
+            )
+            stored = await _store_results(pool, run_id, "sonnet_filtered_ranked", filtered_results, articles_by_id)
+            filtered_cost = sum(r.get("cost_usd") or 0 for r in filtered_results)
+            total_cost += filtered_cost
+            logger.info(
+                "[news_scoring] sonnet_filtered_ranked: %d scored, %d stored, $%.4f",
+                len(filtered_results), stored, filtered_cost,
+            )
+        except Exception as e:
+            logger.error("[news_scoring] sonnet_filtered_ranked batch failed: %s", e, exc_info=True)
+
+    # --- Method G: Sonnet bucket sort ---
+    if "sonnet_bucket_sort" in methods_to_run and client:
+        logger.info("[news_scoring] Running sonnet_bucket_sort batch...")
+        try:
+            bucket_results = await _score_sonnet_bucket_sort(client, articles, deal_context, pool)
+            stored = await _store_results(pool, run_id, "sonnet_bucket_sort", bucket_results, articles_by_id)
+            bucket_cost = sum(r.get("cost_usd") or 0 for r in bucket_results)
+            total_cost += bucket_cost
+            logger.info(
+                "[news_scoring] sonnet_bucket_sort: %d scored, %d stored, $%.4f",
+                len(bucket_results), stored, bucket_cost,
+            )
+        except Exception as e:
+            logger.error("[news_scoring] sonnet_bucket_sort batch failed: %s", e, exc_info=True)
 
     # Update run record
     async with pool.acquire() as conn:
@@ -1174,7 +1943,7 @@ async def run_news_scoring_experiment(
 
     # Compute comparison metrics (only if Sonnet judge ran)
     comparison = {}
-    if client:
+    if "sonnet_judge" in methods_to_run and client:
         try:
             comparison = await _compute_comparison_metrics(run_id, pool)
         except Exception as e:
@@ -1190,7 +1959,7 @@ async def run_news_scoring_experiment(
         "run_id": run_id,
         "total_articles": total_articles,
         "tickers": len(deal_context),
-        "methods": methods_used,
+        "methods": methods_to_run,
         "total_cost_usd": round(total_cost, 4),
         "elapsed_seconds": round(elapsed_s, 1),
         "comparison": comparison,
