@@ -326,7 +326,7 @@ class IBDataAgent:
             elif request_type == "check_availability":
                 return await self._handle_check_availability(payload)
             elif request_type == "fetch_underlying":
-                return await self._handle_fetch_underlying(payload)
+                return await self._run_in_thread(self._handle_fetch_underlying_sync, payload)
             elif request_type == "test_futures":
                 return await self._handle_test_futures(payload)
             elif request_type == "get_positions":
@@ -541,8 +541,8 @@ class IBDataAgent:
             "expirationCount": len(expirations)
         }
     
-    async def _handle_fetch_underlying(self, payload: dict) -> dict:
-        """Fetch underlying stock/futures data.
+    def _handle_fetch_underlying_sync(self, payload: dict) -> dict:
+        """Fetch underlying stock/futures data (runs in thread pool, not on event loop).
 
         For futures, pass secType="FUT" plus exchange, lastTradeDateOrContractMonth,
         and optionally multiplier in the payload.

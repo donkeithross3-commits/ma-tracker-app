@@ -110,6 +110,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.underlying_close = None
         self.underlying_volume = None
         self.historical_vol = None
+        # Per-request underlying data (thread-safe for concurrent fetch_underlying calls)
+        self._underlying_requests: Dict[int, Dict] = {}  # reqId -> {event, price, bid, ask, close, volume, error_200}
         self.contract_details = None
         self.available_expirations = []
         self.available_strikes = {}
@@ -119,6 +121,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.next_req_id = 1000
         self.next_order_id = 1000  # Synced from nextValidId; used only for placeOrder
         self._order_id_lock = Lock()  # Protects get_next_order_id()
+        self._req_id_lock = Lock()   # Protects get_next_req_id() for concurrent fetch_underlying
         self.data_ready = Event()
         # Wait for all option-parameter callbacks (IB sends multiple + End)
         self.sec_def_opt_params_done = Event()
@@ -909,7 +912,12 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self.last_mkt_data_error = (reqId, errorCode, errorString)
             # 200 = no security definition; for underlying requests we may retry with delayed
             if errorCode == 200 and reqId in self.req_id_map and "underlying" in self.req_id_map.get(reqId, ""):
-                self._underlying_200_req_id = reqId
+                rs = self._underlying_requests.get(reqId)
+                if rs is not None:
+                    rs["error_200"] = True
+                    rs["event"].set()  # Unblock the wait so we can retry immediately
+                else:
+                    self._underlying_200_req_id = reqId
             # Order rejections (201 LGSZ, 202 price, etc.): signal pending place_order wait
             if reqId in self._order_events:
                 self._order_results[reqId] = self._order_results.get(reqId) or {}
@@ -1276,10 +1284,12 @@ class IBMergerArbScanner(EWrapper, EClient):
         return events
 
     def get_next_req_id(self) -> int:
-        """For data requests only (market data, contract details, etc.). Do not use for placeOrder."""
-        req_id = self.next_req_id
-        self.next_req_id += 1
-        return req_id
+        """For data requests only (market data, contract details, etc.). Do not use for placeOrder.
+        Thread-safe for concurrent fetch_underlying calls."""
+        with self._req_id_lock:
+            req_id = self.next_req_id
+            self.next_req_id += 1
+            return req_id
 
     def get_next_order_id(self) -> int:
         """For placeOrder only. Thread-safe. Keeps order id sequence separate from request ids."""
@@ -1372,17 +1382,14 @@ class IBMergerArbScanner(EWrapper, EClient):
             self.contract_details_done.set()
 
     def fetch_underlying_data(self, ticker: str, resolved_contract: Optional[Contract] = None) -> Dict:
-        """Fetch current underlying stock data. Use resolved_contract (conId/primaryExchange) when
-        provided to avoid IB error 200 (no security definition) on some accounts."""
-        print(f"[{ticker}] Step 2: Fetching underlying price...", flush=True)
+        """Fetch current underlying stock data (thread-safe for concurrent calls).
 
-        self.underlying_price = None
-        self.underlying_bid = None
-        self.underlying_ask = None
-        self.underlying_close = None
-        self.underlying_volume = None
-        self.historical_vol = None
-        self._underlying_200_req_id = None
+        Uses per-request state in ``_underlying_requests[req_id]`` so multiple
+        threads can call this simultaneously without trampling each other's data.
+        Use *resolved_contract* (conId/primaryExchange) when provided to avoid
+        IB error 200 (no security definition) on some accounts.
+        """
+        self.logger.info("[%s] fetch_underlying: start", ticker)
 
         contract = resolved_contract
         if contract is None:
@@ -1391,49 +1398,70 @@ class IBMergerArbScanner(EWrapper, EClient):
             contract.secType = "STK"
             contract.exchange = "SMART"
             contract.currency = "USD"
-        else:
-            # When a conId is set, do NOT add symbol/secType/etc. to the contract.
-            # IB validates ALL fields together — any mismatch → error 200.
-            # The req_id_map already stores the ticker for logging purposes.
-            pass
 
         req_id = self.get_next_req_id()
         self.req_id_map[req_id] = f"underlying_{ticker}"
 
-        # Use Event for early exit: tickPrice sets the event as soon as a price arrives
-        self._underlying_done = Event()
+        # Per-request state — tickPrice/tickSize callbacks write here via req_id lookup
+        req_state = {
+            "event": Event(),
+            "price": None, "bid": None, "ask": None, "close": None,
+            "volume": None, "error_200": False,
+        }
+        self._underlying_requests[req_id] = req_state
+
         self.reqMktData(req_id, contract, "", False, False, [])
-        self._underlying_done.wait(timeout=3.0)  # exits immediately when price tick arrives
-        self._underlying_done = None
+        req_state["event"].wait(timeout=3.0)
         self.cancelMktData(req_id)
 
         # If IB returned 200 (no security definition) and we have no price, retry with delayed data
-        if self.underlying_price is None and getattr(self, "_underlying_200_req_id", None) == req_id:
-            self._underlying_200_req_id = None
-            print(f"[{ticker}] Step 2: Retrying with delayed market data (account may not have real-time)...", flush=True)
+        if req_state["price"] is None and req_state["error_200"]:
+            self.logger.info("[%s] fetch_underlying: retrying with delayed data", ticker)
             self.reqMarketDataType(3)  # DELAYED
             req_id2 = self.get_next_req_id()
             self.req_id_map[req_id2] = f"underlying_{ticker}"
-            self._underlying_done = Event()
+            req_state2 = {
+                "event": Event(),
+                "price": None, "bid": None, "ask": None, "close": None,
+                "volume": None, "error_200": False,
+            }
+            self._underlying_requests[req_id2] = req_state2
+
             self.reqMktData(req_id2, contract, "", False, False, [])
-            self._underlying_done.wait(timeout=3.0)  # early exit on price tick
-            self._underlying_done = None
+            req_state2["event"].wait(timeout=3.0)
             self.cancelMktData(req_id2)
             self.reqMarketDataType(1)  # restore REALTIME
-            if self.underlying_price is not None:
-                print(f"[{ticker}] Step 2: Got delayed price {self.underlying_price}", flush=True)
 
-        if self.underlying_price is not None:
-            print(f"[{ticker}] Step 2: Got price {self.underlying_price}", flush=True)
+            # Use delayed results
+            if req_state2["price"] is not None:
+                req_state = req_state2
+                self.logger.info("[%s] fetch_underlying: got delayed price %s", ticker, req_state["price"])
+
+            # Clean up retry state
+            self._underlying_requests.pop(req_id2, None)
+
+        # Clean up primary state
+        self._underlying_requests.pop(req_id, None)
+
+        price = req_state["price"]
+        if price is not None:
+            self.logger.info("[%s] fetch_underlying: price=%s", ticker, price)
         else:
-            print(f"[{ticker}] Step 2: No price from IB (timeout or no data)", flush=True)
+            self.logger.warning("[%s] fetch_underlying: no price (timeout or no data)", ticker)
+
+        # Also update legacy instance vars for callers that still read them (e.g. fetch_chain)
+        self.underlying_price = price
+        self.underlying_bid = req_state["bid"]
+        self.underlying_ask = req_state["ask"]
+        self.underlying_close = req_state["close"]
+        self.underlying_volume = req_state["volume"]
 
         return {
-            'price': self.underlying_price,
-            'bid': self.underlying_bid,
-            'ask': self.underlying_ask,
-            'close': self.underlying_close,
-            'volume': self.underlying_volume,
+            'price': price,
+            'bid': req_state["bid"],
+            'ask': req_state["ask"],
+            'close': req_state["close"],
+            'volume': req_state["volume"],
             'volatility': self.historical_vol if self.historical_vol else 0.30
         }
 
@@ -1559,17 +1587,30 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Existing scan path (unchanged)
         if reqId in self.req_id_map:
             if "underlying" in self.req_id_map[reqId]:
-                if tickType == 4:  # Last
-                    self.underlying_price = price
-                    # Signal early exit — we have the price we need
-                    if self._underlying_done is not None:
-                        self._underlying_done.set()
-                elif tickType == 1:  # Bid
-                    self.underlying_bid = price
-                elif tickType == 2:  # Ask
-                    self.underlying_ask = price
-                elif tickType == 9:  # Close (previous day)
-                    self.underlying_close = price
+                # Per-request state (thread-safe for concurrent fetch_underlying calls)
+                rs = self._underlying_requests.get(reqId)
+                if rs is not None:
+                    if tickType == 4:  # Last
+                        rs["price"] = price
+                        rs["event"].set()  # Signal early exit
+                    elif tickType == 1:  # Bid
+                        rs["bid"] = price
+                    elif tickType == 2:  # Ask
+                        rs["ask"] = price
+                    elif tickType == 9:  # Close (previous day)
+                        rs["close"] = price
+                else:
+                    # Legacy fallback (for callers that don't use per-request state)
+                    if tickType == 4:
+                        self.underlying_price = price
+                        if self._underlying_done is not None:
+                            self._underlying_done.set()
+                    elif tickType == 1:
+                        self.underlying_bid = price
+                    elif tickType == 2:
+                        self.underlying_ask = price
+                    elif tickType == 9:
+                        self.underlying_close = price
             elif reqId in self.option_chain:
                 if tickType == 1:
                     self.option_chain[reqId]['bid'] = price
@@ -1584,10 +1625,14 @@ class IBMergerArbScanner(EWrapper, EClient):
         if self.streaming_cache is not None and self.streaming_cache.is_streaming_req_id(reqId):
             self.streaming_cache.update_size(reqId, tickType, size)
             return
-        # Underlying volume capture
+        # Underlying volume capture (per-request state for concurrent calls)
         if reqId in self.req_id_map and "underlying" in self.req_id_map[reqId]:
             if tickType == 8:  # Volume
-                self.underlying_volume = size
+                rs = self._underlying_requests.get(reqId)
+                if rs is not None:
+                    rs["volume"] = size
+                else:
+                    self.underlying_volume = size
             return
         # Existing scan path (unchanged)
         if reqId in self.option_chain:
