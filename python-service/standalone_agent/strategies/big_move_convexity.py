@@ -1,4 +1,4 @@
-"""BigMoveConvexityStrategy — OTM 0DTE options signal agent (multi-ticker).
+"""BigMoveConvexityStrategy — OTM 1DTE options signal agent (multi-ticker).
 
 Implements ExecutionStrategy to plug into the existing 100ms eval loop.
 Wraps the big_move_convexity ML pipeline:
@@ -9,7 +9,7 @@ Wraps the big_move_convexity ML pipeline:
                                        │
                     [signal fires] → select OTM option → OrderAction(BUY)
                                        │
-                    [on_fill] → spawn RiskManagerStrategy (zero_dte_convexity preset)
+                    [on_fill] → spawn RiskManagerStrategy (intraday_convexity preset)
 
 Configurable parameters are hot-reloadable via execution_config.
 
@@ -91,7 +91,7 @@ _DEFAULTS: dict[str, Any] = {
     "max_contracts": 5,
     "contract_budget_usd": 150.0,
     "scan_start": "09:35",            # HH:MM ET — default (overridden by ticker profiles)
-    "scan_end": "15:45",              # 15 min before close for 0DTE safety
+    "scan_end": "15:15",              # 15 min buffer before 15:30 EOD exit window
     "otm_target_pct": 0.20,           # 20bp OTM
     "auto_entry": False,              # paper trading safety
     "model_registry_path": "",        # auto-resolved if empty
@@ -99,7 +99,7 @@ _DEFAULTS: dict[str, Any] = {
     "polygon_channels": [],           # auto-derived from ticker if empty
     "strike_increment": 0.0,          # 0 = auto-detect from ticker
     # DTE / option selection
-    "preferred_dte": [0, 1],          # acceptable days-to-expiry (0DTE first)
+    "preferred_dte": [1, 2],          # 1DTE preferred, 2DTE fallback (avoids IB post-expiry margin blocks)
     "max_spread": 0.05,               # max bid-ask spread in $ to accept
     "premium_min": 0.10,              # min option premium ($) to consider
     "premium_max": 3.00,              # max option premium ($) to consider
@@ -120,12 +120,12 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
     "SPY": {
         "strike_increment": 1.00,         # IB lists $1 increments near ATM for daily opts
         "polygon_channels": ["T.SPY", "Q.SPY"],
-        "preferred_dte": [0, 1],          # daily 0DTE available
+        "preferred_dte": [1, 2],          # 1DTE preferred (avoids IB post-expiry margin blocks)
         "max_spread": 0.05,               # tight bid-ask ($0.01-$0.03 typical)
         "premium_min": 0.10,
         "premium_max": 3.00,
-        "scan_start": "13:30",            # v5i dataset decision times: 13:30-15:50 only
-        "scan_end": "15:50",
+        "scan_start": "13:30",            # v5i dataset decision times: 13:30-15:15 only
+        "scan_end": "15:15",              # 15 min buffer before 15:30 EOD exit window
         "signal_threshold": 0.40,         # model optimal (UP=0.40, DOWN=0.35)
         "contract_budget_usd": 150.0,
         "straddle_richness_max": 1.5,
@@ -134,7 +134,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
     "SLV": {
         "strike_increment": 1.00,         # IB lists $1 increments for SLV options
         "polygon_channels": ["T.SLV", "Q.SLV"],
-        "preferred_dte": [0, 1, 2, 3, 4, 5],  # daily expirations available
+        "preferred_dte": [1, 2, 3, 4, 5],  # 1DTE+ preferred (avoids IB post-expiry margin blocks)
         "max_spread": 0.20,               # wider bid-ask ($0.05-$0.15 typical)
         "premium_min": 0.05,              # lower premiums (~$30 underlying)
         "premium_max": 1.50,
@@ -148,18 +148,18 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
     "QQQ": {
         "strike_increment": 1.00,         # IB lists $1 increments near ATM for daily opts
         "polygon_channels": ["T.QQQ", "Q.QQQ"],
-        "preferred_dte": [0, 1],
+        "preferred_dte": [1, 2],          # 1DTE preferred (avoids IB post-expiry margin blocks)
         "max_spread": 0.05,
         "premium_min": 0.10,
         "premium_max": 3.00,
-        "scan_start": "13:30",            # v5i dataset decision times: 13:30-15:50
-        "scan_end": "15:50",
+        "scan_start": "13:30",            # v5i dataset decision times: 13:30-15:15
+        "scan_end": "15:15",              # 15 min buffer before 15:30 EOD exit window
         "signal_threshold": 0.40,         # model optimal (DOWN=0.40)
     },
     "IWM": {
         "strike_increment": 1.00,         # IB lists $1 increments for IWM options
         "polygon_channels": ["T.IWM", "Q.IWM"],
-        "preferred_dte": [0, 1],
+        "preferred_dte": [1, 2],          # 1DTE preferred (avoids IB post-expiry margin blocks)
         "max_spread": 0.10,
         "premium_min": 0.05,
         "premium_max": 2.00,
@@ -167,7 +167,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
     "GLD": {
         "strike_increment": 1.00,         # IB lists $1 increments for GLD options
         "polygon_channels": ["T.GLD", "Q.GLD"],
-        "preferred_dte": [0, 1, 2, 3, 4, 5],  # daily expirations available
+        "preferred_dte": [1, 2, 3, 4, 5],  # 1DTE+ preferred (avoids IB post-expiry margin blocks)
         "max_spread": 0.15,
         "premium_min": 0.05,
         "premium_max": 2.00,
@@ -187,7 +187,7 @@ def _get_ticker_profile(ticker: str) -> dict[str, Any]:
     return {
         "strike_increment": 1.00,
         "polygon_channels": [f"T.{ticker}", f"Q.{ticker}"],
-        "preferred_dte": [0, 1, 2, 3, 4, 5],
+        "preferred_dte": [1, 2, 3, 4, 5],
         "max_spread": 0.15,
         "premium_min": 0.05,
         "premium_max": 2.00,
@@ -338,7 +338,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Parse risk config from frontend (flows through BMCConfig)
         self._risk_config = {
-            "preset": config.get("risk_preset", "intraday_premium"),
+            "preset": config.get("risk_preset", "intraday_convexity"),
             "stop_loss_enabled": config.get("risk_stop_loss_enabled", False),
             "stop_loss_type": config.get("risk_stop_loss_type", "none"),
             "stop_loss_trigger_pct": config.get("risk_stop_loss_trigger_pct", -5.0),
@@ -458,7 +458,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Update risk config from latest config (hot-reload support)
         self._risk_config = {
-            "preset": config.get("risk_preset", self._risk_config.get("preset", "intraday_premium")),
+            "preset": config.get("risk_preset", self._risk_config.get("preset", "intraday_convexity")),
             "stop_loss_enabled": config.get("risk_stop_loss_enabled", self._risk_config.get("stop_loss_enabled", False)),
             "stop_loss_type": config.get("risk_stop_loss_type", self._risk_config.get("stop_loss_type", "none")),
             "stop_loss_trigger_pct": config.get("risk_stop_loss_trigger_pct", self._risk_config.get("stop_loss_trigger_pct", -5.0)),
@@ -1331,9 +1331,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Expiry selection: pick the nearest acceptable DTE.
         # SPY has daily 0DTE; SLV only has weekly (Fri) expirations.
-        preferred_dte = cfg.get("preferred_dte", [0, 1])
+        preferred_dte = cfg.get("preferred_dte", [1, 2])
         from datetime import timedelta
-        min_dte = min(preferred_dte) if preferred_dte else 0
+        min_dte = min(preferred_dte) if preferred_dte else 1
         expiry_date = datetime.now(ZoneInfo("America/New_York")) + timedelta(days=min_dte)
         expiry_str = expiry_date.strftime("%Y%m%d")
 
@@ -1511,7 +1511,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "premium_max": cfg.get("premium_max", 3.00),
         }
         # Include risk preset
-        risk_preset = cfg.get("risk_preset", "intraday_premium")
+        risk_preset = cfg.get("risk_preset", "intraday_convexity")
         profile_keys["risk_preset"] = risk_preset
 
         # Machine ID: content hash
@@ -1519,7 +1519,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         profile_hash = f"ep:{hashlib.sha256(canon.encode()).hexdigest()[:12]}"
 
         # Human label
-        preset_short = {"zero_dte_convexity": "z0c", "intraday_premium": "inp", "conservative": "con", "custom": "cst"}.get(risk_preset, risk_preset[:3])
+        preset_short = {"zero_dte_convexity": "z0c", "intraday_convexity": "i1c", "intraday_premium": "inp", "conservative": "con", "custom": "cst"}.get(risk_preset, risk_preset[:3])
         threshold = int(profile_keys["signal_threshold"] * 100)
         budget = int(profile_keys["contract_budget_usd"])
         profile_label = f"ep:{preset_short}-t{threshold}-b{budget}"

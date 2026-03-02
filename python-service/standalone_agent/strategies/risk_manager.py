@@ -18,8 +18,10 @@ Config schema:
 
 import logging
 import time
+from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from execution_engine import ExecutionStrategy, OrderAction, OrderSide, OrderType
 
@@ -131,6 +133,28 @@ PRESETS = {
                 ],
             },
         },
+        "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
+    },
+    "intraday_convexity": {
+        # For 1DTE options: exit same-day before close. Tighter stop than 0DTE
+        # (higher capital at risk from time value), lower trailing activation
+        # (1DTE moves less explosively than 0DTE gamma), mandatory EOD close-out.
+        "stop_loss": {"enabled": True, "type": "simple", "trigger_pct": -60.0},
+        "profit_taking": {
+            "enabled": True,
+            "targets": [],  # no ladders — trailing tranches handle scale-out
+            "trailing_stop": {
+                "enabled": True,
+                "activation_pct": 40,   # lower than 0DTE (1DTE moves less explosively)
+                "trail_pct": 25,        # tighter trail (less gamma = smaller swings)
+                "exit_tranches": [
+                    {"exit_pct": 33, "trail_pct": 8},
+                    {"exit_pct": 50, "trail_pct": 5},
+                    {"exit_pct": 100},
+                ],
+            },
+        },
+        "eod_exit_time": "15:30",   # force exit before close (1DTE only — skip for 0DTE)
         "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
     },
     "intraday_premium": {
@@ -254,6 +278,9 @@ class RiskManagerStrategy(ExecutionStrategy):
         self._trailing_tranche_idx: int = 0         # which tranche we're on
         self._trailing_tranche_pending: bool = False  # True while waiting for tranche fill
 
+        # EOD close-out: timestamp when position was opened (for same-day detection)
+        self._entry_timestamp: float = 0.0
+
     # ── ExecutionStrategy interface ──
 
     def get_subscriptions(self, config: dict) -> List[dict]:
@@ -331,6 +358,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         self._trailing_active = False
         self._trailing_tranche_idx = 0
         self._trailing_tranche_pending = False
+        self._entry_timestamp = pos.get("fill_time", time.time())
 
         stop_cfg = config.get("stop_loss", {})
         if stop_cfg.get("enabled") and stop_cfg.get("type") == "laddered":
@@ -473,6 +501,12 @@ class RiskManagerStrategy(ExecutionStrategy):
         trail_action = self._check_trailing_stop(config, pnl_pct, current_price, quote)
         if trail_action:
             actions.append(trail_action)
+            return actions
+
+        # ── EOD close-out check (1DTE same-day exit) ──
+        eod_action = self._check_eod_closeout(config, pnl_pct, current_price, quote)
+        if eod_action:
+            actions.append(eod_action)
             return actions
 
         return actions
@@ -684,6 +718,7 @@ class RiskManagerStrategy(ExecutionStrategy):
             "total_lots": len(self._lot_entries),
             "trailing_tranche_idx": self._trailing_tranche_idx,
             "trailing_tranche_pending": self._trailing_tranche_pending,
+            "entry_timestamp": self._entry_timestamp,
         }
 
     # ── Persistence helpers ──
@@ -702,6 +737,7 @@ class RiskManagerStrategy(ExecutionStrategy):
             "lot_entries": self._lot_entries,
             "trailing_tranche_idx": self._trailing_tranche_idx,
             "trailing_tranche_pending": self._trailing_tranche_pending,
+            "entry_timestamp": self._entry_timestamp,
         }
 
     def restore_runtime_state(self, state: dict) -> None:
@@ -722,6 +758,10 @@ class RiskManagerStrategy(ExecutionStrategy):
         # Restore trailing tranche state
         self._trailing_tranche_idx = int(state.get("trailing_tranche_idx", 0))
         self._trailing_tranche_pending = False  # pending orders are dead after restart
+
+        # Restore entry timestamp (for EOD close-out same-day detection)
+        if state.get("entry_timestamp"):
+            self._entry_timestamp = float(state["entry_timestamp"])
 
         # Restore lot entries (overrides the single-entry default from on_start)
         persisted_lots = state.get("lot_entries")
@@ -1106,3 +1146,81 @@ class RiskManagerStrategy(ExecutionStrategy):
                 return action
 
         return None
+
+    def _check_eod_closeout(self, config: dict, pnl_pct: float,
+                            current_price: float, quote) -> Optional[OrderAction]:
+        """Check if position should be force-closed before end of day.
+
+        Only applies to non-0DTE positions that were opened today.
+        0DTE positions expire naturally — no EOD exit needed.
+
+        Returns an OrderAction to exit the full remaining position, or None.
+        """
+        eod_exit_time = config.get("eod_exit_time")
+        if not eod_exit_time:
+            return None
+
+        # Only apply to non-0DTE (positions that don't expire today)
+        if self._is_0dte_expiry(config):
+            return None
+
+        # Only close positions opened today (don't force-close recovered overnight positions)
+        if not self._position_opened_today():
+            return None
+
+        # Check if we've already triggered an EOD level
+        key = "eod_closeout"
+        if key in self._level_states and self._level_states[key] != LevelState.ARMED:
+            return None
+
+        # Parse eod_exit_time (HH:MM ET)
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        try:
+            parts = eod_exit_time.split(":")
+            eod_hour, eod_minute = int(parts[0]), int(parts[1])
+        except (ValueError, IndexError):
+            return None
+
+        eod_time = now_et.replace(hour=eod_hour, minute=eod_minute, second=0, microsecond=0)
+        if now_et < eod_time:
+            return None
+
+        # Arm the level if not present (first time we reach EOD window)
+        if key not in self._level_states:
+            self._level_states[key] = LevelState.ARMED
+
+        # Exit 100% at market
+        qty = self.remaining_qty
+        exec_cfg = config.get("execution", {})
+        reason = (
+            f"EOD close-out: {eod_exit_time} ET, pnl={pnl_pct:.1f}%, "
+            f"price={current_price:.4f}, remaining={qty}"
+        )
+        action = self._make_order_action(
+            qty, exec_cfg.get("stop_order_type", "MKT"),
+            current_price, quote, config, reason,
+        )
+        self._level_states[key] = LevelState.TRIGGERED
+        logger.info("RiskManager EOD CLOSEOUT triggered: %s", reason)
+        return action
+
+    def _is_0dte_expiry(self, config: dict) -> bool:
+        """Check if the managed contract expires today (0DTE)."""
+        expiry_str = config.get("instrument", {}).get("expiry", "")
+        if not expiry_str:
+            return False
+        try:
+            today_et = datetime.now(ZoneInfo("America/New_York")).strftime("%Y%m%d")
+            return expiry_str == today_et
+        except (ValueError, TypeError):
+            return False
+
+    def _position_opened_today(self) -> bool:
+        """Check if the position was opened today (ET)."""
+        if self._entry_timestamp <= 0:
+            return False
+        entry_date = datetime.fromtimestamp(
+            self._entry_timestamp, tz=ZoneInfo("America/New_York")
+        ).date()
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        return entry_date == today
