@@ -1802,6 +1802,33 @@ class IBDataAgent:
             result = self.execution_engine.set_ticker_budget(strategy_id, budget)
         else:
             result = self.execution_engine.set_global_entry_cap(budget)
+
+            # Sync per-ticker budgets with global budget to maintain the
+            # single-budget mental model the UI presents.
+            if budget == 0:
+                # HALT: also halt all per-ticker budgets for fast Gate 1a rejection
+                for sid, state in self.execution_engine._strategies.items():
+                    if not sid.startswith("bmc_risk_"):
+                        state.ticker_entry_budget = 0
+            elif budget != 0:
+                unblocked = []
+                for sid, state in self.execution_engine._strategies.items():
+                    if sid.startswith("bmc_risk_"):
+                        continue
+                    if state.ticker_entry_budget == 0:
+                        # Restore from saved paused budgets if available, else unlimited
+                        saved = getattr(self, "_saved_ticker_budgets", {}).get(sid, -1)
+                        state.ticker_entry_budget = saved if saved != 0 else -1
+                        unblocked.append(sid)
+                if unblocked:
+                    logger.info("Global budget set to %s — unblocked per-ticker budgets for: %s",
+                                "UNLIMITED" if budget == -1 else budget, ", ".join(unblocked))
+
+                # Also clear auto-restart paused flag if it was set
+                if self.execution_engine._auto_restart_paused:
+                    self.execution_engine._auto_restart_paused = False
+                    logger.info("Cleared auto-restart PAUSED state (user set budget)")
+
         self._persist_engine_config("budget_change")
         return result
 
