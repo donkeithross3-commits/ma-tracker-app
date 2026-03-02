@@ -52,7 +52,7 @@ The dashboard has a continuous release notes system. Every user-visible change M
 ### Agent Coordination
 
 - **You are not the only agent working on this system.** Both Claude Code and Cursor work on these repos.
-- Before making architectural changes, check for in-progress work in `.claude-session` or recent commits.
+- Before making architectural changes, check for in-progress work in recent commits.
 - Guidance changes that affect both repos must update BOTH copies of `SHARED_BLOCK.md` and re-embed.
 - Repo-specific guidance stays in that repo's `.cursorrules` / `CLAUDE.md` only.
 - Read `docs/agent/AGENTS.md` for the full contract including onboarding and change protocol.
@@ -757,7 +757,7 @@ This cuts latency from the timeout value to the actual IB response time.
 - **Place summary elements above/below tables**, not at the side
 - **User-controlled column visibility on every data table** -- see UI Configurability below
 
-- `/app/krj/page.tsx` is a trader-facing report. Follow `docs/krj_ui_style.md`.
+- `/app/krj/page.tsx` is a trader-facing report.
 - Do not change CSV loading or data logic without explicit request.
 - Styling changes should be implemented via Tailwind classes and small formatting helpers only.
 
@@ -1218,20 +1218,13 @@ const deals = await prisma.deals.findMany()
    - Use `dev-start.bat` and `dev-stop.bat` for Windows
    - Use `dev-start.sh` and `dev-stop.sh` for Mac/Linux (development)
 
-5. **Deployment**: The `deploy-staging.bat` script handles Windows backend deployment
-   - Always test encoding-sensitive code on Windows before deploying
-   - Check `logs/python-backend.log` after deployment for errors
-
 ### Testing Infrastructure
 
-**Test framework**: pytest (tests not yet written - see TESTING_PLAN.md)
+**Test framework**: pytest
 
-Current testing approach:
-1. Manual API testing via curl
-2. Database verification via psql
-3. Functional testing (documented in TESTING_FINDINGS.md)
-
-**Do not assume tests exist** -- they are planned but not implemented.
+```bash
+cd python-service && source venv/bin/activate && pytest tests/ -v
+```
 
 ### Logging and Debugging
 
@@ -1426,22 +1419,9 @@ If py_proj changes any of these interfaces, the strategy file in this repo must 
 
 ---
 
-## Session State Tracking
-
-This project uses `.claude-session` (gitignored) to track progress across sessions. When working:
-
-1. Read `.claude-session` at start of session to understand current state
-2. Update it as you make progress
-3. Note completed tasks, blockers, and next steps
-
-See `start-claude-session.sh` for session initialization.
-
----
-
 ## Documentation References
 
-- `DEVELOPMENT.md`: Comprehensive development guide
-- `TESTING_PLAN.md`: Systematic testing roadmap
-- `TESTING_FINDINGS.md`: Test results and known issues
-- `.claude-session`: Current session state
 - `README.md`: Project overview
+- `ARCHITECTURE.md`: System architecture
+- `AGENTS.md`: Agent persona reference
+- `docs/`: Core reference docs (API, database schema, tech stack, dev workflow)
