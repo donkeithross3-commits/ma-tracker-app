@@ -289,6 +289,11 @@ export default function WatchlistTab() {
           <div className="flex items-center justify-between text-xs text-gray-500 px-1">
             <span>
               {items.length} instrument{items.length !== 1 ? "s" : ""}
+              {quotes.size > 0 && (
+                <span className="text-gray-600 ml-2">
+                  ({quotes.size} quotes)
+                </span>
+              )}
             </span>
             <span>
               {quotesLoading && "Fetching..."}
