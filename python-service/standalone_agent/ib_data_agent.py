@@ -181,6 +181,8 @@ class IBDataAgent:
         # TWS reconnection state
         self._tws_reconnecting = False
         self._tws_last_connected: Optional[float] = None
+        # Zombie gateway detection: connected but all data farms DOWN
+        self._farms_down_since: Optional[float] = None
         
     def connect_to_ib(self) -> bool:
         """Connect to IB TWS. Tries configured port first; on failure tries the other (7496/7497)
@@ -254,113 +256,151 @@ class IBDataAgent:
         Checks every 5s when connected. When disconnected, attempts reconnect
         with exponential backoff (5s → 60s). Quiet logging after first attempt
         to avoid spamming the console when TWS isn't running.
+
+        Also detects zombie gateway state: socket connected but all data farms
+        DOWN for >90s (e.g., gateway stuck on "Existing session detected" dialog).
         """
         CHECK_INTERVAL = 5.0
+        FARMS_DOWN_TIMEOUT = 90.0  # seconds before force-reconnecting zombie gateway
         while self.running:
             await asyncio.sleep(CHECK_INTERVAL)
-            if not self.scanner:
-                continue
-            # Check if TWS connection is healthy
-            if self.scanner.isConnected() and not self.scanner.connection_lost:
-                # Active liveness probe — detect half-dead sockets where
-                # connectionClosed() never fires (TCP socket stuck)
-                stale_sec = time.time() - getattr(self.scanner, '_last_ib_callback', time.time())
-                if stale_sec > 30:
-                    logger.warning("IB connection stale (%.0fs no callbacks) — probing...", stale_sec)
-                    try:
-                        self.scanner.reqCurrentTime()
-                    except Exception:
-                        pass
-                    await asyncio.sleep(5.0)
-                    still_stale = time.time() - getattr(self.scanner, '_last_ib_callback', time.time()) > 35
-                    if still_stale:
-                        logger.warning("IB liveness probe failed — marking connection as lost")
-                        self.scanner.connection_lost = True
-                        # Fall through to reconnect logic below
-                    else:
-                        continue  # Probe succeeded, connection is alive
-                else:
-                    continue
-            # --- TWS is down ---
-            was_previously_connected = self._tws_last_connected is not None
-            if not self._tws_reconnecting:
-                if was_previously_connected:
-                    logger.warning("TWS connection lost — starting auto-reconnect...")
-                else:
-                    logger.info("TWS not yet available — will retry in background (60s intervals)")
-                self._tws_reconnecting = True
-            # Clean up dead socket
             try:
-                self.scanner.disconnect()
-            except Exception:
-                pass
-            # Attempt reconnect with backoff
-            # Start at 5s if TWS was previously connected (likely brief outage),
-            # 60s if never connected (TWS not running on this machine)
-            delay = 5.0 if was_previously_connected else 60.0
-            MAX_DELAY = 60.0
-            # Engage reconnect hold BEFORE reconnecting — prevents the eval loop
-            # from placing orders with stale position data between the moment IB
-            # clears connection_lost (in nextValidId callback) and when reconciliation
-            # finishes.  Hold is released in the finally block below.
-            if self.execution_engine and self.execution_engine.is_running:
-                self.execution_engine.set_reconnect_hold(True)
-            while self.running and self._tws_reconnecting:
-                logger.debug("Attempting TWS reconnect (delay=%.0fs)...", delay)
-                if self.connect_to_ib():
-                    logger.info("TWS reconnected successfully!")
-                    # Re-register account event callback
-                    try:
-                        loop = asyncio.get_running_loop()
-                        self.scanner.set_account_event_callback(
-                            self._make_account_event_callback(loop)
-                        )
-                    except Exception as e:
-                        logger.error("Failed to re-register account event callback: %s", e)
-                    # Re-establish streaming subscriptions (execution engine quotes)
-                    try:
-                        if self.quote_cache:
-                            self.quote_cache.resubscribe_all(self.scanner)
-                            logger.info("Re-established streaming quote subscriptions")
-                    except Exception as e:
-                        logger.error("Failed to re-establish streaming subscriptions: %s", e)
-                    # IB Reconciliation on reconnect (WS4) — MUST complete before hold is released
-                    try:
-                        if self.execution_engine and self.execution_engine.is_running:
-                            ib_positions = [
-                                p for p in self.scanner.get_positions_snapshot()
-                                if p.get("account") == self.IB_ACCT_CODE
-                            ]
-                            recon = self.execution_engine.reconcile_with_ib(ib_positions)
-                            if recon["stale_agent"] or recon["orphaned_ib"] or recon["adjusted"]:
+                if not self.scanner:
+                    continue
+                # Check if TWS connection is healthy
+                if self.scanner.isConnected() and not self.scanner.connection_lost:
+                    # Active liveness probe — detect half-dead sockets where
+                    # connectionClosed() never fires (TCP socket stuck)
+                    stale_sec = time.time() - getattr(self.scanner, '_last_ib_callback', time.time())
+                    if stale_sec > 30:
+                        logger.warning("IB connection stale (%.0fs no callbacks) — probing...", stale_sec)
+                        try:
+                            self.scanner.reqCurrentTime()
+                        except Exception:
+                            pass
+                        await asyncio.sleep(5.0)
+                        still_stale = time.time() - getattr(self.scanner, '_last_ib_callback', time.time()) > 35
+                        if still_stale:
+                            logger.warning("IB liveness probe failed — marking connection as lost")
+                            self.scanner.connection_lost = True
+                            # Fall through to reconnect logic below
+                        else:
+                            continue  # Probe succeeded, connection is alive
+                    else:
+                        # Connection alive (getting callbacks) — check for zombie gateway
+                        # Zombie = socket connected to gateway, but gateway has no IB server
+                        # connectivity (e.g. stuck on "Existing session detected" dialog).
+                        # All data farms report DOWN but isConnected() is True.
+                        farm_status = self.scanner._farm_status
+                        if farm_status and not self.scanner.is_data_available():
+                            if self._farms_down_since is None:
+                                self._farms_down_since = time.time()
                                 logger.warning(
-                                    "Post-reconnect reconciliation: matched=%d, orphaned=%d, stale=%d, adjusted=%d",
-                                    len(recon["matched"]), len(recon["orphaned_ib"]),
-                                    len(recon["stale_agent"]), len(recon["adjusted"]),
+                                    "All data farms DOWN (zombie gateway?) — "
+                                    "will force reconnect after %.0fs. Farms: %s",
+                                    FARMS_DOWN_TIMEOUT, farm_status,
                                 )
-                    except Exception as e:
-                        logger.error("Post-reconnect reconciliation failed: %s", e)
-                    # Release reconnect hold — eval loop can resume with fresh position view
-                    if self.execution_engine and self.execution_engine.is_running:
-                        self.execution_engine.set_reconnect_hold(False)
-                    # Notify frontend to refetch positions and open orders (orders may have filled while disconnected)
-                    try:
-                        if self.websocket:
-                            await self.websocket.send(json.dumps({
-                                "type": "account_event",
-                                "event": {"event": "tws_reconnected", "ts": time.time()},
-                            }))
-                            logger.info("Pushed tws_reconnected event for UI sync")
-                    except Exception as e:
-                        logger.error("Failed to push tws_reconnected: %s", e)
-                    self._tws_reconnecting = False
-                    break
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, MAX_DELAY)
-            # Safety: if we exit the reconnect loop without succeeding (e.g. shutdown),
-            # release the hold so the engine isn't permanently frozen.
-            if self.execution_engine and self._reconnect_hold_needs_release():
-                self.execution_engine.set_reconnect_hold(False)
+                            elif time.time() - self._farms_down_since > FARMS_DOWN_TIMEOUT:
+                                logger.warning(
+                                    "All data farms DOWN for >%.0fs — forcing reconnect. Farms: %s",
+                                    FARMS_DOWN_TIMEOUT, farm_status,
+                                )
+                                self._farms_down_since = None
+                                self.scanner.connection_lost = True
+                                # Fall through to reconnect logic below
+                            else:
+                                continue  # Still within grace period
+                        else:
+                            # Farms are OK (or no status yet) — reset timer
+                            if self._farms_down_since is not None:
+                                logger.info("Data farms recovered — cancelling zombie detection timer")
+                                self._farms_down_since = None
+                            continue
+                # --- TWS is down ---
+                was_previously_connected = self._tws_last_connected is not None
+                if not self._tws_reconnecting:
+                    if was_previously_connected:
+                        logger.warning("TWS connection lost — starting auto-reconnect...")
+                    else:
+                        logger.info("TWS not yet available — will retry in background (60s intervals)")
+                    self._tws_reconnecting = True
+                # Clean up dead socket
+                try:
+                    self.scanner.disconnect()
+                except Exception:
+                    pass
+                # Attempt reconnect with backoff
+                # Start at 5s if TWS was previously connected (likely brief outage),
+                # 60s if never connected (TWS not running on this machine)
+                delay = 5.0 if was_previously_connected else 60.0
+                MAX_DELAY = 60.0
+                # Engage reconnect hold BEFORE reconnecting — prevents the eval loop
+                # from placing orders with stale position data between the moment IB
+                # clears connection_lost (in nextValidId callback) and when reconciliation
+                # finishes.  Hold is released in the finally block below.
+                if self.execution_engine and self.execution_engine.is_running:
+                    self.execution_engine.set_reconnect_hold(True)
+                while self.running and self._tws_reconnecting:
+                    logger.debug("Attempting TWS reconnect (delay=%.0fs)...", delay)
+                    if self.connect_to_ib():
+                        logger.info("TWS reconnected successfully!")
+                        # Re-register account event callback
+                        try:
+                            loop = asyncio.get_running_loop()
+                            self.scanner.set_account_event_callback(
+                                self._make_account_event_callback(loop)
+                            )
+                        except Exception as e:
+                            logger.error("Failed to re-register account event callback: %s", e)
+                        # Re-establish streaming subscriptions (execution engine quotes)
+                        try:
+                            if self.quote_cache:
+                                self.quote_cache.resubscribe_all(self.scanner)
+                                logger.info("Re-established streaming quote subscriptions")
+                        except Exception as e:
+                            logger.error("Failed to re-establish streaming subscriptions: %s", e)
+                        # IB Reconciliation on reconnect (WS4) — MUST complete before hold is released
+                        try:
+                            if self.execution_engine and self.execution_engine.is_running:
+                                ib_positions = [
+                                    p for p in self.scanner.get_positions_snapshot()
+                                    if p.get("account") == self.IB_ACCT_CODE
+                                ]
+                                recon = self.execution_engine.reconcile_with_ib(ib_positions)
+                                if recon["stale_agent"] or recon["orphaned_ib"] or recon["adjusted"]:
+                                    logger.warning(
+                                        "Post-reconnect reconciliation: matched=%d, orphaned=%d, stale=%d, adjusted=%d",
+                                        len(recon["matched"]), len(recon["orphaned_ib"]),
+                                        len(recon["stale_agent"]), len(recon["adjusted"]),
+                                    )
+                        except Exception as e:
+                            logger.error("Post-reconnect reconciliation failed: %s", e)
+                        # Release reconnect hold — eval loop can resume with fresh position view
+                        if self.execution_engine and self.execution_engine.is_running:
+                            self.execution_engine.set_reconnect_hold(False)
+                        # Notify frontend to refetch positions and open orders (orders may have filled while disconnected)
+                        try:
+                            if self.websocket:
+                                await self.websocket.send(json.dumps({
+                                    "type": "account_event",
+                                    "event": {"event": "tws_reconnected", "ts": time.time()},
+                                }))
+                                logger.info("Pushed tws_reconnected event for UI sync")
+                        except Exception as e:
+                            logger.error("Failed to push tws_reconnected: %s", e)
+                        self._tws_reconnecting = False
+                        break
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, MAX_DELAY)
+                # Safety: if we exit the reconnect loop without succeeding (e.g. shutdown),
+                # release the hold so the engine isn't permanently frozen.
+                if self.execution_engine and self._reconnect_hold_needs_release():
+                    self.execution_engine.set_reconnect_hold(False)
+            except Exception as e:
+                # CRITICAL: Health loop must never die silently. Log and continue.
+                # Without this, an unexpected exception kills the only mechanism
+                # that detects IB disconnects and triggers reconnection.
+                logger.error("Health loop iteration error (continuing): %s", e, exc_info=True)
 
     def _reconnect_hold_needs_release(self) -> bool:
         """Check if reconnect hold is still engaged (needs cleanup)."""
@@ -2695,6 +2735,10 @@ class IBDataAgent:
                     and self.scanner.isConnected()
                     and not self.scanner.connection_lost
                 )
+                # Include data farm health for dashboard diagnostics
+                if self.scanner:
+                    state["ib_farms"] = self.scanner.get_farm_status()
+                    state["ib_data_available"] = self.scanner.is_data_available()
                 await self.websocket.send(json.dumps({
                     "type": "agent_state",
                     **state
