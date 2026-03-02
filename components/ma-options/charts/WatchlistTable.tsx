@@ -47,10 +47,11 @@ function formatVolume(v: number | null): string {
   return v.toLocaleString();
 }
 
-/** Always 2 decimals — tableLayout:auto lets columns expand to fit. */
+/** 2 decimals, but trim trailing ".00" for round prices (saves width on YM/NQ). */
 function formatPrice(p: number | null): string {
   if (p == null) return "—";
-  return p.toFixed(2);
+  const s = p.toFixed(2);
+  return s.endsWith(".00") ? s.slice(0, -3) : s;
 }
 
 /** Change: ≥100 → 0 decimals, ≥10 → 1, <10 → 2 */
@@ -182,34 +183,34 @@ export default function WatchlistTable({
         <table className="w-full text-sm d-table" style={{ tableLayout: "auto" }}>
           <thead>
             <tr className="border-b border-gray-700 text-gray-400">
+              <th className="w-5 sm:w-6"></th>
               {visibleSet.has("instrument") && (
-                <th className="text-left py-2 px-1.5 sm:px-2 font-medium">Instrument</th>
+                <th className="text-left py-2 px-1 sm:px-2 font-medium">Instrument</th>
               )}
               {visibleSet.has("last") && (
-                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Last</th>
+                <th className="text-right py-2 px-1 sm:px-2 font-medium whitespace-nowrap">Last</th>
               )}
               {visibleSet.has("change") && (
-                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Change</th>
+                <th className="text-right py-2 px-1 sm:px-2 font-medium whitespace-nowrap">Chg</th>
               )}
               {visibleSet.has("changePct") && (
-                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Chg %</th>
+                <th className="text-right py-2 px-1 sm:px-2 font-medium whitespace-nowrap">%</th>
               )}
               {visibleSet.has("volume") && (
-                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Vol</th>
+                <th className="text-right py-2 px-1 sm:px-2 font-medium whitespace-nowrap">Vol</th>
               )}
               {visibleSet.has("bid") && (
-                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Bid</th>
+                <th className="text-right py-2 px-1 sm:px-2 font-medium whitespace-nowrap">Bid</th>
               )}
               {visibleSet.has("ask") && (
-                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Ask</th>
+                <th className="text-right py-2 px-1 sm:px-2 font-medium whitespace-nowrap">Ask</th>
               )}
-              <th className="w-16 sm:w-20"></th>
+              <th className="w-6 sm:w-8"></th>
             </tr>
           </thead>
           <tbody>
             {items.map((item, idx) => {
               const q = quotes.get(item.ticker);
-              const hasData = q && !q.stale;
               const isFirst = idx === 0;
               const isLast = idx === items.length - 1;
 
@@ -218,103 +219,89 @@ export default function WatchlistTable({
                   key={item.id}
                   className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
                 >
+                  {/* Up/down arrows — left column */}
+                  <td className="py-0 px-0">
+                    <div className="flex flex-col items-center">
+                      <button
+                        onClick={() => onMoveItem(idx, "up")}
+                        disabled={isFirst}
+                        className={`p-0.5 transition-colors no-density ${isFirst ? "text-gray-700 cursor-default" : "text-gray-500 hover:text-gray-200"}`}
+                        title="Move up"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => onMoveItem(idx, "down")}
+                        disabled={isLast}
+                        className={`p-0.5 transition-colors no-density ${isLast ? "text-gray-700 cursor-default" : "text-gray-500 hover:text-gray-200"}`}
+                        title="Move down"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </td>
                   {visibleSet.has("instrument") && (
-                    <td className="py-1.5 sm:py-2 px-1.5 sm:px-2">
-                      <div className="flex items-center gap-1.5">
-                        {/* Live indicator */}
-                        <span
-                          className={`text-[10px] shrink-0 ${hasData ? "text-blue-400" : "text-gray-600"}`}
-                          title={hasData ? "Live data" : "No data"}
-                        >
-                          ◆
+                    <td className="py-1.5 sm:py-2 px-1 sm:px-2">
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-sm sm:text-base font-bold text-gray-100 whitespace-nowrap">
+                          {item.ticker}
                         </span>
-                        <div className="min-w-0">
-                          <div className="flex items-baseline gap-1">
-                            <span className="text-sm sm:text-base font-bold text-gray-100">
-                              {item.ticker}
-                            </span>
-                            {item.instrumentType === "future" && (
-                              <span className="text-xs font-mono text-amber-500/80">
-                                {getFrontMonthCode(item.ticker)}
-                              </span>
-                            )}
-                            {item.exchange && (
-                              <span className="text-xs text-gray-500 hidden sm:inline">
-                                {item.exchange}
-                              </span>
-                            )}
-                          </div>
-                          {item.displayName && (
-                            <div className="text-xs text-gray-500 leading-tight hidden sm:block">
-                              {item.displayName}
-                            </div>
-                          )}
-                        </div>
+                        {item.instrumentType === "future" && (
+                          <span className="text-xs font-mono text-amber-500/80">
+                            {getFrontMonthCode(item.ticker)}
+                          </span>
+                        )}
+                        {item.exchange && (
+                          <span className="text-xs text-gray-500 hidden sm:inline">
+                            {item.exchange}
+                          </span>
+                        )}
                       </div>
                     </td>
                   )}
                   {visibleSet.has("last") && (
-                    <td className="text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono text-gray-100 whitespace-nowrap">
+                    <td className="text-right py-1.5 sm:py-2 px-1 sm:px-2 font-mono text-gray-100 whitespace-nowrap">
                       {formatPrice(q?.price ?? null)}
                     </td>
                   )}
                   {visibleSet.has("change") && (
                     <td
-                      className={`text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono whitespace-nowrap ${changeColor(q?.change ?? null)}`}
+                      className={`text-right py-1.5 sm:py-2 px-1 sm:px-2 font-mono whitespace-nowrap ${changeColor(q?.change ?? null)}`}
                     >
                       {formatChange(q?.change ?? null)}
                     </td>
                   )}
                   {visibleSet.has("changePct") && (
                     <td
-                      className={`text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono whitespace-nowrap ${changeColor(q?.changePct ?? null)}`}
+                      className={`text-right py-1.5 sm:py-2 px-1 sm:px-2 font-mono whitespace-nowrap ${changeColor(q?.changePct ?? null)}`}
                     >
                       {formatChangePct(q?.changePct ?? null)}
                     </td>
                   )}
                   {visibleSet.has("volume") && (
-                    <td className="text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono text-gray-300 whitespace-nowrap">
+                    <td className="text-right py-1.5 sm:py-2 px-1 sm:px-2 font-mono text-gray-300 whitespace-nowrap">
                       {formatVolume(q?.volume ?? null)}
                     </td>
                   )}
                   {visibleSet.has("bid") && (
-                    <td className="text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono text-gray-300 whitespace-nowrap">
+                    <td className="text-right py-1.5 sm:py-2 px-1 sm:px-2 font-mono text-gray-300 whitespace-nowrap">
                       {formatPrice(q?.bid ?? null)}
                     </td>
                   )}
                   {visibleSet.has("ask") && (
-                    <td className="text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono text-gray-300 whitespace-nowrap">
+                    <td className="text-right py-1.5 sm:py-2 px-1 sm:px-2 font-mono text-gray-300 whitespace-nowrap">
                       {formatPrice(q?.ask ?? null)}
                     </td>
                   )}
-                  <td className="py-1.5 sm:py-2 px-0.5 sm:px-1">
-                    <div className="flex items-center gap-0.5">
-                      <div className="flex flex-col">
-                        <button
-                          onClick={() => onMoveItem(idx, "up")}
-                          disabled={isFirst}
-                          className={`p-0.5 transition-colors ${isFirst ? "text-gray-700 cursor-default" : "text-gray-500 hover:text-gray-200"}`}
-                          title="Move up"
-                        >
-                          <ChevronUp className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => onMoveItem(idx, "down")}
-                          disabled={isLast}
-                          className={`p-0.5 transition-colors ${isLast ? "text-gray-700 cursor-default" : "text-gray-500 hover:text-gray-200"}`}
-                          title="Move down"
-                        >
-                          <ChevronDown className="h-3 w-3" />
-                        </button>
-                      </div>
-                      <button
-                        onClick={() => onRemoveItem(item.ticker)}
-                        className="p-1 text-gray-600 hover:text-red-400 transition-colors"
-                        title={`Remove ${item.ticker}`}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                  {/* Trash — right column */}
+                  <td className="py-1.5 sm:py-2 px-0">
+                    <button
+                      onClick={() => onRemoveItem(item.ticker)}
+                      className="p-1 text-gray-600 hover:text-red-400 transition-colors no-density"
+                      title={`Remove ${item.ticker}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </td>
                 </tr>
               );
