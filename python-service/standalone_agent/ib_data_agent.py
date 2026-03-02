@@ -2925,6 +2925,32 @@ class IBDataAgent:
         except Exception as e:
             logger.error("Error cleaning up expired position %s: %s", sid, e)
 
+    def _periodic_reconciliation(self):
+        """Compare agent position state against IB source of truth.
+
+        Called from the heartbeat loop via run_in_executor (~every 60s).
+        This is a BLOCKING call (get_positions_snapshot uses Event.wait).
+        Returns the reconciliation report or None on error.
+        """
+        if not self.execution_engine or not self.execution_engine.is_running:
+            return None
+        if not self.scanner or not self.scanner.isConnected() or self.scanner.connection_lost:
+            return None
+        # Don't reconcile during reconnect hold — positions may be stale
+        if self.execution_engine._reconnect_hold:
+            return None
+        try:
+            ib_positions = [
+                p for p in self.scanner.get_positions_snapshot(timeout_sec=5.0)
+                if p.get("account") == self.IB_ACCT_CODE
+            ]
+            recon = self.execution_engine.reconcile_with_ib(ib_positions)
+            self.position_store.purge_phantom_entry_fills()
+            return recon
+        except Exception as e:
+            logger.error("Periodic reconciliation failed: %s", e)
+            return None
+
     async def send_heartbeat(self):
         """Send periodic heartbeats with agent state and execution telemetry."""
         telemetry_counter = 0  # send telemetry every 2nd heartbeat (~20s)
@@ -2967,6 +2993,45 @@ class IBDataAgent:
                     self._persist_engine_config("heartbeat")
                     # Check for expired options on the same ~20s cadence
                     self._check_expired_positions()
+                # Periodic IB position reconciliation (~every 60s)
+                # Runs in a thread pool to avoid blocking the async heartbeat loop.
+                if (
+                    telemetry_counter % 6 == 0
+                    and self.execution_engine is not None
+                    and self.execution_engine.is_running
+                    and self.scanner
+                    and self.scanner.isConnected()
+                    and not self.scanner.connection_lost
+                ):
+                    try:
+                        loop = asyncio.get_running_loop()
+                        recon = await loop.run_in_executor(
+                            None, self._periodic_reconciliation
+                        )
+                        if recon:
+                            if recon["orphaned_ib"]:
+                                n_spawned = self._spawn_missing_risk_managers(
+                                    recon["orphaned_ib"]
+                                )
+                                logger.warning(
+                                    "Periodic reconciliation: %d orphaned IB position(s) — "
+                                    "auto-spawned %d risk manager(s)",
+                                    len(recon["orphaned_ib"]), n_spawned,
+                                )
+                            if recon["stale_agent"] or recon["adjusted"]:
+                                logger.warning(
+                                    "Periodic reconciliation: matched=%d, stale=%d, adjusted=%d",
+                                    len(recon["matched"]),
+                                    len(recon["stale_agent"]),
+                                    len(recon["adjusted"]),
+                                )
+                            elif recon["matched"]:
+                                logger.debug(
+                                    "Periodic reconciliation OK: %d matched, 0 stale, 0 adjusted",
+                                    len(recon["matched"]),
+                                )
+                    except Exception as recon_err:
+                        logger.error("Periodic reconciliation error: %s", recon_err)
                 # Sync dirty positions to server for P&L history persistence
                 dirty_positions = self.position_store.drain_dirty()
                 if dirty_positions and self.websocket:

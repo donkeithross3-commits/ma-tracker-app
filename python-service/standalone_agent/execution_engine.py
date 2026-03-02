@@ -106,6 +106,7 @@ class ActiveOrder:
     placed_at: float = 0.0  # time.time() when submitted
     last_update: float = 0.0  # time.time() of last status update
     error: str = ""
+    is_entry: bool = True  # budget refund on IB-side rejection (Inactive status)
 
 
 @dataclass
@@ -888,6 +889,16 @@ class ExecutionEngine:
                                 state.strategy.on_order_dead(order_id, reason, state.config)
                             except Exception as e:
                                 logger.error("Strategy %s on_order_dead error: %s", strategy_id, e)
+                            # Refund entry budget for IB-side rejections (Inactive = IB
+                            # rejected post-accept, e.g. margin deficit discovered async).
+                            # Don't refund user-initiated cancels (Cancelled/ApiCancelled).
+                            if status == "Inactive" and active.is_entry and state:
+                                self._refund_entry_cap()
+                                self._refund_ticker_budget(state)
+                                logger.info(
+                                    "Refunded entry budget for %s (IB Inactive: order %d)",
+                                    strategy_id, order_id,
+                                )
 
                         # Clean up
                         with self._active_orders_lock:
@@ -1163,8 +1174,9 @@ class ExecutionEngine:
             self._place_order_worker,
             state.strategy_id, action.contract_dict, order_dict,
         )
+        _is_entry = is_entry  # capture for closure
         future.add_done_callback(
-            lambda f: self._on_order_complete(f, state.strategy_id)
+            lambda f: self._on_order_complete(f, state.strategy_id, _is_entry)
         )
 
     def _place_order_worker(
@@ -1175,11 +1187,15 @@ class ExecutionEngine:
             contract_dict, order_dict, timeout_sec=self.ORDER_TIMEOUT_SEC,
         )
 
-    def _on_order_complete(self, future: Future, strategy_id: str):
+    def _on_order_complete(self, future: Future, strategy_id: str, is_entry: bool = False):
         """Callback when order placement finishes (runs on order-exec thread).
 
         Decrements in-flight counters, registers in active orders, logs results,
         and routes immediate fills to strategies.
+
+        If an entry order is rejected by IB (error in result) or throws an
+        exception, the entry budget consumed at Gates 1a/1b is refunded so
+        the user doesn't silently lose budget capacity.
         """
         # Decrement counters
         with self._inflight_lock:
@@ -1195,6 +1211,11 @@ class ExecutionEngine:
             logger.error("Exception placing order for strategy %s: %s", strategy_id, e)
             if state:
                 state.errors.append(f"Order exception: {e}")
+            # Refund entry budget — order never reached IB
+            if is_entry and state:
+                self._refund_entry_cap()
+                self._refund_ticker_budget(state)
+                logger.info("Refunded entry budget for %s (order exception)", strategy_id)
             return
 
         if state:
@@ -1213,6 +1234,12 @@ class ExecutionEngine:
                         )
                     except Exception as e2:
                         logger.error("Strategy %s on_order_dead error: %s", strategy_id, e2)
+                # Refund entry budget — IB rejected the order post-submission
+                if is_entry:
+                    self._refund_entry_cap()
+                    self._refund_ticker_budget(state)
+                    logger.info("Refunded entry budget for %s (IB rejection: %s)",
+                                strategy_id, result["error"][:80])
         else:
             order_id = result.get("orderId")
             status = result.get("status", "")
@@ -1233,6 +1260,7 @@ class ExecutionEngine:
                         perm_id=result.get("permId", 0),
                         placed_at=time.time(),
                         last_update=time.time(),
+                        is_entry=is_entry,
                     )
 
                 # Notify strategy of order placement (so it can map order_id to level)
