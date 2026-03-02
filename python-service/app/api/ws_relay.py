@@ -225,10 +225,31 @@ class ProviderRegistry:
                     return best
                 if not allow_fallback_to_any:
                     return None
+            # Fallback: prefer IB-connected providers with highest version.
+            # Without this, the first-inserted dict entry wins — which could
+            # be an older agent version that lacks newer request handlers.
+            best_fallback: Optional[DataProvider] = None
             for provider in self.providers.values():
-                if provider.is_active:
-                    return provider
-            return None
+                if not provider.is_active:
+                    continue
+                if best_fallback is None:
+                    best_fallback = provider
+                else:
+                    # Prefer ib_connected over not connected
+                    cur_ib = best_fallback.ib_connected
+                    new_ib = provider.ib_connected
+                    if new_ib and not cur_ib:
+                        best_fallback = provider
+                    elif new_ib == cur_ib:
+                        # Same IB status — prefer higher version
+                        try:
+                            cur_v = tuple(int(x) for x in best_fallback.agent_version.split("."))
+                            new_v = tuple(int(x) for x in provider.agent_version.split("."))
+                        except (ValueError, AttributeError):
+                            cur_v, new_v = (0,), (0,)
+                        if new_v > cur_v:
+                            best_fallback = provider
+            return best_fallback
     
     async def get_provider_by_id(self, provider_id: str) -> Optional[DataProvider]:
         """Get a provider by its ID"""
