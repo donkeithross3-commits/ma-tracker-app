@@ -87,6 +87,18 @@ Do this **automatically** at the end of the task -- do not wait for the user to 
 - If the deploy fails with a lock error, another deploy is in progress — wait and retry.
 - **NEVER run raw `docker compose build` or `docker compose up` on the droplet.** Always use `deploy.sh`.
 
+### Service Boundary Rules (Portfolio ↔ FastAPI)
+
+The portfolio container (port 8001) and FastAPI/IB service (port 8000) are **independently deployable**. These rules prevent re-coupling:
+
+1. **`main.py` must NOT import or mount `portfolio_router`.** Portfolio routes live exclusively in `portfolio_main.py` (portfolio container). All dashboard traffic routes via `PORTFOLIO_SERVICE_URL` → port 8001.
+2. **Portfolio code must NOT import from `..main` or `..scanner`.** Files under `app/api/portfolio_routes.py`, `app/scheduler/`, `app/portfolio/`, `app/services/` must have zero imports from `main.py` or `scanner.py`.
+3. **`Dockerfile.portfolio` must NOT copy `scanner.py` or `tools/`.** The portfolio container has no IB dependencies.
+4. **Cross-container URLs must use env vars**, not hardcoded `localhost:8000`. Use `FASTAPI_SERVICE_URL` (defaults to `http://localhost:8000` for local dev).
+5. **`portfolio_routes.py` changes only need `deploy.sh portfolio`** — no FastAPI restart required.
+
+These rules are enforced by the `ops/audit/checks/app/architecture_boundary.sh` daily audit check.
+
 ### Security and Latency Non-Negotiables
 
 These rules apply to ALL code changes in this repository.
