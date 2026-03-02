@@ -488,23 +488,28 @@ export default function SignalsTab() {
     });
   };
 
-  // ── Fetch model availability from registry on mount ──
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/ma-options/model-availability");
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (data.tickers && !cancelled) {
-          setModelAvailability(data.tickers);
-        }
-      } catch {
-        // Silent fail — badges just won't show
+  // ── Fetch model availability from registry (on mount + every 60s) ──
+  // Refreshes periodically so newly deployed models show correct badges
+  // without requiring a page reload.
+  const fetchModelAvailability = useCallback(async () => {
+    if (document.hidden) return;
+    try {
+      const res = await fetch("/api/ma-options/model-availability");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.tickers) {
+        setModelAvailability(data.tickers);
       }
-    })();
-    return () => { cancelled = true; };
+    } catch {
+      // Silent fail — badges just won't show
+    }
   }, []);
+
+  useEffect(() => {
+    fetchModelAvailability();
+    const interval = setInterval(fetchModelAvailability, 60_000);
+    return () => clearInterval(interval);
+  }, [fetchModelAvailability]);
 
   // ── Poll signal state ──
   const fetchSignal = useCallback(async () => {
