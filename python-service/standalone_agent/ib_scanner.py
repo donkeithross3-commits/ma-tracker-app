@@ -1481,12 +1481,15 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         def _on_bar(rId, bar):
             if rId == req_id:
-                # Parse bar date: intraday = epoch seconds string, daily = "YYYYMMDD"
+                # Parse bar date: IB sends three formats:
+                #   - Intraday: epoch seconds string (e.g. "1709150400")
+                #   - Daily: "YYYYMMDD" (e.g. "20260223")
+                #   - Daily with time: "YYYYMMDD  HH:MM:SS" (e.g. "20260223  18:00:00")
                 try:
                     ts = int(bar.date)  # Intraday: already epoch seconds
                 except ValueError:
-                    # Daily: "YYYYMMDD" -> epoch seconds (midnight UTC)
-                    dt = datetime.strptime(bar.date, "%Y%m%d")
+                    date_str = bar.date.strip().split()[0]  # Take "YYYYMMDD" part, drop any time
+                    dt = datetime.strptime(date_str, "%Y%m%d")
                     ts = int(calendar.timegm(dt.timetuple()))
 
                 bars_collected.append({
