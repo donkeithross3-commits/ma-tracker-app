@@ -125,6 +125,8 @@ class StreamingQuoteCache:
         self._key_to_req_id: Dict[str, int] = {}
         # cache_key -> (Contract, generic_ticks)  (for resubscription after reconnect)
         self._key_to_contract: Dict[str, tuple] = {}
+        # Reference counting: how many strategies share each subscription
+        self._ref_counts: Dict[str, int] = {}
         self._lock = threading.Lock()
 
     # ── Subscription management ──
@@ -145,7 +147,8 @@ class StreamingQuoteCache:
         """
         with self._lock:
             if cache_key in self._key_to_req_id:
-                logger.warning("Already subscribed to %s (reqId=%d)", cache_key, self._key_to_req_id[cache_key])
+                self._ref_counts[cache_key] = self._ref_counts.get(cache_key, 1) + 1
+                logger.info("QuoteCache: ref count for %s incremented to %d", cache_key, self._ref_counts[cache_key])
                 return self._key_to_req_id[cache_key]
 
             if not self._resource_manager.acquire_execution_lines(1, allocation_key=cache_key):
@@ -158,6 +161,7 @@ class StreamingQuoteCache:
             self._key_to_req_id[cache_key] = req_id
             # Store contract for resubscription after reconnect
             self._key_to_contract[cache_key] = (contract, generic_ticks)
+            self._ref_counts[cache_key] = 1
 
         # reqMktData outside the lock (it sends over the socket)
         # snapshot=False, regulatorySnapshot=False -> persistent streaming
@@ -166,8 +170,19 @@ class StreamingQuoteCache:
         return req_id
 
     def unsubscribe(self, scanner: "IBMergerArbScanner", cache_key: str):
-        """Cancel a streaming subscription and free the market data line."""
+        """Cancel a streaming subscription and free the market data line.
+
+        If multiple strategies share this subscription (ref count > 1),
+        only decrements the count -- the IB data line stays open.
+        """
         with self._lock:
+            count = self._ref_counts.get(cache_key, 1) - 1
+            if count > 0:
+                self._ref_counts[cache_key] = count
+                logger.info("QuoteCache: ref count for %s decremented to %d, keeping subscription", cache_key, count)
+                return
+            self._ref_counts.pop(cache_key, None)
+
             req_id = self._key_to_req_id.pop(cache_key, None)
             if req_id is None:
                 logger.warning("unsubscribe: %s not found in cache", cache_key)
@@ -324,3 +339,12 @@ class StreamingQuoteCache:
     def get_subscribed_keys(self) -> list:
         """List of currently subscribed cache keys."""
         return list(self._key_to_req_id.keys())
+
+    def get_status(self) -> dict:
+        """Debug snapshot of subscription state including ref counts."""
+        with self._lock:
+            return {
+                "subscription_count": len(self._key_to_req_id),
+                "subscribed_keys": list(self._key_to_req_id.keys()),
+                "ref_counts": dict(self._ref_counts),
+            }
