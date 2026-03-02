@@ -592,7 +592,9 @@ class IBDataAgent:
         def _get_front_month(symbol: str) -> str:
             """Derive front-month YYYYMM for a futures symbol.
             Quarterly symbols → nearest H(03)/M(06)/U(09)/Z(12).
-            Monthly symbols → current month."""
+            Monthly symbols → always next month. Commodity contracts (CL, NG,
+            GC, SI, etc.) expire weeks before the delivery month (e.g. CL March
+            expires ~Feb 20). Using next-month guarantees a valid, liquid contract."""
             from datetime import datetime as _dt
             now = _dt.utcnow()
             if symbol in _QUARTERLY_SYMBOLS:
@@ -602,7 +604,11 @@ class IBDataAgent:
                         return f"{now.year}{q:02d}"
                 return f"{now.year + 1}03"  # past Dec → next year Mar
             else:
-                return f"{now.year}{now.month:02d}"
+                # Monthly: always use next month — current month's contract is
+                # usually expired or illiquid by the time you'd look at it.
+                if now.month == 12:
+                    return f"{now.year + 1}01"
+                return f"{now.year}{now.month + 1:02d}"
 
         # Build a resolved contract if the caller provided contract metadata
         resolved = None
@@ -653,8 +659,13 @@ class IBDataAgent:
                 resolved.exchange = exch
                 resolved.lastTradeDateOrContractMonth = contract_month
 
+                # Disambiguate contracts that have multiple variants.
+                # SI (Silver) has 1000oz and 5000oz — specify 5000 (standard).
+                _MULTIPLIER_OVERRIDES = {"SI": "5000"}
                 if payload.get("multiplier"):
                     resolved.multiplier = payload["multiplier"]
+                elif resolved.symbol in _MULTIPLIER_OVERRIDES:
+                    resolved.multiplier = _MULTIPLIER_OVERRIDES[resolved.symbol]
                 logger.info(f"fetch_underlying: futures {ticker} → symbol={resolved.symbol} "
                             f"secType=FUT month={contract_month} exchange={resolved.exchange}")
             else:
