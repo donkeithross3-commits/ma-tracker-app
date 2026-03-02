@@ -18,7 +18,7 @@ interface ChartsPageClientProps {
 }
 
 export default function ChartsPageClient({ initialUser }: ChartsPageClientProps) {
-  const [activeTab, setActiveTab] = useState("watchlist");
+  const [activeTab, setActiveTab] = useState("charts");
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">

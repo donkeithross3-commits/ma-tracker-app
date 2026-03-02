@@ -195,8 +195,19 @@ export default function ChartsTab() {
   });
 
   // --- Auto-save on state changes ---
+  // Only auto-saves to user-created presets. Built-in presets (Single Chart,
+  // Quad View) are never overwritten — use "Save As" to create a named copy.
   useEffect(() => {
     if (!readyToSave.current) return;
+
+    // Skip auto-save for built-in presets — user must "Save As" explicitly
+    if (currentPresetName in BUILT_IN_PRESETS) {
+      // Still persist lastChartPreset so we re-open the right tab
+      updatePrefs({
+        maOptionsPrefs: { lastChartPreset: currentPresetName },
+      });
+      return;
+    }
 
     const chartPresets = {
       ...(
