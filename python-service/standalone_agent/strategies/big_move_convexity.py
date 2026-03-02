@@ -30,6 +30,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
@@ -1167,8 +1168,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         probability = prediction["probability"]
 
         # Auto-determine direction_mode from model when not explicitly configured
+        # "auto" or None → derive from model target column
         effective_direction = cfg.get("direction_mode", None)
-        if effective_direction is None:
+        if effective_direction is None or effective_direction == "auto":
             if _snap_invert_signal or ("UP" in (_snap_target_column or "")):
                 effective_direction = "long_only"
             else:
@@ -1467,9 +1469,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
     def _is_in_scan_window(self, cfg: dict) -> bool:
         """Check if current time (ET) is within the configured scan window."""
         try:
-            now = datetime.now()
-            # Simple ET approximation for US East (handles most cases)
-            # The execution engine runs on the local machine which is typically ET
+            now = datetime.now(ZoneInfo("America/New_York"))
             hour, minute = now.hour, now.minute
             current_minutes = hour * 60 + minute
 

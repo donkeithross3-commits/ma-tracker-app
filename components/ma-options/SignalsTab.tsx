@@ -249,7 +249,7 @@ const DEFAULT_CONFIG: BMCConfig = {
   scan_start: "13:30",
   scan_end: "15:55",
   auto_entry: false,
-  direction_mode: "both",
+  direction_mode: "auto",
   use_delayed_data: false,
   preferred_dte: [0, 1],
   max_spread: 0.05,
@@ -327,7 +327,7 @@ const TICKER_DEFAULTS: Record<string, Partial<BMCConfig>> = {
     scan_start: "13:30",
     scan_end: "15:55",
     contract_budget_usd: 150,
-    direction_mode: "both",
+    direction_mode: "auto",
   },
   SLV: {
     preferred_dte: [0, 1, 2, 3, 4, 5],
@@ -337,7 +337,7 @@ const TICKER_DEFAULTS: Record<string, Partial<BMCConfig>> = {
     scan_start: "09:35",
     scan_end: "13:30",
     contract_budget_usd: 50,
-    direction_mode: "both",
+    direction_mode: "auto",
     straddle_richness_max: 2.5,
     straddle_richness_ideal: 1.5,
   },
@@ -2092,6 +2092,7 @@ export default function SignalsTab() {
                   onChange={e => updateConfig(activeTicker, "direction_mode", e.target.value)}
                   className="bg-gray-800 border border-gray-700 rounded px-2 py-0.5 text-gray-200 text-xs inline-edit"
                 >
+                  <option value="auto">Auto (from model)</option>
                   <option value="both">Both</option>
                   <option value="long_only">Long Only</option>
                   <option value="short_only">Short Only</option>
