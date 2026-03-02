@@ -1498,6 +1498,8 @@ class IBDataAgent:
             except Exception as e:
                 logger.error("IB reconciliation on startup failed: %s", e)
 
+            # Fresh start clears any stale paused flag from prior auto-restart
+            self.execution_engine._auto_restart_paused = False
             # Start the evaluation loop
             self.execution_engine.start()
         else:
@@ -1531,9 +1533,10 @@ class IBDataAgent:
                 except Exception as e:
                     logger.error("Error snapshotting %s on stop: %s", sid, e)
 
-        self.execution_engine.stop()
-        # Clean stop = no auto-restart on next boot
+        # Clear config BEFORE stop — if crash during stop(), no stale auto-restart
         self.engine_config_store.clear()
+        self.execution_engine._auto_restart_paused = False
+        self.execution_engine.stop()
         return {
             "running": False,
             "lines_held": self.resource_manager.execution_lines_held,
