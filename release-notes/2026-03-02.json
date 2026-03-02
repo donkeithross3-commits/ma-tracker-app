@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-02",
+  "title": "Mar 2, 2026",
+  "summary": "Fix directional model expansion and pre-start badge refresh for BMC strategies.",
+  "features": [
+    {
+      "id": "directional-expansion-fix",
+      "title": "Fix Directional Model Expansion",
+      "summary": "Fixed BMC_PATH resolution bug that prevented UP/DOWN model pair expansion on engine start",
+      "description": "The agent's _expand_directional_strategies() function used an incorrect number of parent directory traversals to resolve the py_proj path. It resolved to ma-tracker-app/py_proj (which doesn't exist) instead of the correct sibling path dev/py_proj.\n\nThis caused directional expansion to silently fail for ALL tickers — the registry path check returned early, and every ticker loaded as a single undirected strategy (bmc_spy instead of bmc_spy_up + bmc_spy_down). The same off-by-one existed in the strategy module's BMC_PATH resolution.\n\nFixed by adding one additional .parent traversal in both ib_data_agent.py and strategies/big_move_convexity.py. Now correctly resolves to the py_proj sibling directory on both local (~/dev/) and production (~/apps/) layouts. Agent v1.23.1.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}

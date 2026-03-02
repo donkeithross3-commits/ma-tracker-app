@@ -39,8 +39,8 @@ if TYPE_CHECKING:
 # Resolve big_move_convexity import path
 _BMC_PATH = os.environ.get("BMC_PATH", "")
 if not _BMC_PATH:
-    # Default: ../../py_proj relative to standalone_agent/
-    _BMC_PATH = str(Path(__file__).resolve().parent.parent.parent.parent / "py_proj")
+    # strategies/big_move_convexity.py -> parent x5 -> dev/ (sibling of py_proj)
+    _BMC_PATH = str(Path(__file__).resolve().parent.parent.parent.parent.parent / "py_proj")
 if _BMC_PATH not in sys.path:
     sys.path.insert(0, _BMC_PATH)
 

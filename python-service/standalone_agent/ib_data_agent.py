@@ -2084,8 +2084,9 @@ class IBDataAgent:
             import sys as _sys
             bmc_path = os.environ.get("BMC_PATH", "")
             if not bmc_path:
+                # standalone_agent/ib_data_agent.py -> parent x4 -> dev/ (sibling of py_proj)
                 bmc_path = str(
-                    Path(__file__).resolve().parent.parent.parent / "py_proj"
+                    Path(__file__).resolve().parent.parent.parent.parent / "py_proj"
                 )
             if bmc_path not in _sys.path:
                 _sys.path.insert(0, bmc_path)
