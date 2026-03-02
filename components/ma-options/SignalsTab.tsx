@@ -1113,8 +1113,11 @@ export default function SignalsTab() {
     const fills: (FillLogEntry & { source: string; instrument?: PositionLedgerEntry["instrument"]; positionStatus?: string; modelVersion?: string })[] = [];
     for (const pos of ledger) {
       const mv = pos.lineage?.model_version;
-      // Entry fill from the position's entry data
-      if (pos.entry?.fill_time) {
+      // Entry fill from the position's entry data.
+      // Skip reconciliation-spawned phantom positions: they have order_id=0
+      // and no model lineage. Real IB fills always have order_id > 0 or lineage.
+      const isPhantomEntry = (pos.entry?.order_id ?? 0) === 0 && !mv;
+      if (pos.entry?.fill_time && !isPhantomEntry) {
         fills.push({
           time: pos.entry.fill_time,
           order_id: pos.entry.order_id ?? 0,
