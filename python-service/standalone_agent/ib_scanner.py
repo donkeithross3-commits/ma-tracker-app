@@ -570,6 +570,10 @@ class IBMergerArbScanner(EWrapper, EClient):
             contract = self._contract_from_dict(contract_d)
             order = self._order_from_dict(order_d)
             order.orderId = order_id
+            # Auto-set account when multiple managed accounts exist (IB error 435)
+            if not order.account and len(self._managed_accounts) > 1:
+                order.account = self._managed_accounts[0]
+                logger.info("Auto-set order account to %s (multi-account)", order.account)
             self.placeOrder(order_id, contract, order)
             if not self._order_events[order_id].wait(timeout=timeout_sec):
                 # Attempt to cancel -- order may or may not have reached TWS
@@ -649,6 +653,9 @@ class IBMergerArbScanner(EWrapper, EClient):
             contract = self._contract_from_dict(contract_d)
             order = self._order_from_dict(order_d)
             order.orderId = order_id
+            # Auto-set account when multiple managed accounts exist (IB error 435)
+            if not order.account and len(self._managed_accounts) > 1:
+                order.account = self._managed_accounts[0]
             self.placeOrder(order_id, contract, order)
             if not self._order_events[order_id].wait(timeout=timeout_sec):
                 return {"error": "Modify order timeout. Check TWS.", "orderId": order_id}

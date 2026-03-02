@@ -1329,7 +1329,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         preferred_dte = cfg.get("preferred_dte", [0, 1])
         from datetime import timedelta
         min_dte = min(preferred_dte) if preferred_dte else 0
-        expiry_date = datetime.now() + timedelta(days=min_dte)
+        expiry_date = datetime.now(ZoneInfo("America/New_York")) + timedelta(days=min_dte)
         expiry_str = expiry_date.strftime("%Y%m%d")
 
         # Premium / spread constraints
