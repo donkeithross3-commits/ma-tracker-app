@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/ColumnChooser";
 import { useUIPreferences } from "@/lib/ui-preferences";
 import type { QuoteData } from "./useWatchlistQuotes";
+import { getDisplayMonthCode } from "./futures-utils";
 
 // ---------------------------------------------------------------------------
 // Column definitions — module level (avoids re-creation on render)
@@ -77,38 +78,6 @@ function formatChangePct(c: number | null): string {
 function changeColor(v: number | null): string {
   if (v == null || v === 0) return "text-gray-400";
   return v > 0 ? "text-green-400" : "text-red-400";
-}
-
-// ---------------------------------------------------------------------------
-// Futures front-month — mirrors agent's _get_front_month() logic
-// ---------------------------------------------------------------------------
-
-const FUTURES_MONTH_CODES = "FGHJKMNQUVXZ"; // Jan=F … Dec=Z
-const QUARTERLY_FUTURES = new Set([
-  "ES", "NQ", "YM", "RTY", "MES", "MNQ", "M2K", "MYM",
-]);
-
-/** Derive the front-month contract code for a bare futures root, e.g. "H6" */
-function getFrontMonthCode(symbol: string): string {
-  const now = new Date();
-  const month = now.getUTCMonth(); // 0-based
-  const year = now.getUTCFullYear();
-
-  if (QUARTERLY_FUTURES.has(symbol)) {
-    // Quarterly: nearest Mar(2), Jun(5), Sep(8), Dec(11)
-    const quarters = [2, 5, 8, 11];
-    for (const q of quarters) {
-      if (q >= month) {
-        return FUTURES_MONTH_CODES[q] + String(year % 10);
-      }
-    }
-    return FUTURES_MONTH_CODES[2] + String((year + 1) % 10);
-  }
-
-  // Monthly: always next month (current month contract typically expired)
-  const nextMonth = (month + 1) % 12;
-  const nextYear = month === 11 ? year + 1 : year;
-  return FUTURES_MONTH_CODES[nextMonth] + String(nextYear % 10);
 }
 
 // ---------------------------------------------------------------------------
@@ -240,25 +209,30 @@ export default function WatchlistTable({
                       </button>
                     </div>
                   </td>
-                  {visibleSet.has("instrument") && (
-                    <td className="py-1.5 sm:py-2 px-1 sm:px-2">
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-sm sm:text-base font-bold text-gray-100 whitespace-nowrap">
-                          {item.ticker}
-                        </span>
-                        {item.instrumentType === "future" && (
-                          <span className="text-xs font-mono text-amber-500/80">
-                            {getFrontMonthCode(item.ticker)}
+                  {visibleSet.has("instrument") && (() => {
+                    const monthCode = item.instrumentType === "future"
+                      ? getDisplayMonthCode(item.ticker)
+                      : null;
+                    return (
+                      <td className="py-1.5 sm:py-2 px-1 sm:px-2">
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-sm sm:text-base font-bold text-gray-100 whitespace-nowrap">
+                            {item.ticker}
                           </span>
-                        )}
-                        {item.exchange && (
-                          <span className="text-xs text-gray-500 hidden sm:inline">
-                            {item.exchange}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                  )}
+                          {monthCode && (
+                            <span className="text-xs font-mono text-amber-500/80">
+                              {monthCode}
+                            </span>
+                          )}
+                          {item.exchange && (
+                            <span className="text-xs text-gray-500 hidden sm:inline">
+                              {item.exchange}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    );
+                  })()}
                   {visibleSet.has("last") && (
                     <td className="text-right py-1.5 sm:py-2 px-1 sm:px-2 font-mono text-gray-100 whitespace-nowrap">
                       {formatPrice(q?.price ?? null)}

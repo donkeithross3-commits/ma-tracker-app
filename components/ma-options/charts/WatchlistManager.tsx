@@ -2,6 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Plus, Pencil, Trash2, Check, X, ChevronDown } from "lucide-react";
+import {
+  isFuturesTicker,
+  parseFuturesContract,
+  getExchangeForSymbol,
+} from "./futures-utils";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,8 +52,6 @@ const INSTRUMENT_TYPES = [
   { value: "future", label: "Future" },
 ] as const;
 
-const FUTURES_EXCHANGES = ["CME", "CBOT", "NYMEX", "COMEX", "GLOBEX"];
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -75,7 +78,6 @@ export default function WatchlistManager({
   // --- Add ticker state ---
   const [tickerInput, setTickerInput] = useState("");
   const [instrumentType, setInstrumentType] = useState("stock");
-  const [exchange, setExchange] = useState("");
   const [suggestions, setSuggestions] = useState<TickerMatch[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(-1);
@@ -151,15 +153,30 @@ export default function WatchlistManager({
     [searchTicker, instrumentType]
   );
 
+  // Resolve instrument type + exchange for a ticker, auto-detecting futures
+  const resolveTickerMeta = useCallback(
+    (ticker: string): { type: string; exchange?: string } => {
+      // If user explicitly selected "future", or ticker is a known future
+      if (instrumentType === "future" || isFuturesTicker(ticker)) {
+        const parsed = parseFuturesContract(ticker);
+        const base = parsed ? parsed.base : ticker;
+        return { type: "future", exchange: getExchangeForSymbol(base) };
+      }
+      return { type: instrumentType };
+    },
+    [instrumentType],
+  );
+
   const selectSuggestion = useCallback(
     (match: TickerMatch) => {
       setTickerInput(match.ticker);
       setShowSuggestions(false);
-      onAddTicker(match.ticker, instrumentType, match.name, exchange || undefined);
+      const meta = resolveTickerMeta(match.ticker);
+      onAddTicker(match.ticker, meta.type, match.name, meta.exchange);
       setTickerInput("");
       setSuggestions([]);
     },
-    [instrumentType, exchange, onAddTicker]
+    [resolveTickerMeta, onAddTicker],
   );
 
   const handleTickerKeyDown = useCallback(
@@ -167,12 +184,9 @@ export default function WatchlistManager({
       if (!showSuggestions || suggestions.length === 0) {
         if (e.key === "Enter" && tickerInput.trim()) {
           e.preventDefault();
-          onAddTicker(
-            tickerInput.trim().toUpperCase(),
-            instrumentType,
-            undefined,
-            exchange || undefined
-          );
+          const ticker = tickerInput.trim().toUpperCase();
+          const meta = resolveTickerMeta(ticker);
+          onAddTicker(ticker, meta.type, undefined, meta.exchange);
           setTickerInput("");
           setSuggestions([]);
           setShowSuggestions(false);
@@ -191,12 +205,9 @@ export default function WatchlistManager({
         if (highlightIdx >= 0 && highlightIdx < suggestions.length) {
           selectSuggestion(suggestions[highlightIdx]);
         } else if (tickerInput.trim()) {
-          onAddTicker(
-            tickerInput.trim().toUpperCase(),
-            instrumentType,
-            undefined,
-            exchange || undefined
-          );
+          const ticker = tickerInput.trim().toUpperCase();
+          const meta = resolveTickerMeta(ticker);
+          onAddTicker(ticker, meta.type, undefined, meta.exchange);
           setTickerInput("");
           setSuggestions([]);
           setShowSuggestions(false);
@@ -210,11 +221,10 @@ export default function WatchlistManager({
       suggestions,
       highlightIdx,
       tickerInput,
-      instrumentType,
-      exchange,
+      resolveTickerMeta,
       onAddTicker,
       selectSuggestion,
-    ]
+    ],
   );
 
   // --- Handlers ---
@@ -363,7 +373,6 @@ export default function WatchlistManager({
             value={instrumentType}
             onChange={(e) => {
               setInstrumentType(e.target.value);
-              if (e.target.value !== "future") setExchange("");
               // Clear autocomplete when switching away from stock
               if (e.target.value !== "stock") {
                 setSuggestions([]);
@@ -379,22 +388,6 @@ export default function WatchlistManager({
             ))}
           </select>
 
-          {/* Exchange for futures */}
-          {instrumentType === "future" && (
-            <select
-              value={exchange}
-              onChange={(e) => setExchange(e.target.value)}
-              className="appearance-none bg-gray-800 text-gray-300 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
-            >
-              <option value="">Exchange</option>
-              {FUTURES_EXCHANGES.map((ex) => (
-                <option key={ex} value={ex}>
-                  {ex}
-                </option>
-              ))}
-            </select>
-          )}
-
           {/* Ticker input */}
           <div className="relative">
             <input
@@ -405,7 +398,7 @@ export default function WatchlistManager({
               onFocus={() => {
                 if (suggestions.length > 0) setShowSuggestions(true);
               }}
-              placeholder={instrumentType === "stock" ? "Add ticker..." : instrumentType === "future" ? "e.g. ES, NQ, CL..." : "e.g. SPX, VIX..."}
+              placeholder={instrumentType === "stock" ? "Add ticker..." : instrumentType === "future" ? "e.g. ES, SIK6, CLJ6..." : "e.g. SPX, VIX..."}
               className="bg-gray-800 text-gray-100 border border-gray-700 rounded px-2 py-1.5 text-sm w-28 focus:outline-none focus:border-blue-500 inline-edit"
             />
             {searching && (
