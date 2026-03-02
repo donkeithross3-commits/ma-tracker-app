@@ -600,7 +600,7 @@ class ExecutionEngine:
         for order_id, ao in working:
             logger.info("Cancelling working order %d for %s before shutdown", order_id, ao.strategy_id)
             try:
-                self._scanner.cancelOrder(order_id, "")
+                self._scanner.cancelOrder(order_id)
             except Exception as e:
                 logger.error("Failed to cancel order %d on shutdown: %s", order_id, e)
 
@@ -963,7 +963,7 @@ class ExecutionEngine:
         for order_id in to_cancel:
             logger.warning("Auto-cancelling stale order %d", order_id)
             try:
-                self._scanner.cancelOrder(order_id, "")
+                self._scanner.cancelOrder(order_id)
             except Exception as e:
                 logger.error("Failed to cancel stale order %d: %s", order_id, e)
             # Strategy will be notified via orderStatus -> on_order_dead path

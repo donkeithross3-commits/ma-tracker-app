@@ -1853,7 +1853,7 @@ class IBDataAgent:
                 for oid in list(rm_state.strategy._pending_orders.keys()):
                     logger.info("Cancelling order %d for manual close of %s", oid, position_id)
                     try:
-                        self.scanner.cancelOrder(oid, "")
+                        self.scanner.cancelOrder(oid)
                     except Exception as e:
                         logger.error("Failed to cancel order %d: %s", oid, e)
             self.execution_engine.unload_strategy(position_id)
@@ -2620,7 +2620,7 @@ class IBDataAgent:
                 for oid in list(state.strategy._pending_orders.keys()):
                     logger.info("Cancelling order %d for expired position %s", oid, sid)
                     try:
-                        self.scanner.cancelOrder(oid, "")
+                        self.scanner.cancelOrder(oid)
                     except Exception as e:
                         logger.error("Failed to cancel order %d: %s", oid, e)
 

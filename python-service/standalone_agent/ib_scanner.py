@@ -579,7 +579,7 @@ class IBMergerArbScanner(EWrapper, EClient):
             if not self._order_events[order_id].wait(timeout=timeout_sec):
                 # Attempt to cancel -- order may or may not have reached TWS
                 try:
-                    self.cancelOrder(order_id, "")
+                    self.cancelOrder(order_id)
                     logger.warning("Order %d timed out -- cancelOrder sent", order_id)
                 except Exception:
                     logger.error("Failed to cancel timed-out order %d", order_id, exc_info=True)
