@@ -191,10 +191,21 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
       }
     }, [width, height]);
 
-    // Update candlestick + volume data
+    // Update candlestick + volume data — MUST clear old data when bars are empty
+    // so stale candles from a previous timeframe don't persist on screen.
     useEffect(() => {
       if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
-      if (bars.length === 0) return;
+
+      if (bars.length === 0) {
+        // Clear stale data from previous timeframe/ticker
+        try {
+          candleSeriesRef.current.setData([]);
+          volumeSeriesRef.current.setData([]);
+        } catch {
+          // chart may already be disposed
+        }
+        return;
+      }
 
       try {
         // Deduplicate bars by time (IB can return overlapping timestamps)

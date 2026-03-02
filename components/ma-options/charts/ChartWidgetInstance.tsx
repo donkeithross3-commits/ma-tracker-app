@@ -146,9 +146,12 @@ function PriceChartContent({
     </div>
   );
 
+  // Show bar count in title for quick data verification
+  const barCountLabel = bars.length > 0 ? ` (${bars.length})` : "";
+
   return (
     <WidgetContainer
-      title={`${config.ticker} — ${timeframe.label}`}
+      title={`${config.ticker} — ${timeframe.label}${barCountLabel}`}
       loading={loading}
       error={error}
       headerExtra={headerExtra}
