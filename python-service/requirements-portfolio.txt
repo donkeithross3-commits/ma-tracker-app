@@ -18,3 +18,4 @@ certifi>=2024.7.4
 urllib3>=2.5.0
 wheel>=0.46.2
 jaraco.context>=6.1.0
+feedparser>=6.0.0

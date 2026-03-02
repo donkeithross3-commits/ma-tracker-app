@@ -2007,7 +2007,7 @@ async def get_deal_sources(ticker: str):
             news_rows = await conn.fetch(
                 """SELECT
                     title, publisher, published_at, article_url,
-                    summary, relevance_score, risk_factor_affected
+                    summary, relevance_score, risk_factor_affected, source
                 FROM deal_news_articles
                 WHERE ticker = $1
                 ORDER BY published_at DESC""",
@@ -2060,7 +2060,14 @@ async def get_deal_sources(ticker: str):
                 "summary": nd["summary"],
                 "relevance_score": nd["relevance_score"],
                 "risk_factor_affected": nd["risk_factor_affected"],
+                "source": nd.get("source", "polygon"),
             })
+
+        # Count news by source
+        news_by_source: dict[str, int] = {}
+        for n in news:
+            src = n.get("source", "polygon")
+            news_by_source[src] = news_by_source.get(src, 0) + 1
 
         return {
             "ticker": ticker,
@@ -2072,6 +2079,7 @@ async def get_deal_sources(ticker: str):
                 "filings_with_impact": impact_count,
                 "total_news": len(news),
                 "keyword_matched_news": keyword_matched,
+                "news_by_source": news_by_source,
             },
         }
     except HTTPException:

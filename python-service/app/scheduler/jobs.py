@@ -191,6 +191,49 @@ async def job_morning_news_scan():
     return result
 
 
+@run_job("rss_feed_scan", "RSS Feed Scan (DOJ/FTC/Wire Services)")
+async def job_rss_feed_scan():
+    """Scan RSS/ATOM feeds for M&A-relevant articles (5:16 AM + intraday ET weekdays).
+
+    Covers DOJ Antitrust, FTC HSR Early Termination, PR Newswire, GlobeNewswire,
+    Business Wire. Fast scan (~5 HTTP calls) — firehose feeds matched against
+    active deal tickers.
+    """
+    from app.scheduler.rss_feed_monitor import scan_rss_feeds
+
+    pool = _get_pool()
+    result = await scan_rss_feeds(pool)
+    return result
+
+
+@run_job("finnhub_news_scan", "Finnhub Company News Scan")
+async def job_finnhub_news_scan():
+    """Scan Finnhub for per-ticker company news (5:17 AM ET weekdays).
+
+    Covers BusinessWire, AccessWire, PRNewswire, SeekingAlpha — publishers
+    Polygon misses. ~48 calls with 1s delay = ~48 seconds.
+    """
+    from app.scheduler.finnhub_monitor import scan_finnhub_news
+
+    pool = _get_pool()
+    result = await scan_finnhub_news(pool)
+    return result
+
+
+@run_job("seekingalpha_scan", "Seeking Alpha News Scan")
+async def job_seekingalpha_scan():
+    """Scan Seeking Alpha RSS for per-ticker analyst articles (5:19 AM ET weekdays).
+
+    Unique content: analyst commentary, earnings call transcripts.
+    ~48 calls with 0.5s delay = ~24 seconds.
+    """
+    from app.scheduler.seekingalpha_monitor import scan_seekingalpha_news
+
+    pool = _get_pool()
+    result = await scan_seekingalpha_news(pool)
+    return result
+
+
 @run_job("overnight_event_scan", "Overnight Event Scan")
 async def job_overnight_event_scan():
     """Scan for overnight events (5:25 AM ET weekdays)."""
@@ -652,11 +695,53 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     )
 
     scheduler.add_job(
+        job_rss_feed_scan,
+        "cron",
+        id="rss_feed_scan",
+        day_of_week="mon-fri",
+        hour=5, minute=16,
+        replace_existing=True,
+        **_SAFE,
+    )
+
+    scheduler.add_job(
+        job_finnhub_news_scan,
+        "cron",
+        id="finnhub_news_scan",
+        day_of_week="mon-fri",
+        hour=5, minute=17,
+        replace_existing=True,
+        **_SAFE,
+    )
+
+    scheduler.add_job(
         job_morning_news_scan,
         "cron",
         id="morning_news_scan",
         day_of_week="mon-fri",
         hour=5, minute=18,
+        replace_existing=True,
+        **_SAFE,
+    )
+
+    scheduler.add_job(
+        job_seekingalpha_scan,
+        "cron",
+        id="seekingalpha_scan",
+        day_of_week="mon-fri",
+        hour=5, minute=19,
+        replace_existing=True,
+        **_SAFE,
+    )
+
+    # RSS feeds: also run intraday (regulatory news is time-sensitive)
+    scheduler.add_job(
+        job_rss_feed_scan,
+        "cron",
+        id="rss_feeds_intraday",
+        day_of_week="mon-fri",
+        hour="10,13,16",
+        minute=0,
         replace_existing=True,
         **_SAFE,
     )

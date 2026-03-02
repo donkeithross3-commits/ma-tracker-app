@@ -137,7 +137,7 @@ def classify_risk_factor(article: Dict[str, Any]) -> Optional[str]:
 
 
 async def store_news_articles(
-    pool, ticker: str, articles: List[Dict[str, Any]]
+    pool, ticker: str, articles: List[Dict[str, Any]], source: str = "polygon",
 ) -> int:
     """Upsert news articles for a tracked deal ticker into deal_news_articles.
 
@@ -177,8 +177,8 @@ async def store_news_articles(
                     """INSERT INTO deal_news_articles
                            (ticker, article_id, title, publisher, published_at,
                             article_url, summary, relevance_score,
-                            risk_factor_affected)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                            risk_factor_affected, source)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                        ON CONFLICT (ticker, article_id) DO NOTHING""",
                     ticker,
                     str(article_id),
@@ -189,6 +189,7 @@ async def store_news_articles(
                     (article.get("description") or "")[:1000],
                     relevance,
                     risk_factor,
+                    source,
                 )
                 if result == "INSERT 0 1":
                     stored += 1

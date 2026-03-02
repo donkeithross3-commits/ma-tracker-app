@@ -33,6 +33,7 @@ interface NewsArticle {
   summary: string | null;
   relevance_score: number | null;
   risk_factor_affected: string | null;
+  source?: string;
 }
 
 interface Stats {
@@ -41,6 +42,7 @@ interface Stats {
   filings_with_impact: number;
   total_news: number;
   keyword_matched_news: number;
+  news_by_source?: Record<string, number>;
 }
 
 interface SourcesData {
@@ -108,6 +110,45 @@ function impactColor(level: string | null): {
       return { bg: "bg-gray-700/30", text: "text-gray-400", label: "None" };
     default:
       return { bg: "bg-gray-700/20", text: "text-gray-500", label: "—" };
+  }
+}
+
+function sourceStyle(source: string | undefined): {
+  bg: string;
+  text: string;
+  label: string;
+} {
+  switch (source) {
+    case "polygon":
+      return { bg: "bg-blue-500/20", text: "text-blue-300", label: "Polygon" };
+    case "finnhub":
+      return { bg: "bg-green-500/20", text: "text-green-300", label: "Finnhub" };
+    case "doj":
+      return { bg: "bg-red-500/20", text: "text-red-300", label: "DOJ" };
+    case "ftc_hsr":
+      return {
+        bg: "bg-orange-500/20",
+        text: "text-orange-300",
+        label: "FTC HSR",
+      };
+    case "prnewswire":
+      return {
+        bg: "bg-purple-500/20",
+        text: "text-purple-300",
+        label: "PR News",
+      };
+    case "globenewswire":
+      return { bg: "bg-teal-500/20", text: "text-teal-300", label: "Globe" };
+    case "seekingalpha":
+      return { bg: "bg-yellow-500/20", text: "text-yellow-300", label: "SA" };
+    case "businesswire":
+      return { bg: "bg-gray-500/20", text: "text-gray-300", label: "BizWire" };
+    default:
+      return {
+        bg: "bg-gray-600/20",
+        text: "text-gray-400",
+        label: source ?? "—",
+      };
   }
 }
 
@@ -295,6 +336,27 @@ export default function DealSourcesPage() {
                   </>
                 )}
               </span>
+              {data.stats.news_by_source &&
+                Object.keys(data.stats.news_by_source).length > 1 && (
+                  <>
+                    <span className="text-gray-600">·</span>
+                    <span className="flex flex-wrap gap-1 items-center">
+                      {Object.entries(data.stats.news_by_source)
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([src, count]) => {
+                          const ss = sourceStyle(src);
+                          return (
+                            <span
+                              key={src}
+                              className={`text-[10px] px-1.5 py-0.5 rounded ${ss.bg} ${ss.text}`}
+                            >
+                              {ss.label} {count}
+                            </span>
+                          );
+                        })}
+                    </span>
+                  </>
+                )}
             </div>
 
             {/* ── SEC Filings ─────────────────────────────────── */}
@@ -464,6 +526,7 @@ export default function DealSourcesPage() {
                     <thead>
                       <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
                         <th className="text-left py-2 px-2 w-20">Date</th>
+                        <th className="text-left py-2 px-2 w-20">Source</th>
                         <th className="text-left py-2 px-2 w-28">Relevance</th>
                         <th className="text-left py-2 px-2">Title</th>
                         <th className="text-left py-2 px-2 w-28">Publisher</th>
@@ -487,6 +550,18 @@ export default function DealSourcesPage() {
                                 title={fmtDateFull(n.published_at)}
                               >
                                 {fmtDate(n.published_at)}
+                              </td>
+                              <td className="py-2 px-2">
+                                {(() => {
+                                  const ss = sourceStyle(n.source);
+                                  return (
+                                    <span
+                                      className={`text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap ${ss.bg} ${ss.text}`}
+                                    >
+                                      {ss.label}
+                                    </span>
+                                  );
+                                })()}
                               </td>
                               <td className="py-2 px-2">
                                 <div className="flex items-center gap-2">
@@ -537,7 +612,7 @@ export default function DealSourcesPage() {
                             </tr>
                             {isExpanded && n.summary && (
                               <tr>
-                                <td colSpan={5} className="px-2 py-2">
+                                <td colSpan={6} className="px-2 py-2">
                                   <div className="bg-gray-800/40 rounded-lg p-3 ml-4 text-xs text-gray-300 border-l-2 border-gray-700 leading-relaxed">
                                     {n.summary}
                                   </div>
