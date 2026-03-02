@@ -131,25 +131,25 @@ export default function WatchlistTable({
           <thead>
             <tr className="border-b border-gray-700 text-gray-400">
               {visibleSet.has("instrument") && (
-                <th className="text-left py-2 px-2 font-medium">Instrument</th>
+                <th className="text-left py-2 px-1.5 sm:px-2 font-medium">Instrument</th>
               )}
               {visibleSet.has("last") && (
-                <th className="text-right py-2 px-2 font-medium">Last</th>
+                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Last</th>
               )}
               {visibleSet.has("change") && (
-                <th className="text-right py-2 px-2 font-medium">Change</th>
+                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Change</th>
               )}
               {visibleSet.has("changePct") && (
-                <th className="text-right py-2 px-2 font-medium">Chg %</th>
+                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Chg %</th>
               )}
               {visibleSet.has("volume") && (
-                <th className="text-right py-2 px-2 font-medium">Volume</th>
+                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Vol</th>
               )}
               {visibleSet.has("bid") && (
-                <th className="text-right py-2 px-2 font-medium">Bid</th>
+                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Bid</th>
               )}
               {visibleSet.has("ask") && (
-                <th className="text-right py-2 px-2 font-medium">Ask</th>
+                <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Ask</th>
               )}
               <th className="w-8"></th>
             </tr>
@@ -165,28 +165,28 @@ export default function WatchlistTable({
                   className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
                 >
                   {visibleSet.has("instrument") && (
-                    <td className="py-2 px-2">
-                      <div className="flex items-center gap-2">
+                    <td className="py-1.5 sm:py-2 px-1.5 sm:px-2">
+                      <div className="flex items-center gap-1.5">
                         {/* Live indicator */}
                         <span
-                          className={`text-[10px] ${hasData ? "text-blue-400" : "text-gray-600"}`}
+                          className={`text-[10px] shrink-0 ${hasData ? "text-blue-400" : "text-gray-600"}`}
                           title={hasData ? "Live data" : "No data"}
                         >
                           ◆
                         </span>
-                        <div>
-                          <div className="flex items-baseline gap-1.5">
-                            <span className="text-base font-bold text-gray-100">
+                        <div className="min-w-0">
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-sm sm:text-base font-bold text-gray-100">
                               {item.ticker}
                             </span>
                             {item.exchange && (
-                              <span className="text-xs text-gray-400">
+                              <span className="text-xs text-gray-500 hidden sm:inline">
                                 {item.exchange}
                               </span>
                             )}
                           </div>
                           {item.displayName && (
-                            <div className="text-xs text-gray-500 leading-tight">
+                            <div className="text-xs text-gray-500 leading-tight hidden sm:block">
                               {item.displayName}
                             </div>
                           )}
@@ -195,40 +195,40 @@ export default function WatchlistTable({
                     </td>
                   )}
                   {visibleSet.has("last") && (
-                    <td className="text-right py-2 px-2 font-mono text-gray-100">
+                    <td className="text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono text-gray-100 whitespace-nowrap">
                       {formatPrice(q?.price ?? null)}
                     </td>
                   )}
                   {visibleSet.has("change") && (
                     <td
-                      className={`text-right py-2 px-2 font-mono ${changeColor(q?.change ?? null)}`}
+                      className={`text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono whitespace-nowrap ${changeColor(q?.change ?? null)}`}
                     >
                       {formatChange(q?.change ?? null)}
                     </td>
                   )}
                   {visibleSet.has("changePct") && (
                     <td
-                      className={`text-right py-2 px-2 font-mono ${changeColor(q?.changePct ?? null)}`}
+                      className={`text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono whitespace-nowrap ${changeColor(q?.changePct ?? null)}`}
                     >
                       {formatChangePct(q?.changePct ?? null)}
                     </td>
                   )}
                   {visibleSet.has("volume") && (
-                    <td className="text-right py-2 px-2 font-mono text-gray-300">
+                    <td className="text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono text-gray-300 whitespace-nowrap">
                       {formatVolume(q?.volume ?? null)}
                     </td>
                   )}
                   {visibleSet.has("bid") && (
-                    <td className="text-right py-2 px-2 font-mono text-gray-300">
+                    <td className="text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono text-gray-300 whitespace-nowrap">
                       {formatPrice(q?.bid ?? null)}
                     </td>
                   )}
                   {visibleSet.has("ask") && (
-                    <td className="text-right py-2 px-2 font-mono text-gray-300">
+                    <td className="text-right py-1.5 sm:py-2 px-1.5 sm:px-2 font-mono text-gray-300 whitespace-nowrap">
                       {formatPrice(q?.ask ?? null)}
                     </td>
                   )}
-                  <td className="py-2 px-1">
+                  <td className="py-1.5 sm:py-2 px-0.5 sm:px-1">
                     <button
                       onClick={() => onRemoveItem(item.ticker)}
                       className="p-1 text-gray-600 hover:text-red-400 transition-colors"
