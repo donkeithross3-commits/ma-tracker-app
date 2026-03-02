@@ -65,6 +65,24 @@
       "category": "signals",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "futures-code-consolidation",
+      "title": "Futures Chart Reliability Fix",
+      "summary": "Fixed futures chart 500 errors by consolidating duplicated detection code into shared utilities",
+      "description": "Futures charts (ESH6, NQM26, etc.) were failing with 'Failed to fetch IB bars: 500' because the chart component had its own duplicated futures detection code that diverged from the shared module the watchlist uses successfully.\n\nConsolidated ~60 lines of duplicated futures symbols, exchange mapping, month codes, and contract parsing from ChartWidgetInstance into the shared futures-utils.ts module. Added a new getContractMonth() helper that converts parsed contract data into the YYYYMM format the IB bars API expects. Both charts and watchlist now use identical futures resolution logic.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "mobile-ticker-editing",
+      "title": "Mobile Chart Ticker Editing",
+      "summary": "Fixed inability to tap the ticker input or timeframe buttons on mobile devices",
+      "description": "On mobile devices, the ticker input field and timeframe buttons (1m/5m/15m/1h/1D) in chart widget headers were completely unresponsive to touch. The entire header div was marked as a drag-handle for react-grid-layout, which intercepted all touch events — including taps on interactive controls.\n\nFixed by splitting the header: only the grip icon and title text are now inside the drag-handle zone. The ticker input, IB badge, timeframe buttons, and close button sit outside it, so touch events reach them normally. Desktop dragging still works by grabbing the grip icon or title. Also widened the ticker input (56px → 64px) and increased its font size for easier mobile tapping.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
     }
   ]
 }

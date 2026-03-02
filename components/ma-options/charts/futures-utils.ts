@@ -136,6 +136,25 @@ function deriveFrontMonthCode(symbol: string): string {
 }
 
 /**
+ * Get the IB contract month string ("YYYYMM") for a futures ticker.
+ *
+ *   "ESH6"  → "202603"
+ *   "NQM26" → "202606"
+ *   "ES"    → null (bare root — use CONTFUT)
+ *   "AAPL"  → null (not a futures contract)
+ */
+export function getContractMonth(ticker: string): string | null {
+  const parsed = parseFuturesContract(ticker);
+  if (!parsed) return null;
+  const month = FUTURES_MONTH_CODES[parsed.monthCode];
+  const year =
+    parsed.yearDigit.length === 1
+      ? `202${parsed.yearDigit}`
+      : `20${parsed.yearDigit}`;
+  return `${year}${month}`;
+}
+
+/**
  * Get the IB exchange for a futures base symbol.
  * Returns "CME" as default if not found in the mapping.
  */
