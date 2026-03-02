@@ -306,32 +306,41 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
         <div ref={containerRef} className="w-full h-full" />
         {ohlcv && (
           <div
-            className="absolute top-1 left-1 flex items-center gap-2 text-[10px] font-mono pointer-events-none z-10"
-            style={{ lineHeight: 1 }}
+            className="absolute top-1 left-1 flex items-center gap-3 text-xs font-mono pointer-events-none z-30 bg-gray-950/80 rounded px-1.5 py-0.5"
           >
-            <span className="text-gray-500">O</span>
-            <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
-              {ohlcv.open.toFixed(2)}
+            <span>
+              <span className="text-gray-500">O </span>
+              <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
+                {ohlcv.open.toFixed(2)}
+              </span>
             </span>
-            <span className="text-gray-500">H</span>
-            <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
-              {ohlcv.high.toFixed(2)}
+            <span>
+              <span className="text-gray-500">H </span>
+              <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
+                {ohlcv.high.toFixed(2)}
+              </span>
             </span>
-            <span className="text-gray-500">L</span>
-            <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
-              {ohlcv.low.toFixed(2)}
+            <span>
+              <span className="text-gray-500">L </span>
+              <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
+                {ohlcv.low.toFixed(2)}
+              </span>
             </span>
-            <span className="text-gray-500">C</span>
-            <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
-              {ohlcv.close.toFixed(2)}
+            <span>
+              <span className="text-gray-500">C </span>
+              <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
+                {ohlcv.close.toFixed(2)}
+              </span>
             </span>
-            <span className="text-gray-500">V</span>
-            <span className="text-gray-400">
-              {ohlcv.volume >= 1_000_000
-                ? `${(ohlcv.volume / 1_000_000).toFixed(1)}M`
-                : ohlcv.volume >= 1_000
-                  ? `${(ohlcv.volume / 1_000).toFixed(1)}K`
-                  : ohlcv.volume.toLocaleString()}
+            <span>
+              <span className="text-gray-500">V </span>
+              <span className="text-gray-400">
+                {ohlcv.volume >= 1_000_000
+                  ? `${(ohlcv.volume / 1_000_000).toFixed(1)}M`
+                  : ohlcv.volume >= 1_000
+                    ? `${(ohlcv.volume / 1_000).toFixed(1)}K`
+                    : ohlcv.volume.toLocaleString()}
+              </span>
             </span>
           </div>
         )}
