@@ -90,8 +90,8 @@ _DEFAULTS: dict[str, Any] = {
     "decision_interval_seconds": 60,   # 1 minute
     "max_contracts": 5,
     "contract_budget_usd": 150.0,
-    "scan_start": "09:35",            # HH:MM ET — default (overridden by ticker profiles)
-    "scan_end": "15:15",              # 15 min buffer before 15:30 EOD exit window
+    "scan_start": "09:45",            # HH:MM ET — 15 min after open (avoids auction noise)
+    "scan_end": "15:45",              # last entry time; EOD exit at 15:57 (1DTE retains time value)
     "otm_target_pct": 0.20,           # 20bp OTM
     "auto_entry": False,              # paper trading safety
     "model_registry_path": "",        # auto-resolved if empty
@@ -124,8 +124,8 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.05,               # tight bid-ask ($0.01-$0.03 typical)
         "premium_min": 0.10,
         "premium_max": 3.00,
-        "scan_start": "13:30",            # v5i dataset decision times: 13:30-15:15 only
-        "scan_end": "15:15",              # 15 min buffer before 15:30 EOD exit window
+        "scan_start": "09:45",            # standardized: 15 min after open
+        "scan_end": "15:45",              # standardized: last entry time
         "signal_threshold": 0.40,         # model optimal (UP=0.40, DOWN=0.35)
         "contract_budget_usd": 150.0,
         "straddle_richness_max": 1.5,
@@ -138,8 +138,8 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.20,               # wider bid-ask ($0.05-$0.15 typical)
         "premium_min": 0.05,              # lower premiums (~$30 underlying)
         "premium_max": 1.50,
-        "scan_start": "09:35",            # after market open (was 08:30 which is pre-open)
-        "scan_end": "15:45",
+        "scan_start": "09:45",            # standardized: 15 min after open
+        "scan_end": "15:45",              # standardized: last entry time
         "direction_mode": "long_only",    # symmetric model (is_big_move) — no edge on puts
         "contract_budget_usd": 50.0,
         "straddle_richness_max": 2.5,     # SLV IV ~2x SPY, higher richness normal
@@ -152,8 +152,8 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.05,
         "premium_min": 0.10,
         "premium_max": 3.00,
-        "scan_start": "13:30",            # v5i dataset decision times: 13:30-15:15
-        "scan_end": "15:15",              # 15 min buffer before 15:30 EOD exit window
+        "scan_start": "09:45",            # standardized: 15 min after open
+        "scan_end": "15:45",              # standardized: last entry time
         "signal_threshold": 0.40,         # model optimal (DOWN=0.40)
     },
     "IWM": {
@@ -171,8 +171,8 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.15,
         "premium_min": 0.05,
         "premium_max": 2.00,
-        "scan_start": "09:35",            # v5 dataset decision times: 09:35-13:30
-        "scan_end": "13:30",
+        "scan_start": "09:45",            # standardized: 15 min after open
+        "scan_end": "15:45",              # standardized: last entry time
         "signal_threshold": 0.67,         # model optimal (UP=0.68, DOWN=0.66)
         "straddle_richness_max": 2.0,
         "straddle_richness_ideal": 1.2,
@@ -1478,8 +1478,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             hour, minute = now.hour, now.minute
             current_minutes = hour * 60 + minute
 
-            start_parts = cfg.get("scan_start", "09:30").split(":")
-            end_parts = cfg.get("scan_end", "15:55").split(":")
+            start_parts = cfg.get("scan_start", "09:45").split(":")
+            end_parts = cfg.get("scan_end", "15:45").split(":")
             start_minutes = int(start_parts[0]) * 60 + int(start_parts[1])
             end_minutes = int(end_parts[0]) * 60 + int(end_parts[1])
 
