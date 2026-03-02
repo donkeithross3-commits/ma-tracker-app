@@ -741,7 +741,7 @@ async def _fetch_deal_context(pool) -> dict[str, dict]:
             assessment = await conn.fetchrow(
                 """SELECT vote_risk, finance_risk, legal_risk,
                           regulatory_risk, closing_probability
-                   FROM risk_assessments
+                   FROM deal_risk_assessments
                    WHERE ticker = $1
                    ORDER BY assessed_at DESC LIMIT 1""",
                 ticker,
