@@ -534,27 +534,26 @@ async def send_request_to_provider(
         logger.info(f"Routing request to provider for user {user_id}: {provider.provider_id}")
     
     if not provider:
-        # No provider matched the strict user_id filter — try cross-user fallback.
-        # This is a single-user deployment: one agent, one IB account, two dashboard logins.
-        if user_id and not allow_fallback_to_any_provider:
-            provider = await registry.get_active_provider(user_id=None, allow_fallback_to_any=True)
-            if provider:
-                logger.info(
-                    f"send_request_to_provider: cross-user fallback for {request_type} "
-                    f"(user={user_id}, provider_user={provider.user_id})"
-                )
-        if not provider:
-            status = registry.get_status()
-            if status["providers_connected"] == 0:
-                raise HTTPException(
-                    status_code=503,
-                    detail="No IB data provider connected. Please start the local agent."
-                )
-            else:
-                raise HTTPException(
-                    status_code=503,
-                    detail="No IB agent available for your request. Please try again."
-                )
+        status = registry.get_status()
+        if not allow_fallback_to_any_provider and status["providers_connected"] > 0:
+            # Account-sensitive request (positions/orders/execution) with no agent
+            # registered for this user. Never fall back to another user's agent —
+            # that would expose account data or route orders to the wrong account.
+            logger.warning(
+                f"send_request_to_provider: no agent for user {user_id} "
+                f"(request={request_type}, total_providers={status['providers_connected']})"
+            )
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Your IB agent is not running. Please start the agent on your local "
+                    "machine to access positions, orders, and trading features."
+                ),
+            )
+        raise HTTPException(
+            status_code=503,
+            detail="No IB data provider connected. Please start the local agent.",
+        )
 
     # ── Priority-aware throttling for scan requests on execution-active agents ──
     is_scan = request_type in SCAN_REQUESTS

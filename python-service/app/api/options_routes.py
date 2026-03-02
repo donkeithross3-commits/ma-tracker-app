@@ -1444,8 +1444,11 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
     timeouts when the agent is busy processing other requests (positions,
     chart data) on page load.
 
-    If user_id is provided, checks that user's agent first, then falls back
-    to any connected agent (cross-user fallback for single-user deployments).
+    If user_id is provided, checks that user's agent first. If the user has
+    no agent running, falls back to any connected agent so the IB status
+    indicator reflects whether market data is available at all. This fallback
+    is intentional for status/read-only purposes — account-sensitive operations
+    (positions, orders, reconnect) enforce strict user isolation.
     """
     try:
         registry = get_registry()
@@ -1470,10 +1473,11 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
             if user_providers:
                 providers_to_check = user_providers
             else:
-                # Cross-user fallback: single-user deployment — use any connected agent
+                # No agent for this user — fall back to any agent for status/market-data
+                # purposes only. Account-sensitive requests enforce strict user isolation.
                 logger.info(
-                    f"relay_ib_status: no provider for user {target_user_id}, "
-                    f"falling back to all {status['providers_connected']} provider(s)"
+                    f"relay_ib_status: no agent for user {target_user_id}, "
+                    f"showing status from all {status['providers_connected']} provider(s)"
                 )
 
         # Check cached ib_connected from heartbeat data (instant, no WebSocket round-trip)
@@ -1560,22 +1564,24 @@ async def relay_ib_reconnect(request: Request, user_id: Optional[str] = Query(No
                 "message": "No IB data provider connected. Cannot reconnect."
             }
 
-        # Find agent: user's own first, then fallback to any
+        # Find the requesting user's own agent only — never reconnect another user's agent.
+        # Falling back to another user's agent could disconnect/disrupt their execution engine.
         target_user_id = user_id.strip() if user_id else None
         provider = None
         if target_user_id:
             provider = await registry.get_active_provider(user_id=target_user_id, allow_fallback_to_any=False)
-        if not provider:
-            # Cross-user fallback (single-user deployment)
-            if target_user_id:
-                logger.info(f"relay_ib_reconnect: no provider for user {target_user_id}, falling back to any provider")
+        else:
             provider = await registry.get_active_provider(allow_fallback_to_any=True)
 
         if not provider:
+            logger.info(f"relay_ib_reconnect: no agent for user {target_user_id}")
             return {
                 "success": False,
                 "connected": False,
-                "message": "No agent available to reconnect."
+                "message": (
+                    "Your IB agent is not running. Please start it on your local machine "
+                    "before attempting to reconnect."
+                ) if target_user_id else "No agent available to reconnect.",
             }
 
         # Send ib_reconnect request to agent (with force flag)
