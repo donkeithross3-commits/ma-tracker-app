@@ -914,9 +914,10 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # from within the agent's running asyncio event loop (Python 3.12+
         # forbids nested run_until_complete on the same thread).
         bootstrap = DailyBootstrap()
-        # Bootstrap the target ticker + SPY + all cross-asset tickers
+        # Bootstrap the target ticker + SPY + all cross-asset tickers + TIP
+        # (TIP is bootstrap-only — needed for real yield proxy, not for WS bars)
         bootstrap_tickers = list(dict.fromkeys(
-            [self._ticker, "SPY"] + _CROSS_ASSET_TICKERS
+            [self._ticker, "SPY"] + _CROSS_ASSET_TICKERS + ["TIP"]
         ))
         try:
             bootstrap_result = _run_async_in_thread(
