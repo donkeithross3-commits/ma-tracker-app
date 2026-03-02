@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth-api";
 
+// Force dynamic — never cache this route or its fetch calls
+export const dynamic = "force-dynamic";
+
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY || "";
 
 // Strict validation patterns
@@ -61,6 +64,7 @@ export async function GET(request: NextRequest) {
 
     const response = await fetch(url, {
       headers: { Accept: "application/json" },
+      cache: "no-store",
     });
 
     // Pass through rate limit errors
@@ -95,12 +99,17 @@ export async function GET(request: NextRequest) {
       trades: bar.n || undefined,
     }));
 
-    return NextResponse.json({
-      ticker: data.ticker || ticker,
-      bars,
-      count: bars.length,
-      status: data.status,
-    });
+    return NextResponse.json(
+      {
+        ticker: data.ticker || ticker,
+        bars,
+        count: bars.length,
+        status: data.status,
+      },
+      {
+        headers: { "Cache-Control": "no-store, max-age=0" },
+      }
+    );
   } catch (error) {
     console.error("Error fetching Polygon bars:", error);
     return NextResponse.json(
