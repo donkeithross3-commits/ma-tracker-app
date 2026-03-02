@@ -573,7 +573,7 @@ class IBMergerArbScanner(EWrapper, EClient):
             # Auto-set account when multiple managed accounts exist (IB error 435)
             if not order.account and len(self._managed_accounts) > 1:
                 order.account = self._managed_accounts[0]
-                logger.info("Auto-set order account to %s (multi-account)", order.account)
+                self.logger.info("Auto-set order account to %s (multi-account)", order.account)
             self.placeOrder(order_id, contract, order)
             if not self._order_events[order_id].wait(timeout=timeout_sec):
                 # Attempt to cancel -- order may or may not have reached TWS
