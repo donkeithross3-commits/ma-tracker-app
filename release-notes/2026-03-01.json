@@ -56,6 +56,15 @@
       "category": "signals",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "stock-quote-fix",
+      "title": "Stock Quote Change/Volume Fix",
+      "summary": "Fixed stock instruments showing no change, change%, or volume data in the watchlist",
+      "description": "Stock instruments in the watchlist showed last price but Change, Change%, and Volume columns were blank. The root cause: the Polygon snapshot API returns previous close (prevDay.c) and today's volume (day.v) but the quote fetcher wasn't extracting them. Without the previous close, the frontend couldn't compute change or change%.\n\nFixed by extracting close and volume from the Polygon snapshot response and passing them through the relay pipeline. Futures were unaffected since they use the IB data path which already included close and volume.\n\nNote: outside market hours (evenings/weekends), stock prices reflect the last trade from the previous session — this is expected since equity markets are closed. Futures show live Sunday–Friday prices via CME Globex.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
     }
   ]
 }
