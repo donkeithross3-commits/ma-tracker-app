@@ -135,29 +135,37 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
 
       // OHLCV legend on crosshair hover
       chart.subscribeCrosshairMove((param) => {
-        if (!param.time || !param.seriesData || param.seriesData.size === 0) {
+        try {
+          if (!param.time || !param.seriesData || param.seriesData.size === 0) {
+            setOhlcv(null);
+            return;
+          }
+          const candle = param.seriesData.get(candleSeries) as
+            | CandlestickData
+            | undefined;
+          if (
+            !candle ||
+            typeof candle.open !== "number" ||
+            typeof candle.close !== "number"
+          ) {
+            setOhlcv(null);
+            return;
+          }
+          // Find matching volume
+          const vol = param.seriesData.get(volumeSeries) as
+            | HistogramData
+            | undefined;
+          setOhlcv({
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+            volume: vol?.value ?? 0,
+            up: candle.close >= candle.open,
+          });
+        } catch {
           setOhlcv(null);
-          return;
         }
-        const candle = param.seriesData.get(candleSeries) as
-          | CandlestickData
-          | undefined;
-        if (!candle || candle.open == null) {
-          setOhlcv(null);
-          return;
-        }
-        // Find matching volume
-        const vol = param.seriesData.get(volumeSeries) as
-          | HistogramData
-          | undefined;
-        setOhlcv({
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-          volume: vol?.value ?? 0,
-          up: candle.close >= candle.open,
-        });
       });
 
       chartRef.current = chart;
