@@ -35,15 +35,22 @@ export function useWatchlistQuotes(items: WatchlistItemForQuote[]) {
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const itemsRef = useRef(items);
+  const isFetchingRef = useRef(false);
   itemsRef.current = items;
 
   const fetchQuotes = useCallback(async () => {
+    // Guard: skip if a previous fetch is still in flight.
+    // Without this, the 8s interval fires new batches while the previous
+    // one is still waiting for slow/timed-out tickers — cascading load.
+    if (isFetchingRef.current) return;
+
     const currentItems = itemsRef.current;
     if (currentItems.length === 0) {
       setQuotes(new Map());
       return;
     }
 
+    isFetchingRef.current = true;
     setLoading(true);
     try {
       const resp = await fetch("/api/watchlists/quotes", {
@@ -70,6 +77,7 @@ export function useWatchlistQuotes(items: WatchlistItemForQuote[]) {
     } catch {
       // Keep existing quotes on error
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
   }, []);
