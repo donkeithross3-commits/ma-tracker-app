@@ -53,28 +53,45 @@ export function useWatchlistQuotes(items: WatchlistItemForQuote[]) {
     isFetchingRef.current = true;
     setLoading(true);
     try {
+      const payload = {
+        items: currentItems.map((i) => ({
+          ticker: i.ticker,
+          instrumentType: i.instrumentType || "stock",
+          exchange: i.exchange || undefined,
+        })),
+      };
+
       const resp = await fetch("/api/watchlists/quotes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: currentItems.map((i) => ({
-            ticker: i.ticker,
-            instrumentType: i.instrumentType || "stock",
-            exchange: i.exchange || undefined,
-          })),
-        }),
+        body: JSON.stringify(payload),
       });
 
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        console.error(
+          `[watchlist-quotes] fetch failed: ${resp.status} ${resp.statusText}`,
+          await resp.text().catch(() => ""),
+        );
+        return;
+      }
 
       const data = await resp.json();
       const newMap = new Map<string, QuoteData>();
       for (const q of data.quotes || []) {
         newMap.set(q.ticker, q);
       }
+      if (newMap.size === 0 && currentItems.length > 0) {
+        console.warn(
+          "[watchlist-quotes] received 0 quotes for",
+          currentItems.length,
+          "items. Response:",
+          JSON.stringify(data).slice(0, 500),
+        );
+      }
       setQuotes(newMap);
       setLastFetch(new Date());
-    } catch {
+    } catch (err) {
+      console.error("[watchlist-quotes] error:", err);
       // Keep existing quotes on error
     } finally {
       isFetchingRef.current = false;

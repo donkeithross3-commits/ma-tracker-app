@@ -112,14 +112,26 @@ export async function POST(request: NextRequest) {
   const user = await requireAuth();
   if (user instanceof NextResponse) return user;
 
-  const body = await request.json();
-  const items: QuoteItem[] = body.items;
+  let body: { items?: QuoteItem[] };
+  try {
+    body = await request.json();
+  } catch (e) {
+    console.error("[watchlist-quotes] JSON parse error:", e);
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const items: QuoteItem[] = body.items ?? [];
   if (!Array.isArray(items) || items.length === 0) {
+    console.warn("[watchlist-quotes] empty items array");
     return NextResponse.json(
       { error: "items array is required" },
       { status: 400 }
     );
   }
+
+  console.log(
+    `[watchlist-quotes] fetching ${items.length} quotes for user=${user.id}`,
+  );
 
   // Cap at 50 items to avoid abuse
   const capped = items.slice(0, 50);
@@ -139,6 +151,11 @@ export async function POST(request: NextRequest) {
       );
     }
   }
+
+  const withPrice = quotes.filter((q) => q.price != null).length;
+  console.log(
+    `[watchlist-quotes] done: ${quotes.length} quotes, ${withPrice} with price`,
+  );
 
   return NextResponse.json({ quotes });
 }
