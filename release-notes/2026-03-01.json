@@ -92,6 +92,15 @@
       "category": "signals",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "ohlcv-crosshair-legend",
+      "title": "OHLCV Crosshair Legend",
+      "summary": "Charts now display O/H/L/C values and volume when hovering over any bar",
+      "description": "Hovering the crosshair over a candlestick bar now shows a TradingView-style OHLCV legend in the top-left corner of the chart. Values are colored green for bullish bars and red for bearish bars, with volume shown in compact format (K/M suffixes). The legend disappears when the crosshair moves off the chart area. Works on both stock and futures charts across all timeframes.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
     }
   ]
 }

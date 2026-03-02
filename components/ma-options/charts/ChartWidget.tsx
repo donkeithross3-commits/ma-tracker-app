@@ -5,6 +5,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
   forwardRef,
 } from "react";
 import {
@@ -51,6 +52,15 @@ interface ChartWidgetProps {
   ticker?: string;
 }
 
+interface OHLCVData {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  up: boolean;
+}
+
 const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
   function ChartWidget({ bars, width, height, signals, fills, overlayToggles, ticker }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -59,6 +69,7 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
     const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
     const signalHistSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
     const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+    const [ohlcv, setOhlcv] = useState<OHLCVData | null>(null);
 
     // Expose imperative API
     useImperativeHandle(ref, () => ({
@@ -120,6 +131,33 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
       });
       chart.priceScale("signal").applyOptions({
         scaleMargins: { top: 0, bottom: 0.85 },
+      });
+
+      // OHLCV legend on crosshair hover
+      chart.subscribeCrosshairMove((param) => {
+        if (!param.time || !param.seriesData || param.seriesData.size === 0) {
+          setOhlcv(null);
+          return;
+        }
+        const candle = param.seriesData.get(candleSeries) as
+          | CandlestickData
+          | undefined;
+        if (!candle || candle.open == null) {
+          setOhlcv(null);
+          return;
+        }
+        // Find matching volume
+        const vol = param.seriesData.get(volumeSeries) as
+          | HistogramData
+          | undefined;
+        setOhlcv({
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: vol?.value ?? 0,
+          up: candle.close >= candle.open,
+        });
       });
 
       chartRef.current = chart;
@@ -229,11 +267,40 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
     }, [applyOverlays]);
 
     return (
-      <div
-        ref={containerRef}
-        className="w-full h-full"
-        style={{ minHeight: 200 }}
-      />
+      <div className="relative w-full h-full" style={{ minHeight: 200 }}>
+        <div ref={containerRef} className="w-full h-full" />
+        {ohlcv && (
+          <div
+            className="absolute top-1 left-1 flex items-center gap-2 text-[10px] font-mono pointer-events-none z-10"
+            style={{ lineHeight: 1 }}
+          >
+            <span className="text-gray-500">O</span>
+            <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
+              {ohlcv.open.toFixed(2)}
+            </span>
+            <span className="text-gray-500">H</span>
+            <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
+              {ohlcv.high.toFixed(2)}
+            </span>
+            <span className="text-gray-500">L</span>
+            <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
+              {ohlcv.low.toFixed(2)}
+            </span>
+            <span className="text-gray-500">C</span>
+            <span className={ohlcv.up ? "text-green-400" : "text-red-400"}>
+              {ohlcv.close.toFixed(2)}
+            </span>
+            <span className="text-gray-500">V</span>
+            <span className="text-gray-400">
+              {ohlcv.volume >= 1_000_000
+                ? `${(ohlcv.volume / 1_000_000).toFixed(1)}M`
+                : ohlcv.volume >= 1_000
+                  ? `${(ohlcv.volume / 1_000).toFixed(1)}K`
+                  : ohlcv.volume.toLocaleString()}
+            </span>
+          </div>
+        )}
+      </div>
     );
   }
 );
