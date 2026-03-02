@@ -147,6 +147,8 @@ class IBMergerArbScanner(EWrapper, EClient):
         self._snapshot_end_events = set()   # reqIds that received tickSnapshotEnd
         # Option snapshot: single-option bid/ask fetch for entry pricing
         self._opt_snapshot_done: Optional[Event] = None
+        # Serializes reqHistoricalData (monkey-patch pattern is not thread-safe)
+        self._historical_lock = Lock()
         self._opt_snapshot_req_id: Optional[int] = None
 
         # Data farm health: tracks which data farms are up/down
@@ -1473,73 +1475,77 @@ class IBMergerArbScanner(EWrapper, EClient):
                               what_to_show="TRADES", use_rth=0) -> List[Dict]:
         """Fetch historical OHLCV bars from IB via reqHistoricalData.
 
+        Serialized via _historical_lock — the monkey-patch callback pattern is
+        not safe for concurrent calls (_run_in_thread dispatches to a thread pool).
+
         Returns list of dicts: [{time (epoch sec), open, high, low, close, volume}, ...]
         """
-        req_id = self.get_next_req_id()
-        bars_collected: List[Dict] = []
-        done_event = Event()
+        with self._historical_lock:
+            req_id = self.get_next_req_id()
+            bars_collected: List[Dict] = []
+            done_event = Event()
 
-        # Save and monkey-patch callbacks (same pattern as _handle_test_futures)
-        orig_hd = getattr(self, 'historicalData', None)
-        orig_hde = getattr(self, 'historicalDataEnd', None)
+            # Save and monkey-patch callbacks (same pattern as _handle_test_futures)
+            orig_hd = getattr(self, 'historicalData', None)
+            orig_hde = getattr(self, 'historicalDataEnd', None)
 
-        def _on_bar(rId, bar):
-            if rId == req_id:
-                # Parse bar date: IB sends three formats:
-                #   - Intraday: epoch seconds string (e.g. "1709150400")
-                #   - Daily: "YYYYMMDD" (e.g. "20260223")
-                #   - Daily with time: "YYYYMMDD  HH:MM:SS" (e.g. "20260223  18:00:00")
-                try:
-                    ts = int(bar.date)  # Intraday: already epoch seconds
-                except ValueError:
-                    date_str = bar.date.strip().split()[0]  # Take "YYYYMMDD" part, drop any time
-                    dt = datetime.strptime(date_str, "%Y%m%d")
-                    ts = int(calendar.timegm(dt.timetuple()))
+            def _on_bar(rId, bar):
+                if rId == req_id:
+                    # Parse bar date: IB sends three formats:
+                    #   - Intraday: epoch seconds string (e.g. "1709150400")
+                    #   - Daily: "YYYYMMDD" (e.g. "20260223")
+                    #   - Daily with time: "YYYYMMDD  HH:MM:SS" (e.g. "20260223  18:00:00")
+                    try:
+                        ts = int(bar.date)  # Intraday: already epoch seconds
+                    except ValueError:
+                        date_str = bar.date.strip().split()[0]  # Take "YYYYMMDD" part, drop any time
+                        dt = datetime.strptime(date_str, "%Y%m%d")
+                        ts = int(calendar.timegm(dt.timetuple()))
 
-                bars_collected.append({
-                    "time": ts,
-                    "open": bar.open,
-                    "high": bar.high,
-                    "low": bar.low,
-                    "close": bar.close,
-                    "volume": int(bar.volume) if bar.volume else 0,
-                })
+                    bars_collected.append({
+                        "time": ts,
+                        "open": bar.open,
+                        "high": bar.high,
+                        "low": bar.low,
+                        "close": bar.close,
+                        "volume": int(bar.volume) if bar.volume else 0,
+                    })
 
-        def _on_end(rId, start, end):
-            if rId == req_id:
-                done_event.set()
+            def _on_end(rId, start, end):
+                if rId == req_id:
+                    done_event.set()
 
-        self.historicalData = _on_bar
-        self.historicalDataEnd = _on_end
+            self.historicalData = _on_bar
+            self.historicalDataEnd = _on_end
 
-        self.logger.info(f"reqHistoricalData: reqId={req_id} duration={duration} "
-                         f"barSize={bar_size} whatToShow={what_to_show}")
+            self.logger.info(f"reqHistoricalData: reqId={req_id} duration={duration} "
+                             f"barSize={bar_size} whatToShow={what_to_show}")
 
-        self.reqHistoricalData(
-            req_id, contract,
-            "",              # endDateTime = now
-            duration,        # e.g., "5 D"
-            bar_size,        # e.g., "5 mins"
-            what_to_show,    # "TRADES"
-            use_rth,         # 0 = include extended hours
-            2,               # formatDate (2 = epoch seconds for intraday, YYYYMMDD for daily)
-            False,           # keepUpToDate
-            []               # chartOptions
-        )
+            self.reqHistoricalData(
+                req_id, contract,
+                "",              # endDateTime = now
+                duration,        # e.g., "5 D"
+                bar_size,        # e.g., "5 mins"
+                what_to_show,    # "TRADES"
+                use_rth,         # 0 = include extended hours
+                2,               # formatDate (2 = epoch seconds for intraday, YYYYMMDD for daily)
+                False,           # keepUpToDate
+                []               # chartOptions
+            )
 
-        done_event.wait(timeout=30.0)  # Historical can be slow for large requests
+            done_event.wait(timeout=30.0)  # Historical can be slow for large requests
 
-        # Restore original handlers
-        if orig_hd is not None:
-            self.historicalData = orig_hd
-        if orig_hde is not None:
-            self.historicalDataEnd = orig_hde
+            # Restore original handlers
+            if orig_hd is not None:
+                self.historicalData = orig_hd
+            if orig_hde is not None:
+                self.historicalDataEnd = orig_hde
 
-        # Sort by time
-        bars_collected.sort(key=lambda b: b["time"])
+            # Sort by time
+            bars_collected.sort(key=lambda b: b["time"])
 
-        self.logger.info(f"reqHistoricalData: got {len(bars_collected)} bars")
-        return bars_collected
+            self.logger.info(f"reqHistoricalData: got {len(bars_collected)} bars")
+            return bars_collected
 
     def fetch_option_snapshot(self, contract_dict: dict, timeout_sec: float = 3.0) -> dict:
         """Fetch a snapshot bid/ask for a single option contract.
