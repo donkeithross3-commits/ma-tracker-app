@@ -739,20 +739,21 @@ async def _fetch_deal_context(pool) -> dict[str, dict]:
         # Enrich with latest risk assessment grades
         for ticker in list(context.keys()):
             assessment = await conn.fetchrow(
-                """SELECT vote_risk, finance_risk, legal_risk,
-                          regulatory_risk, closing_probability
+                """SELECT vote_grade, financing_grade, legal_grade,
+                          regulatory_grade, probability_of_success
                    FROM deal_risk_assessments
                    WHERE ticker = $1
-                   ORDER BY assessed_at DESC LIMIT 1""",
+                   ORDER BY assessment_date DESC LIMIT 1""",
                 ticker,
             )
             if assessment:
                 grades = []
-                for field in ["vote_risk", "finance_risk", "legal_risk", "regulatory_risk"]:
+                for field in ["vote_grade", "financing_grade", "legal_grade", "regulatory_grade"]:
                     val = assessment.get(field)
                     if val:
-                        grades.append(f"{field.replace('_', ' ').title()}: {val}")
-                prob = assessment.get("closing_probability")
+                        label = field.replace("_grade", "").replace("_", " ").title()
+                        grades.append(f"{label}: {val}")
+                prob = assessment.get("probability_of_success")
                 if prob:
                     grades.append(f"Close prob: {prob}%")
                 if grades:
