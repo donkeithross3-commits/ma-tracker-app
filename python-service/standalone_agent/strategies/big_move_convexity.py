@@ -116,7 +116,7 @@ _CROSS_ASSET_TICKERS = ["QQQ", "IWM", "TLT", "GLD", "HYG"]
 # These override _DEFAULTS when a ticker profile is applied in on_start().
 _TICKER_PROFILES: dict[str, dict[str, Any]] = {
     "SPY": {
-        "strike_increment": 0.50,
+        "strike_increment": 1.00,         # IB lists $1 increments near ATM for daily opts
         "polygon_channels": ["T.SPY", "Q.SPY"],
         "preferred_dte": [0, 1],          # daily 0DTE available
         "max_spread": 0.05,               # tight bid-ask ($0.01-$0.03 typical)
@@ -130,9 +130,9 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "straddle_richness_ideal": 0.9,
     },
     "SLV": {
-        "strike_increment": 0.50,
+        "strike_increment": 1.00,         # IB lists $1 increments for SLV options
         "polygon_channels": ["T.SLV", "Q.SLV"],
-        "preferred_dte": [0, 1, 2, 3, 4, 5],  # weekly expirations only (Fri)
+        "preferred_dte": [0, 1, 2, 3, 4, 5],  # daily expirations available
         "max_spread": 0.20,               # wider bid-ask ($0.05-$0.15 typical)
         "premium_min": 0.05,              # lower premiums (~$30 underlying)
         "premium_max": 1.50,
@@ -144,7 +144,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "straddle_richness_ideal": 1.5,
     },
     "QQQ": {
-        "strike_increment": 0.50,
+        "strike_increment": 1.00,         # IB lists $1 increments near ATM for daily opts
         "polygon_channels": ["T.QQQ", "Q.QQQ"],
         "preferred_dte": [0, 1],
         "max_spread": 0.05,
@@ -155,7 +155,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "signal_threshold": 0.40,         # model optimal (DOWN=0.40)
     },
     "IWM": {
-        "strike_increment": 0.50,
+        "strike_increment": 1.00,         # IB lists $1 increments for IWM options
         "polygon_channels": ["T.IWM", "Q.IWM"],
         "preferred_dte": [0, 1],
         "max_spread": 0.10,
@@ -163,9 +163,9 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "premium_max": 2.00,
     },
     "GLD": {
-        "strike_increment": 0.50,
+        "strike_increment": 1.00,         # IB lists $1 increments for GLD options
         "polygon_channels": ["T.GLD", "Q.GLD"],
-        "preferred_dte": [0, 1, 2, 3, 4, 5],  # weekly expirations
+        "preferred_dte": [0, 1, 2, 3, 4, 5],  # daily expirations available
         "max_spread": 0.15,
         "premium_min": 0.05,
         "premium_max": 2.00,
@@ -183,7 +183,7 @@ def _get_ticker_profile(ticker: str) -> dict[str, Any]:
         return _TICKER_PROFILES[ticker]
     # Generic fallback for unknown tickers
     return {
-        "strike_increment": 0.50,
+        "strike_increment": 1.00,
         "polygon_channels": [f"T.{ticker}", f"Q.{ticker}"],
         "preferred_dte": [0, 1, 2, 3, 4, 5],
         "max_spread": 0.15,
@@ -192,31 +192,21 @@ def _get_ticker_profile(ticker: str) -> dict[str, Any]:
     }
 
 
-# Tickers with separate weekly/daily trading classes (non-3rd-Friday expirations).
-# Monthly (3rd Friday) uses the standard class; all other dates use the weekly class.
-_WEEKLY_TRADING_CLASSES: dict[str, str] = {
-    "SPY": "SPYW",
-    "QQQ": "QQQW",
-    "IWM": "IWMW",
-}
-
+# IB trading class disambiguation (DEPRECATED as of 2026-03 — IB uses standard
+# ticker symbol as tradingClass for all equity options including dailies).
+# Previously SPY used "SPYW", QQQ used "QQQW", IWM used "IWMW" for non-3rd-Friday
+# expirations.  IB now returns these under the standard class (e.g., "SPY").
+# We no longer set tradingClass — IB auto-resolves when there's only one series
+# for a given date, and uses the standard class name for daily expirations.
 
 def _get_option_trading_class(ticker: str, expiry_date) -> str:
     """Return the IB tradingClass for an option expiry.
 
-    SPY/QQQ/IWM have separate trading classes for weekly/daily (non-3rd-Friday)
-    expirations.  Without specifying this, IB returns Error 200 'No security
-    definition' for 0DTE contracts.
+    As of 2026-03, IB lists all equity options (daily, weekly, monthly) under the
+    standard trading class (e.g., "SPY").  The old SPYW/QQQW/IWMW classes are
+    deprecated and cause Error 200.  We return empty string to let IB auto-resolve.
     """
-    weekly_class = _WEEKLY_TRADING_CLASSES.get(ticker)
-    if not weekly_class:
-        return ""  # most tickers don't need tradingClass disambiguation
-    import calendar
-    cal = calendar.monthcalendar(expiry_date.year, expiry_date.month)
-    # 3rd Friday: find all Fridays (weekday index 4) that are nonzero
-    fridays = [week[4] for week in cal if week[4] != 0]
-    is_third_friday = len(fridays) >= 3 and expiry_date.day == fridays[2]
-    return ticker if is_third_friday else weekly_class
+    return ""
 
 
 class BigMoveConvexityStrategy(ExecutionStrategy):
