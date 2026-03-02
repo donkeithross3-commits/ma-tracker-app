@@ -206,6 +206,25 @@ class TradeDatabase:
             created_at_dt,
         )
 
+        # Apply annotation hint from reconciliation (only if no human note exists)
+        annotation_hint = pos.get("annotation_hint")
+        if annotation_hint and isinstance(annotation_hint, dict):
+            await conn.execute(
+                """
+                UPDATE algo_positions
+                SET manual_intervention = $3,
+                    intervention_type = $4,
+                    annotation = COALESCE(annotation, $5)
+                WHERE user_id = $1 AND position_id = $2
+                  AND annotation IS NULL
+                """,
+                user_id,
+                position_id,
+                annotation_hint.get("manual_intervention", False),
+                annotation_hint.get("intervention_type", ""),
+                annotation_hint.get("auto_note", ""),
+            )
+
         # Upsert fills
         for idx, fill in enumerate(fill_log):
             await self._upsert_one_fill(conn, user_id, position_id, idx, fill)
@@ -356,6 +375,7 @@ class TradeDatabase:
         group_by: str = "date",
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
+        exclude_flagged: bool = False,
     ) -> dict:
         """Aggregate P&L summary grouped by date, symbol, or model_version."""
         if not self.pool:
@@ -372,6 +392,9 @@ class TradeDatabase:
         conditions = ["user_id = $1", "status = 'closed'"]
         params: list = [user_id]
         idx = 2
+
+        if exclude_flagged:
+            conditions.append("manual_intervention = FALSE")
 
         if date_from:
             conditions.append(f"created_at >= ${idx}")
@@ -451,6 +474,71 @@ class TradeDatabase:
             totals["wins"] = int(totals.get("wins") or 0)
 
         return {"summary": summary, "totals": totals}
+
+    # ── Annotation ──
+
+    ALLOWED_INTERVENTION_TYPES = frozenset({
+        "manual_tws_exit", "partial_fill_abort", "reject_recovery", "other",
+    })
+
+    async def annotate_position(
+        self,
+        user_id: str,
+        position_id: str,
+        annotation: Optional[str] = None,
+        manual_intervention: Optional[bool] = None,
+        intervention_type: Optional[str] = None,
+    ) -> bool:
+        """Update annotation fields on a position.  Only provided fields are updated.
+
+        Returns True if a row was affected.
+        """
+        if not self.pool:
+            return False
+
+        # Validate intervention_type
+        if intervention_type and intervention_type not in self.ALLOWED_INTERVENTION_TYPES:
+            raise ValueError(
+                f"Invalid intervention_type '{intervention_type}'. "
+                f"Allowed: {', '.join(sorted(self.ALLOWED_INTERVENTION_TYPES))}"
+            )
+
+        set_clauses = []
+        params: list = []
+        idx = 1
+
+        if annotation is not None:
+            set_clauses.append(f"annotation = ${idx}")
+            params.append(annotation)
+            idx += 1
+        if manual_intervention is not None:
+            set_clauses.append(f"manual_intervention = ${idx}")
+            params.append(manual_intervention)
+            idx += 1
+        if intervention_type is not None:
+            set_clauses.append(f"intervention_type = ${idx}")
+            params.append(intervention_type)
+            idx += 1
+
+        if not set_clauses:
+            return False
+
+        set_clauses.append("updated_at = NOW()")
+        set_sql = ", ".join(set_clauses)
+
+        params.append(user_id)
+        params.append(position_id)
+
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                f"""
+                UPDATE algo_positions
+                SET {set_sql}
+                WHERE user_id = ${idx} AND position_id = ${idx + 1}
+                """,
+                *params,
+            )
+        return result != "UPDATE 0"
 
     # ── Helpers ──
 

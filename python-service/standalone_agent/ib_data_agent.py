@@ -45,6 +45,7 @@ from resource_manager import ResourceManager
 from quote_cache import StreamingQuoteCache
 from execution_engine import ExecutionEngine, ExecutionStrategy
 from position_store import PositionStore
+from engine_config_store import EngineConfigStore
 
 # Configure logging
 logging.basicConfig(
@@ -130,6 +131,11 @@ class IBDataAgent:
         self.quote_cache: Optional[StreamingQuoteCache] = None  # created after scanner is ready
         self.execution_engine: Optional[ExecutionEngine] = None  # created after scanner is ready
         self.position_store = PositionStore()  # persistent position ledger
+        self.engine_config_store = EngineConfigStore()  # engine config persistence
+        # Auto-restart state
+        self._auto_restart_attempted = False  # prevent re-attempt within same lifecycle
+        self._saved_entry_cap_before_pause: int = 0
+        self._saved_ticker_budgets: dict = {}  # strategy_id -> budget
         # TWS reconnection state
         self._tws_reconnecting = False
         self._tws_last_connected: Optional[float] = None
@@ -366,6 +372,8 @@ class IBDataAgent:
                 return await self._handle_execution_list_models(payload)
             elif request_type == "execution_swap_model":
                 return await self._handle_execution_swap_model(payload)
+            elif request_type == "execution_resume":
+                return await self._handle_execution_resume(payload)
             elif request_type == "ib_reconnect":
                 return await self._handle_ib_reconnect()
             elif request_type == "get_ib_executions":
@@ -1352,6 +1360,7 @@ class IBDataAgent:
             strategy_id = strat_cfg.get("strategy_id", "")
             strategy_type = strat_cfg.get("strategy_type", "")
             config = strat_cfg.get("config", {})
+            config["_strategy_type"] = strategy_type  # stash for config persistence
             ticker_budget = strat_cfg.get("ticker_budget", -1)
 
             if not strategy_id:
@@ -1495,6 +1504,9 @@ class IBDataAgent:
             recovered = 0
             logger.info("Execution engine already running — added %d new strategies", len(results))
 
+        # Persist engine config for auto-restart
+        self._persist_engine_config("execution_start")
+
         return {
             "running": self.execution_engine.is_running,
             "strategies_loaded": results,
@@ -1520,6 +1532,8 @@ class IBDataAgent:
                     logger.error("Error snapshotting %s on stop: %s", sid, e)
 
         self.execution_engine.stop()
+        # Clean stop = no auto-restart on next boot
+        self.engine_config_store.clear()
         return {
             "running": False,
             "lines_held": self.resource_manager.execution_lines_held,
@@ -1540,7 +1554,9 @@ class IBDataAgent:
         new_config = payload.get("config", {})
         if not strategy_id:
             return {"error": "strategy_id is required"}
-        return self.execution_engine.update_strategy_config(strategy_id, new_config)
+        result = self.execution_engine.update_strategy_config(strategy_id, new_config)
+        self._persist_engine_config("config_change")
+        return result
 
     async def _handle_execution_budget(self, payload: dict) -> dict:
         """Set entry budget — global cap, per-ticker, or risk budget.
@@ -1559,14 +1575,16 @@ class IBDataAgent:
 
         if scope == "risk":
             budget_usd = float(payload.get("budget", 0))
-            return self.execution_engine.set_risk_budget(budget_usd)
+            result = self.execution_engine.set_risk_budget(budget_usd)
         elif scope == "ticker":
             strategy_id = payload.get("strategy_id", "")
             if not strategy_id:
                 return {"error": "strategy_id is required for scope=ticker"}
-            return self.execution_engine.set_ticker_budget(strategy_id, budget)
+            result = self.execution_engine.set_ticker_budget(strategy_id, budget)
         else:
-            return self.execution_engine.set_global_entry_cap(budget)
+            result = self.execution_engine.set_global_entry_cap(budget)
+        self._persist_engine_config("budget_change")
+        return result
 
     async def _handle_execution_add_ticker(self, payload: dict) -> dict:
         """Add a single ticker/strategy to the running execution engine.
@@ -1585,6 +1603,7 @@ class IBDataAgent:
         strategy_id = payload.get("strategy_id", "")
         strategy_type = payload.get("strategy_type", "")
         config = payload.get("config", {})
+        config["_strategy_type"] = strategy_type  # stash for config persistence
         ticker_budget = int(payload.get("ticker_budget", -1))
 
         if not strategy_id:
@@ -1611,6 +1630,7 @@ class IBDataAgent:
                     state.ticker_entry_budget = ticker_budget
 
         result["budget_status"] = self.execution_engine.get_budget_status()
+        self._persist_engine_config("ticker_add")
         return result
 
     async def _handle_execution_remove_ticker(self, payload: dict) -> dict:
@@ -1634,6 +1654,7 @@ class IBDataAgent:
 
         result = self.execution_engine.unload_strategy(strategy_id)
         result["budget_status"] = self.execution_engine.get_budget_status()
+        self._persist_engine_config("ticker_remove")
         return result
 
     async def _handle_close_position(self, payload: dict) -> dict:
@@ -1757,7 +1778,55 @@ class IBDataAgent:
             return {"error": f"Strategy {strategy_id} does not support model swapping"}
 
         result = await self._run_in_thread(state.strategy.swap_model, version_id)
+        self._persist_engine_config("model_swap")
         return result
+
+    async def _handle_execution_resume(self, payload: dict) -> dict:
+        """Resume execution engine from auto-restart PAUSED state.
+
+        Restores saved entry budgets (global cap + per-ticker) so new entries
+        can flow again.  Optionally accepts overrides in the payload.
+
+        Payload (all optional):
+            global_entry_cap: int (override saved cap)
+            ticker_budgets: dict (strategy_id -> budget overrides)
+        """
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+        if not self.execution_engine.is_running:
+            return {"error": "Execution engine is not running"}
+        if not self.execution_engine._auto_restart_paused:
+            return {"error": "Engine is not in PAUSED state"}
+
+        # Determine caps to restore
+        global_cap = payload.get("global_entry_cap", self._saved_entry_cap_before_pause)
+        ticker_overrides = payload.get("ticker_budgets", {})
+
+        # Restore global cap
+        self.execution_engine.set_global_entry_cap(int(global_cap))
+
+        # Restore per-ticker budgets
+        for sid, state in self.execution_engine._strategies.items():
+            if sid.startswith("bmc_risk_"):
+                continue
+            if sid in ticker_overrides:
+                state.ticker_entry_budget = int(ticker_overrides[sid])
+            elif sid in self._saved_ticker_budgets:
+                state.ticker_entry_budget = self._saved_ticker_budgets[sid]
+
+        # Clear paused flag
+        self.execution_engine._auto_restart_paused = False
+        self._persist_engine_config("resume")
+
+        logger.info(
+            "Execution engine RESUMED — global_cap=%d, %d ticker budgets restored",
+            global_cap, len(self._saved_ticker_budgets),
+        )
+        return {
+            "success": True,
+            "engine_mode": "running",
+            "budget_status": self.execution_engine.get_budget_status(),
+        }
 
     # IB account dedicated to automated BMC trading
     IB_ACCT_CODE = "U152133"
@@ -2102,6 +2171,138 @@ class IBDataAgent:
                 except Exception as e:
                     logger.error("Error persisting runtime state for %s: %s", sid, e)
 
+    # ── Engine config persistence ──
+
+    def _persist_engine_config(self, reason: str = "") -> None:
+        """Snapshot current engine configuration for auto-restart on next boot.
+
+        Only persists BMC entry strategies (not bmc_risk_* risk managers, which
+        persist via position_store.json).
+        """
+        if not self.execution_engine or not self.execution_engine.is_running:
+            return
+        try:
+            strategies = []
+            for sid, state in self.execution_engine._strategies.items():
+                # Only persist entry strategies, not risk managers
+                if sid.startswith("bmc_risk_"):
+                    continue
+                strat_entry = {
+                    "strategy_id": sid,
+                    "strategy_type": state.config.get("_strategy_type", "big_move_convexity"),
+                    "config": state.config,
+                    "ticker_budget": state.ticker_entry_budget,
+                    "ticker_entries_placed": state.ticker_entries_placed,
+                }
+                # Capture model pin for non-production models (hot-swap recovery)
+                if hasattr(state.strategy, "_model_version") and state.strategy._model_version:
+                    strat_entry["model_pin"] = state.strategy._model_version
+                strategies.append(strat_entry)
+
+            engine_state = "paused" if self.execution_engine._auto_restart_paused else "running"
+            self.engine_config_store.save(
+                engine_state=engine_state,
+                strategies=strategies,
+                global_entry_cap=self.execution_engine._global_entry_cap,
+                risk_budget_usd=self.execution_engine._risk_budget_usd,
+                reason=reason,
+            )
+        except Exception as e:
+            logger.error("Error persisting engine config: %s", e)
+
+    # ── Auto-restart on boot ──
+
+    async def _maybe_auto_restart(self) -> None:
+        """Auto-restart execution engine from saved config in PAUSED mode.
+
+        Called once from run() after relay connects. Reconstructs strategies
+        with same config/models but blocks all new entries (global_entry_cap=0).
+        Risk managers rebuild from position_store.json and remain fully active.
+        """
+        # Guard: skip if engine already running or already attempted
+        if self._auto_restart_attempted:
+            return
+        self._auto_restart_attempted = True
+
+        if self.execution_engine and self.execution_engine.is_running:
+            logger.info("Auto-restart: engine already running, skipping")
+            return
+
+        saved = self.engine_config_store.load()
+        if saved is None:
+            logger.info("Auto-restart: no saved config found (fresh start)")
+            return
+
+        strategies = saved.get("strategies", [])
+        if not strategies:
+            logger.info("Auto-restart: saved config has no strategies, skipping")
+            return
+
+        logger.info(
+            "Auto-restart: found saved config (%d strategies, reason=%s, saved_at=%.0f)",
+            len(strategies), saved.get("saved_reason", "?"), saved.get("saved_at", 0),
+        )
+
+        # Reconstruct execution_start payload
+        payload_strategies = []
+        for strat in strategies:
+            payload_strategies.append({
+                "strategy_id": strat["strategy_id"],
+                "strategy_type": strat.get("strategy_type", "big_move_convexity"),
+                "config": strat.get("config", {}),
+                "ticker_budget": strat.get("ticker_budget", -1),
+            })
+
+        payload = {"strategies": payload_strategies}
+        try:
+            result = await self._handle_execution_start(payload)
+            if "error" in result:
+                logger.error("Auto-restart: execution_start failed: %s", result["error"])
+                return
+
+            # Save original caps before pausing
+            self._saved_entry_cap_before_pause = saved.get("global_entry_cap", 0)
+            self._saved_ticker_budgets = {}
+            for strat in strategies:
+                sid = strat["strategy_id"]
+                self._saved_ticker_budgets[sid] = strat.get("ticker_budget", -1)
+
+            # Force PAUSED: block all new entries
+            self.execution_engine.set_global_entry_cap(0)
+            for sid, state in self.execution_engine._strategies.items():
+                if not sid.startswith("bmc_risk_"):
+                    state.ticker_entry_budget = 0
+
+            # Restore risk budget (doesn't gate entries, safe immediately)
+            risk_budget = saved.get("risk_budget_usd", 0.0)
+            if risk_budget > 0:
+                self.execution_engine.set_risk_budget(risk_budget)
+
+            # Restore model pins (hot-swap non-production models)
+            for strat in strategies:
+                model_pin = strat.get("model_pin")
+                if model_pin:
+                    sid = strat["strategy_id"]
+                    state = self.execution_engine._strategies.get(sid)
+                    if state and hasattr(state.strategy, "swap_model"):
+                        try:
+                            await self._run_in_thread(state.strategy.swap_model, model_pin)
+                            logger.info("Auto-restart: restored model pin %s on %s", model_pin, sid)
+                        except Exception as e:
+                            logger.warning("Auto-restart: model pin restore failed for %s: %s", sid, e)
+
+            # Mark as paused
+            self.execution_engine._auto_restart_paused = True
+            self._persist_engine_config("auto_restart_paused")
+
+            logger.info(
+                "Auto-restart: engine PAUSED — %d strategies loaded, entries blocked. "
+                "Send execution_resume to re-enable entries.",
+                len(payload_strategies),
+            )
+        except Exception as e:
+            logger.error("Auto-restart: unexpected error: %s", e)
+
     # ── Expired option cleanup ──
 
     def _check_expired_positions(self):
@@ -2232,6 +2433,8 @@ class IBDataAgent:
                     }))
                     # Persist risk manager runtime states (~20s cadence)
                     self._persist_runtime_states()
+                    # Persist engine config for auto-restart
+                    self._persist_engine_config("heartbeat")
                     # Check for expired options on the same ~20s cadence
                     self._check_expired_positions()
                 # Sync dirty positions to server for P&L history persistence
@@ -2484,6 +2687,9 @@ class IBDataAgent:
 
                 # Mark all positions dirty for full sync on (re)connect
                 self.position_store.mark_all_dirty()
+
+                # Auto-restart engine from saved config (once per lifecycle)
+                await self._maybe_auto_restart()
 
                 heartbeat_task = asyncio.create_task(self.send_heartbeat())
                 handler_task = asyncio.create_task(self.message_handler())

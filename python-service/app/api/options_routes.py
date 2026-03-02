@@ -2275,6 +2275,38 @@ async def relay_execution_swap_model(request: ExecutionSwapModelRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ExecutionResumeRequest(BaseModel):
+    userId: str
+    global_entry_cap: Optional[int] = None
+    ticker_budgets: Optional[dict] = None
+
+
+@router.post("/relay/execution/resume")
+async def relay_execution_resume(request: ExecutionResumeRequest):
+    """Resume execution engine from auto-restart PAUSED state."""
+    try:
+        payload: dict = {}
+        if request.global_entry_cap is not None:
+            payload["global_entry_cap"] = request.global_entry_cap
+        if request.ticker_budgets is not None:
+            payload["ticker_budgets"] = request.ticker_budgets
+        response_data = await send_request_to_provider(
+            request_type="execution_resume",
+            payload=payload,
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/resume error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---------------------------------------------------------------------------
 # BMC (Big Move Convexity) relay endpoints
 # ---------------------------------------------------------------------------
@@ -2540,10 +2572,12 @@ async def relay_pnl_history_summary(
     group_by: str = Query("date"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    exclude_flagged: bool = Query(False),
 ):
     """Aggregate P&L summary for closed positions.
 
     group_by: 'date', 'symbol', or 'model_version'
+    exclude_flagged: if true, excludes positions with manual_intervention=TRUE
     """
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id required")
@@ -2560,6 +2594,7 @@ async def relay_pnl_history_summary(
             group_by=group_by,
             date_from=date_from,
             date_to=date_to,
+            exclude_flagged=exclude_flagged,
         )
         return _sanitize_for_json(result)
     except HTTPException:
@@ -2598,5 +2633,45 @@ async def relay_pnl_history_backfill(request: BackfillRequest):
         raise
     except Exception as e:
         logger.error(f"pnl-history/backfill error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AnnotatePositionRequest(BaseModel):
+    annotation: Optional[str] = None
+    manual_intervention: Optional[bool] = None
+    intervention_type: Optional[str] = None
+
+
+@router.patch("/relay/pnl-history/positions/{position_id}/annotate")
+async def relay_pnl_history_annotate(
+    position_id: str,
+    request: AnnotatePositionRequest,
+    user_id: str = Query(""),
+):
+    """Update annotation fields on a position.  Only provided fields are updated."""
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id required")
+    try:
+        from app.trade_history.database import get_trade_db
+        trade_db = get_trade_db()
+        if not trade_db or not trade_db.pool:
+            raise HTTPException(status_code=503, detail="Trade history database not available")
+
+        updated = await trade_db.annotate_position(
+            user_id=user_id,
+            position_id=position_id,
+            annotation=request.annotation,
+            manual_intervention=request.manual_intervention,
+            intervention_type=request.intervention_type,
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        return {"success": True, "position_id": position_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"pnl-history/annotate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

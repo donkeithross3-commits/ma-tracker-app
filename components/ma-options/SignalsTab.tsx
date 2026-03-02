@@ -114,6 +114,7 @@ interface FullExecutionStatus {
   order_budget: number;
   total_algo_orders: number;
   position_ledger?: PositionLedgerEntry[];
+  engine_mode?: "running" | "paused";
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +404,8 @@ export default function SignalsTab() {
   // Multi-ticker state: strategy entries from the agent, keyed by ticker
   const [strategies, setStrategies] = useState<StrategyEntry[]>([]);
   const [running, setRunning] = useState(false);
+  const [engineMode, setEngineMode] = useState<"running" | "paused">("running");
+  const [resuming, setResuming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -465,6 +468,7 @@ export default function SignalsTab() {
       if (!res.ok) return;
       const data = await res.json();
       setRunning(data.running ?? false);
+      setEngineMode(data.engine_mode ?? "running");
 
       // Multi-ticker: use strategies array if available
       if (data.strategies && Array.isArray(data.strategies)) {
@@ -670,6 +674,30 @@ export default function SignalsTab() {
       setError(e.message || "Failed to stop");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── Resume from PAUSED (auto-restart) ──
+  const handleResume = async () => {
+    setResuming(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ma-options/execution/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setEngineMode("running");
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to resume");
+    } finally {
+      setResuming(false);
     }
   };
 
@@ -1193,6 +1221,23 @@ export default function SignalsTab() {
           </span>
         )}
       </div>
+
+      {/* PAUSED banner — auto-restarted, entries blocked */}
+      {running && engineMode === "paused" && (
+        <div className="bg-amber-900/30 border border-amber-700 text-amber-300 text-sm px-3 py-2 rounded flex items-center gap-3">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          <span className="flex-1">
+            <span className="font-medium">PAUSED</span> — Auto-restarted. Protecting positions — new entries paused.
+          </span>
+          <button
+            onClick={handleResume}
+            disabled={resuming}
+            className="px-3 py-1 rounded text-xs font-medium bg-amber-600 hover:bg-amber-500 text-white transition-colors disabled:opacity-50"
+          >
+            {resuming ? "Resuming…" : "Resume"}
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-900/30 border border-red-800 text-red-300 text-sm px-3 py-1.5 rounded">

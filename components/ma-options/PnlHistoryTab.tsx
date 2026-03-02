@@ -41,6 +41,9 @@ interface Position {
   created_at?: string;
   updated_at?: string;
   agent_created_at?: string;
+  annotation?: string | null;
+  manual_intervention?: boolean;
+  intervention_type?: string | null;
 }
 
 interface PositionsResponse {
@@ -171,6 +174,7 @@ function truncateModel(v: string | undefined | null): string {
 // ---------------------------------------------------------------------------
 
 const POSITION_COLUMNS: ColumnDef[] = [
+  { key: "flag", label: "Flag" },
   { key: "symbol", label: "Symbol" },
   { key: "strike", label: "Strike" },
   { key: "expiry", label: "Expiry" },
@@ -185,6 +189,7 @@ const POSITION_COLUMNS: ColumnDef[] = [
   { key: "signal", label: "Signal" },
   { key: "opened", label: "Opened" },
   { key: "duration", label: "Duration" },
+  { key: "note", label: "Note" },
 ];
 
 const POSITION_DEFAULTS = [
@@ -218,6 +223,8 @@ export default function PnlHistoryTab() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [showFlaggedOnly, setShowFlaggedOnly] = useState(false);
+  const [excludeFlagged, setExcludeFlagged] = useState(false);
 
   // Data
   const [positions, setPositions] = useState<Position[]>([]);
@@ -270,6 +277,7 @@ export default function PnlHistoryTab() {
       const params = new URLSearchParams({ endpoint: "summary", group_by: groupBy });
       if (dateFrom) params.set("date_from", dateFrom);
       if (dateTo) params.set("date_to", dateTo);
+      if (excludeFlagged) params.set("exclude_flagged", "true");
       const res = await fetch(`/api/ma-options/execution/pnl-history?${params}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -282,7 +290,7 @@ export default function PnlHistoryTab() {
     } finally {
       setSumLoading(false);
     }
-  }, [groupBy, dateFrom, dateTo]);
+  }, [groupBy, dateFrom, dateTo, excludeFlagged]);
 
   // Fetch on mount + filter change
   useEffect(() => {
@@ -335,8 +343,12 @@ export default function PnlHistoryTab() {
   // ---------------------------------------------------------------------------
 
   const filteredPositions = useMemo(() => {
-    if (!activeGroup) return positions;
-    return positions.filter((p) => {
+    let list = positions;
+    if (showFlaggedOnly) {
+      list = list.filter((p) => p.manual_intervention);
+    }
+    if (!activeGroup) return list;
+    return list.filter((p) => {
       if (groupBy === "date") {
         const posDate = p.created_at ? p.created_at.slice(0, 10) : "";
         return posDate === activeGroup;
@@ -345,13 +357,43 @@ export default function PnlHistoryTab() {
       if (groupBy === "model_version") return (p.model_version || "") === activeGroup;
       return true;
     });
-  }, [positions, activeGroup, groupBy]);
+  }, [positions, activeGroup, groupBy, showFlaggedOnly]);
 
   // ---------------------------------------------------------------------------
   // Totals (from summary response or computed)
   // ---------------------------------------------------------------------------
 
   const totals = summary?.totals;
+
+  // ---------------------------------------------------------------------------
+  // Annotation helpers
+  // ---------------------------------------------------------------------------
+
+  const annotatePosition = useCallback(
+    async (positionId: string, updates: { annotation?: string; manual_intervention?: boolean; intervention_type?: string }) => {
+      try {
+        const res = await fetch(
+          `/api/ma-options/execution/pnl-history/${encodeURIComponent(positionId)}/annotate`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(updates),
+          },
+        );
+        if (!res.ok) return;
+        // Update local state
+        setPositions((prev) =>
+          prev.map((p) =>
+            p.position_id === positionId ? { ...p, ...updates } : p,
+          ),
+        );
+      } catch {
+        // silently fail — user sees stale data until next refresh
+      }
+    },
+    [],
+  );
 
   // ---------------------------------------------------------------------------
   // Render helpers
@@ -365,6 +407,7 @@ export default function PnlHistoryTab() {
       risk_exit: { bg: "bg-blue-900/40", text: "text-blue-400", label: "Risk" },
       expired_worthless: { bg: "bg-red-900/40", text: "text-red-400", label: "Expired" },
       manual_close: { bg: "bg-gray-700", text: "text-gray-300", label: "Manual" },
+      reconciliation: { bg: "bg-amber-900/40", text: "text-amber-400", label: "Recon" },
     };
     const m = map[reason] || { bg: "bg-gray-700", text: "text-gray-300", label: reason };
     return (
@@ -450,6 +493,32 @@ export default function PnlHistoryTab() {
             className="bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 px-1.5 py-1 inline-edit"
           />
         </div>
+
+        {/* Flagged filter */}
+        <button
+          onClick={() => setShowFlaggedOnly((v) => !v)}
+          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+            showFlaggedOnly
+              ? "bg-amber-600 text-white"
+              : "text-gray-400 hover:text-gray-200"
+          }`}
+          title="Show only flagged positions"
+        >
+          ⚠ Flagged
+        </button>
+
+        {/* Exclude flagged from summary */}
+        <button
+          onClick={() => setExcludeFlagged((v) => !v)}
+          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+            excludeFlagged
+              ? "bg-amber-600 text-white"
+              : "text-gray-400 hover:text-gray-200"
+          }`}
+          title="Exclude flagged positions from summary stats"
+        >
+          Exclude Flagged
+        </button>
 
         {/* Refresh */}
         <button
@@ -607,6 +676,9 @@ export default function PnlHistoryTab() {
               <tr className="bg-gray-800/50 text-gray-400 border-b border-gray-700">
                 {/* Expand toggle column */}
                 <th className="w-6 py-1.5 px-1" />
+                {visibleSet.has("flag") && (
+                  <th className="text-center py-1.5 px-1 text-xs font-medium w-8">⚠</th>
+                )}
                 {visibleSet.has("symbol") && (
                   <th className="text-left py-1.5 px-3 text-xs font-medium">Symbol</th>
                 )}
@@ -649,6 +721,9 @@ export default function PnlHistoryTab() {
                 {visibleSet.has("duration") && (
                   <th className="text-right py-1.5 px-3 text-xs font-medium">Duration</th>
                 )}
+                {visibleSet.has("note") && (
+                  <th className="text-left py-1.5 px-3 text-xs font-medium">Note</th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -678,6 +753,13 @@ export default function PnlHistoryTab() {
                           <ChevronRight className="w-3.5 h-3.5" />
                         )}
                       </td>
+                      {visibleSet.has("flag") && (
+                        <td className="py-1.5 px-1 text-center">
+                          {pos.manual_intervention && (
+                            <span className="text-amber-400 text-xs" title={pos.intervention_type || "Flagged"}>⚠</span>
+                          )}
+                        </td>
+                      )}
                       {visibleSet.has("symbol") && (
                         <td className="py-1.5 px-3 text-gray-200 font-mono font-medium">
                           {pos.symbol}
@@ -769,9 +851,14 @@ export default function PnlHistoryTab() {
                           {fmtDuration(pos.created_at, pos.closed_at)}
                         </td>
                       )}
+                      {visibleSet.has("note") && (
+                        <td className="py-1.5 px-3 text-gray-500 text-xs max-w-[120px] truncate" title={pos.annotation || ""}>
+                          {pos.annotation || "—"}
+                        </td>
+                      )}
                     </tr>
 
-                    {/* ── Expanded: Fill detail ── */}
+                    {/* ── Expanded: Fill detail + annotations ── */}
                     {isExpanded && (
                       <tr className="bg-gray-900/50">
                         <td colSpan={colCount} className="px-6 py-2">
@@ -821,6 +908,65 @@ export default function PnlHistoryTab() {
                           ) : (
                             <div className="text-xs text-gray-500">No fills recorded.</div>
                           )}
+
+                          {/* ── Inline annotation editing ── */}
+                          <div className="mt-2 pt-2 border-t border-gray-800 flex items-center gap-4 flex-wrap text-xs">
+                            {/* Manual intervention checkbox */}
+                            <label className="flex items-center gap-1.5 text-gray-400 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={pos.manual_intervention ?? false}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  annotatePosition(pos.position_id, {
+                                    manual_intervention: e.target.checked,
+                                    ...(!e.target.checked ? { intervention_type: "" } : {}),
+                                  });
+                                }}
+                                className="accent-amber-500 inline-edit"
+                              />
+                              Flag intervention
+                            </label>
+
+                            {/* Intervention type dropdown (shown when flagged) */}
+                            {pos.manual_intervention && (
+                              <select
+                                value={pos.intervention_type || ""}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  annotatePosition(pos.position_id, { intervention_type: e.target.value });
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 px-1.5 py-0.5 inline-edit"
+                              >
+                                <option value="">Type…</option>
+                                <option value="manual_tws_exit">Manual TWS Exit</option>
+                                <option value="partial_fill_abort">Partial Fill Abort</option>
+                                <option value="reject_recovery">Reject Recovery</option>
+                                <option value="other">Other</option>
+                              </select>
+                            )}
+
+                            {/* Annotation text input */}
+                            <input
+                              type="text"
+                              placeholder="Add note…"
+                              defaultValue={pos.annotation || ""}
+                              onBlur={(e) => {
+                                const val = e.target.value.trim();
+                                if (val !== (pos.annotation || "")) {
+                                  annotatePosition(pos.position_id, { annotation: val });
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  (e.target as HTMLInputElement).blur();
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex-1 min-w-[140px] bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 px-2 py-0.5 placeholder-gray-600 inline-edit"
+                            />
+                          </div>
                         </td>
                       </tr>
                     )}

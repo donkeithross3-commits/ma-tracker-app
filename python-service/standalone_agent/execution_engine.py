@@ -311,6 +311,9 @@ class ExecutionEngine:
         # ── Reconnect hold: blocks eval loop until post-reconnect reconciliation ──
         self._reconnect_hold: bool = False
 
+        # ── Auto-restart pause: entries blocked, risk managers active ──
+        self._auto_restart_paused: bool = False
+
         # ── Flip-flop detection ──
         # strategy_id -> list of submission timestamps
         self._order_timestamps: Dict[str, List[float]] = {}
@@ -1392,6 +1395,12 @@ class ExecutionEngine:
         for key, agent_pos in store_positions.items():
             if key not in ib_keys:
                 report["stale_agent"].append({"position_id": agent_pos["id"], "instrument": key})
+                # Tag for annotation pipeline — position closed outside agent
+                agent_pos["annotation_hint"] = {
+                    "manual_intervention": True,
+                    "intervention_type": "manual_tws_exit",
+                    "auto_note": "Position closed outside agent (IB reconciliation)",
+                }
                 self._position_store.mark_closed(agent_pos["id"], exit_reason="reconciliation")
 
         return report
@@ -1492,6 +1501,8 @@ class ExecutionEngine:
             "trade_attribution_summary": attribution_summary,
             # Connection health
             "reconnect_hold": self._reconnect_hold,
+            # Engine mode: "paused" after auto-restart, "running" normally
+            "engine_mode": "paused" if self._auto_restart_paused else "running",
         }
 
     def get_telemetry(self) -> dict:
@@ -1532,4 +1543,6 @@ class ExecutionEngine:
             # New budget structure
             "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
+            # Engine mode: "paused" after auto-restart, "running" normally
+            "engine_mode": "paused" if self._auto_restart_paused else "running",
         }
