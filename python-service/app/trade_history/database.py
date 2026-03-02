@@ -229,6 +229,18 @@ class TradeDatabase:
         for idx, fill in enumerate(fill_log):
             await self._upsert_one_fill(conn, user_id, position_id, idx, fill)
 
+        # Delete any fill rows with index >= current fill_log length.
+        # This handles the case where fills were removed from the agent's
+        # fill_log (e.g. phantom entry fills purged by purge_phantom_entry_fills).
+        # Without this, orphaned rows at old indices linger in the DB forever
+        # because INSERT ON CONFLICT never removes rows.
+        await conn.execute(
+            "DELETE FROM algo_fills WHERE user_id = $1 AND position_id = $2 AND fill_index >= $3",
+            user_id,
+            position_id,
+            len(fill_log),
+        )
+
     async def _upsert_one_fill(
         self,
         conn: asyncpg.Connection,
