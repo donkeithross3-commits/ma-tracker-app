@@ -920,6 +920,25 @@ class ExecutionEngine:
                             placed_at=time.time(),
                             last_update=time.time(),
                         )
+                    # Process fills/terminals even for early-arriving events.
+                    # Without this, a Filled event that arrives before
+                    # _on_order_complete creates the ActiveOrder would be
+                    # recorded but never routed to the strategy.
+                    if filled > 0:
+                        try:
+                            state.strategy.on_fill(order_id, data, state.config)
+                        except Exception as e:
+                            logger.error("Strategy %s on_fill error (early): %s", strategy_id, e)
+                        self._persist_fill(strategy_id, state, data)
+                    if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
+                        if status != "Filled":
+                            try:
+                                state.strategy.on_order_dead(order_id, f"Order {order_id} terminal: {status}", state.config)
+                            except Exception as e:
+                                logger.error("Strategy %s on_order_dead error (early): %s", strategy_id, e)
+                        with self._active_orders_lock:
+                            self._active_orders.pop(order_id, None)
+                        self._order_strategy_map.pop(order_id, None)
 
             elif event_type == "exec":
                 # execDetails: capture exec_id for commission routing
@@ -1182,9 +1201,18 @@ class ExecutionEngine:
     def _place_order_worker(
         self, strategy_id: str, contract_dict: dict, order_dict: dict,
     ) -> dict:
-        """Run on the order-exec thread.  Places order and blocks until TWS ack."""
+        """Run on the order-exec thread.  Places order and blocks until TWS ack.
+
+        Uses pre_submit_callback to register _order_strategy_map BEFORE IB can
+        fire callbacks (closes the race where fills arrive before the future's
+        done-callback registers the order for event routing).
+        """
+        def _pre_register(order_id):
+            self._order_strategy_map[order_id] = strategy_id
+
         return self._scanner.place_order_sync(
             contract_dict, order_dict, timeout_sec=self.ORDER_TIMEOUT_SEC,
+            pre_submit_callback=_pre_register,
         )
 
     def _on_order_complete(self, future: Future, strategy_id: str, is_entry: bool = False):
@@ -1248,20 +1276,37 @@ class ExecutionEngine:
             if order_id:
                 self._order_strategy_map[order_id] = strategy_id
 
-                # Register in active orders for lifecycle tracking
+                # Register in active orders for lifecycle tracking.
+                # IMPORTANT: Don't overwrite if _drain_order_events already
+                # processed a more advanced status (e.g. Filled arrived via
+                # callback before this done-callback fired). If the order was
+                # already cleaned up (terminal), skip registration entirely.
                 with self._active_orders_lock:
-                    self._active_orders[order_id] = ActiveOrder(
-                        order_id=order_id,
-                        strategy_id=strategy_id,
-                        status=status,
-                        filled=filled,
-                        remaining=result.get("remaining", 0.0),
-                        avg_fill_price=result.get("avgFillPrice", 0.0),
-                        perm_id=result.get("permId", 0),
-                        placed_at=time.time(),
-                        last_update=time.time(),
-                        is_entry=is_entry,
-                    )
+                    existing = self._active_orders.get(order_id)
+                    if existing is None:
+                        # Order not yet tracked OR already cleaned up (terminal).
+                        # If it was cleaned up (not in strategy map anymore), skip.
+                        if order_id in self._order_strategy_map:
+                            self._active_orders[order_id] = ActiveOrder(
+                                order_id=order_id,
+                                strategy_id=strategy_id,
+                                status=status,
+                                filled=filled,
+                                remaining=result.get("remaining", 0.0),
+                                avg_fill_price=result.get("avgFillPrice", 0.0),
+                                perm_id=result.get("permId", 0),
+                                placed_at=time.time(),
+                                last_update=time.time(),
+                                is_entry=is_entry,
+                            )
+                        else:
+                            # Already processed and cleaned up — skip
+                            logger.info(
+                                "Order %d already processed (terminal) before "
+                                "_on_order_complete — skipping registration",
+                                order_id,
+                            )
+                    # else: existing entry is more up-to-date, don't overwrite
 
                 # Notify strategy of order placement (so it can map order_id to level)
                 if state:

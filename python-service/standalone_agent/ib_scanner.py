@@ -550,8 +550,15 @@ class IBMergerArbScanner(EWrapper, EClient):
             return f"IB {code}: {text.strip()}"
         return f"IB error {code}: {text or 'Unknown'}"
 
-    def place_order_sync(self, contract_d: dict, order_d: dict, timeout_sec: float = 30.0) -> dict:
-        """Place order via IB (placeOrder -> orderStatus/error). Returns {} on success or error dict."""
+    def place_order_sync(self, contract_d: dict, order_d: dict, timeout_sec: float = 30.0,
+                         pre_submit_callback=None) -> dict:
+        """Place order via IB (placeOrder -> orderStatus/error). Returns {} on success or error dict.
+
+        Args:
+            pre_submit_callback: Optional callable(order_id) invoked after order_id is
+                allocated but BEFORE placeOrder sends the order to IB. Allows callers to
+                register the order for event routing before any IB callbacks can fire.
+        """
         if self.read_only_session:
             return {
                 "error": "TWS is in Read-Only API mode. Uncheck Read-Only in TWS API Settings to place orders.",
@@ -567,6 +574,14 @@ class IBMergerArbScanner(EWrapper, EClient):
         order_id = self.get_next_order_id()
         self._order_events[order_id] = Event()
         self._order_results[order_id] = {}
+        # Notify caller of order_id BEFORE placeOrder sends to IB.
+        # This closes a race window where IB fill callbacks arrive before the
+        # caller's done-callback can register the order for event routing.
+        if pre_submit_callback:
+            try:
+                pre_submit_callback(order_id)
+            except Exception as e:
+                self.logger.error("pre_submit_callback error: %s", e)
         try:
             contract = self._contract_from_dict(contract_d)
             order = self._order_from_dict(order_d)
