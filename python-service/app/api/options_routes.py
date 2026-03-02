@@ -2,7 +2,7 @@
 Options Scanner API Routes
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -1535,12 +1535,21 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
 
 
 @router.post("/relay/ib-reconnect")
-async def relay_ib_reconnect(user_id: Optional[str] = Query(None)):
+async def relay_ib_reconnect(request: Request, user_id: Optional[str] = Query(None)):
     """
     Trigger IB reconnect on the agent via WebSocket relay.
     Uses the user's own agent if available, otherwise falls back to any connected agent.
+    Accepts optional JSON body with {"force": true} to force-disconnect before reconnecting.
     """
     try:
+        # Parse force flag from request body
+        force = False
+        try:
+            body = await request.json()
+            force = body.get("force", False) is True
+        except Exception:
+            pass
+
         registry = get_registry()
         status = registry.get_status()
 
@@ -1569,14 +1578,15 @@ async def relay_ib_reconnect(user_id: Optional[str] = Query(None)):
                 "message": "No agent available to reconnect."
             }
 
-        # Send ib_reconnect request to agent
+        # Send ib_reconnect request to agent (with force flag)
+        payload = {"force": True} if force else {}
         request_id = str(uuid.uuid4())
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         pending = PendingRequest(
             request_id=request_id,
             request_type="ib_reconnect",
-            payload={},
+            payload=payload,
             future=future
         )
         await registry.add_pending_request(pending)
@@ -1585,7 +1595,7 @@ async def relay_ib_reconnect(user_id: Optional[str] = Query(None)):
             "type": "request",
             "request_id": request_id,
             "request_type": "ib_reconnect",
-            "payload": {}
+            "payload": payload
         })
 
         try:

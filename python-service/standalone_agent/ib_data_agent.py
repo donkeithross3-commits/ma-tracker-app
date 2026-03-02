@@ -262,7 +262,25 @@ class IBDataAgent:
                 continue
             # Check if TWS connection is healthy
             if self.scanner.isConnected() and not self.scanner.connection_lost:
-                continue
+                # Active liveness probe — detect half-dead sockets where
+                # connectionClosed() never fires (TCP socket stuck)
+                stale_sec = time.time() - getattr(self.scanner, '_last_ib_callback', time.time())
+                if stale_sec > 30:
+                    logger.warning("IB connection stale (%.0fs no callbacks) — probing...", stale_sec)
+                    try:
+                        self.scanner.reqCurrentTime()
+                    except Exception:
+                        pass
+                    await asyncio.sleep(5.0)
+                    still_stale = time.time() - getattr(self.scanner, '_last_ib_callback', time.time()) > 35
+                    if still_stale:
+                        logger.warning("IB liveness probe failed — marking connection as lost")
+                        self.scanner.connection_lost = True
+                        # Fall through to reconnect logic below
+                    else:
+                        continue  # Probe succeeded, connection is alive
+                else:
+                    continue
             # --- TWS is down ---
             was_previously_connected = self._tws_last_connected is not None
             if not self._tws_reconnecting:
@@ -417,7 +435,7 @@ class IBDataAgent:
             elif request_type == "execution_resume":
                 return await self._handle_execution_resume(payload)
             elif request_type == "ib_reconnect":
-                return await self._handle_ib_reconnect()
+                return await self._handle_ib_reconnect(payload)
             elif request_type == "get_ib_executions":
                 return await self._run_in_thread(self._handle_get_ib_executions_sync, payload)
             elif request_type == "fetch_historical_bars":
@@ -465,22 +483,31 @@ class IBDataAgent:
             "last_connected": self._tws_last_connected,
         }
     
-    async def _handle_ib_reconnect(self) -> dict:
+    async def _handle_ib_reconnect(self, payload: dict = None) -> dict:
         """Handle dashboard-triggered IB reconnect request.
 
         Reuses the same post-reconnect logic as _tws_health_loop:
         engage hold → disconnect stale socket → connect → re-register callbacks →
         resubscribe quotes → reconcile → release hold.
+
+        When force=True (from payload), skips the "already connected" early return
+        and tears down the existing connection before reconnecting.
         """
-        # Already connected — nothing to do
-        if self.scanner and self.scanner.isConnected() and not self.scanner.connection_lost:
+        payload = payload or {}
+        force = payload.get("force", False)
+
+        # Already connected — skip unless force
+        if not force and self.scanner and self.scanner.isConnected() and not self.scanner.connection_lost:
             return {"success": True, "connected": True, "message": "Already connected to IB"}
 
         # Already reconnecting via health loop — don't double-trigger
         if self._tws_reconnecting:
             return {"success": False, "connected": False, "message": "IB reconnect already in progress"}
 
-        logger.info("Manual IB reconnect triggered from dashboard")
+        if force:
+            logger.info("Force reconnect triggered from dashboard — tearing down existing connection")
+        else:
+            logger.info("Manual IB reconnect triggered from dashboard")
 
         # Engage reconnect hold if engine is running
         if self.execution_engine and self.execution_engine.is_running:
@@ -2664,7 +2691,9 @@ class IBDataAgent:
                 # checks from cache without sending a request through the
                 # congested WebSocket (avoids timeout on page load).
                 state["ib_connected"] = bool(
-                    self.scanner and self.scanner.isConnected()
+                    self.scanner
+                    and self.scanner.isConnected()
+                    and not self.scanner.connection_lost
                 )
                 await self.websocket.send(json.dumps({
                     "type": "agent_state",

@@ -8,7 +8,7 @@ interface IBConnectionContextType {
   lastChecked: Date | null;
   lastMessage?: string; // From status API (e.g. relay error when disconnected)
   checkConnection: () => Promise<void>;
-  reconnectIB: () => Promise<{ success: boolean; message: string }>;
+  reconnectIB: (force?: boolean) => Promise<{ success: boolean; message: string }>;
   isReconnecting: boolean;
 }
 
@@ -68,11 +68,13 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const reconnectIB = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+  const reconnectIB = useCallback(async (force: boolean = false): Promise<{ success: boolean; message: string }> => {
     setIsReconnecting(true);
     try {
       const response = await fetch("/api/ib-connection/reconnect", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force }),
       });
       const data = await response.json();
 

@@ -10,12 +10,22 @@ export async function POST(request: NextRequest) {
     const user = await getCurrentUser();
     const userId = user?.id ?? undefined;
 
+    // Parse force flag from request body
+    let force = false;
+    try {
+      const body = await request.json();
+      force = body?.force === true;
+    } catch {
+      // No body or invalid JSON — default to non-force
+    }
+
     const url = new URL(`${PYTHON_SERVICE_URL}/options/relay/ib-reconnect`);
     if (userId) url.searchParams.set("user_id", userId);
 
     const response = await fetch(url.toString(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force }),
       cache: "no-store",
     });
 

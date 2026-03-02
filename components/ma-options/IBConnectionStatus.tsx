@@ -125,14 +125,19 @@ export default function IBConnectionStatus() {
             {isChecking ? "..." : "↻"}
           </button>
 
-          {!isConnected && !isChecking && (
+          {/* Reconnect button: always visible. Amber when disconnected, gray when connected (force mode) */}
+          {!isChecking && (
             <button
-              onClick={reconnectIB}
+              onClick={() => reconnectIB(isConnected)}
               disabled={isReconnecting}
-              className="px-2 py-0.5 bg-amber-700 hover:bg-amber-600 text-amber-100 rounded text-xs disabled:opacity-50"
-              title="Trigger IB reconnect on the agent"
+              className={`px-2 py-0.5 rounded text-xs disabled:opacity-50 ${
+                isConnected
+                  ? "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                  : "bg-amber-700 hover:bg-amber-600 text-amber-100"
+              }`}
+              title={isConnected ? "Force disconnect and reconnect to IB" : "Trigger IB reconnect on the agent"}
             >
-              {isReconnecting ? "Reconnecting..." : "Reconnect IB"}
+              {isReconnecting ? "Reconnecting..." : isConnected ? "Force Reconnect" : "Reconnect IB"}
             </button>
           )}
 

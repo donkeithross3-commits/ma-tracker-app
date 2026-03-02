@@ -137,6 +137,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.connection_lost = False
         self.last_heartbeat = time.time()
         self.connection_start_time = None
+        self._last_ib_callback = time.time()  # Updated on every IB callback for liveness probing
         # Last market data error (req_id, errorCode, errorString) for ES test_futures
         self.last_mkt_data_error = None
         # Error 200 on underlying request (no security definition) - trigger delayed retry
@@ -895,6 +896,12 @@ class IBMergerArbScanner(EWrapper, EClient):
                 self._farm_status[farm] = True
                 self.logger.info(f"Data farm UP: {farm} (code {errorCode})")
             # Informational — no further action
+        elif errorCode == 504:
+            # "Not connected" — TCP socket dead but connectionClosed() may not have fired
+            if not self.connection_lost:
+                self.logger.warning("Error 504 (Not connected) — marking connection as lost")
+                self.connection_lost = True
+            return  # Don't spam generic log with repeated 504s
         else:
             self.logger.error(f"IB Error {reqId}/{errorCode}: {errorString}")
             # Detect Read-Only API mode: IB blocks order/position info in that mode.
@@ -961,6 +968,10 @@ class IBMergerArbScanner(EWrapper, EClient):
         # Signal option snapshot early exit
         if self._opt_snapshot_req_id == reqId and self._opt_snapshot_done is not None:
             self._opt_snapshot_done.set()
+
+    def currentTime(self, time_server: int):
+        """IB responds to reqCurrentTime() — used as liveness probe."""
+        self._last_ib_callback = time.time()
 
     def orderStatus(self, orderId: int, status: str, filled: float, remaining: float,
                    avgFillPrice: float, permId: int, parentId: int, lastFillPrice: float,
@@ -1611,6 +1622,7 @@ class IBMergerArbScanner(EWrapper, EClient):
 
     def tickPrice(self, reqId: TickerId, tickType: int, price: float, attrib: TickAttrib):
         """Handle price updates -- routes to streaming cache or scan data as appropriate."""
+        self._last_ib_callback = time.time()  # Liveness proof — updated on every streaming tick
         # Fast path: if this reqId belongs to the streaming cache, update there and return
         if self.streaming_cache is not None and self.streaming_cache.is_streaming_req_id(reqId):
             self.streaming_cache.update_price(reqId, tickType, price)
