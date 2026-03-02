@@ -53,6 +53,7 @@ export function useIBBars(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const lastBarTimeRef = useRef<number>(0);
+  const hasBarsRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -115,6 +116,7 @@ export function useIBBars(
         // Track last bar time for incremental polls
         if (newBars.length > 0) {
           lastBarTimeRef.current = newBars[newBars.length - 1].time;
+          hasBarsRef.current = true;
         }
 
         setError(null);
@@ -136,17 +138,24 @@ export function useIBBars(
       setBars([]);
       setLoading(false);
       setError(null);
+      hasBarsRef.current = false;
       return;
     }
 
     // Reset on ticker/timeframe change
     setBars([]);
     lastBarTimeRef.current = 0;
+    hasBarsRef.current = false;
     setError(null);
 
     fetchBars(false);
 
-    pollRef.current = setInterval(() => fetchBars(true), POLL_INTERVAL_MS);
+    // Poll: full retry (isAppend=false) if initial fetch failed and we have no bars,
+    // otherwise incremental merge (isAppend=true)
+    pollRef.current = setInterval(
+      () => fetchBars(hasBarsRef.current),
+      POLL_INTERVAL_MS
+    );
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       abortRef.current?.abort();
