@@ -38,21 +38,37 @@ function formatVolume(v: number | null): string {
   return v.toLocaleString();
 }
 
+/** Adaptive decimals: large prices get fewer decimals to fit mobile columns.
+ *  ≥10000 → 0 decimals (24726), ≥1000 → 0-1 (6815 or 6814.5), <1000 → 2 (71.70) */
 function formatPrice(p: number | null): string {
   if (p == null) return "—";
+  const a = Math.abs(p);
+  if (a >= 10000) return Math.round(p).toString();
+  if (a >= 1000) {
+    const s = p.toFixed(1);
+    return s.endsWith(".0") ? s.slice(0, -2) : s;
+  }
   return p.toFixed(2);
 }
 
+/** Change: ≥100 → 0 decimals, ≥10 → 1, <10 → 2 */
 function formatChange(c: number | null): string {
   if (c == null) return "—";
   const sign = c > 0 ? "+" : "";
+  const a = Math.abs(c);
+  if (a >= 100) return sign + Math.round(c).toString();
+  if (a >= 10) {
+    const s = c.toFixed(1);
+    return sign + (s.startsWith("-") ? s : s);
+  }
   return sign + c.toFixed(2);
 }
 
+/** Change %: always 1 decimal for compact display */
 function formatChangePct(c: number | null): string {
   if (c == null) return "—";
   const sign = c > 0 ? "+" : "";
-  return sign + c.toFixed(2) + "%";
+  return sign + c.toFixed(1) + "%";
 }
 
 function changeColor(v: number | null): string {
