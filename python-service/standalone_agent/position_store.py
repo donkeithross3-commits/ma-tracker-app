@@ -150,6 +150,27 @@ class PositionStore:
             self._dirty_ids.add(position_id)
             self._save()
 
+    def update_risk_config(self, position_id: str, risk_updates: dict) -> None:
+        """Merge risk config updates into stored position.
+
+        Used by hot-modify to persist config changes to running risk managers.
+        Shallow merge for nested dicts preserves existing fields not in the update.
+        """
+        with self._lock:
+            pos = self._positions.get(position_id)
+            if not pos:
+                return
+            rc = pos.get("risk_config", {})
+            for key, val in risk_updates.items():
+                if isinstance(val, dict) and isinstance(rc.get(key), dict):
+                    rc[key] = {**rc[key], **val}  # shallow merge for nested dicts
+                else:
+                    rc[key] = val
+            pos["risk_config"] = rc
+            self._dirty_ids.add(position_id)
+            self._save()
+        logger.info("PositionStore: updated risk_config for %s (keys=%s)", position_id, list(risk_updates.keys()))
+
     def update_fill_exec_id(self, position_id: str, order_id: int, exec_id: str) -> bool:
         """Retroactively set exec_id on a fill matched by order_id.
 

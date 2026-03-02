@@ -398,6 +398,21 @@ class ExecutionEngine:
                 }
         return result
 
+    def get_risk_managers_for_parent(self, parent_strategy_id: str) -> list:
+        """Return all active risk manager strategies whose parent matches.
+
+        Returns list of (strategy_id, StrategyState) tuples.
+        """
+        result = []
+        for sid, state in self._strategies.items():
+            if not sid.startswith("bmc_risk_"):
+                continue
+            rm = state.strategy
+            parent = getattr(rm, '_parent_strategy_id', None) or state.config.get('_parent_strategy_id', '')
+            if parent == parent_strategy_id:
+                result.append((sid, state))
+        return result
+
     def _consume_entry_cap(self) -> bool:
         """Try to consume one unit of global entry cap. Returns True if allowed."""
         with self._entry_cap_lock:

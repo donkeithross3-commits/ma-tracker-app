@@ -84,6 +84,48 @@ HEARTBEAT_INTERVAL = 10  # seconds
 RECONNECT_DELAY = 5  # seconds
 CACHE_TTL_SECONDS = 60  # How long to cache option chain data
 
+# ── Risk config hot-modify: BMC flat fields → nested risk manager format ──
+_BMC_RISK_FIELDS = frozenset({
+    "risk_stop_loss_enabled", "risk_stop_loss_type", "risk_stop_loss_trigger_pct",
+    "risk_trailing_enabled", "risk_trailing_activation_pct", "risk_trailing_trail_pct",
+    "risk_profit_taking_enabled", "risk_profit_targets",
+    "risk_preset",
+})
+
+
+def _translate_bmc_to_risk_config(bmc_config: dict) -> dict:
+    """Translate BMC flat config fields to nested risk manager config format.
+
+    The dashboard sends flat keys like risk_stop_loss_enabled=true. Risk managers
+    expect nested dicts like {"stop_loss": {"enabled": true, ...}}.
+    Only includes sections where at least one field is present in bmc_config.
+    """
+    risk = {}
+    # Stop loss
+    if any(k.startswith("risk_stop_loss_") for k in bmc_config):
+        risk["stop_loss"] = {
+            "enabled": bmc_config.get("risk_stop_loss_enabled", False),
+            "type": bmc_config.get("risk_stop_loss_type", "simple"),
+            "trigger_pct": bmc_config.get("risk_stop_loss_trigger_pct", -80.0),
+        }
+    # Profit taking + trailing
+    if any(k.startswith("risk_trailing_") or k.startswith("risk_profit_") for k in bmc_config):
+        pt = {}
+        if any(k.startswith("risk_profit_") for k in bmc_config):
+            pt["enabled"] = bmc_config.get("risk_profit_taking_enabled", False)
+            pt["targets"] = bmc_config.get("risk_profit_targets", [])
+        if any(k.startswith("risk_trailing_") for k in bmc_config):
+            pt["trailing_stop"] = {
+                "enabled": bmc_config.get("risk_trailing_enabled", False),
+                "activation_pct": bmc_config.get("risk_trailing_activation_pct", 25.0),
+                "trail_pct": bmc_config.get("risk_trailing_trail_pct", 15.0),
+            }
+        risk["profit_taking"] = pt
+    # Preset override
+    if "risk_preset" in bmc_config:
+        risk["preset"] = bmc_config["risk_preset"]
+    return risk
+
 
 class OptionChainCache:
     """In-memory cache for option chain data with TTL expiration"""
@@ -1598,7 +1640,12 @@ class IBDataAgent:
         return self.execution_engine.get_status()
 
     async def _handle_execution_config(self, payload: dict) -> dict:
-        """Update strategy configuration without restart."""
+        """Update strategy configuration without restart.
+
+        Also propagates risk-related fields to running risk managers
+        (hot-modify). See _BMC_RISK_FIELDS for the set of fields that
+        trigger propagation.
+        """
         if not self.execution_engine:
             return {"error": "Execution engine not initialized"}
 
@@ -1615,6 +1662,31 @@ class IBDataAgent:
                 break
         if len(resolved_ids) > 1:
             result["resolved_ids"] = resolved_ids
+
+        # ── Hot-modify running risk managers if risk fields changed ──
+        if _BMC_RISK_FIELDS & set(new_config.keys()):
+            risk_update = _translate_bmc_to_risk_config(new_config)
+            if risk_update:
+                rm_updated = 0
+                for sid in resolved_ids:
+                    rms = self.execution_engine.get_risk_managers_for_parent(sid)
+                    for rm_sid, rm_state in rms:
+                        try:
+                            rm = rm_state.strategy
+                            changes = rm.update_risk_config(risk_update)
+                            # Persist updated config to position store
+                            self.position_store.update_risk_config(rm_sid, risk_update)
+                            # Persist runtime state (level_states may have changed)
+                            if hasattr(rm, "get_runtime_snapshot"):
+                                self.position_store.update_runtime_state(
+                                    rm_sid, rm.get_runtime_snapshot()
+                                )
+                            rm_updated += 1
+                            logger.info("Hot-modified risk manager %s: %s", rm_sid, changes)
+                        except Exception as e:
+                            logger.error("Failed to hot-modify %s: %s", rm_sid, e)
+                result["risk_managers_updated"] = rm_updated
+
         self._persist_engine_config("config_change")
         return result
 

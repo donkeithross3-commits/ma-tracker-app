@@ -749,6 +749,99 @@ class RiskManagerStrategy(ExecutionStrategy):
             {k: v.value for k, v in self._level_states.items()},
         )
 
+    # ── Hot-modify (called from eval thread via execution engine) ──
+
+    def update_risk_config(self, new_config: dict) -> dict:
+        """Hot-modify risk parameters on a running risk manager.
+
+        Called from the eval thread context — no lock needed since evaluate()
+        and update_risk_config() both run on the eval thread.
+
+        Returns dict with {updated_fields, added_levels, removed_levels, skipped_levels}.
+        """
+        changes = {"updated_fields": [], "added_levels": [], "removed_levels": [], "skipped_levels": []}
+
+        # --- Stop Loss ---
+        old_sl = self.config.get("stop_loss", {})
+        new_sl = new_config.get("stop_loss", old_sl)
+        if new_sl != old_sl:
+            changes["updated_fields"].append("stop_loss")
+            if new_sl.get("enabled") and not old_sl.get("enabled"):
+                # Enabling stop loss — add level(s)
+                if new_sl.get("type") == "laddered":
+                    for i, _ in enumerate(new_sl.get("ladders", [])):
+                        key = f"stop_{i}"
+                        if key not in self._level_states:
+                            self._level_states[key] = LevelState.ARMED
+                            changes["added_levels"].append(key)
+                else:
+                    # Simple stop
+                    if "stop_simple" not in self._level_states:
+                        self._level_states["stop_simple"] = LevelState.ARMED
+                        changes["added_levels"].append("stop_simple")
+            elif not new_sl.get("enabled") and old_sl.get("enabled"):
+                # Disabling stop loss — remove only ARMED levels
+                for key in list(self._level_states):
+                    if key.startswith("stop_") and self._level_states[key] == LevelState.ARMED:
+                        del self._level_states[key]
+                        changes["removed_levels"].append(key)
+                    elif key.startswith("stop_"):
+                        changes["skipped_levels"].append(key)
+
+        # --- Profit Taking ---
+        old_pt = self.config.get("profit_taking", {})
+        new_pt = new_config.get("profit_taking", old_pt)
+        if new_pt != old_pt:
+            changes["updated_fields"].append("profit_taking")
+            if new_pt.get("enabled") and not old_pt.get("enabled"):
+                for i, _ in enumerate(new_pt.get("targets", [])):
+                    key = f"profit_{i}"
+                    if key not in self._level_states:
+                        self._level_states[key] = LevelState.ARMED
+                        changes["added_levels"].append(key)
+            elif not new_pt.get("enabled") and old_pt.get("enabled"):
+                for key in list(self._level_states):
+                    if key.startswith("profit_") and self._level_states[key] == LevelState.ARMED:
+                        del self._level_states[key]
+                        changes["removed_levels"].append(key)
+                    elif key.startswith("profit_"):
+                        changes["skipped_levels"].append(key)
+
+        # --- Trailing Stop (activation_pct, trail_pct, exit_tranches) ---
+        old_ts = old_pt.get("trailing_stop", {})
+        new_ts = new_pt.get("trailing_stop", old_ts)
+        if new_ts != old_ts:
+            changes["updated_fields"].append("trailing_stop")
+            if new_ts.get("enabled") and not old_ts.get("enabled"):
+                if "trailing" not in self._level_states:
+                    self._level_states["trailing"] = LevelState.ARMED
+                    changes["added_levels"].append("trailing")
+            elif not new_ts.get("enabled") and old_ts.get("enabled"):
+                if self._level_states.get("trailing") == LevelState.ARMED and not self._trailing_active:
+                    del self._level_states["trailing"]
+                    changes["removed_levels"].append("trailing")
+                elif "trailing" in self._level_states:
+                    changes["skipped_levels"].append("trailing")
+            # If trail_pct changed and trailing IS active, recalculate trail price from HWM
+            if self._trailing_active and new_ts.get("trail_pct") != old_ts.get("trail_pct"):
+                new_trail_pct = new_ts["trail_pct"]
+                # Determine effective trail_pct (may be tightened by current tranche)
+                tranches = new_ts.get("exit_tranches", [])
+                if tranches and self._trailing_tranche_idx < len(tranches):
+                    new_trail_pct = tranches[self._trailing_tranche_idx].get("trail_pct", new_trail_pct)
+                if self.is_long:
+                    self._trailing_stop_price = self.high_water_mark * (1 - new_trail_pct / 100)
+                else:
+                    self._trailing_stop_price = self.high_water_mark * (1 + new_trail_pct / 100)
+                changes["updated_fields"].append("trailing_stop_price_recalc")
+
+        # --- Merge new config into self.config ---
+        for key in ("stop_loss", "profit_taking"):
+            if key in new_config:
+                self.config[key] = new_config[key]
+
+        return changes
+
     # ── Internal helpers ──
 
     def _calc_pnl_pct(self, price: float) -> float:
