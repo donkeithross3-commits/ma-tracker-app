@@ -367,11 +367,17 @@ class IBDataAgent:
                                     if p.get("account") == self.IB_ACCT_CODE
                                 ]
                                 recon = self.execution_engine.reconcile_with_ib(ib_positions)
-                                if recon["stale_agent"] or recon["orphaned_ib"] or recon["adjusted"]:
+                                if recon["orphaned_ib"]:
+                                    n_spawned = self._spawn_missing_risk_managers(recon["orphaned_ib"])
                                     logger.warning(
-                                        "Post-reconnect reconciliation: matched=%d, orphaned=%d, stale=%d, adjusted=%d",
-                                        len(recon["matched"]), len(recon["orphaned_ib"]),
-                                        len(recon["stale_agent"]), len(recon["adjusted"]),
+                                        "Post-reconnect reconciliation: %d orphaned IB position(s) — "
+                                        "auto-spawned %d risk manager(s)",
+                                        len(recon["orphaned_ib"]), n_spawned,
+                                    )
+                                if recon["stale_agent"] or recon["adjusted"]:
+                                    logger.warning(
+                                        "Post-reconnect reconciliation: matched=%d, stale=%d, adjusted=%d",
+                                        len(recon["matched"]), len(recon["stale_agent"]), len(recon["adjusted"]),
                                     )
                         except Exception as e:
                             logger.error("Post-reconnect reconciliation failed: %s", e)
@@ -597,11 +603,17 @@ class IBDataAgent:
                         if p.get("account") == self.IB_ACCT_CODE
                     ]
                     recon = self.execution_engine.reconcile_with_ib(ib_positions)
-                    if recon["stale_agent"] or recon["orphaned_ib"] or recon["adjusted"]:
+                    if recon["orphaned_ib"]:
+                        n_spawned = self._spawn_missing_risk_managers(recon["orphaned_ib"])
                         logger.warning(
-                            "Post-reconnect reconciliation: matched=%d, orphaned=%d, stale=%d, adjusted=%d",
-                            len(recon["matched"]), len(recon["orphaned_ib"]),
-                            len(recon["stale_agent"]), len(recon["adjusted"]),
+                            "Post-reconnect reconciliation: %d orphaned IB position(s) — "
+                            "auto-spawned %d risk manager(s)",
+                            len(recon["orphaned_ib"]), n_spawned,
+                        )
+                    if recon["stale_agent"] or recon["adjusted"]:
+                        logger.warning(
+                            "Post-reconnect reconciliation: matched=%d, stale=%d, adjusted=%d",
+                            len(recon["matched"]), len(recon["stale_agent"]), len(recon["adjusted"]),
                         )
             except Exception as e:
                 logger.error("Post-reconnect reconciliation failed: %s", e)
@@ -1648,7 +1660,12 @@ class IBDataAgent:
                 ]
                 recon = self.execution_engine.reconcile_with_ib(ib_positions)
                 if recon["orphaned_ib"]:
-                    logger.warning("IB reconciliation: %d orphaned positions in IB", len(recon["orphaned_ib"]))
+                    n_spawned = self._spawn_missing_risk_managers(recon["orphaned_ib"])
+                    logger.warning(
+                        "IB reconciliation: %d orphaned IB option position(s) — "
+                        "auto-spawned %d risk manager(s)",
+                        len(recon["orphaned_ib"]), n_spawned,
+                    )
                 if recon["stale_agent"]:
                     logger.warning("IB reconciliation: %d stale positions closed", len(recon["stale_agent"]))
                 if recon["adjusted"]:
@@ -2401,6 +2418,154 @@ class IBDataAgent:
             ):
                 return sid
         return None
+
+    def _spawn_missing_risk_managers(self, orphaned_ib: list) -> int:
+        """Auto-spawn risk managers for IB option positions not tracked by the agent.
+
+        Closes the gap where a position exists in IB but has no corresponding
+        risk manager — e.g. when the position_store entry was lost before server
+        sync (agent crash/restart within 10s of fill) or when the risk manager
+        spawn failed silently.
+
+        Only acts on OPT positions (identified by non-empty strike + right).
+        Uses IB avgCost as entry_price. Inherits risk preset from the parent
+        BMC strategy's active config; falls back to zero_dte_convexity.
+
+        Returns the count of successfully spawned risk managers.
+        """
+        if not orphaned_ib or not self.execution_engine:
+            return 0
+
+        spawned = 0
+        for orphan in orphaned_ib:
+            instrument_key = orphan.get("instrument")  # tuple: (symbol, strike, expiry, right)
+            qty = orphan.get("qty", 0)
+            avg_cost = orphan.get("avg_cost") or 0.0
+
+            if not instrument_key or qty <= 0:
+                continue
+
+            symbol, strike, expiry, right = instrument_key
+
+            # Only handle option positions (identified by non-empty strike & right)
+            if not strike or not right:
+                logger.debug("IB reconciliation: skipping non-option orphan %s", instrument_key)
+                continue
+
+            # Skip if a risk manager already exists for this contract in memory
+            inst_dict = {"symbol": symbol, "secType": "OPT",
+                         "strike": strike, "expiry": expiry, "right": right}
+            if self._find_risk_manager_for_contract(inst_dict):
+                logger.info(
+                    "IB reconciliation: risk manager already in engine for %s %s %s %s — skipping",
+                    symbol, strike, expiry, right,
+                )
+                continue
+
+            logger.warning(
+                "IB reconciliation: orphaned option position %s %s %s %s "
+                "qty=%d avgCost=%.4f — auto-spawning risk manager",
+                symbol, strike, expiry, right, qty, avg_cost,
+            )
+
+            # ── Find parent BMC strategy for this ticker ──
+            ticker = (symbol or "").upper()
+            parent_sid: Optional[str] = None
+            parent_config: dict = {}
+            for sid_candidate in [
+                f"bmc_{ticker.lower()}_up",
+                f"bmc_{ticker.lower()}_down",
+                f"bmc_{ticker.lower()}",
+            ]:
+                state = self.execution_engine._strategies.get(sid_candidate)
+                if state:
+                    parent_sid = sid_candidate
+                    parent_config = state.config or {}
+                    break
+
+            # ── Build risk config — use parent's preset, fall back to zero_dte_convexity ──
+            risk_preset = parent_config.get("risk_preset", "zero_dte_convexity")
+            if risk_preset == "custom":
+                risk_section: dict = {
+                    "stop_loss": {
+                        "enabled": parent_config.get("risk_stop_loss_enabled", False),
+                        "type": parent_config.get("risk_stop_loss_type", "none"),
+                        "trigger_pct": parent_config.get("risk_stop_loss_trigger_pct", -80.0),
+                    },
+                    "profit_taking": {
+                        "enabled": parent_config.get("risk_profit_targets_enabled", True),
+                        "targets": parent_config.get("risk_profit_targets", []),
+                        "trailing_stop": {
+                            "enabled": parent_config.get("risk_trailing_enabled", True),
+                            "activation_pct": parent_config.get("risk_trailing_activation_pct", 25),
+                            "trail_pct": parent_config.get("risk_trailing_trail_pct", 15),
+                        },
+                    },
+                    "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
+                }
+            else:
+                risk_section = {"preset": risk_preset}
+
+            risk_config = {
+                **risk_section,
+                "instrument": {
+                    "symbol": symbol,
+                    "secType": "OPT",
+                    "exchange": "SMART",
+                    "currency": "USD",
+                    "strike": float(strike) if strike else 0.0,
+                    "expiry": expiry or "",
+                    "right": right or "C",
+                },
+                "position": {
+                    "side": "LONG",
+                    "quantity": int(qty),
+                    "entry_price": float(avg_cost),
+                },
+                "_parent_strategy_id": parent_sid or f"bmc_{ticker.lower()}",
+            }
+
+            try:
+                self._spawn_risk_manager_for_bmc(risk_config)
+                spawned += 1
+                logger.info(
+                    "IB reconciliation: spawned risk manager for %s %s %s %s "
+                    "(entry=%.4f, qty=%d, parent=%s)",
+                    symbol, strike, expiry, right, avg_cost, qty, parent_sid,
+                )
+
+                # Populate parent BMC strategy's _active_positions so it knows
+                # about the recovered position (cooldown, spawn counter, dashboard display)
+                if parent_sid:
+                    parent_state = self.execution_engine._strategies.get(parent_sid)
+                    if parent_state and hasattr(parent_state.strategy, "_active_positions"):
+                        option_contract = {
+                            "symbol": symbol,
+                            "strike": float(strike) if strike else 0.0,
+                            "expiry": expiry or "",
+                            "right": right or "C",
+                        }
+                        parent_state.strategy._active_positions.append({
+                            "order_id": 0,
+                            "entry_price": float(avg_cost),
+                            "quantity": int(qty),
+                            "fill_time": time.time(),
+                            "perm_id": 0,
+                            "signal": {"option_contract": option_contract},
+                        })
+                        if hasattr(parent_state.strategy, "_positions_spawned"):
+                            parent_state.strategy._positions_spawned += 1
+                        logger.info(
+                            "IB reconciliation: populated %s._active_positions for %s",
+                            parent_sid, ticker,
+                        )
+            except Exception as e:
+                logger.error(
+                    "IB reconciliation: failed to spawn risk manager for %s %s %s %s: %s",
+                    symbol, strike, expiry, right, e,
+                )
+
+        return spawned
 
     def _aggregate_lot_into_manager(
         self,
