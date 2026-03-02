@@ -1522,7 +1522,7 @@ class IBMergerArbScanner(EWrapper, EClient):
             bar_size,        # e.g., "5 mins"
             what_to_show,    # "TRADES"
             use_rth,         # 0 = include extended hours
-            1,               # formatDate (1 = yyyymmdd for daily, epoch for intraday)
+            2,               # formatDate (2 = epoch seconds for intraday, YYYYMMDD for daily)
             False,           # keepUpToDate
             []               # chartOptions
         )

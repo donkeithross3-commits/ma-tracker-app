@@ -83,6 +83,15 @@
       "category": "signals",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "intraday-bar-timestamps",
+      "title": "Intraday Chart Timestamp Fix",
+      "summary": "Fixed sub-1-hour futures charts showing daily bars instead of intraday candles",
+      "description": "Sub-hourly futures charts (1m, 5m, 15m) were displaying only one giant bar per day instead of hundreds of intraday candles. The x-axis showed daily date labels instead of intraday times.\n\nRoot cause: IB's reqHistoricalData was called with formatDate=1, which returns intraday bar timestamps as 'YYYYMMDD  HH:MM:SS' strings. The scanner's bar handler tried int(bar.date), which threw ValueError on the space-separated format. The except block stripped the time component, collapsing all bars on the same day to a midnight timestamp. The charting library then deduplicated by timestamp, showing one bar per day.\n\nFixed by switching formatDate from 1 to 2, which makes IB return epoch seconds directly for intraday bars (and YYYYMMDD for daily). The existing int() parse handles both correctly. Agent v1.19.9.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
     }
   ]
 }
