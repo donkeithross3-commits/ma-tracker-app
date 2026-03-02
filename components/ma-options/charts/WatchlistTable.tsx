@@ -47,16 +47,9 @@ function formatVolume(v: number | null): string {
   return v.toLocaleString();
 }
 
-/** Adaptive decimals: large prices get fewer decimals to fit mobile columns.
- *  ≥1000 → 0 decimals (6812, 24726), ≥100 → 0-1 (177 or 263.5), <100 → 2 (71.70) */
+/** Always 2 decimals — tableLayout:auto lets columns expand to fit. */
 function formatPrice(p: number | null): string {
   if (p == null) return "—";
-  const a = Math.abs(p);
-  if (a >= 1000) return Math.round(p).toString();
-  if (a >= 100) {
-    const s = p.toFixed(1);
-    return s.endsWith(".0") ? s.slice(0, -2) : s;
-  }
   return p.toFixed(2);
 }
 
@@ -83,6 +76,38 @@ function formatChangePct(c: number | null): string {
 function changeColor(v: number | null): string {
   if (v == null || v === 0) return "text-gray-400";
   return v > 0 ? "text-green-400" : "text-red-400";
+}
+
+// ---------------------------------------------------------------------------
+// Futures front-month — mirrors agent's _get_front_month() logic
+// ---------------------------------------------------------------------------
+
+const FUTURES_MONTH_CODES = "FGHJKMNQUVXZ"; // Jan=F … Dec=Z
+const QUARTERLY_FUTURES = new Set([
+  "ES", "NQ", "YM", "RTY", "MES", "MNQ", "M2K", "MYM",
+]);
+
+/** Derive the front-month contract code for a bare futures root, e.g. "H6" */
+function getFrontMonthCode(symbol: string): string {
+  const now = new Date();
+  const month = now.getUTCMonth(); // 0-based
+  const year = now.getUTCFullYear();
+
+  if (QUARTERLY_FUTURES.has(symbol)) {
+    // Quarterly: nearest Mar(2), Jun(5), Sep(8), Dec(11)
+    const quarters = [2, 5, 8, 11];
+    for (const q of quarters) {
+      if (q >= month) {
+        return FUTURES_MONTH_CODES[q] + String(year % 10);
+      }
+    }
+    return FUTURES_MONTH_CODES[2] + String((year + 1) % 10);
+  }
+
+  // Monthly: always next month (current month contract typically expired)
+  const nextMonth = (month + 1) % 12;
+  const nextYear = month === 11 ? year + 1 : year;
+  return FUTURES_MONTH_CODES[nextMonth] + String(nextYear % 10);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +233,11 @@ export default function WatchlistTable({
                             <span className="text-sm sm:text-base font-bold text-gray-100">
                               {item.ticker}
                             </span>
+                            {item.instrumentType === "future" && (
+                              <span className="text-xs font-mono text-amber-500/80">
+                                {getFrontMonthCode(item.ticker)}
+                              </span>
+                            )}
                             {item.exchange && (
                               <span className="text-xs text-gray-500 hidden sm:inline">
                                 {item.exchange}
