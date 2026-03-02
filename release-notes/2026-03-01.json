@@ -97,7 +97,16 @@
       "id": "ohlcv-crosshair-legend",
       "title": "OHLCV Crosshair Legend",
       "summary": "Charts now display O/H/L/C values and volume when hovering over any bar",
-      "description": "Hovering the crosshair over a candlestick bar now shows a TradingView-style OHLCV legend in the top-left corner of the chart. Values are colored green for bullish bars and red for bearish bars, with volume shown in compact format (K/M suffixes). The legend disappears when the crosshair moves off the chart area. Works on both stock and futures charts across all timeframes.",
+      "description": "Hovering the crosshair over a candlestick bar now shows a TradingView-style OHLCV legend in the top-left corner of the chart. Values are colored green for bullish bars and red for bearish bars, with volume shown in compact format (K/M suffixes). The legend disappears when the crosshair moves off the chart area.\n\nThe legend uses a semi-transparent dark background (bg-gray-950/80) for readability against any chart content, with grouped O/H/L/C/V labels and adequate spacing. Works on both stock and futures charts across all timeframes.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "stale-chart-data-fix",
+      "title": "Timeframe Switch Data Fix",
+      "summary": "Fixed charts showing stale candles from the previous timeframe when switching between 1m/5m/15m/1h/1D",
+      "description": "Switching timeframes (e.g., 5m → 15m) would sometimes show the old timeframe's candles until new data loaded. The chart wasn't being cleared when the data source reset to empty during the transition.\n\nFixed by explicitly clearing the chart's candlestick and volume data when bars are empty, ensuring a clean slate before the new timeframe's data arrives. Also added bar count to the widget title (e.g., 'SPY — 5m (390)') as a quick verification that the correct number of bars loaded for each timeframe.",
       "category": "signals",
       "image": null,
       "screenshot": null
