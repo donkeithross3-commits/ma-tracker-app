@@ -224,17 +224,6 @@ class ProviderRegistry:
                 if best:
                     return best
                 if not allow_fallback_to_any:
-                    # Single-tenant optimization: if exactly 1 provider is
-                    # connected, use it even for user-restricted requests.
-                    # Safe because one agent = one user = whoever is asking.
-                    active = [p for p in self.providers.values() if p.is_active]
-                    if len(active) == 1:
-                        logger.info(
-                            "Single-tenant fallback: routing user %s to sole "
-                            "provider %s (registered user %s)",
-                            user_id, active[0].provider_id, active[0].user_id,
-                        )
-                        return active[0]
                     return None
             # Fallback: prefer IB-connected providers with highest version.
             # Without this, the first-inserted dict entry wins — which could
