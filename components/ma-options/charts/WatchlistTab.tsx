@@ -207,6 +207,33 @@ export default function WatchlistTab() {
     [selectedListId]
   );
 
+  // --- Move ticker (reorder) ---
+  const handleMoveItem = useCallback(
+    async (index: number, direction: "up" | "down") => {
+      if (!selectedListId) return;
+      const swapIdx = direction === "up" ? index - 1 : index + 1;
+      if (swapIdx < 0 || swapIdx >= items.length) return;
+
+      // Optimistic swap in UI
+      const reordered = [...items];
+      [reordered[index], reordered[swapIdx]] = [reordered[swapIdx], reordered[index]];
+      setItems(reordered);
+
+      // Persist via API
+      try {
+        await fetch(`/api/watchlists/${selectedListId}/items`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemIds: reordered.map((i) => i.id) }),
+        });
+      } catch {
+        // Revert on failure
+        setItems(items);
+      }
+    },
+    [selectedListId, items]
+  );
+
   // --- Remove ticker ---
   const handleRemoveItem = useCallback(
     async (ticker: string) => {
@@ -275,6 +302,7 @@ export default function WatchlistTab() {
             items={items}
             quotes={quotes}
             onRemoveItem={handleRemoveItem}
+            onMoveItem={handleMoveItem}
           />
         </>
       ) : (

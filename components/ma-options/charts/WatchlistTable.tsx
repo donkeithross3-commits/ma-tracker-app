@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useCallback } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, ChevronUp, ChevronDown } from "lucide-react";
 import {
   ColumnChooser,
   type ColumnDef,
@@ -32,19 +32,28 @@ const WATCHLIST_LOCKED = ["instrument"];
 
 function formatVolume(v: number | null): string {
   if (v == null) return "—";
-  if (v >= 1_000_000_000) return (v / 1_000_000_000).toFixed(1) + "B";
-  if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + "M";
-  if (v >= 1_000) return (v / 1_000).toFixed(1) + "K";
+  if (v >= 1_000_000_000) {
+    const n = v / 1_000_000_000;
+    return (n >= 100 ? Math.round(n).toString() : n.toFixed(1)) + "B";
+  }
+  if (v >= 1_000_000) {
+    const n = v / 1_000_000;
+    return (n >= 100 ? Math.round(n).toString() : n.toFixed(1)) + "M";
+  }
+  if (v >= 1_000) {
+    const n = v / 1_000;
+    return (n >= 100 ? Math.round(n).toString() : n.toFixed(1)) + "K";
+  }
   return v.toLocaleString();
 }
 
 /** Adaptive decimals: large prices get fewer decimals to fit mobile columns.
- *  ≥10000 → 0 decimals (24726), ≥1000 → 0-1 (6815 or 6814.5), <1000 → 2 (71.70) */
+ *  ≥1000 → 0 decimals (6812, 24726), ≥100 → 0-1 (177 or 263.5), <100 → 2 (71.70) */
 function formatPrice(p: number | null): string {
   if (p == null) return "—";
   const a = Math.abs(p);
-  if (a >= 10000) return Math.round(p).toString();
-  if (a >= 1000) {
+  if (a >= 1000) return Math.round(p).toString();
+  if (a >= 100) {
     const s = p.toFixed(1);
     return s.endsWith(".0") ? s.slice(0, -2) : s;
   }
@@ -93,6 +102,7 @@ interface WatchlistTableProps {
   items: WatchlistItemDisplay[];
   quotes: Map<string, QuoteData>;
   onRemoveItem: (ticker: string) => void;
+  onMoveItem: (index: number, direction: "up" | "down") => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +113,7 @@ export default function WatchlistTable({
   items,
   quotes,
   onRemoveItem,
+  onMoveItem,
 }: WatchlistTableProps) {
   const { getVisibleColumns, setVisibleColumns } = useUIPreferences();
   const savedCols = getVisibleColumns("watchlist");
@@ -143,7 +154,7 @@ export default function WatchlistTable({
         className="overflow-x-auto d-table-wrap"
         style={{ "--visible-cols": visibleKeys.length } as React.CSSProperties}
       >
-        <table className="w-full text-sm d-table">
+        <table className="w-full text-sm d-table" style={{ tableLayout: "auto" }}>
           <thead>
             <tr className="border-b border-gray-700 text-gray-400">
               {visibleSet.has("instrument") && (
@@ -167,13 +178,15 @@ export default function WatchlistTable({
               {visibleSet.has("ask") && (
                 <th className="text-right py-2 px-1.5 sm:px-2 font-medium whitespace-nowrap">Ask</th>
               )}
-              <th className="w-8"></th>
+              <th className="w-16 sm:w-20"></th>
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => {
+            {items.map((item, idx) => {
               const q = quotes.get(item.ticker);
               const hasData = q && !q.stale;
+              const isFirst = idx === 0;
+              const isLast = idx === items.length - 1;
 
               return (
                 <tr
@@ -245,13 +258,33 @@ export default function WatchlistTable({
                     </td>
                   )}
                   <td className="py-1.5 sm:py-2 px-0.5 sm:px-1">
-                    <button
-                      onClick={() => onRemoveItem(item.ticker)}
-                      className="p-1 text-gray-600 hover:text-red-400 transition-colors"
-                      title={`Remove ${item.ticker}`}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="flex items-center gap-0.5">
+                      <div className="flex flex-col">
+                        <button
+                          onClick={() => onMoveItem(idx, "up")}
+                          disabled={isFirst}
+                          className={`p-0.5 transition-colors ${isFirst ? "text-gray-700 cursor-default" : "text-gray-500 hover:text-gray-200"}`}
+                          title="Move up"
+                        >
+                          <ChevronUp className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={() => onMoveItem(idx, "down")}
+                          disabled={isLast}
+                          className={`p-0.5 transition-colors ${isLast ? "text-gray-700 cursor-default" : "text-gray-500 hover:text-gray-200"}`}
+                          title="Move down"
+                        >
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => onRemoveItem(item.ticker)}
+                        className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+                        title={`Remove ${item.ticker}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
