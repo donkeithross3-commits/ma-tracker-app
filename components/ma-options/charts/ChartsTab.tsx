@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import ChartWidgetInstance from "./ChartWidgetInstance";
+import { ChartErrorBoundary } from "./ChartErrorBoundary";
 import PresetSelector from "./PresetSelector";
 import AddWidgetButton from "./AddWidgetButton";
 import {
@@ -521,16 +522,18 @@ export default function ChartsTab() {
           >
             {widgets.map((widget) => (
               <div key={widget.id} style={{ width: "100%", height: "100%" }}>
-                <ChartWidgetInstance
-                  config={widget}
-                  overlayToggles={overlayToggles}
-                  onConfigChange={handleWidgetConfigChange}
-                  onRemove={
-                    widgets.length > 1
-                      ? () => handleWidgetRemove(widget.id)
-                      : undefined
-                  }
-                />
+                <ChartErrorBoundary widgetId={widget.id}>
+                  <ChartWidgetInstance
+                    config={widget}
+                    overlayToggles={overlayToggles}
+                    onConfigChange={handleWidgetConfigChange}
+                    onRemove={
+                      widgets.length > 1
+                        ? () => handleWidgetRemove(widget.id)
+                        : undefined
+                    }
+                  />
+                </ChartErrorBoundary>
               </div>
             ))}
           </RGLResponsive>

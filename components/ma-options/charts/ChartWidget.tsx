@@ -196,25 +196,37 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
       if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
       if (bars.length === 0) return;
 
-      const candleData: CandlestickData[] = bars.map((b) => ({
-        time: b.time as Time,
-        open: b.open,
-        high: b.high,
-        low: b.low,
-        close: b.close,
-      }));
+      try {
+        // Deduplicate bars by time (IB can return overlapping timestamps)
+        const seen = new Set<number>();
+        const dedupedBars = bars.filter((b) => {
+          if (seen.has(b.time)) return false;
+          seen.add(b.time);
+          return true;
+        });
 
-      const volumeData: HistogramData[] = bars.map((b) => ({
-        time: b.time as Time,
-        value: b.volume,
-        color: b.close >= b.open ? VOLUME_UP : VOLUME_DOWN,
-      }));
+        const candleData: CandlestickData[] = dedupedBars.map((b) => ({
+          time: b.time as Time,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+        }));
 
-      candleSeriesRef.current.setData(candleData);
-      volumeSeriesRef.current.setData(volumeData);
+        const volumeData: HistogramData[] = dedupedBars.map((b) => ({
+          time: b.time as Time,
+          value: b.volume,
+          color: b.close >= b.open ? VOLUME_UP : VOLUME_DOWN,
+        }));
 
-      // Fit content on initial data load
-      chartRef.current?.timeScale().fitContent();
+        candleSeriesRef.current.setData(candleData);
+        volumeSeriesRef.current.setData(volumeData);
+
+        // Fit content on initial data load
+        chartRef.current?.timeScale().fitContent();
+      } catch (err) {
+        console.error("[ChartWidget] Error setting bar data:", err);
+      }
     }, [bars]);
 
     // Toggle volume visibility
@@ -229,44 +241,48 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
     const applyOverlays = useCallback(() => {
       if (!markersPluginRef.current || !signalHistSeriesRef.current) return;
 
-      // Signal histogram
-      if (overlayToggles.showSignals && signals && signals.length > 0) {
-        const { markers: signalMarkers, histogramData } = buildSignalOverlay(
-          signals,
-          bars
-        );
+      try {
+        // Signal histogram
+        if (overlayToggles.showSignals && signals && signals.length > 0) {
+          const { markers: signalMarkers, histogramData } = buildSignalOverlay(
+            signals,
+            bars
+          );
 
-        // Set histogram data
-        const histData: HistogramData[] = histogramData.map((h: SignalHistogramPoint) => ({
-          time: h.time as Time,
-          value: h.value,
-          color: h.color,
-        }));
-        signalHistSeriesRef.current.setData(histData);
-        signalHistSeriesRef.current.applyOptions({ visible: true });
+          // Set histogram data
+          const histData: HistogramData[] = histogramData.map((h: SignalHistogramPoint) => ({
+            time: h.time as Time,
+            value: h.value,
+            color: h.color,
+          }));
+          signalHistSeriesRef.current.setData(histData);
+          signalHistSeriesRef.current.applyOptions({ visible: true });
 
-        // Merge signal markers with trade markers
-        let allMarkers: SeriesMarker<Time>[] = [...signalMarkers];
+          // Merge signal markers with trade markers
+          let allMarkers: SeriesMarker<Time>[] = [...signalMarkers];
 
-        if (overlayToggles.showTrades && fills && fills.length > 0) {
-          const tradeMarkers = buildTradeMarkers(fills, bars);
-          allMarkers = [...allMarkers, ...tradeMarkers];
-        }
+          if (overlayToggles.showTrades && fills && fills.length > 0) {
+            const tradeMarkers = buildTradeMarkers(fills, bars);
+            allMarkers = [...allMarkers, ...tradeMarkers];
+          }
 
-        allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
-        markersPluginRef.current.setMarkers(allMarkers);
-      } else {
-        // No signal overlay
-        signalHistSeriesRef.current.setData([]);
-        signalHistSeriesRef.current.applyOptions({ visible: false });
-
-        // Still show trade markers if enabled
-        if (overlayToggles.showTrades && fills && fills.length > 0) {
-          const tradeMarkers = buildTradeMarkers(fills, bars);
-          markersPluginRef.current.setMarkers(tradeMarkers);
+          allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+          markersPluginRef.current.setMarkers(allMarkers);
         } else {
-          markersPluginRef.current.setMarkers([]);
+          // No signal overlay
+          signalHistSeriesRef.current.setData([]);
+          signalHistSeriesRef.current.applyOptions({ visible: false });
+
+          // Still show trade markers if enabled
+          if (overlayToggles.showTrades && fills && fills.length > 0) {
+            const tradeMarkers = buildTradeMarkers(fills, bars);
+            markersPluginRef.current.setMarkers(tradeMarkers);
+          } else {
+            markersPluginRef.current.setMarkers([]);
+          }
         }
+      } catch (err) {
+        console.error("[ChartWidget] Error applying overlays:", err);
       }
     }, [bars, signals, fills, overlayToggles]);
 

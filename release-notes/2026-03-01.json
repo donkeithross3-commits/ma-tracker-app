@@ -101,6 +101,24 @@
       "category": "signals",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "chart-error-boundary",
+      "title": "Chart Widget Error Isolation",
+      "summary": "Individual chart widgets now recover gracefully from errors instead of crashing the entire page",
+      "description": "Added React error boundaries around each chart widget so that if one widget encounters bad data or a rendering error (e.g., from IB returning duplicate timestamps for futures bars), only that widget shows an error state with a Retry button — the rest of the page remains functional.\n\nAlso added duplicate-timestamp deduplication for bar data from IB (which can return overlapping bars during polling), and defensive try-catch wrappers around all chart library data-setting operations. Previously, an error in any single widget would crash the entire charts page with no recovery path.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "chart-preset-protection",
+      "title": "Built-in Preset Protection",
+      "summary": "Built-in chart presets (Single Chart, Quad View) are no longer silently overwritten when you customize tickers",
+      "description": "Previously, modifying tickers in a built-in preset (e.g., changing Quad View's default SPY tickers to ES-NQ-GC-SI) would auto-save over the built-in preset. Next time you loaded Quad View for a fresh layout, the customized version would load instead.\n\nBuilt-in presets are now read-only. Ticker changes on built-in presets are not auto-saved. To keep a customized layout, use Save As to create a named copy. Also fixed the /charts URL defaulting to the Watchlist tab instead of Charts.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
     }
   ]
 }
