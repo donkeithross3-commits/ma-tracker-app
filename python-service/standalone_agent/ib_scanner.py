@@ -920,6 +920,11 @@ class IBMergerArbScanner(EWrapper, EClient):
             _mkt_err_codes = (354, 10090, 10167, 10168, 10189)
             if errorCode in _mkt_err_codes or "not subscribed" in (errorString or "").lower():
                 self.last_mkt_data_error = (reqId, errorCode, errorString)
+            # 200 = no security definition; for option snapshots, unblock the wait
+            if errorCode == 200 and self._opt_snapshot_req_id == reqId:
+                done = self._opt_snapshot_done
+                if done:
+                    done.set()
             # 200 = no security definition; for underlying requests we may retry with delayed
             if errorCode == 200 and reqId in self.req_id_map and "underlying" in self.req_id_map.get(reqId, ""):
                 rs = self._underlying_requests.get(reqId)
@@ -1580,6 +1585,12 @@ class IBMergerArbScanner(EWrapper, EClient):
 
         self._opt_snapshot_done = Event()
         self._opt_snapshot_req_id = req_id
+        self.logger.info(
+            "Option snapshot reqId=%d: %s %s %.1f %s %s tc=%s",
+            req_id, contract.symbol, contract.secType, contract.strike,
+            contract.right, contract.lastTradeDateOrContractMonth,
+            contract.tradingClass or "(none)",
+        )
         # snapshot=True: IB delivers all available ticks then calls tickSnapshotEnd
         self.reqMktData(req_id, contract, "", True, False, [])
         self._opt_snapshot_done.wait(timeout=timeout_sec)
@@ -1589,7 +1600,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         result = self.option_chain.pop(req_id, {"bid": None, "ask": None})
         self.req_id_map.pop(req_id, None)
 
-        self.logger.debug(
+        self.logger.info(
             "Option snapshot %s %.1f%s %s: bid=%s ask=%s",
             contract_dict.get("symbol"), contract_dict.get("strike", 0),
             contract_dict.get("right", "?"),
