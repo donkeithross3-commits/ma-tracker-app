@@ -389,8 +389,9 @@ class ExecutionEngine:
         }
         for sid, state in self._strategies.items():
             if state.ticker:  # skip risk managers (no ticker)
-                result["tickers"][state.ticker] = {
+                result["tickers"][sid] = {
                     "strategy_id": sid,
+                    "ticker": state.ticker,
                     "ticker_entry_budget": state.ticker_entry_budget,
                     "ticker_entries_placed": state.ticker_entries_placed,
                     "is_active": state.is_active,

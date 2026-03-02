@@ -34,7 +34,7 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -1340,6 +1340,49 @@ class IBDataAgent:
 
     # ── Execution engine request handlers ──
 
+    async def _load_single_strategy(self, strat_cfg: dict) -> dict:
+        """Create, load, and register a single strategy from config.
+
+        Shared by _handle_execution_start (normal + expanded) and
+        _handle_execution_add_ticker. Returns the load_strategy result dict.
+        """
+        strategy_id = strat_cfg.get("strategy_id", "")
+        strategy_type = strat_cfg.get("strategy_type", "")
+        config = strat_cfg.get("config", {})
+        config["_strategy_type"] = strategy_type
+        ticker_budget = strat_cfg.get("ticker_budget", -1)
+
+        if not strategy_id:
+            return {"error": "strategy_id is required"}
+
+        if strategy_id in self.execution_engine._strategies:
+            return {"strategy_id": strategy_id, "status": "already_loaded"}
+
+        strategy = self._create_strategy(strategy_type)
+        if strategy is None:
+            return {"error": f"Unknown strategy_type: {strategy_type}"}
+
+        # Set parent strategy ID for risk manager lineage
+        # For expanded variants like bmc_spy_up, parent is still this strategy_id
+        strategy._parent_strategy_id = strategy_id
+
+        # Run load_strategy in a thread pool so strategy.on_start()
+        # (which performs blocking REST calls for bootstrap + backfill)
+        # doesn't freeze the asyncio event loop and cause relay timeouts.
+        result = await self._run_in_thread(
+            self.execution_engine.load_strategy, strategy_id, strategy, config
+        )
+
+        # Set ticker + per-ticker budget on the StrategyState
+        if "error" not in result:
+            state = self.execution_engine._strategies.get(strategy_id)
+            if state:
+                state.ticker = config.get("ticker", strategy_id.replace("bmc_", "").upper())
+                if ticker_budget != -1:
+                    state.ticker_entry_budget = ticker_budget
+
+        return result
+
     async def _handle_execution_start(self, payload: dict) -> dict:
         """Start execution engine with strategy configuration.
 
@@ -1368,31 +1411,25 @@ class IBDataAgent:
                 continue
 
             # Skip if strategy already loaded (idempotent on running engine)
-            if strategy_id in self.execution_engine._strategies:
-                results.append({"strategy_id": strategy_id, "status": "already_loaded"})
+            # Also check directional variants (bmc_spy -> bmc_spy_up/bmc_spy_down)
+            resolved = self._resolve_strategy_ids(strategy_id)
+            if resolved and resolved[0] in self.execution_engine._strategies:
+                results.append({"strategy_id": strategy_id, "status": "already_loaded",
+                                "resolved_ids": resolved})
                 continue
 
-            # Create strategy instance based on type
-            strategy = self._create_strategy(strategy_type)
-            if strategy is None:
-                results.append({"error": f"Unknown strategy_type: {strategy_type}"})
-                continue
+            # ── Directional expansion: split into UP/DOWN if both models exist ──
+            if config.get("ticker") and not config.get("model_version"):
+                expanded = self._expand_directional_strategies(strat_cfg)
+                if expanded:
+                    for exp_cfg in expanded:
+                        exp_result = await self._load_single_strategy(exp_cfg)
+                        results.append(exp_result)
+                    continue  # Skip original strat_cfg -- it was expanded
 
-            # Run load_strategy in a thread pool so strategy.on_start()
-            # (which performs blocking REST calls for bootstrap + backfill)
-            # doesn't freeze the asyncio event loop and cause relay timeouts.
-            result = await self._run_in_thread(
-                self.execution_engine.load_strategy, strategy_id, strategy, config
-            )
+            # ── Single strategy creation ──
+            result = await self._load_single_strategy(strat_cfg)
             results.append(result)
-
-            # Set ticker + per-ticker budget on the StrategyState
-            if "error" not in result:
-                state = self.execution_engine._strategies.get(strategy_id)
-                if state:
-                    state.ticker = config.get("ticker", strategy_id.replace("bmc_", "").upper())
-                    if ticker_budget != -1:
-                        state.ticker_entry_budget = ticker_budget
 
         if not already_running:
             # ── Recover persisted risk manager positions ──
@@ -1426,11 +1463,23 @@ class IBDataAgent:
                         logger.info("Recovered risk manager %s (remaining=%d)", pos_id, rm.remaining_qty)
 
                         # Populate parent BMC strategy's _active_positions list + counter.
-                        # Aggregate positions have multiple lot_entries — expand each
+                        # Aggregate positions have multiple lot_entries -- expand each
                         # into its own _active_positions entry so cooldown and spawn
                         # counts reflect the actual number of fills.
                         parent = pos.get("parent_strategy", "")
                         parent_state = self.execution_engine._strategies.get(parent)
+                        if not parent_state and parent:
+                            # Try directional variants (e.g. parent="bmc_spy" -> "bmc_spy_up", "bmc_spy_down")
+                            for suffix in ("_up", "_down"):
+                                alt_key = parent + suffix
+                                alt_state = self.execution_engine._strategies.get(alt_key)
+                                if alt_state and hasattr(alt_state.strategy, "_active_positions"):
+                                    parent_state = alt_state
+                                    logger.info(
+                                        "Recovery: matched parent %s to directional variant %s",
+                                        parent, alt_key,
+                                    )
+                                    break
                         if parent_state and hasattr(parent_state.strategy, "_active_positions"):
                             instrument = pos.get("instrument", {})
                             option_contract = {
@@ -1557,7 +1606,15 @@ class IBDataAgent:
         new_config = payload.get("config", {})
         if not strategy_id:
             return {"error": "strategy_id is required"}
-        result = self.execution_engine.update_strategy_config(strategy_id, new_config)
+        # Resolve directional variants (e.g. bmc_spy -> bmc_spy_up, bmc_spy_down)
+        resolved_ids = self._resolve_strategy_ids(strategy_id)
+        result = {}
+        for sid in resolved_ids:
+            result = self.execution_engine.update_strategy_config(sid, new_config)
+            if "error" in result:
+                break
+        if len(resolved_ids) > 1:
+            result["resolved_ids"] = resolved_ids
         self._persist_engine_config("config_change")
         return result
 
@@ -1601,7 +1658,7 @@ class IBDataAgent:
         if not self.execution_engine:
             return {"error": "Execution engine not initialized"}
         if not self.execution_engine.is_running:
-            return {"error": "Execution engine is not running — call execution_start first"}
+            return {"error": "Execution engine is not running -- call execution_start first"}
 
         strategy_id = payload.get("strategy_id", "")
         strategy_type = payload.get("strategy_type", "")
@@ -1612,26 +1669,36 @@ class IBDataAgent:
         if not strategy_id:
             return {"error": "strategy_id is required"}
 
-        if strategy_id in self.execution_engine._strategies:
-            return {"error": f"Strategy {strategy_id} is already loaded"}
+        # Check if already loaded (including directional variants)
+        resolved = self._resolve_strategy_ids(strategy_id)
+        if resolved and resolved[0] in self.execution_engine._strategies:
+            return {"error": f"Strategy {strategy_id} is already loaded (resolved: {resolved})"}
 
-        strategy = self._create_strategy(strategy_type)
-        if strategy is None:
-            return {"error": f"Unknown strategy_type: {strategy_type}"}
+        strat_cfg = {
+            "strategy_id": strategy_id,
+            "strategy_type": strategy_type,
+            "config": config,
+            "ticker_budget": ticker_budget,
+        }
 
-        # Run load_strategy in thread pool (on_start may do blocking I/O)
-        result = await self._run_in_thread(
-            self.execution_engine.load_strategy, strategy_id, strategy, config
-        )
+        # ── Directional expansion: split into UP/DOWN if both models exist ──
+        if config.get("ticker") and not config.get("model_version"):
+            expanded = self._expand_directional_strategies(strat_cfg)
+            if expanded:
+                results = []
+                for exp_cfg in expanded:
+                    exp_result = await self._load_single_strategy(exp_cfg)
+                    results.append(exp_result)
+                result = {
+                    "expanded": True,
+                    "strategies_loaded": results,
+                    "budget_status": self.execution_engine.get_budget_status(),
+                }
+                self._persist_engine_config("ticker_add")
+                return result
 
-        # Set ticker + per-ticker budget on the StrategyState
-        if "error" not in result:
-            state = self.execution_engine._strategies.get(strategy_id)
-            if state:
-                state.ticker = config.get("ticker", strategy_id.replace("bmc_", "").upper())
-                if ticker_budget != -1:
-                    state.ticker_entry_budget = ticker_budget
-
+        # ── Single strategy creation ──
+        result = await self._load_single_strategy(strat_cfg)
         result["budget_status"] = self.execution_engine.get_budget_status()
         self._persist_engine_config("ticker_add")
         return result
@@ -1652,10 +1719,17 @@ class IBDataAgent:
         if not strategy_id:
             return {"error": "strategy_id is required"}
 
-        if strategy_id not in self.execution_engine._strategies:
+        # Resolve directional variants (e.g. bmc_spy -> bmc_spy_up, bmc_spy_down)
+        resolved_ids = self._resolve_strategy_ids(strategy_id)
+        if not resolved_ids or (len(resolved_ids) == 1
+                                and resolved_ids[0] not in self.execution_engine._strategies):
             return {"error": f"Strategy {strategy_id} not found"}
 
-        result = self.execution_engine.unload_strategy(strategy_id)
+        result = {}
+        for sid in resolved_ids:
+            result = self.execution_engine.unload_strategy(sid)
+        if len(resolved_ids) > 1:
+            result["resolved_ids"] = resolved_ids
         result["budget_status"] = self.execution_engine.get_budget_status()
         self._persist_engine_config("ticker_remove")
         return result
@@ -1692,6 +1766,13 @@ class IBDataAgent:
         parent = pos.get("parent_strategy", "")
         if parent and self.execution_engine:
             parent_state = self.execution_engine._strategies.get(parent)
+            if not parent_state:
+                # Fallback: try directional variants
+                for suffix in ("_up", "_down"):
+                    alt = self.execution_engine._strategies.get(parent + suffix)
+                    if alt and hasattr(alt.strategy, "_active_positions"):
+                        parent_state = alt
+                        break
             if parent_state and hasattr(parent_state.strategy, "_active_positions"):
                 instrument = pos.get("instrument", {})
                 close_sym = instrument.get("symbol", "")
@@ -1988,6 +2069,91 @@ class IBDataAgent:
         logger.warning("No strategy implementation for type: %s", strategy_type)
         return None
 
+    def _expand_directional_strategies(self, strat_cfg: dict) -> Optional[List[dict]]:
+        """If ticker has both UP and DOWN production models, return two configs.
+
+        Returns None if expansion is not applicable (single model or error).
+        """
+        config = strat_cfg.get("config", {})
+        ticker = config.get("ticker", "")
+        if not ticker or config.get("model_version"):
+            return None  # Already pinned or no ticker -- skip expansion
+
+        try:
+            # Resolve BMC_PATH the same way big_move_convexity.py does
+            import sys as _sys
+            bmc_path = os.environ.get("BMC_PATH", "")
+            if not bmc_path:
+                bmc_path = str(
+                    Path(__file__).resolve().parent.parent.parent / "py_proj"
+                )
+            if bmc_path not in _sys.path:
+                _sys.path.insert(0, bmc_path)
+
+            from big_move_convexity.ml.model_registry import ModelRegistry
+
+            registry_path = os.path.join(
+                bmc_path, "big_move_convexity", "models", "registry"
+            )
+            if not os.path.isdir(registry_path):
+                return None  # Registry not available on this machine
+
+            registry = ModelRegistry(registry_path)
+
+            production = [
+                v for v in registry._versions
+                if "production" in v.tags and v.ticker == ticker
+            ]
+            up_models = sorted(
+                [v for v in production if "UP" in (v.target_column or "")],
+                key=lambda v: v.created_at, reverse=True,
+            )
+            down_models = sorted(
+                [v for v in production if "DOWN" in (v.target_column or "")],
+                key=lambda v: v.created_at, reverse=True,
+            )
+
+            if not (up_models and down_models):
+                return None  # Single model -- no expansion needed
+
+            base_id = strat_cfg.get("strategy_id", f"bmc_{ticker.lower()}")
+
+            up_config = {
+                **strat_cfg,
+                "strategy_id": f"{base_id}_up",
+                "config": {**config, "model_version": up_models[0].version_id},
+            }
+            down_config = {
+                **strat_cfg,
+                "strategy_id": f"{base_id}_down",
+                "config": {**config, "model_version": down_models[0].version_id},
+            }
+
+            logger.info(
+                "Expanding %s into directional pair: %s (model=%s) + %s (model=%s)",
+                base_id,
+                f"{base_id}_up", up_models[0].version_id,
+                f"{base_id}_down", down_models[0].version_id,
+            )
+            return [up_config, down_config]
+
+        except Exception as e:
+            logger.warning("Directional expansion failed for %s: %s", ticker, e)
+            return None
+
+    def _resolve_strategy_ids(self, strategy_id: str) -> List[str]:
+        """Resolve strategy_id to actual loaded IDs (handles directional expansion).
+
+        E.g., 'bmc_spy' resolves to ['bmc_spy_up', 'bmc_spy_down'] if expanded,
+        or ['bmc_spy'] if loaded as single strategy.
+        """
+        if strategy_id in self.execution_engine._strategies:
+            return [strategy_id]
+        # Check for directional variants
+        variants = [f"{strategy_id}_up", f"{strategy_id}_down"]
+        found = [v for v in variants if v in self.execution_engine._strategies]
+        return found if found else [strategy_id]  # return original if no variants found
+
     def _spawn_risk_manager_for_bmc(self, risk_config: dict) -> None:
         """Spawn or aggregate a RiskManagerStrategy for a BMC entry fill.
 
@@ -2006,7 +2172,10 @@ class IBDataAgent:
         # Extract lineage before passing to risk manager (WS2)
         lineage = risk_config.pop("lineage", None)
 
+        # Extract parent strategy ID (set by BMC on_fill); fallback to legacy format
         instrument = risk_config.get("instrument", {})
+        symbol = instrument.get("symbol", "").lower()
+        parent_sid = risk_config.pop("_parent_strategy_id", f"bmc_{symbol}" if symbol else "bmc")
         pos_info = risk_config.get("position", {})
 
         # ── Check for existing same-contract risk manager to aggregate into ──
@@ -2027,7 +2196,6 @@ class IBDataAgent:
         else:
             logger.info("Spawned RiskManagerStrategy %s for BMC position", strategy_id)
             # Persist the new position in the store
-            symbol = instrument.get("symbol", "").lower()
             self.position_store.add_position(
                 position_id=strategy_id,
                 entry={
@@ -2039,7 +2207,7 @@ class IBDataAgent:
                 },
                 instrument=instrument,
                 risk_config=risk_config,
-                parent_strategy=f"bmc_{symbol}" if symbol else "bmc",
+                parent_strategy=parent_sid,
             )
             # Attach lineage to position record (WS2)
             if lineage:
@@ -2375,6 +2543,13 @@ class IBDataAgent:
                 parent = pos.get("parent_strategy", "")
                 if parent and self.execution_engine:
                     parent_state = self.execution_engine._strategies.get(parent)
+                    if not parent_state:
+                        # Fallback: try directional variants
+                        for suffix in ("_up", "_down"):
+                            alt = self.execution_engine._strategies.get(parent + suffix)
+                            if alt and hasattr(alt.strategy, "_active_positions"):
+                                parent_state = alt
+                                break
                     if parent_state and hasattr(parent_state.strategy, "_active_positions"):
                         parent_state.strategy._active_positions = [
                             p for p in parent_state.strategy._active_positions

@@ -152,6 +152,7 @@ interface SignalState {
       right: string;
     };
   } | null;
+  model_direction?: "UP" | "DOWN" | "symmetric" | string;
   signal_history: Array<{
     timestamp: string;
     probability: number;
@@ -371,6 +372,20 @@ const TICKER_DEFAULTS: Record<string, Partial<BMCConfig>> = {
 
 // Available tickers for BMC strategies
 const AVAILABLE_TICKERS = ["SPY", "SLV", "QQQ", "IWM", "GLD"];
+
+// ---------------------------------------------------------------------------
+// Direction badge helper — parses directional strategy_id variants
+// ---------------------------------------------------------------------------
+
+function parseStrategyDirection(strategyId: string): { ticker: string; direction: "up" | "down" | null } {
+  const match = strategyId.match(/^bmc_(\w+?)_(up|down)$/i);
+  if (match) {
+    return { ticker: match[1].toUpperCase(), direction: match[2].toLowerCase() as "up" | "down" };
+  }
+  // Fallback: extract ticker from bmc_xxx format
+  const tickerMatch = strategyId.match(/^bmc_(\w+)$/i);
+  return { ticker: tickerMatch ? tickerMatch[1].toUpperCase() : strategyId, direction: null };
+}
 
 function makeDefaultConfig(ticker: string): BMCConfig {
   return { ...DEFAULT_CONFIG, ...TICKER_DEFAULTS[ticker], ticker };
@@ -874,6 +889,13 @@ export default function SignalsTab() {
   const activeConfig = configs[activeTicker] || makeDefaultConfig(activeTicker);
   const activeConfigDirty = configDirty[activeTicker] ?? false;
 
+  // All strategies for the active ticker (supports directional pairs)
+  const activeTickerStrategies = useMemo(
+    () => strategies.filter(s => s.ticker === activeTicker),
+    [strategies, activeTicker],
+  );
+  const activeDirection = activeStrategy ? parseStrategyDirection(activeStrategy.strategy_id) : null;
+
   // ── Derived: position details with risk manager + live quotes ──
   const positionDetails = useMemo(() => {
     if (!signal?.active_positions?.length) return [];
@@ -1140,6 +1162,11 @@ export default function SignalsTab() {
           const strat = strategies.find(s => s.ticker === t);
           const hasModel = strat?.signal?.model_version;
           const hasFailed = strat?.signal?.startup_error;
+          // Check for directional strategy pairs (bmc_spy_up / bmc_spy_down)
+          const tickerStrats = strategies.filter(s => s.ticker === t);
+          const directions = tickerStrats.map(s => parseStrategyDirection(s.strategy_id).direction).filter(Boolean) as ("up" | "down")[];
+          const hasUp = directions.includes("up");
+          const hasDown = directions.includes("down");
           return (
             <div key={t} className="flex items-center gap-1">
               {!running && (
@@ -1171,7 +1198,13 @@ export default function SignalsTab() {
                 }`}
               >
                 {t}
-                {running && isRunning && hasModel && !isActive && (
+                {running && isRunning && (hasUp || hasDown) && (
+                  <span className="ml-0.5 text-[9px]">
+                    {hasUp && <span className="text-green-400">{"\u25B2"}</span>}
+                    {hasDown && <span className="text-red-400">{"\u25BC"}</span>}
+                  </span>
+                )}
+                {running && isRunning && hasModel && !isActive && !hasUp && !hasDown && (
                   <span className="ml-1 text-[9px]">{"\u25CF"}</span>
                 )}
                 {running && hasFailed && (
@@ -1246,11 +1279,19 @@ export default function SignalsTab() {
       )}
 
       {/* Per-ticker startup errors (show all, not just active) */}
-      {running && strategies.filter(s => s.signal?.startup_error).map(s => (
-        <div key={s.ticker} className="bg-red-900/30 border border-red-800 text-red-300 text-sm px-3 py-1.5 rounded">
-          <span className="font-medium">{s.ticker}:</span> {s.signal?.startup_error}
-        </div>
-      ))}
+      {running && strategies.filter(s => s.signal?.startup_error).map(s => {
+        const { ticker: parsedTicker, direction } = parseStrategyDirection(s.strategy_id);
+        return (
+          <div key={s.strategy_id} className="bg-red-900/30 border border-red-800 text-red-300 text-sm px-3 py-1.5 rounded">
+            <span className="font-medium">
+              {parsedTicker}
+              {direction === "up" && <span className="text-green-400 ml-0.5">{"\u25B2"}</span>}
+              {direction === "down" && <span className="text-red-400 ml-0.5">{"\u25BC"}</span>}
+              :
+            </span> {s.signal?.startup_error}
+          </div>
+        );
+      })}
       {/* Non-running startup error for active ticker */}
       {!running && signal?.startup_error && (
         <div className="bg-red-900/30 border border-red-800 text-red-300 text-sm px-3 py-1.5 rounded">
@@ -1263,7 +1304,24 @@ export default function SignalsTab() {
         <div className="col-span-2 space-y-3">
           <div className="bg-gray-900 border border-gray-800 rounded p-3">
             <h3 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-              <span>Current Signal {activeTicker && <span className="text-blue-400">({activeTicker})</span>}</span>
+              <span>
+                Current Signal{" "}
+                {activeTicker && (
+                  <span className="text-blue-400">
+                    ({activeTicker}
+                    {activeDirection?.direction === "up" && <span className="text-green-400 ml-0.5">{"\u25B2"}</span>}
+                    {activeDirection?.direction === "down" && <span className="text-red-400 ml-0.5">{"\u25BC"}</span>}
+                    )
+                  </span>
+                )}
+              </span>
+              {signal?.model_direction && signal.model_direction !== "symmetric" && (
+                <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${
+                  signal.model_direction === "UP" ? "bg-green-900/50 text-green-400" : "bg-red-900/50 text-red-400"
+                }`}>
+                  {signal.model_direction}
+                </span>
+              )}
               {signal?.model_version && (
                 running ? (
                   <button
@@ -1281,6 +1339,34 @@ export default function SignalsTab() {
                 )
               )}
             </h3>
+            {/* Show directional strategy pair summary when multiple strategies exist for this ticker */}
+            {activeTickerStrategies.length > 1 && (
+              <div className="flex gap-1.5 mb-2">
+                {activeTickerStrategies.map(s => {
+                  const { direction } = parseStrategyDirection(s.strategy_id);
+                  const isStarted = s.signal?.started;
+                  const hasError = s.signal?.startup_error;
+                  return (
+                    <span
+                      key={s.strategy_id}
+                      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                        hasError ? "bg-red-900/40 text-red-400"
+                        : isStarted ? "bg-gray-800 text-gray-300"
+                        : "bg-gray-800/50 text-gray-500"
+                      }`}
+                      title={s.strategy_id}
+                    >
+                      {direction === "up" && <span className="text-green-400">{"\u25B2"}</span>}
+                      {direction === "down" && <span className="text-red-400">{"\u25BC"}</span>}
+                      {s.signal?.model_type || s.strategy_id}
+                      {s.signal?.decisions_run != null && (
+                        <span className="text-gray-500 ml-0.5">({s.signal.decisions_run})</span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             {currentSig ? (
               <div className="space-y-2">
                 <div className="flex items-baseline gap-3">
@@ -1786,7 +1872,11 @@ export default function SignalsTab() {
           <div className="bg-gray-900 border border-gray-800 rounded p-2.5">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium text-gray-300 flex items-center gap-2">
-                <span className="bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded text-xs font-bold">{activeTicker}</span>
+                <span className="bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded text-xs font-bold">
+                  {activeTicker}
+                  {activeDirection?.direction === "up" && <span className="text-green-400 ml-0.5">{"\u25B2"}</span>}
+                  {activeDirection?.direction === "down" && <span className="text-red-400 ml-0.5">{"\u25BC"}</span>}
+                </span>
                 Config
               </h3>
               {!running ? (

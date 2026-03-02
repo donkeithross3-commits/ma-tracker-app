@@ -83,7 +83,7 @@ _DEFAULTS: dict[str, Any] = {
     "ticker": "SPY",                  # underlying ticker for this instance
     "signal_threshold": 0.5,
     "min_signal_strength": 0.3,
-    "direction_mode": "both",          # "long_only" | "short_only" | "both"
+    "direction_mode": None,             # None=auto from model | "long_only" | "short_only" | "both"
     "cooldown_minutes": 15,
     "decision_interval_seconds": 60,   # 1 minute
     "max_contracts": 5,
@@ -278,6 +278,12 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._target_column: str = ""
         self._dataset_version: str = ""
         self._bar_type: str = ""
+
+        # Signal inversion: auto-derived from target_column (DOWN models flip direction)
+        self._invert_signal: bool = False
+
+        # Parent strategy ID for risk manager lineage pass-through
+        self._parent_strategy_id: Optional[str] = None
 
         # Session tracking
         self._session_id: str = ""
@@ -503,6 +509,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 # Attach lineage for position store persistence (WS2)
                 if self._pending_lineage:
                     risk_config["lineage"] = self._pending_lineage
+                # Pass parent strategy ID for risk manager lineage tracking
+                risk_config["_parent_strategy_id"] = getattr(self, "_parent_strategy_id", None) or f"bmc_{self._ticker.lower()}"
                 self._spawn_risk_manager(risk_config)
                 logger.info(
                     "Spawned RiskManagerStrategy for BMC position: strike=%.2f, qty=%d",
@@ -566,6 +574,10 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "session_id": self._session_id,
             "segment_idx": self._segment_idx,
             "execution_profile": self._current_profile_label,
+            # Signal inversion / directional model telemetry
+            "model_direction": "DOWN" if self._invert_signal else "UP" if self._target_column and "UP" in self._target_column else "symmetric",
+            "signal_inverted": self._invert_signal,
+            "target_column": self._target_column,
         }
 
         # Current signal
@@ -745,6 +757,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._dataset_version = getattr(version_meta, 'dataset_version', '')
         self._bar_type = getattr(version_meta, 'bar_type', '')
 
+        # Auto-derive signal inversion from target_column (DOWN models flip direction)
+        self._invert_signal = bool(self._target_column and "DOWN" in self._target_column)
+
         # Cache model metrics
         self._model_metrics = {}
         if hasattr(version_meta, 'metrics') and version_meta.metrics:
@@ -805,7 +820,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         self._registry_path = registry_path
         registry = ModelRegistry(registry_path)
-        prod_version = registry.get_production(ticker=self._ticker)
+
+        # Support pinning a specific model version via config (for directional pair expansion)
+        model_version_pin = cfg.get("model_version")
+        if model_version_pin:
+            try:
+                prod_version = registry.get(model_version_pin)
+            except KeyError:
+                raise RuntimeError(f"Model version '{model_version_pin}' not found in registry")
+        else:
+            prod_version = registry.get_production(ticker=self._ticker)
         if prod_version is None:
             raise RuntimeError(
                 f"No production model for ticker '{self._ticker}' in {registry_path}. "
@@ -832,6 +856,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._target_column = getattr(prod_version, 'target_column', '')
         self._dataset_version = getattr(prod_version, 'dataset_version', '')
         self._bar_type = getattr(prod_version, 'bar_type', '')
+
+        # Auto-derive signal inversion from target_column (DOWN models flip direction)
+        self._invert_signal = bool(self._target_column and "DOWN" in self._target_column)
 
         # Cache model metrics for lineage snapshots
         self._model_metrics = {}
@@ -1008,6 +1035,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         _snap_bar_type = self._bar_type
         _snap_model_metrics = self._model_metrics
         _snap_top_feature_names = self._top_feature_names
+        _snap_invert_signal = self._invert_signal
 
         import pandas as pd
         from big_move_convexity.features.feature_stack import assemble_feature_vector
@@ -1095,17 +1123,37 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         prediction = predict_single(_snap_model, fv.features)
         probability = prediction["probability"]
 
+        # Auto-determine direction_mode from model when not explicitly configured
+        effective_direction = cfg.get("direction_mode", None)
+        if effective_direction is None:
+            if _snap_invert_signal or ("UP" in (_snap_target_column or "")):
+                effective_direction = "long_only"
+            else:
+                effective_direction = "both"
+
         # Generate signal (with straddle richness gating if configured)
         signal_config = SignalConfig(
             probability_threshold=cfg.get("signal_threshold", 0.5),
             min_strength=cfg.get("min_signal_strength", 0.3),
-            direction_mode=cfg.get("direction_mode", "both"),
+            direction_mode=effective_direction,
             cooldown_minutes=cfg.get("cooldown_minutes", 15),
             straddle_richness_max=cfg.get("straddle_richness_max", 1.5),
             straddle_richness_ideal=cfg.get("straddle_richness_ideal", 0.9),
             options_gate_enabled=cfg.get("options_gate_enabled", False),
         )
         signal = generate_signal(prediction, self._ticker, t, signal_config)
+
+        # Invert signal direction for DOWN models (flip long<->short)
+        if _snap_invert_signal and signal.direction != "none":
+            signal = Signal(
+                timestamp=signal.timestamp,
+                ticker=signal.ticker,
+                direction="short" if signal.direction == "long" else "long",
+                strength=signal.strength,
+                probability=signal.probability,
+                threshold_used=signal.threshold_used,
+                metadata={**signal.metadata, "signal_inverted": True, "target_column": _snap_target_column},
+            )
 
         # Record signal state for telemetry
         signal_record = {
@@ -1165,6 +1213,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "model_n_features": len(_snap_model.feature_names) if _snap_model else 0,
             "model_metrics": _snap_model_metrics,
             "top_feature_names": _snap_top_feature_names,
+            "target_column": _snap_target_column,
+            "signal_inverted": _snap_invert_signal,
         }
         self._pending_lineage = self._build_lineage_snapshot(
             signal, signal_record, fv, cfg, underlying_price, bars_by_res,
@@ -1393,7 +1443,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         profile_keys = {
             "signal_threshold": cfg.get("signal_threshold", 0.5),
             "min_signal_strength": cfg.get("min_signal_strength", 0.3),
-            "direction_mode": cfg.get("direction_mode", "both"),
+            "direction_mode": cfg.get("direction_mode") or "auto",
             "cooldown_minutes": cfg.get("cooldown_minutes", 15),
             "decision_interval_seconds": cfg.get("decision_interval_seconds", 60),
             "otm_target_pct": cfg.get("otm_target_pct", 0.20),
@@ -1537,6 +1587,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "model_ticker": ms.get("model_ticker") or self._model_ticker,
             "model_n_features": ms.get("model_n_features", len(self._model.feature_names) if self._model else 0),
             "model_metrics": ms.get("model_metrics") or self._model_metrics,
+            "target_column": ms.get("target_column") or self._target_column,
+            "signal_inverted": ms.get("signal_inverted", self._invert_signal),
             "signal": {
                 "timestamp": signal_record.get("timestamp"),
                 "direction": signal.direction,
