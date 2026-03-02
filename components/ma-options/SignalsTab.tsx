@@ -2338,7 +2338,7 @@ export default function SignalsTab() {
           onClick={() => { if (!modelSwapping) setModelModalOpen(false); }}
         >
           <div
-            className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl w-[700px] max-h-[80vh] overflow-hidden flex flex-col"
+            className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl w-[780px] max-h-[80vh] overflow-hidden flex flex-col"
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}
@@ -2371,8 +2371,9 @@ export default function SignalsTab() {
                   <thead>
                     <tr className="text-gray-500 border-b border-gray-800">
                       <th className="text-left py-1.5 px-1">Version</th>
+                      <th className="text-center py-1.5 px-1">Dir</th>
                       <th className="text-left py-1.5 px-1">Type</th>
-                      <th className="text-left py-1.5 px-1">Recipe</th>
+                      <th className="text-left py-1.5 px-1">Target</th>
                       <th className="text-left py-1.5 px-1">Date</th>
                       <th className="text-left py-1.5 px-1">Status</th>
                       <th className="text-right py-1.5 px-1">AUC</th>
@@ -2389,9 +2390,20 @@ export default function SignalsTab() {
                         <td className="py-1.5 px-1 font-mono text-gray-300" title={m.version_id}>
                           {m.version_id.length > 20 ? m.version_id.slice(0, 20) + "..." : m.version_id}
                         </td>
+                        <td className="py-1.5 px-1 text-center">
+                          {m.target_column?.includes("_UP_") ? (
+                            <span className="text-green-400" title="UP (calls)">▲</span>
+                          ) : m.target_column?.includes("_DOWN_") ? (
+                            <span className="text-red-400" title="DOWN (puts)">▼</span>
+                          ) : (
+                            <span className="text-gray-500" title="Symmetric">●</span>
+                          )}
+                        </td>
                         <td className="py-1.5 px-1 text-gray-400">{m.model_type}</td>
-                        <td className="py-1.5 px-1 text-gray-400" title={m.recipe_label}>
-                          {m.recipe_label ? (m.recipe_label.length > 24 ? m.recipe_label.slice(0, 24) + "..." : m.recipe_label) : "\u2014"}
+                        <td className="py-1.5 px-1 text-gray-400 font-mono" title={m.target_column}>
+                          {m.target_column
+                            ? m.target_column.replace(/^target_/, "").replace(/_60m$/, "").replace(/_30m$/, " 30m")
+                            : "\u2014"}
                         </td>
                         <td className="py-1.5 px-1 text-gray-500">
                           {m.created_at ? m.created_at.slice(0, 10) : "\u2014"}
