@@ -166,6 +166,7 @@ function PriceChartContent({
           fills={fills}
           overlayToggles={overlayToggles}
           ticker={config.ticker}
+          timeframe={timeframe}
         />
       )}
     </WidgetContainer>

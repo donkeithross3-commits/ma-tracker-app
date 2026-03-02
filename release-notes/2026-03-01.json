@@ -128,6 +128,15 @@
       "category": "signals",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "daily-change-overlay",
+      "title": "Persistent Daily Change Overlay",
+      "summary": "Charts now show a persistent price change and percentage overlay at the top-right, visible without hovering",
+      "description": "Each chart widget now displays a persistent daily change overlay at the top-right corner showing the price change and percentage (e.g., '+2.45 (+0.52%)' in green or '-1.30 (-0.28%)' in red). Unlike the OHLCV crosshair legend (which only appears on hover), this overlay is always visible.\n\nThe calculation adapts to the timeframe:\n- Intraday (1m/5m/15m/1h): shows session change from the first bar's open to the last bar's close\n- Daily (1D): shows the most recent day's change vs the previous day's close\n\nThe overlay uses the same semi-transparent dark background as the crosshair legend for visual consistency, positioned at top-right to avoid overlapping with the top-left OHLCV legend. Works on both stock and futures charts across all timeframes.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
     }
   ]
 }

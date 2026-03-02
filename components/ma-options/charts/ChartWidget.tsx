@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   forwardRef,
@@ -23,7 +24,7 @@ import {
   type Time,
   type ISeriesMarkersPluginApi,
 } from "lightweight-charts";
-import type { ChartBar, OverlayToggles, SignalHistoryEntry, PositionFill } from "./types";
+import type { ChartBar, OverlayToggles, SignalHistoryEntry, PositionFill, TimeframeConfig } from "./types";
 import { buildSignalOverlay, type SignalHistogramPoint } from "./SignalOverlay";
 import { buildTradeMarkers } from "./TradeMarkers";
 
@@ -50,6 +51,7 @@ interface ChartWidgetProps {
   fills?: PositionFill[];
   overlayToggles: OverlayToggles;
   ticker?: string;
+  timeframe?: TimeframeConfig;
 }
 
 interface OHLCVData {
@@ -62,7 +64,7 @@ interface OHLCVData {
 }
 
 const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
-  function ChartWidget({ bars, width, height, signals, fills, overlayToggles, ticker }, ref) {
+  function ChartWidget({ bars, width, height, signals, fills, overlayToggles, ticker, timeframe }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -70,6 +72,23 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
     const signalHistSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
     const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
     const [ohlcv, setOhlcv] = useState<OHLCVData | null>(null);
+
+    // Persistent daily change overlay data
+    const dailyChange = useMemo(() => {
+      if (bars.length === 0) return null;
+      const lastBar = bars[bars.length - 1];
+      const isDaily = timeframe?.timespan === "day";
+      let startPrice: number;
+      if (isDaily && bars.length > 1) {
+        startPrice = bars[bars.length - 2].close;
+      } else {
+        startPrice = bars[0].open;
+      }
+      if (startPrice === 0) return null;
+      const change = lastBar.close - startPrice;
+      const pctChange = (change / startPrice) * 100;
+      return { change, pctChange, up: change >= 0 };
+    }, [bars, timeframe]);
 
     // Expose imperative API
     useImperativeHandle(ref, () => ({
@@ -341,6 +360,19 @@ const ChartWidget = forwardRef<ChartWidgetHandle, ChartWidgetProps>(
                     ? `${(ohlcv.volume / 1_000).toFixed(1)}K`
                     : ohlcv.volume.toLocaleString()}
               </span>
+            </span>
+          </div>
+        )}
+        {dailyChange && (
+          <div className="absolute top-1 right-12 text-xs font-mono pointer-events-none z-30 bg-gray-950/80 rounded px-1.5 py-0.5">
+            <span className={dailyChange.up ? "text-green-400" : "text-red-400"}>
+              {dailyChange.up ? "+" : ""}
+              {dailyChange.change.toFixed(2)}
+            </span>
+            {" "}
+            <span className={dailyChange.up ? "text-green-400/70" : "text-red-400/70"}>
+              ({dailyChange.up ? "+" : ""}
+              {dailyChange.pctChange.toFixed(2)}%)
             </span>
           </div>
         )}
