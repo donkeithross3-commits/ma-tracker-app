@@ -2087,3 +2087,82 @@ async def get_deal_sources(ticker: str):
     except Exception as e:
         logger.error("Failed to fetch sources for %s: %s", ticker, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /risk/news-scoring-experiment
+# ---------------------------------------------------------------------------
+@router.post("/news-scoring-experiment")
+async def run_news_scoring_experiment_endpoint(
+    ticker_filter: Optional[str] = Query(None, description="Comma-separated tickers"),
+    max_articles: Optional[int] = Query(None, description="Max articles to score"),
+):
+    """Run the news relevance scoring experiment (heuristic vs AI).
+
+    Scores all articles with heuristic_v1, heuristic_v2, Haiku AI, and Sonnet judge.
+    Returns run_id and comparison metrics.
+    """
+    pool = _get_pool()
+
+    # Parse ticker filter
+    tickers = None
+    if ticker_filter:
+        tickers = [t.strip().upper() for t in ticker_filter.split(",") if t.strip()]
+
+    # Get Anthropic client for AI scoring methods
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    client = None
+    if api_key:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=api_key)
+    else:
+        logger.warning("No ANTHROPIC_API_KEY — running heuristic methods only")
+
+    from ..risk.news_scoring_experiment import run_news_scoring_experiment
+
+    try:
+        result = await run_news_scoring_experiment(
+            pool=pool,
+            client=client,
+            ticker_filter=tickers,
+            max_articles=max_articles,
+        )
+        return result
+    except Exception as e:
+        logger.error("News scoring experiment failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/news-scoring-results/{run_id}
+# ---------------------------------------------------------------------------
+@router.get("/news-scoring-results/{run_id}")
+async def get_news_scoring_results_endpoint(
+    run_id: str,
+    ticker: Optional[str] = Query(None, description="Filter by ticker"),
+):
+    """Get results from a news scoring experiment run.
+
+    Returns run metadata, per-method summary, comparison metrics,
+    top divergences, and optional per-ticker detail.
+    """
+    pool = _get_pool()
+
+    # Validate run_id is a UUID
+    try:
+        uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run_id format")
+
+    from ..risk.news_scoring_experiment import get_experiment_results
+
+    try:
+        result = await get_experiment_results(pool, run_id, ticker)
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to fetch scoring results: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
