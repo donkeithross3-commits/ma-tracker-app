@@ -43,7 +43,16 @@
       "id": "futures-charts",
       "title": "Futures Charts via IB",
       "summary": "Candlestick charts now support futures instruments using IB historical data",
-      "description": "Charts automatically detect futures tickers (ES, NQ, CL, GC, etc.) and fetch OHLCV bar data from Interactive Brokers instead of Polygon. Supports all standard timeframes (1m, 5m, 15m, 1h, 1D) with the same 30-second auto-refresh.\n\nFutures symbols are auto-detected from a known list including equity indices (ES, NQ, YM, RTY), energy (CL, NG), metals (GC, SI), treasuries (ZB, ZN), and grains (ZC, ZS, ZW). Exchange routing uses the same mapping as the trading engine. An amber \"IB\" badge appears next to the ticker when chart data comes from Interactive Brokers. Agent v1.19.0.",
+      "description": "Charts automatically detect futures tickers (ES, NQ, CL, GC, etc.) and fetch OHLCV bar data from Interactive Brokers instead of Polygon. Supports all standard timeframes (1m, 5m, 15m, 1h, 1D) with the same 30-second auto-refresh.\n\nFutures symbols are auto-detected from a known list including equity indices (ES, NQ, YM, RTY), energy (CL, NG), metals (GC, SI), treasuries (ZB, ZN), and grains (ZC, ZS, ZW). Both bare root symbols (ES → continuous front-month via CONTFUT) and full contract tickers (ESH6 → March 2026 specific contract) are supported. Exchange routing uses the same mapping as the trading engine. An amber \"IB\" badge appears next to the ticker when chart data comes from Interactive Brokers. Agent v1.19.6.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "watchlist-reliability",
+      "title": "Watchlist Quote Reliability Fix",
+      "summary": "Fixed batch quote fetching that was overwhelming the IB agent and causing complete data loss",
+      "description": "The watchlist's batch quote fetcher was sending all 18 ticker requests concurrently to the IB agent, which processes them sequentially. This caused WebSocket disconnections and prevented any data from reaching the UI.\n\nThree fixes:\n1. Chunked batch requests (max 4 concurrent) to prevent agent overload\n2. Per-request 10-second timeout via AbortSignal.timeout to bound total fetch time\n3. Overlap guard in the polling hook to prevent cascading fetches\n\nAlso fixed monthly commodity futures front-month derivation — CL/NG/GC/SI contracts expire weeks before the delivery month, so the agent now uses the next month for monthly symbols. Silver (SI) contracts are disambiguated with the standard 5000oz multiplier. Agent v1.19.6.",
       "category": "signals",
       "image": null,
       "screenshot": null
