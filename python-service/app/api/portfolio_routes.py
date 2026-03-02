@@ -25,17 +25,11 @@ def set_pool(pool):
 def _get_pool():
     """Get the database connection pool.
 
-    In standalone mode (portfolio_main.py), uses the pool injected via set_pool().
-    In monolith mode (main.py), falls back to the global EdgarDatabase instance.
+    Pool is injected via set_pool() during portfolio_main.py startup.
     """
-    if _pool is not None:
-        return _pool
-    # Fallback: running inside the monolith
-    from ..main import get_db
-    db = get_db()
-    if db.pool is None:
-        raise HTTPException(status_code=503, detail="Database pool not available")
-    return db.pool
+    if _pool is None:
+        raise HTTPException(status_code=503, detail="Database pool not initialized")
+    return _pool
 
 
 def _row_to_dict(row) -> dict:

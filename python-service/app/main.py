@@ -31,7 +31,6 @@ from .api.halt_routes import router as halt_router
 from .api.options_routes import router as options_router
 from .api.ws_relay import router as ws_relay_router
 from .api.krj_routes import router as krj_router
-from .api.portfolio_routes import router as portfolio_router
 from .edgar.database import EdgarDatabase
 from .trade_history.database import init_trade_db, shutdown_trade_db
 
@@ -75,8 +74,8 @@ app.include_router(ws_relay_router)
 # Include KRJ single-ticker signal (Polygon, no IB)
 app.include_router(krj_router)
 
-# Include Portfolio (Google Sheet ingest) routes
-app.include_router(portfolio_router)
+# Portfolio routes live exclusively in the portfolio container (port 8001).
+# All dashboard traffic already routes via PORTFOLIO_SERVICE_URL → python-portfolio.
 
 # Configure CORS - allow requests from Next.js frontend
 # Set CORS_ALLOWED_ORIGINS env var to a comma-separated list of origins.

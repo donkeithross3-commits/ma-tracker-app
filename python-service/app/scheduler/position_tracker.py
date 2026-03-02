@@ -7,14 +7,17 @@ Used by the morning pipeline to:
 """
 
 import logging
+import os
 from datetime import date
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-# Main service relay endpoint (portfolio service → main service on port 8000)
-MA_POSITIONS_URL = "http://localhost:8000/options/relay/ma-positions"
+# Main service relay endpoint (portfolio service → FastAPI on host port 8000).
+# Inside Docker the host is reached via host.docker.internal; locally it's localhost.
+_fastapi_base = os.environ.get("FASTAPI_SERVICE_URL", "http://localhost:8000")
+MA_POSITIONS_URL = f"{_fastapi_base}/options/relay/ma-positions"
 
 
 async def fetch_ma_positions(timeout: float = 20.0) -> list[dict]:
