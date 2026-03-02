@@ -2462,10 +2462,14 @@ class IBDataAgent:
                 )
                 continue
 
+            # IB reports avgCost for options as total per-contract cost (premium × 100 multiplier).
+            # Divide by 100 to get the per-share premium that the rest of the system expects.
+            entry_price = float(avg_cost) / 100.0
+
             logger.warning(
                 "IB reconciliation: orphaned option position %s %s %s %s "
-                "qty=%d avgCost=%.4f — auto-spawning risk manager",
-                symbol, strike, expiry, right, qty, avg_cost,
+                "qty=%d avgCost=%.4f (entry_price=%.4f) — auto-spawning risk manager",
+                symbol, strike, expiry, right, qty, avg_cost, entry_price,
             )
 
             # ── Find parent BMC strategy for this ticker ──
@@ -2520,7 +2524,7 @@ class IBDataAgent:
                 "position": {
                     "side": "LONG",
                     "quantity": int(qty),
-                    "entry_price": float(avg_cost),
+                    "entry_price": entry_price,
                 },
                 "_parent_strategy_id": parent_sid or f"bmc_{ticker.lower()}",
             }
@@ -2547,7 +2551,7 @@ class IBDataAgent:
                         }
                         parent_state.strategy._active_positions.append({
                             "order_id": 0,
-                            "entry_price": float(avg_cost),
+                            "entry_price": entry_price,
                             "quantity": int(qty),
                             "fill_time": time.time(),
                             "perm_id": 0,
