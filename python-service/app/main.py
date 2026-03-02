@@ -31,6 +31,7 @@ from .api.halt_routes import router as halt_router
 from .api.options_routes import router as options_router
 from .api.ws_relay import router as ws_relay_router
 from .api.krj_routes import router as krj_router
+from .api.fleet_routes import router as fleet_router
 from .edgar.database import EdgarDatabase
 from .trade_history.database import init_trade_db, shutdown_trade_db
 
@@ -73,6 +74,9 @@ app.include_router(ws_relay_router)
 
 # Include KRJ single-ticker signal (Polygon, no IB)
 app.include_router(krj_router)
+
+# Include Fleet GPU monitoring (push-based checkins from GPU machines)
+app.include_router(fleet_router)
 
 # Portfolio routes live exclusively in the portfolio container (port 8001).
 # All dashboard traffic already routes via PORTFOLIO_SERVICE_URL → python-portfolio.
@@ -469,6 +473,19 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to start Halt Monitor: {e}")
         logger.warning("Continuing without halt monitoring...")
+
+    # Start Fleet silence watchdog (detects GPU machines that stop checking in)
+    try:
+        from .fleet_monitor import silence_watchdog_loop
+        from .api.fleet_routes import FLEET_DATA_DIR
+        import asyncio
+
+        logger.info("Starting Fleet silence watchdog...")
+        asyncio.create_task(silence_watchdog_loop(FLEET_DATA_DIR))
+        logger.info("✓ Fleet silence watchdog started (10min threshold)")
+    except Exception as e:
+        logger.error(f"Failed to start Fleet silence watchdog: {e}")
+        logger.warning("Continuing without fleet silence monitoring...")
 
     logger.info("=" * 50)
     logger.info("STARTUP COMPLETE")
