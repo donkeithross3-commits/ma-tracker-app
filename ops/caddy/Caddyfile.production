@@ -1,0 +1,92 @@
+{
+    skip_install_trust
+}
+
+# DR3 Dashboard - Cloudflare Origin SSL
+# Updated: Zero-downtime deploys via request holding
+dr3-dashboard.com, www.dr3-dashboard.com {
+    # Use Cloudflare Origin Certificate
+    tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin-key.pem
+
+    # WebSocket relay for IB data providers
+    handle /ws/* {
+        reverse_proxy localhost:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Python service API routes
+    handle /options/* {
+        reverse_proxy localhost:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # All other routes go to Next.js (with request holding for zero-downtime deploys)
+    handle {
+        reverse_proxy localhost:3000 {
+            # Hold requests during container restart (up to 15s)
+            lb_try_duration 15s
+            lb_try_interval 250ms
+
+            # Mark backend as down after 2 failed requests within 10s
+            fail_duration 10s
+            max_fails 2
+
+            # Active health check - detect recovery quickly
+            health_uri /api/health
+            health_interval 2s
+            health_timeout 3s
+
+            # Proxy headers
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/dr3-dashboard.log
+        format json
+    }
+}
+
+# Emergency direct-IP access (bypasses Cloudflare)
+# UFW restricts port 8443 to home IP only
+# Access: https://<DROPLET_IP>:8443 (accept self-signed cert warning)
+https://192.241.179.9:8443 {
+    tls internal
+
+    # Health check (no auth needed)
+    handle /api/health {
+        reverse_proxy localhost:3000
+    }
+
+    # Full dashboard access
+    handle {
+        reverse_proxy localhost:3000 {
+            header_up Host dr3-dashboard.com
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    log {
+        output file /var/log/caddy/emergency-access.log
+        format json
+    }
+}
