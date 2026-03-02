@@ -109,8 +109,10 @@ _DEFAULTS: dict[str, Any] = {
     "options_gate_enabled": False,    # enable straddle richness gate
 }
 
-# Cross-asset tickers for correlation features (Group C) and backfill
-_CROSS_ASSET_TICKERS = ["QQQ", "IWM", "TLT", "GLD", "HYG"]
+# Cross-asset tickers for correlation features (Group C) and backfill.
+# Must include every ticker referenced by any TickerFeatureConfig.reference_tickers
+# in py_proj ticker_features.py (currently: UUP, SPY, TLT, DBB for metals).
+_CROSS_ASSET_TICKERS = ["QQQ", "IWM", "TLT", "GLD", "HYG", "UUP", "DBB"]
 
 # Ticker-specific defaults for option selection, spreads, and Polygon channels.
 # These override _DEFAULTS when a ticker profile is applied in on_start().
@@ -1113,9 +1115,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # QQQ bars for cross-ticker features (Group C)
         qqq_bars = self._data_store.get_completed_bars("time_1m:QQQ", before=t)
 
-        # Extra cross-asset ticker bars (IWM, TLT, GLD, HYG) for Group C
+        # Extra cross-asset ticker bars for Group C.
+        # Pulls from _CROSS_ASSET_TICKERS + SPY (when not the primary ticker)
+        # so compute_cross_asset_displacement() can find every reference ticker
+        # defined in ticker_features.py (e.g. SLV references UUP, SPY, TLT, DBB).
         extra_ticker_bars = {}
-        for ref_ticker in ["IWM", "TLT", "GLD", "HYG"]:
+        _ref_set = set(_CROSS_ASSET_TICKERS)
+        if self._ticker != "SPY":
+            _ref_set.add("SPY")
+        _ref_set.discard(self._ticker)  # primary ticker uses bars_by_res, not extra
+        for ref_ticker in sorted(_ref_set):
             ref_bars = self._data_store.get_completed_bars(f"time_1m:{ref_ticker}", before=t)
             if not ref_bars.empty:
                 extra_ticker_bars[ref_ticker] = ref_bars
