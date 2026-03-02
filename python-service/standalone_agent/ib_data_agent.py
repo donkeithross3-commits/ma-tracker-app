@@ -367,6 +367,7 @@ class IBDataAgent:
                                     if p.get("account") == self.IB_ACCT_CODE
                                 ]
                                 recon = self.execution_engine.reconcile_with_ib(ib_positions)
+                                self.position_store.purge_phantom_entry_fills()
                                 if recon["orphaned_ib"]:
                                     n_spawned = self._spawn_missing_risk_managers(recon["orphaned_ib"])
                                     logger.warning(
@@ -603,6 +604,7 @@ class IBDataAgent:
                         if p.get("account") == self.IB_ACCT_CODE
                     ]
                     recon = self.execution_engine.reconcile_with_ib(ib_positions)
+                    self.position_store.purge_phantom_entry_fills()
                     if recon["orphaned_ib"]:
                         n_spawned = self._spawn_missing_risk_managers(recon["orphaned_ib"])
                         logger.warning(
@@ -1659,6 +1661,7 @@ class IBDataAgent:
                     if p.get("account") == self.IB_ACCT_CODE
                 ]
                 recon = self.execution_engine.reconcile_with_ib(ib_positions)
+                self.position_store.purge_phantom_entry_fills()
                 if recon["orphaned_ib"]:
                     n_spawned = self._spawn_missing_risk_managers(recon["orphaned_ib"])
                     logger.warning(
@@ -2311,7 +2314,7 @@ class IBDataAgent:
         found = [v for v in variants if v in self.execution_engine._strategies]
         return found if found else [strategy_id]  # return original if no variants found
 
-    def _spawn_risk_manager_for_bmc(self, risk_config: dict) -> None:
+    def _spawn_risk_manager_for_bmc(self, risk_config: dict, record_fill: bool = True) -> None:
         """Spawn or aggregate a RiskManagerStrategy for a BMC entry fill.
 
         Called by BigMoveConvexityStrategy.on_fill() to create a position
@@ -2321,6 +2324,10 @@ class IBDataAgent:
         (symbol + strike + expiry + right), the new lot is aggregated into
         it via add_lot() rather than spawning a new independent manager.
         This ensures a single trailing stop for the aggregate position.
+
+        record_fill: if False, skip add_fill() for the entry. Used by
+            _spawn_missing_risk_managers (IB reconciliation) so that
+            recovery spawns don't create phantom Trade Log entries.
         """
         if not self.execution_engine:
             logger.warning("Cannot spawn risk manager: execution engine not initialized")
@@ -2369,16 +2376,19 @@ class IBDataAgent:
             # Attach lineage to position record (WS2)
             if lineage:
                 self.position_store.set_lineage(strategy_id, lineage)
-            # Record the entry fill in the ledger
-            self.position_store.add_fill(strategy_id, {
-                "time": time.time(),
-                "order_id": pos_info.get("order_id", 0),
-                "level": "entry",
-                "qty_filled": pos_info.get("quantity", 0),
-                "avg_price": pos_info.get("entry_price", 0),
-                "remaining_qty": pos_info.get("quantity", 0),
-                "pnl_pct": 0.0,
-            })
+            # Record the entry fill in the ledger.
+            # Skipped for reconciliation spawns (record_fill=False) to avoid
+            # creating phantom Trade Log rows for non-real entries.
+            if record_fill:
+                self.position_store.add_fill(strategy_id, {
+                    "time": time.time(),
+                    "order_id": pos_info.get("order_id", 0),
+                    "level": "entry",
+                    "qty_filled": pos_info.get("quantity", 0),
+                    "avg_price": pos_info.get("entry_price", 0),
+                    "remaining_qty": pos_info.get("quantity", 0),
+                    "pnl_pct": 0.0,
+                })
             # Persist initial runtime state (ARMED) so it survives restarts
             if hasattr(strategy, "get_runtime_snapshot"):
                 self.position_store.update_runtime_state(
@@ -2530,12 +2540,12 @@ class IBDataAgent:
             }
 
             try:
-                self._spawn_risk_manager_for_bmc(risk_config)
+                self._spawn_risk_manager_for_bmc(risk_config, record_fill=False)
                 spawned += 1
                 logger.info(
                     "IB reconciliation: spawned risk manager for %s %s %s %s "
                     "(entry=%.4f, qty=%d, parent=%s)",
-                    symbol, strike, expiry, right, avg_cost, qty, parent_sid,
+                    symbol, strike, expiry, right, entry_price, qty, parent_sid,
                 )
 
                 # Populate parent BMC strategy's _active_positions so it knows

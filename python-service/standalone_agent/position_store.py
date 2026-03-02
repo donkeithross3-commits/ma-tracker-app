@@ -190,6 +190,43 @@ class PositionStore:
                     return True
             return False
 
+    def purge_phantom_entry_fills(self) -> int:
+        """Remove fill_log entries that are reconciliation-spawn artifacts.
+
+        Phantom entry fills are identified by ALL of:
+          - level == "entry"
+          - order_id == 0  (no real IB order was placed)
+          - position has no lineage (reconciliation spawns lack model lineage)
+
+        Real IB-filled entries always have a positive order_id assigned by TWS
+        and a lineage dict set by BigMoveConvexityStrategy.on_fill(). Positions
+        spawned by _spawn_missing_risk_managers have neither.
+
+        Returns the count of positions where phantom fills were removed.
+        Dirty-marks affected positions so the server receives the cleaned fill_log.
+        """
+        cleaned = 0
+        with self._lock:
+            for pos in self._positions.values():
+                if pos.get("lineage"):
+                    continue  # real position with model lineage — skip
+                fill_log = pos.get("fill_log", [])
+                before = len(fill_log)
+                pos["fill_log"] = [
+                    f for f in fill_log
+                    if not (f.get("level") == "entry" and f.get("order_id", -1) == 0)
+                ]
+                if len(pos["fill_log"]) < before:
+                    self._dirty_ids.add(pos["id"])
+                    cleaned += 1
+            if cleaned:
+                self._save()
+        if cleaned:
+            logger.info(
+                "PositionStore: purged phantom entry fills from %d position(s)", cleaned
+            )
+        return cleaned
+
     def update_fill_commission(self, position_id: str, exec_id: str, commission_report: dict) -> None:
         """Update a fill's execution_analytics with commission data from IB."""
         with self._lock:
