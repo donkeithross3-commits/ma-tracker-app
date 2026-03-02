@@ -371,7 +371,15 @@ const TICKER_DEFAULTS: Record<string, Partial<BMCConfig>> = {
 };
 
 // Available tickers for BMC strategies
-const AVAILABLE_TICKERS = ["SPY", "SLV", "QQQ", "IWM", "GLD"];
+const AVAILABLE_TICKERS = ["SPY", "QQQ", "GLD", "SLV", "IWM"];
+
+// Per-ticker model availability (fetched from registry on mount)
+interface ModelAvailability {
+  has_up: boolean;
+  has_down: boolean;
+  has_symmetric: boolean;
+  models: Array<{ version_id: string; direction: string; model_type: string; target_column: string }>;
+}
 
 // ---------------------------------------------------------------------------
 // Direction badge helper — parses directional strategy_id variants
@@ -424,8 +432,11 @@ export default function SignalsTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Which tickers are enabled for starting
-  const [enabledTickers, setEnabledTickers] = useState<string[]>(["SPY", "SLV"]);
+  // Model availability per ticker (fetched from registry on mount)
+  const [modelAvailability, setModelAvailability] = useState<Record<string, ModelAvailability>>({});
+
+  // Which tickers are enabled for starting — default to all tickers with models
+  const [enabledTickers, setEnabledTickers] = useState<string[]>(["SPY", "QQQ", "GLD", "SLV"]);
   // Per-ticker configs (for editing before start or hot-reload)
   // Initialize from localStorage cache to survive page refreshes
   const [configs, setConfigs] = useState<Record<string, BMCConfig>>(() => {
@@ -433,6 +444,8 @@ export default function SignalsTab() {
     if (cached) return cached;
     return {
       SPY: makeDefaultConfig("SPY"),
+      QQQ: makeDefaultConfig("QQQ"),
+      GLD: makeDefaultConfig("GLD"),
       SLV: makeDefaultConfig("SLV"),
     };
   });
@@ -474,6 +487,24 @@ export default function SignalsTab() {
       return next;
     });
   };
+
+  // ── Fetch model availability from registry on mount ──
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/ma-options/model-availability");
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (data.tickers && !cancelled) {
+          setModelAvailability(data.tickers);
+        }
+      } catch {
+        // Silent fail — badges just won't show
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Poll signal state ──
   const fetchSignal = useCallback(async () => {
@@ -1167,6 +1198,25 @@ export default function SignalsTab() {
           const directions = tickerStrats.map(s => parseStrategyDirection(s.strategy_id).direction).filter(Boolean) as ("up" | "down")[];
           const hasUp = directions.includes("up");
           const hasDown = directions.includes("down");
+          // Pre-start model availability from registry
+          const avail = modelAvailability[t];
+          const hasAnyModel = avail ? (avail.has_up || avail.has_down || avail.has_symmetric) : false;
+          // Direction badges: show from registry (pre-start) or from running strategies
+          const showUp = running ? hasUp : (avail?.has_up ?? false);
+          const showDown = running ? hasDown : (avail?.has_down ?? false);
+          const showSymmetric = !running && !showUp && !showDown && (avail?.has_symmetric ?? false);
+          // Build tooltip
+          const tooltip = hasModel
+            ? `Model: ${strat?.signal?.model_version} (${strat?.signal?.model_type})`
+            : hasFailed
+              ? `Error: ${strat?.signal?.startup_error}`
+              : isRunning
+                ? "Loading..."
+                : avail
+                  ? `Models: ${avail.models.map(m => `${m.direction} (${m.model_type})`).join(", ")}`
+                  : Object.keys(modelAvailability).length > 0
+                    ? "No production model"
+                    : undefined;
           return (
             <div key={t} className="flex items-center gap-1">
               {!running && (
@@ -1174,35 +1224,36 @@ export default function SignalsTab() {
                   type="checkbox"
                   checked={isEnabled}
                   onChange={() => toggleTicker(t)}
-                  className="w-3 h-3 accent-blue-600 cursor-pointer inline-edit"
+                  disabled={Object.keys(modelAvailability).length > 0 && !hasAnyModel}
+                  className="w-3 h-3 accent-blue-600 cursor-pointer inline-edit disabled:opacity-30"
                 />
               )}
               <button
                 onClick={() => setActiveTicker(t)}
-                title={
-                  hasModel ? `Model: ${strat?.signal?.model_version} (${strat?.signal?.model_type})`
-                  : hasFailed ? `Error: ${strat?.signal?.startup_error}`
-                  : isRunning ? "Loading..."
-                  : undefined
-                }
+                title={tooltip}
                 className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                  isActive
-                    ? "bg-blue-600 text-white"
-                    : hasFailed
-                      ? "bg-red-900/30 text-red-400 hover:bg-red-900/50"
-                      : isRunning
-                        ? "bg-green-900/30 text-green-400 hover:bg-green-900/50"
-                        : isEnabled
-                          ? "bg-blue-900/30 text-blue-400 hover:bg-blue-900/50"
-                          : "text-gray-500 hover:text-gray-300"
+                  !hasAnyModel && Object.keys(modelAvailability).length > 0 && !running
+                    ? "text-gray-600 cursor-not-allowed"
+                    : isActive
+                      ? "bg-blue-600 text-white"
+                      : hasFailed
+                        ? "bg-red-900/30 text-red-400 hover:bg-red-900/50"
+                        : isRunning
+                          ? "bg-green-900/30 text-green-400 hover:bg-green-900/50"
+                          : isEnabled
+                            ? "bg-blue-900/30 text-blue-400 hover:bg-blue-900/50"
+                            : "text-gray-500 hover:text-gray-300"
                 }`}
               >
                 {t}
-                {running && isRunning && (hasUp || hasDown) && (
+                {(showUp || showDown) && (
                   <span className="ml-0.5 text-[9px]">
-                    {hasUp && <span className="text-green-400">{"\u25B2"}</span>}
-                    {hasDown && <span className="text-red-400">{"\u25BC"}</span>}
+                    {showUp && <span className="text-green-400">{"\u25B2"}</span>}
+                    {showDown && <span className="text-red-400">{"\u25BC"}</span>}
                   </span>
+                )}
+                {showSymmetric && (
+                  <span className="ml-0.5 text-[9px] text-yellow-500">{"\u25CF"}</span>
                 )}
                 {running && isRunning && hasModel && !isActive && !hasUp && !hasDown && (
                   <span className="ml-1 text-[9px]">{"\u25CF"}</span>

@@ -1462,7 +1462,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         profile_hash = f"ep:{hashlib.sha256(canon.encode()).hexdigest()[:12]}"
 
         # Human label
-        preset_short = {"zero_dte_convexity": "z0c", "conservative": "con", "custom": "cst"}.get(risk_preset, risk_preset[:3])
+        preset_short = {"zero_dte_convexity": "z0c", "intraday_premium": "inp", "conservative": "con", "custom": "cst"}.get(risk_preset, risk_preset[:3])
         threshold = int(profile_keys["signal_threshold"] * 100)
         budget = int(profile_keys["contract_budget_usd"])
         profile_label = f"ep:{preset_short}-t{threshold}-b{budget}"

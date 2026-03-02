@@ -1290,6 +1290,79 @@ async def relay_open_orders(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/model-availability")
+async def model_availability():
+    """Return per-ticker model availability from the BMC model registry.
+
+    Reads the registry index.json directly (no agent round-trip needed).
+    Used by the dashboard to show which tickers have UP/DOWN/symmetric models
+    before starting the execution engine.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    # Resolve registry path: BMC_PATH env, or py_proj as sibling of ma-tracker-app
+    # __file__ = python-service/app/api/options_routes.py
+    # .parent x5 = ma-tracker-app's parent dir (~/dev or ~/apps)
+    bmc_path = os.environ.get("BMC_PATH", "")
+    if not bmc_path:
+        bmc_path = str(
+            _Path(__file__).resolve().parent.parent.parent.parent.parent / "py_proj"
+        )
+    index_path = os.path.join(
+        bmc_path, "big_move_convexity", "models", "registry", "index.json"
+    )
+
+    try:
+        with open(index_path, "r") as f:
+            versions = _json.load(f)
+    except FileNotFoundError:
+        return {"tickers": {}, "error": "Registry not found", "registry_path": index_path}
+    except Exception as e:
+        logger.error("Failed to read model registry: %s", e)
+        return {"tickers": {}, "error": str(e)}
+
+    # Group active production models by ticker
+    tickers: dict = {}
+    for v in versions:
+        if v.get("status") != "active":
+            continue
+        if "production" not in v.get("tags", []):
+            continue
+        ticker = v.get("ticker", "")
+        if not ticker:
+            continue
+
+        tc = v.get("target_column", "")
+        if "UP" in tc:
+            direction = "up"
+        elif "DOWN" in tc:
+            direction = "down"
+        else:
+            direction = "symmetric"
+
+        if ticker not in tickers:
+            tickers[ticker] = {"has_up": False, "has_down": False, "has_symmetric": False, "models": []}
+
+        entry = tickers[ticker]
+        if direction == "up":
+            entry["has_up"] = True
+        elif direction == "down":
+            entry["has_down"] = True
+        else:
+            entry["has_symmetric"] = True
+
+        entry["models"].append({
+            "version_id": v.get("version_id", ""),
+            "direction": direction,
+            "model_type": v.get("model_type", ""),
+            "target_column": tc,
+            "created_at": v.get("created_at", ""),
+        })
+
+    return {"tickers": tickers}
+
+
 @router.get("/relay/registry")
 async def relay_registry():
     """
