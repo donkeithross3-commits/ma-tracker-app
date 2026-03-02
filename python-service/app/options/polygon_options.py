@@ -184,15 +184,21 @@ class PolygonOptionsClient:
         last_trade = snap.get("lastTrade", {})
         day = snap.get("day", {})
 
+        prev_day = snap.get("prevDay", {})
+
         price = last_trade.get("p", 0) or day.get("c", 0)
         bid = last_quote.get("p", 0)  # lowercase p = bid price
         ask = last_quote.get("P", 0)  # uppercase P = ask price
+        close = prev_day.get("c")  # previous day close
+        volume = day.get("v")  # today's volume
 
         return {
             "ticker": ticker.upper(),
             "price": price,
             "bid": bid,
             "ask": ask,
+            "close": close,
+            "volume": volume,
             "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 

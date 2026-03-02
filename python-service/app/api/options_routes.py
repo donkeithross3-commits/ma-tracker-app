@@ -1770,6 +1770,8 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
                         price=price,
                         bid=data.get("bid"),
                         ask=data.get("ask"),
+                        close=data.get("close"),
+                        volume=data.get("volume"),
                         timestamp=data.get("timestamp", datetime.utcnow().isoformat() + "Z"),
                     )
                 # Price is 0/None — might be outside market hours, try IB
