@@ -82,13 +82,14 @@ logger = logging.getLogger(__name__)
 _DEFAULTS: dict[str, Any] = {
     "ticker": "SPY",                  # underlying ticker for this instance
     "signal_threshold": 0.5,
+    "signal_threshold_auto": True,    # True = use model's optimal_threshold from training metadata
     "min_signal_strength": 0.3,
     "direction_mode": None,             # None=auto from model | "long_only" | "short_only" | "both"
     "cooldown_minutes": 15,
     "decision_interval_seconds": 60,   # 1 minute
     "max_contracts": 5,
     "contract_budget_usd": 150.0,
-    "scan_start": "09:35",            # HH:MM ET — all-day trading
+    "scan_start": "09:35",            # HH:MM ET — default (overridden by ticker profiles)
     "scan_end": "15:45",              # 15 min before close for 0DTE safety
     "otm_target_pct": 0.20,           # 20bp OTM
     "auto_entry": False,              # paper trading safety
@@ -120,8 +121,9 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.05,               # tight bid-ask ($0.01-$0.03 typical)
         "premium_min": 0.10,
         "premium_max": 3.00,
-        "scan_start": "09:35",
-        "scan_end": "15:45",
+        "scan_start": "13:30",            # v5i dataset decision times: 13:30-15:50 only
+        "scan_end": "15:50",
+        "signal_threshold": 0.40,         # model optimal (UP=0.40, DOWN=0.35)
         "contract_budget_usd": 150.0,
         "straddle_richness_max": 1.5,
         "straddle_richness_ideal": 0.9,
@@ -133,8 +135,9 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.20,               # wider bid-ask ($0.05-$0.15 typical)
         "premium_min": 0.05,              # lower premiums (~$30 underlying)
         "premium_max": 1.50,
-        "scan_start": "08:30",            # morning session for SLV
-        "scan_end": "15:45",              # extended to all-day
+        "scan_start": "09:35",            # after market open (was 08:30 which is pre-open)
+        "scan_end": "15:45",
+        "direction_mode": "long_only",    # symmetric model (is_big_move) — no edge on puts
         "contract_budget_usd": 50.0,
         "straddle_richness_max": 2.5,     # SLV IV ~2x SPY, higher richness normal
         "straddle_richness_ideal": 1.5,
@@ -146,6 +149,9 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.05,
         "premium_min": 0.10,
         "premium_max": 3.00,
+        "scan_start": "13:30",            # v5i dataset decision times: 13:30-15:50
+        "scan_end": "15:50",
+        "signal_threshold": 0.40,         # model optimal (DOWN=0.40)
     },
     "IWM": {
         "strike_increment": 0.50,
@@ -162,6 +168,9 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.15,
         "premium_min": 0.05,
         "premium_max": 2.00,
+        "scan_start": "09:35",            # v5 dataset decision times: 09:35-13:30
+        "scan_end": "13:30",
+        "signal_threshold": 0.67,         # model optimal (UP=0.68, DOWN=0.66)
         "straddle_richness_max": 2.0,
         "straddle_richness_ideal": 1.2,
     },
@@ -266,6 +275,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._model_type: str = ""
         self._model_metrics: dict = {}
         self._top_feature_names: list = []
+        self._model_optimal_threshold: Optional[float] = None  # from training metadata
 
         # Pending lineage snapshot (built on signal fire, consumed by on_fill)
         self._pending_lineage: Optional[dict] = None
@@ -335,7 +345,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Parse risk config from frontend (flows through BMCConfig)
         self._risk_config = {
-            "preset": config.get("risk_preset", "zero_dte_convexity"),
+            "preset": config.get("risk_preset", "intraday_premium"),
             "stop_loss_enabled": config.get("risk_stop_loss_enabled", False),
             "stop_loss_type": config.get("risk_stop_loss_type", "none"),
             "stop_loss_trigger_pct": config.get("risk_stop_loss_trigger_pct", -5.0),
@@ -354,11 +364,17 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             # Compute initial execution profile
             self._current_profile_id, self._current_profile_label = self._compute_execution_profile(cfg)
 
+            # Log effective threshold (model-auto vs config)
+            _eff_thresh = self._model_optimal_threshold if (
+                cfg.get("signal_threshold_auto", True) and self._model_optimal_threshold is not None
+            ) else cfg["signal_threshold"]
+            _thresh_src = "model-auto" if _eff_thresh != cfg["signal_threshold"] else "config"
+
             logger.info(
-                "BigMoveConvexityStrategy[%s] started: auto_entry=%s, threshold=%.2f, "
+                "BigMoveConvexityStrategy[%s] started: auto_entry=%s, threshold=%.4f (%s), "
                 "interval=%ds, scan=%s-%s, delayed=%s, session=%s, profile=%s",
                 self._ticker,
-                cfg["auto_entry"], cfg["signal_threshold"],
+                cfg["auto_entry"], _eff_thresh, _thresh_src,
                 cfg["decision_interval_seconds"],
                 cfg["scan_start"], cfg["scan_end"],
                 cfg["use_delayed_data"],
@@ -449,7 +465,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Update risk config from latest config (hot-reload support)
         self._risk_config = {
-            "preset": config.get("risk_preset", self._risk_config.get("preset", "zero_dte_convexity")),
+            "preset": config.get("risk_preset", self._risk_config.get("preset", "intraday_premium")),
             "stop_loss_enabled": config.get("risk_stop_loss_enabled", self._risk_config.get("stop_loss_enabled", False)),
             "stop_loss_type": config.get("risk_stop_loss_type", self._risk_config.get("stop_loss_type", "none")),
             "stop_loss_trigger_pct": config.get("risk_stop_loss_trigger_pct", self._risk_config.get("stop_loss_trigger_pct", -5.0)),
@@ -578,6 +594,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "model_direction": "DOWN" if self._invert_signal else "UP" if self._target_column and "UP" in self._target_column else "symmetric",
             "signal_inverted": self._invert_signal,
             "target_column": self._target_column,
+            # Model's trained optimal threshold (None if v1 model without threshold metadata)
+            "model_optimal_threshold": self._model_optimal_threshold,
         }
 
         # Current signal
@@ -760,6 +778,18 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Auto-derive signal inversion from target_column (DOWN models flip direction)
         self._invert_signal = bool(self._target_column and "DOWN" in self._target_column)
 
+        # Extract model's optimal threshold from training metadata (v2+ models)
+        _md = new_model.metadata if hasattr(new_model, 'metadata') else {}
+        _raw_thresh = _md.get("optimal_threshold")
+        if _raw_thresh is not None:
+            self._model_optimal_threshold = round(float(_raw_thresh), 4)
+            logger.info(
+                "Hot-swapped model %s has optimal_threshold=%.4f",
+                version_id, self._model_optimal_threshold,
+            )
+        else:
+            self._model_optimal_threshold = None
+
         # Cache model metrics
         self._model_metrics = {}
         if hasattr(version_meta, 'metrics') and version_meta.metrics:
@@ -867,6 +897,18 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 "auc_roc": prod_version.metrics.get("auc_roc"),
                 "profit_factor": prod_version.metrics.get("profit_factor"),
             }
+        # Extract model's optimal threshold from training metadata (v2+ models)
+        _md = self._model.metadata if hasattr(self._model, 'metadata') else {}
+        _raw_thresh = _md.get("optimal_threshold")
+        if _raw_thresh is not None:
+            self._model_optimal_threshold = round(float(_raw_thresh), 4)
+            logger.info(
+                "Model %s has optimal_threshold=%.4f (will auto-apply when signal_threshold_auto=True)",
+                prod_version.version_id, self._model_optimal_threshold,
+            )
+        else:
+            self._model_optimal_threshold = None
+
         # Pre-compute top 20 feature names by importance for lineage fingerprint
         if hasattr(self._model.model, 'feature_importances_'):
             importances = self._model.model.feature_importances_
@@ -1036,6 +1078,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         _snap_model_metrics = self._model_metrics
         _snap_top_feature_names = self._top_feature_names
         _snap_invert_signal = self._invert_signal
+        _snap_optimal_threshold = self._model_optimal_threshold
 
         import pandas as pd
         from big_move_convexity.features.feature_stack import assemble_feature_vector
@@ -1131,9 +1174,17 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             else:
                 effective_direction = "both"
 
+        # Resolve effective threshold: model's optimal > ticker profile > default 0.5
+        # signal_threshold_auto=True (default) uses model's validated optimal_threshold
+        _cfg_threshold = cfg.get("signal_threshold", 0.5)
+        if cfg.get("signal_threshold_auto", True) and _snap_optimal_threshold is not None:
+            _effective_threshold = _snap_optimal_threshold
+        else:
+            _effective_threshold = _cfg_threshold
+
         # Generate signal (with straddle richness gating if configured)
         signal_config = SignalConfig(
-            probability_threshold=cfg.get("signal_threshold", 0.5),
+            probability_threshold=_effective_threshold,
             min_strength=cfg.get("min_signal_strength", 0.3),
             direction_mode=effective_direction,
             cooldown_minutes=cfg.get("cooldown_minutes", 15),
@@ -1185,8 +1236,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         if signal.direction == "none":
             logger.debug(
-                "Decision cycle: no signal (prob=%.4f, threshold=%.2f)",
-                probability, cfg.get("signal_threshold", 0.5),
+                "Decision cycle: no signal (prob=%.4f, threshold=%.4f%s)",
+                probability, _effective_threshold,
+                " [model-auto]" if _effective_threshold != _cfg_threshold else "",
             )
             return []
 
@@ -1454,7 +1506,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "premium_max": cfg.get("premium_max", 3.00),
         }
         # Include risk preset
-        risk_preset = cfg.get("risk_preset", "zero_dte_convexity")
+        risk_preset = cfg.get("risk_preset", "intraday_premium")
         profile_keys["risk_preset"] = risk_preset
 
         # Machine ID: content hash
