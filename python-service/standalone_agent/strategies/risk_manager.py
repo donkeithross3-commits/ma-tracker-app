@@ -133,6 +133,30 @@ PRESETS = {
         },
         "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
     },
+    "intraday_premium": {
+        # For higher-priced intraday options ($1-$10) where capital at risk matters.
+        # Tighter stop than zero_dte_convexity, earlier trailing activation,
+        # and a profit ladder to bank gains progressively.
+        "stop_loss": {"enabled": True, "type": "simple", "trigger_pct": -40.0},
+        "profit_taking": {
+            "enabled": True,
+            "targets": [
+                {"trigger_pct": 50, "exit_pct": 25},     # bank 25% at +50%
+                {"trigger_pct": 150, "exit_pct": 25},    # bank 25% more at +150%
+            ],
+            "trailing_stop": {
+                "enabled": True,
+                "activation_pct": 20,   # trailing engages at +20% (vs 50% for lotto)
+                "trail_pct": 20,        # 20% below peak initially
+                "exit_tranches": [
+                    {"exit_pct": 33, "trail_pct": 10},   # 1st trigger: sell 33%, tighten to 10%
+                    {"exit_pct": 50, "trail_pct": 6},    # 2nd trigger: sell 50%, tighten to 6%
+                    {"exit_pct": 100},                     # 3rd trigger: sell everything
+                ],
+            },
+        },
+        "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
+    },
     "stock_swing": {
         "stop_loss": {"enabled": True, "type": "simple", "trigger_pct": -5.0},
         "profit_taking": {
