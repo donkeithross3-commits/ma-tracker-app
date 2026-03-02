@@ -10,6 +10,14 @@ interface IBConnectionContextType {
   checkConnection: () => Promise<void>;
   reconnectIB: (force?: boolean) => Promise<{ success: boolean; message: string }>;
   isReconnecting: boolean;
+  // Gateway controls
+  gatewayRunning: boolean | null; // null = unknown/loading
+  isGatewayLoading: boolean;
+  stopGateway: () => Promise<{ success: boolean; message: string }>;
+  startGateway: () => Promise<{ success: boolean; message: string }>;
+  // Agent restart
+  restartAgent: () => Promise<{ success: boolean; message: string }>;
+  isAgentRestarting: boolean;
 }
 
 const IBConnectionContext = createContext<IBConnectionContextType | undefined>(undefined);
@@ -21,6 +29,28 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
   const [lastMessage, setLastMessage] = useState<string | undefined>(undefined);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const hasInitialized = useRef(false);
+
+  // Gateway state
+  const [gatewayRunning, setGatewayRunning] = useState<boolean | null>(null);
+  const [isGatewayLoading, setIsGatewayLoading] = useState(false);
+
+  // Agent restart state
+  const [isAgentRestarting, setIsAgentRestarting] = useState(false);
+  const agentRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const checkGatewayStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/ib-connection/gateway-status", {
+        credentials: "include",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setGatewayRunning(data.running ?? false);
+      }
+    } catch {
+      // Silently fail — gateway status is supplementary
+    }
+  }, []);
 
   const checkConnection = useCallback(async (forceReconnect: boolean = false) => {
     // Only show "checking" state on initial load or manual refresh
@@ -95,17 +125,96 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
     }
   }, [checkConnection]);
 
+  const stopGateway = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    setIsGatewayLoading(true);
+    try {
+      const response = await fetch("/api/ib-connection/gateway-stop", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await response.json();
+      if (data.success) {
+        setGatewayRunning(false);
+      }
+      // Refresh gateway status after a short delay
+      setTimeout(() => checkGatewayStatus(), 2000);
+      return { success: data.success ?? false, message: data.message ?? "Unknown result" };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : "Failed to stop gateway" };
+    } finally {
+      setIsGatewayLoading(false);
+    }
+  }, [checkGatewayStatus]);
+
+  const startGateway = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    setIsGatewayLoading(true);
+    try {
+      const response = await fetch("/api/ib-connection/gateway-start", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await response.json();
+      if (data.success) {
+        setGatewayRunning(true);
+      }
+      // Refresh gateway status after a short delay
+      setTimeout(() => checkGatewayStatus(), 2000);
+      return { success: data.success ?? false, message: data.message ?? "Unknown result" };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : "Failed to start gateway" };
+    } finally {
+      setIsGatewayLoading(false);
+    }
+  }, [checkGatewayStatus]);
+
+  const restartAgent = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    setIsAgentRestarting(true);
+    try {
+      const response = await fetch("/api/ib-connection/agent-restart", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await response.json();
+      // Agent takes ~10s to come back via systemd. Keep restarting state for 15s.
+      if (agentRestartTimerRef.current) clearTimeout(agentRestartTimerRef.current);
+      agentRestartTimerRef.current = setTimeout(() => {
+        setIsAgentRestarting(false);
+        // Refresh connection status after agent should be back
+        checkConnection();
+        checkGatewayStatus();
+      }, 15_000);
+      return { success: data.success ?? false, message: data.message ?? "Unknown result" };
+    } catch (error) {
+      setIsAgentRestarting(false);
+      return { success: false, message: error instanceof Error ? error.message : "Failed to restart agent" };
+    }
+  }, [checkConnection, checkGatewayStatus]);
+
   useEffect(() => {
     checkConnection();
+    checkGatewayStatus();
     // Check every 15 seconds silently; skip when tab is hidden to save resources
     const interval = setInterval(() => {
-      if (!document.hidden) checkConnection(false);
+      if (!document.hidden) {
+        checkConnection(false);
+        // Only poll gateway status when gateway is running (avoid error spam when stopped)
+        if (gatewayRunning !== false) {
+          checkGatewayStatus();
+        }
+      }
     }, 15_000);
-    return () => clearInterval(interval);
-  }, [checkConnection]);
+    return () => {
+      clearInterval(interval);
+      if (agentRestartTimerRef.current) clearTimeout(agentRestartTimerRef.current);
+    };
+  }, [checkConnection, checkGatewayStatus, gatewayRunning]);
 
   return (
-    <IBConnectionContext.Provider value={{ isConnected, isChecking, lastChecked, lastMessage, checkConnection, reconnectIB, isReconnecting }}>
+    <IBConnectionContext.Provider value={{
+      isConnected, isChecking, lastChecked, lastMessage, checkConnection, reconnectIB, isReconnecting,
+      gatewayRunning, isGatewayLoading, stopGateway, startGateway,
+      restartAgent, isAgentRestarting,
+    }}>
       {children}
     </IBConnectionContext.Provider>
   );

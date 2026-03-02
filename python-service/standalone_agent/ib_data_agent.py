@@ -487,6 +487,8 @@ class IBDataAgent:
                 return await self._run_in_thread(self._handle_get_ib_executions_sync, payload)
             elif request_type == "fetch_historical_bars":
                 return await self._run_in_thread(self._handle_fetch_historical_bars_sync, payload)
+            elif request_type == "agent_restart":
+                return await self._handle_agent_restart(payload)
             else:
                 return {"error": f"Unknown request type: {request_type}"}
         except Exception as e:
@@ -2097,6 +2099,19 @@ class IBDataAgent:
             "engine_mode": "running",
             "budget_status": self.execution_engine.get_budget_status(),
         }
+
+    async def _handle_agent_restart(self, payload: dict) -> dict:
+        """Restart the agent process.
+
+        Sends a success response, then schedules sys.exit(0) after a short
+        delay so the WebSocket response has time to flush.  systemd
+        (Restart=always, RestartSec=10) brings the agent back up.
+        """
+        logger.info("Agent restart requested via dashboard — exiting in 1s")
+        # Schedule exit after 1s so the WS response can flush
+        loop = asyncio.get_event_loop()
+        loop.call_later(1.0, lambda: os._exit(0))
+        return {"success": True, "message": "Agent restarting in 1 second..."}
 
     # IB account dedicated to automated BMC trading
     IB_ACCT_CODE = "U152133"

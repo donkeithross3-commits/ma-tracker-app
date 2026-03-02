@@ -16,13 +16,20 @@ interface FuturesQuote {
 }
 
 export default function IBConnectionStatus() {
-  const { isConnected, isChecking, lastMessage, checkConnection, reconnectIB, isReconnecting } = useIBConnection();
+  const {
+    isConnected, isChecking, lastMessage, checkConnection, reconnectIB, isReconnecting,
+    gatewayRunning, isGatewayLoading, stopGateway, startGateway,
+    restartAgent, isAgentRestarting,
+  } = useIBConnection();
   const [futuresQuote, setFuturesQuote] = useState<FuturesQuote | null>(null);
   const [isFetchingFutures, setIsFetchingFutures] = useState(false);
   const [polygonQuote, setPolygonQuote] = useState<FuturesQuote | null>(null);
   const [isFetchingPolygon, setIsFetchingPolygon] = useState(false);
   const [showAgentModal, setShowAgentModal] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  // Gateway stop confirmation
+  const [confirmingStop, setConfirmingStop] = useState(false);
 
   const testFuturesQuote = async () => {
     setIsFetchingFutures(true);
@@ -67,7 +74,7 @@ export default function IBConnectionStatus() {
     try {
       const response = await fetch("/api/ma-options/download-agent");
       if (!response.ok) throw new Error("Download failed");
-      
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -82,6 +89,25 @@ export default function IBConnectionStatus() {
     } finally {
       setIsDownloading(false);
     }
+  };
+
+  const handleStopGateway = async () => {
+    if (!confirmingStop) {
+      setConfirmingStop(true);
+      // Auto-dismiss confirmation after 5s
+      setTimeout(() => setConfirmingStop(false), 5000);
+      return;
+    }
+    setConfirmingStop(false);
+    await stopGateway();
+  };
+
+  const handleStartGateway = async () => {
+    await startGateway();
+  };
+
+  const handleRestartAgent = async () => {
+    await restartAgent();
   };
 
   // Show initial loading state only, not during background polling
@@ -205,28 +231,105 @@ export default function IBConnectionStatus() {
           )}
         </div>
 
-        {/* Second row: Local Agent button */}
-        <button
-          onClick={() => setShowAgentModal(true)}
-          className="text-xs text-gray-400 hover:text-gray-200 flex items-center gap-1"
-        >
-          <span>▶</span>
-          <span>Use Your Own IB Account</span>
-          <span className="ml-1 px-1.5 py-0.5 bg-yellow-600/30 text-yellow-400 rounded text-[9px] font-medium">
-            ALPHA
-          </span>
-        </button>
+        {/* Second row: Infrastructure controls */}
+        <div className="flex items-center gap-2 text-xs">
+          {/* Gateway status indicator */}
+          <div className="flex items-center gap-1.5">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                gatewayRunning === null
+                  ? "bg-gray-600"
+                  : gatewayRunning
+                  ? "bg-green-500"
+                  : "bg-red-500"
+              }`}
+              title={
+                gatewayRunning === null
+                  ? "Gateway status unknown"
+                  : gatewayRunning
+                  ? "IB Gateway running"
+                  : "IB Gateway stopped"
+              }
+            />
+            <span
+              className={
+                gatewayRunning === null
+                  ? "text-gray-500"
+                  : gatewayRunning
+                  ? "text-green-400"
+                  : "text-red-400"
+              }
+            >
+              Gateway: {gatewayRunning === null ? "..." : gatewayRunning ? "Running" : "Stopped"}
+            </span>
+          </div>
+
+          {/* Stop/Start Gateway */}
+          {gatewayRunning === true && (
+            <button
+              onClick={handleStopGateway}
+              disabled={isGatewayLoading}
+              className={`px-2 py-0.5 rounded text-xs disabled:opacity-50 ${
+                confirmingStop
+                  ? "bg-red-600 hover:bg-red-500 text-white animate-pulse"
+                  : "bg-red-900/60 hover:bg-red-800/60 text-red-300"
+              }`}
+              title="Stop IB Gateway — releases IB session so IBKR Mobile can connect"
+            >
+              {isGatewayLoading ? "Stopping..." : confirmingStop ? "Confirm Stop" : "Stop Gateway"}
+            </button>
+          )}
+
+          {gatewayRunning === false && (
+            <button
+              onClick={handleStartGateway}
+              disabled={isGatewayLoading}
+              className="px-2 py-0.5 bg-green-900/60 hover:bg-green-800/60 text-green-300 rounded text-xs disabled:opacity-50"
+              title="Start IB Gateway — re-enables automated IB connection"
+            >
+              {isGatewayLoading ? "Starting..." : "Start Gateway"}
+            </button>
+          )}
+
+          {/* Separator */}
+          <span className="text-gray-700">|</span>
+
+          {/* Restart Agent */}
+          <button
+            onClick={handleRestartAgent}
+            disabled={isAgentRestarting}
+            className="px-2 py-0.5 bg-amber-900/50 hover:bg-amber-800/50 text-amber-300 rounded text-xs disabled:opacity-50"
+            title="Restart trading agent process — systemd brings it back in ~10s"
+          >
+            {isAgentRestarting ? "Restarting (~10s)..." : "Restart Agent"}
+          </button>
+
+          {/* Separator */}
+          <span className="text-gray-700">|</span>
+
+          {/* Local Agent download button */}
+          <button
+            onClick={() => setShowAgentModal(true)}
+            className="text-gray-500 hover:text-gray-300 flex items-center gap-1"
+          >
+            <span>▶</span>
+            <span>Local Agent</span>
+            <span className="ml-0.5 px-1 py-0 bg-yellow-600/30 text-yellow-400 rounded text-[9px] font-medium">
+              ALPHA
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* Modal */}
       {showAgentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           {/* Backdrop */}
-          <div 
-            className="absolute inset-0 bg-black/60" 
+          <div
+            className="absolute inset-0 bg-black/60"
             onClick={() => setShowAgentModal(false)}
           />
-          
+
           {/* Modal content */}
           <div className="relative bg-gray-900 border border-gray-700 rounded-lg p-5 max-w-md w-full mx-4 shadow-xl">
             {/* Header */}

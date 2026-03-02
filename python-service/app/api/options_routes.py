@@ -2764,3 +2764,122 @@ async def relay_pnl_history_annotate(
         logger.error(f"pnl-history/annotate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ---------------------------------------------------------------------------
+# IB Gateway & Agent Infrastructure Controls
+# ---------------------------------------------------------------------------
+
+_GATEWAY_CONTAINER = os.environ.get("IB_GATEWAY_CONTAINER", "ib-gateway")
+
+
+@router.get("/relay/gateway/status")
+async def relay_gateway_status():
+    """Check IB Gateway container status via docker inspect."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "inspect",
+            "--format", '{{.State.Status}}|{{.State.StartedAt}}',
+            _GATEWAY_CONTAINER,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        if proc.returncode != 0:
+            err_msg = stderr.decode().strip()
+            # Container doesn't exist or docker not available
+            if "No such object" in err_msg:
+                return {"running": False, "status": "not_found", "uptime": ""}
+            return {"running": False, "status": "error", "error": err_msg}
+        parts = stdout.decode().strip().split("|", 1)
+        status = parts[0] if parts else "unknown"
+        started_at = parts[1] if len(parts) > 1 else ""
+        return {
+            "running": status == "running",
+            "status": status,
+            "started_at": started_at,
+        }
+    except asyncio.TimeoutError:
+        return {"running": False, "status": "timeout", "error": "docker inspect timed out"}
+    except Exception as e:
+        logger.error(f"gateway/status error: {e}")
+        return {"running": False, "status": "error", "error": str(e)}
+
+
+class GatewayControlRequest(BaseModel):
+    userId: str
+
+
+@router.post("/relay/gateway/stop")
+async def relay_gateway_stop(request: GatewayControlRequest):
+    """Stop IB Gateway container. Releases IB session for mobile access.
+
+    docker stop prevents restart:always from restarting the container.
+    Only docker start or system reboot brings it back.
+    """
+    logger.info(f"Gateway STOP requested by user {request.userId}")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "stop", _GATEWAY_CONTAINER,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        if proc.returncode != 0:
+            err_msg = stderr.decode().strip()
+            return {"success": False, "message": f"docker stop failed: {err_msg}"}
+        logger.info(f"IB Gateway container stopped by user {request.userId}")
+        return {"success": True, "message": "IB Gateway stopped. IBKR Mobile can now connect."}
+    except asyncio.TimeoutError:
+        return {"success": False, "message": "docker stop timed out (30s)"}
+    except Exception as e:
+        logger.error(f"gateway/stop error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@router.post("/relay/gateway/start")
+async def relay_gateway_start(request: GatewayControlRequest):
+    """Start IB Gateway container. Re-enables automated IB connection."""
+    logger.info(f"Gateway START requested by user {request.userId}")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "start", _GATEWAY_CONTAINER,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        if proc.returncode != 0:
+            err_msg = stderr.decode().strip()
+            return {"success": False, "message": f"docker start failed: {err_msg}"}
+        logger.info(f"IB Gateway container started by user {request.userId}")
+        return {"success": True, "message": "IB Gateway started. Agent will auto-reconnect."}
+    except asyncio.TimeoutError:
+        return {"success": False, "message": "docker start timed out (30s)"}
+    except Exception as e:
+        logger.error(f"gateway/start error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+class AgentRestartRequest(BaseModel):
+    userId: str
+
+
+@router.post("/relay/agent/restart")
+async def relay_agent_restart(request: AgentRestartRequest):
+    """Restart trading agent process. Agent exits cleanly, systemd restarts it."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="agent_restart",
+            payload={},
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay agent/restart error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
