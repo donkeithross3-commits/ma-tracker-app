@@ -66,14 +66,16 @@ export async function GET(request: NextRequest) {
     );
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return NextResponse.json(
-        {
-          error:
-            errorData.detail || `Failed to fetch IB bars: ${response.status}`,
-        },
-        { status: response.status }
-      );
+      const text = await response.text().catch(() => "");
+      let detail = `Failed to fetch IB bars: ${response.status}`;
+      try {
+        const errorData = JSON.parse(text);
+        if (errorData.detail) detail = errorData.detail;
+      } catch {
+        // Non-JSON error body — surface the raw text for debugging
+        if (text) detail = text.slice(0, 200);
+      }
+      return NextResponse.json({ error: detail }, { status: response.status });
     }
 
     const data = await response.json();

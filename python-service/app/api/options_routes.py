@@ -1879,7 +1879,7 @@ async def relay_historical_bars(req: HistoricalBarsRequest):
             detail="No IB agent connected — cannot fetch historical bars."
         )
 
-    timer.mark("provider_found")
+    timer.stage("provider_found")
 
     try:
         response_data = await send_request_to_provider(
@@ -1898,13 +1898,13 @@ async def relay_historical_bars(req: HistoricalBarsRequest):
             user_id=req.userId,
         )
 
-        timer.mark("agent_response")
+        timer.stage("agent_response")
 
         if "error" in response_data:
-            timer.log(extra=f"error={response_data['error']}")
+            timer.finish(extra={"error": response_data["error"]})
             raise HTTPException(status_code=502, detail=response_data["error"])
 
-        timer.log(extra=f"bars={response_data.get('count', 0)}")
+        timer.finish(extra={"bars": response_data.get("count", 0)})
         return response_data
 
     except HTTPException:

@@ -69,6 +69,7 @@ function InlineTickerInput({
       }}
       onBlur={handleSubmit}
       className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0 text-sm text-gray-100 font-mono uppercase focus:outline-none focus:border-blue-500 inline-edit"
+      style={{ touchAction: "manipulation" }}
       maxLength={10}
     />
   );

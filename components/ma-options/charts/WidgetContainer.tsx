@@ -55,17 +55,20 @@ export default function WidgetContainer({
     >
       {/* Header — drag-handle only on grip+title; controls sit outside for mobile touch */}
       <div
-        className="flex items-center gap-1.5 px-2 border-b border-gray-800 select-none shrink-0"
+        className="flex items-center gap-1.5 px-2 border-b border-gray-800 shrink-0"
         style={{ height: HEADER_HEIGHT_PX }}
       >
         {/* Draggable zone: grip icon + title only */}
-        <div className="drag-handle flex items-center gap-1.5 cursor-grab active:cursor-grabbing min-w-0">
+        <div className="drag-handle flex items-center gap-1.5 cursor-grab active:cursor-grabbing min-w-0 select-none">
           <GripVertical className="h-3.5 w-3.5 text-gray-500 shrink-0" />
           <span className="text-xs font-medium text-gray-300 truncate">
             {title}
           </span>
         </div>
-        {headerExtra}
+        {/* Controls sit outside drag-handle — touchAction ensures fast mobile taps */}
+        <div className="flex items-center min-w-0" style={{ touchAction: "manipulation" }}>
+          {headerExtra}
+        </div>
         <div className="flex items-center gap-1 ml-auto shrink-0">
           {loading && (
             <Loader2 className="h-3 w-3 text-blue-400 animate-spin" />
