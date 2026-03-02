@@ -21,11 +21,11 @@ export interface WatchlistItemForQuote {
   exchange?: string | null;
 }
 
-const POLL_INTERVAL_MS = 8000;
+const POLL_INTERVAL_MS = 4000;
 
 /**
  * Polling hook for watchlist quotes.
- * - Polls every 8 seconds
+ * - Polls every 4 seconds
  * - Skips when document.hidden
  * - Re-fetches on visibility change
  */
