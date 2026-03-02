@@ -764,8 +764,14 @@ class IBDataAgent:
 
             if payload.get("lastTradeDateOrContractMonth"):
                 contract.lastTradeDateOrContractMonth = payload["lastTradeDateOrContractMonth"]
+
+            # Disambiguate contracts that have multiple variants.
+            # SI (Silver) has 1000oz and 5000oz — specify 5000 (standard).
+            _MULTIPLIER_OVERRIDES = {"SI": "5000"}
             if payload.get("multiplier"):
                 contract.multiplier = payload["multiplier"]
+            elif contract.symbol in _MULTIPLIER_OVERRIDES:
+                contract.multiplier = _MULTIPLIER_OVERRIDES[contract.symbol]
         elif sec_type == "IND":
             contract.symbol = ticker
             contract.secType = "IND"
