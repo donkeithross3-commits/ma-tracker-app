@@ -122,6 +122,7 @@ class IBMergerArbScanner(EWrapper, EClient):
         self.next_order_id = 1000  # Synced from nextValidId; used only for placeOrder
         self._order_id_lock = Lock()  # Protects get_next_order_id()
         self._req_id_lock = Lock()   # Protects get_next_req_id() for concurrent fetch_underlying
+        self._mkt_data_type_lock = Lock()  # Serializes reqMarketDataType(DELAYED/REALTIME) switches
         self.data_ready = Event()
         # Wait for all option-parameter callbacks (IB sends multiple + End)
         self.sec_def_opt_params_done = Event()
@@ -1414,23 +1415,26 @@ class IBMergerArbScanner(EWrapper, EClient):
         req_state["event"].wait(timeout=3.0)
         self.cancelMktData(req_id)
 
-        # If IB returned 200 (no security definition) and we have no price, retry with delayed data
+        # If IB returned 200 (no security definition) and we have no price, retry with delayed data.
+        # reqMarketDataType is a GLOBAL IB setting — serialize retries so concurrent threads
+        # don't trample each other's DELAYED↔REALTIME switch.
         if req_state["price"] is None and req_state["error_200"]:
             self.logger.info("[%s] fetch_underlying: retrying with delayed data", ticker)
-            self.reqMarketDataType(3)  # DELAYED
-            req_id2 = self.get_next_req_id()
-            self.req_id_map[req_id2] = f"underlying_{ticker}"
-            req_state2 = {
-                "event": Event(),
-                "price": None, "bid": None, "ask": None, "close": None,
-                "volume": None, "error_200": False,
-            }
-            self._underlying_requests[req_id2] = req_state2
+            with self._mkt_data_type_lock:
+                self.reqMarketDataType(3)  # DELAYED
+                req_id2 = self.get_next_req_id()
+                self.req_id_map[req_id2] = f"underlying_{ticker}"
+                req_state2 = {
+                    "event": Event(),
+                    "price": None, "bid": None, "ask": None, "close": None,
+                    "volume": None, "error_200": False,
+                }
+                self._underlying_requests[req_id2] = req_state2
 
-            self.reqMktData(req_id2, contract, "", False, False, [])
-            req_state2["event"].wait(timeout=3.0)
-            self.cancelMktData(req_id2)
-            self.reqMarketDataType(1)  # restore REALTIME
+                self.reqMktData(req_id2, contract, "", False, False, [])
+                req_state2["event"].wait(timeout=3.0)
+                self.cancelMktData(req_id2)
+                self.reqMarketDataType(1)  # restore REALTIME
 
             # Use delayed results
             if req_state2["price"] is not None:
