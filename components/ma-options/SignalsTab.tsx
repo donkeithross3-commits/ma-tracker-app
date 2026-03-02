@@ -961,31 +961,49 @@ export default function SignalsTab() {
     const consumed = new Set<number>();
 
     return allActivePositions.map(pos => {
-      // Multi-field match: entry_price + qty + instrument strike from config.
-      // Each matched strategy is consumed so it can't be reused by another position.
+      // Match positions to risk managers. With aggregate lots (v1.15.0+), one RM
+      // holds multiple fills for the same contract. We match by contract first
+      // (most robust), then fall back to price+qty for legacy compatibility.
       let matchIdx = -1;
-      const posStrike = pos.signal?.option_contract?.strike;
-      for (let i = 0; i < riskStrategies.length; i++) {
-        if (consumed.has(i)) continue;
-        const s = riskStrategies[i];
-        const priceMatch = Math.abs(s.strategy_state.entry_price - pos.entry_price) < 0.005;
-        const qtyMatch = s.strategy_state.initial_qty === pos.quantity;
-        if (!priceMatch || !qtyMatch) continue;
-        // Tighten match with instrument strike from config when available
-        const configStrike = s.config?.instrument?.strike;
-        if (posStrike != null && configStrike != null) {
-          if (Math.abs(configStrike - posStrike) < 0.005) {
+      const posOc = pos.signal?.option_contract;
+
+      // Strategy 1: Contract-based match via cache_key.
+      // Build expected cache_key from position's option_contract and match against
+      // the RM's strategy_state.cache_key. Multiple positions can share one RM.
+      if (posOc?.symbol && posOc?.strike != null && posOc?.expiry && posOc?.right) {
+        const posCacheKey = `${posOc.symbol}:${posOc.strike}:${posOc.expiry}:${posOc.right}`;
+        for (let i = 0; i < riskStrategies.length; i++) {
+          const s = riskStrategies[i];
+          if (s.strategy_state.cache_key === posCacheKey) {
             matchIdx = i;
             break;
           }
-          // Strike mismatch — skip this candidate, try next
-          continue;
         }
-        // No strike info to compare — accept price+qty match
-        matchIdx = i;
-        break;
       }
-      if (matchIdx >= 0) consumed.add(matchIdx);
+
+      // Strategy 2: Fall back to price+qty match (pre-aggregate positions).
+      if (matchIdx < 0) {
+        const posStrike = posOc?.strike;
+        for (let i = 0; i < riskStrategies.length; i++) {
+          if (consumed.has(i)) continue;
+          const s = riskStrategies[i];
+          const priceMatch = Math.abs(s.strategy_state.entry_price - pos.entry_price) < 0.005;
+          const qtyMatch = s.strategy_state.initial_qty === pos.quantity;
+          if (!priceMatch || !qtyMatch) continue;
+          const configStrike = s.config?.instrument?.strike;
+          if (posStrike != null && configStrike != null) {
+            if (Math.abs(configStrike - posStrike) < 0.005) {
+              matchIdx = i;
+              break;
+            }
+            continue;
+          }
+          matchIdx = i;
+          break;
+        }
+        // Only consume on fallback match (contract match allows sharing)
+        if (matchIdx >= 0) consumed.add(matchIdx);
+      }
       const matchedStrategy = matchIdx >= 0 ? riskStrategies[matchIdx] : undefined;
 
       const rm = matchedStrategy?.strategy_state ?? null;
