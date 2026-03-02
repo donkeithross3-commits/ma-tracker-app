@@ -2024,12 +2024,12 @@ export default function SignalsTab() {
                 type="number"
               />
               <ConfigField
-                label="Scan Start"
+                label="Scan Start (ET)"
                 value={activeConfig.scan_start}
                 onChange={v => updateConfig(activeTicker, "scan_start", v)}
               />
               <ConfigField
-                label="Scan End"
+                label="Scan End (ET)"
                 value={activeConfig.scan_end}
                 onChange={v => updateConfig(activeTicker, "scan_end", v)}
               />
