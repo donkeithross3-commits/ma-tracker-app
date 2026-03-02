@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
@@ -328,7 +329,7 @@ def send_pushover(alerts: list[Alert]) -> None:
 
     title = f"Fleet Monitor: {len(alerts)} alert(s)"
 
-    data = urllib.request.urlencode({
+    data = urllib.parse.urlencode({
         "token": token,
         "user": user,
         "title": title,
