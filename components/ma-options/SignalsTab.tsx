@@ -932,9 +932,23 @@ export default function SignalsTab() {
   );
   const activeDirection = activeStrategy ? parseStrategyDirection(activeStrategy.strategy_id) : null;
 
+  // Sum positions_spawned across ALL strategies for this ticker.
+  // Directional pairs (bmc_spy_up + bmc_spy_down) each track their own fills, so a fill
+  // on bmc_spy_down would show "0 positions" on the SPY tab if we only read bmc_spy_up.
+  const totalPositionsSpawned = activeTickerStrategies.reduce(
+    (sum, s) => sum + (s.signal?.positions_spawned ?? 0), 0
+  );
+
   // ── Derived: position details with risk manager + live quotes ──
   const positionDetails = useMemo(() => {
-    if (!signal?.active_positions?.length) return [];
+    // Aggregate active_positions from ALL strategies for this ticker.
+    // Directional pairs (bmc_spy_up + bmc_spy_down) each track their own fills in
+    // separate _active_positions arrays. Without aggregation, a fill that lands on the
+    // "non-primary" directional strategy shows as "0 positions" on the tab.
+    const allActivePositions = activeTickerStrategies.flatMap(
+      s => (s.signal?.active_positions ?? []) as NonNullable<typeof signal>["active_positions"]
+    );
+    if (!allActivePositions.length) return [];
     const riskStrategies = (executionStatus?.strategies || []).filter(
       s => s.strategy_id.includes("risk_") && s.strategy_state && "entry_price" in s.strategy_state,
     ) as (ExecutionStrategyInfo & { strategy_state: RiskManagerState })[];
@@ -946,7 +960,7 @@ export default function SignalsTab() {
     // was ever matched — the rest lost their trailing state, level badges, and quotes.
     const consumed = new Set<number>();
 
-    return signal.active_positions.map(pos => {
+    return allActivePositions.map(pos => {
       // Multi-field match: entry_price + qty + instrument strike from config.
       // Each matched strategy is consumed so it can't be reused by another position.
       let matchIdx = -1;
@@ -992,7 +1006,7 @@ export default function SignalsTab() {
       const recentErrors = matchedStrategy?.recent_errors ?? [];
       return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors };
     });
-  }, [signal?.active_positions, executionStatus?.strategies, executionStatus?.quote_snapshot]);
+  }, [activeTickerStrategies, executionStatus?.strategies, executionStatus?.quote_snapshot]);
 
   // ── Derived: group positions by contract for compact rendering ──
   const groupedPositions = useMemo(() => {
@@ -1306,7 +1320,7 @@ export default function SignalsTab() {
 
         {signal && (
           <span className="text-gray-600 text-xs ml-auto">
-            {signal.decisions_run} decisions &middot; {signal.signals_generated} signals &middot; {signal.positions_spawned} positions
+            {signal.decisions_run} decisions &middot; {signal.signals_generated} signals &middot; {totalPositionsSpawned} positions
           </span>
         )}
       </div>
@@ -1756,7 +1770,7 @@ export default function SignalsTab() {
           )}
 
           {/* ── Session Summary ── */}
-          {((executionStatus?.position_ledger?.length ?? 0) > 0 || (signal?.positions_spawned ?? 0) > 0) && (
+          {((executionStatus?.position_ledger?.length ?? 0) > 0 || totalPositionsSpawned > 0) && (
             <div className="bg-gray-800/50 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-300 flex items-center gap-2">
               <span>{sessionSummary.activeCount} active, {sessionSummary.completedCount} closed{sessionSummary.expired > 0 ? ` (${sessionSummary.expired} expired)` : ""}</span>
               {sessionSummary.completedCount > 0 && (

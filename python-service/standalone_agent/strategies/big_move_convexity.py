@@ -1158,13 +1158,18 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         probability = prediction["probability"]
 
         # Auto-determine direction_mode from model when not explicitly configured
-        # "auto" or None → derive from model target column
+        # "auto" or None → derive from model target column.
+        # Directional models (UP/DOWN) always use "long_only" — even when "both" is
+        # explicitly configured — because trading the inverted low-P direction is
+        # statistically unsound (e.g. DOWN model low P ≠ a reliable UP signal).
         effective_direction = cfg.get("direction_mode", None)
+        _is_directional = _snap_invert_signal or ("UP" in (_snap_target_column or ""))
         if effective_direction is None or effective_direction == "auto":
-            if _snap_invert_signal or ("UP" in (_snap_target_column or "")):
-                effective_direction = "long_only"
-            else:
-                effective_direction = "both"
+            effective_direction = "long_only" if _is_directional else "both"
+        elif effective_direction == "both" and _is_directional:
+            # "both" on a directional model causes it to trade its "wrong" direction
+            # via inversion. Force long_only to prevent cross-direction duplicate orders.
+            effective_direction = "long_only"
 
         # Resolve effective threshold: model's optimal > ticker profile > default 0.5
         # signal_threshold_auto=True (default) uses model's validated optimal_threshold
