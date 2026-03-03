@@ -180,8 +180,9 @@ async def run_batch_assessment(
 
                 # Parse JSON with robust extraction
                 try:
-                    from .engine import _extract_json
+                    from .engine import _extract_json, _normalize_assessment_json
                     parsed = _extract_json(raw_text)
+                    parsed = _normalize_assessment_json(parsed)
                 except (json.JSONDecodeError, ValueError):
                     truncation_note = " [TRUNCATED]" if msg.stop_reason == "max_tokens" else ""
                     logger.error("Malformed JSON in batch for %s%s: %s", ticker, truncation_note, raw_text[:500])

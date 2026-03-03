@@ -118,6 +118,128 @@ ENABLE_SIGNAL_WEIGHTS = os.environ.get("RISK_SIGNAL_WEIGHTS", "false").lower() =
 ENABLE_BATCH_MODE = os.environ.get("RISK_BATCH_MODE", "false").lower() == "true"
 
 
+def _normalize_assessment_json(parsed: dict) -> dict:
+    """Normalize delta-format AI responses into the full assessment format.
+
+    Delta assessments produce flat JSON with grade factors (vote, financing, etc.)
+    at the top level. Full assessments nest them under a "grades" key.
+    This function detects the flat format and restructures it so all downstream
+    code (storage, change detection, discrepancy checks) works uniformly.
+
+    Flat (delta) format:
+        {"vote": {"grade": "Low", ...}, "market": {"score": 7, ...}, ...}
+    Full format:
+        {"grades": {"vote": {"grade": "Low", ...}},
+         "supplemental_scores": {"market": {"score": 7, ...}}, ...}
+    """
+    # If "grades" key already exists, this is full format -- nothing to do
+    if "grades" in parsed:
+        return parsed
+
+    # Check if any graded factor exists at top level (dict or string form)
+    graded = ["vote", "financing", "legal", "regulatory", "mac"]
+    has_flat_grades = any(
+        k in parsed and (
+            (isinstance(parsed[k], dict) and "grade" in parsed[k])
+            or isinstance(parsed[k], str)
+        )
+        for k in graded
+    )
+
+    if not has_flat_grades:
+        return parsed
+
+    # --- Restructure grades ---
+    parsed["grades"] = {}
+    for f in graded:
+        if f in parsed:
+            val = parsed.pop(f)
+            if isinstance(val, dict):
+                parsed["grades"][f] = val
+            elif isinstance(val, str):
+                # Direct string grade: "vote": "Low" or "vote": "Low -- detail..."
+                grade = extract_grade(val)
+                if grade:
+                    entry = {"grade": grade}
+                    # Extract detail after separator (e.g., "Low -- 75% voting...")
+                    detail_match = re.match(
+                        r'^(?:Low|Medium|High)\s*[\-\u2014,]\s*(.*)',
+                        val, re.IGNORECASE | re.DOTALL,
+                    )
+                    if detail_match:
+                        entry["detail"] = detail_match.group(1).strip()
+                    parsed["grades"][f] = entry
+                else:
+                    # Unrecognized grade string (e.g., "B") -- store as-is
+                    parsed["grades"][f] = {"grade": val}
+
+    # --- Restructure supplemental scores ---
+    supplemental = ["market", "timing", "competing_bid"]
+    has_flat_supplementals = any(
+        k in parsed and (
+            (isinstance(parsed[k], dict) and "score" in parsed[k])
+            or isinstance(parsed[k], (int, float))
+        )
+        for k in supplemental
+    )
+    if has_flat_supplementals and "supplemental_scores" not in parsed:
+        parsed["supplemental_scores"] = {}
+        for f in supplemental:
+            if f in parsed:
+                val = parsed.pop(f)
+                if isinstance(val, dict):
+                    parsed["supplemental_scores"][f] = val
+                elif isinstance(val, (int, float)):
+                    parsed["supplemental_scores"][f] = {"score": val}
+
+    # --- Normalize alternative key casing ---
+    # Some delta responses use capitalized keys (Investable, Prob_Success, Summary)
+    case_map = {
+        "Investable": "investable",
+        "Prob_Success": "prob_success",
+        "Summary": "summary",
+    }
+    for alt_key, canonical_key in case_map.items():
+        if alt_key in parsed and canonical_key not in parsed:
+            parsed[canonical_key] = parsed.pop(alt_key)
+
+    # --- Normalize alternative field names ---
+    # investable (bool/str/dict) -> investable_assessment (string) + investable_reasoning
+    if "investable_assessment" not in parsed and "investable" in parsed:
+        inv = parsed.pop("investable")
+        if isinstance(inv, bool):
+            parsed["investable_assessment"] = "Yes" if inv else "No"
+        elif isinstance(inv, dict):
+            # Object with value/grade/answer key + detail
+            val = inv.get("value") or inv.get("grade") or inv.get("answer")
+            if isinstance(val, bool):
+                parsed["investable_assessment"] = "Yes" if val else "No"
+            elif val:
+                parsed["investable_assessment"] = str(val)
+            detail = inv.get("detail")
+            if detail and "investable_reasoning" not in parsed:
+                parsed["investable_reasoning"] = str(detail)
+        else:
+            parsed["investable_assessment"] = str(inv)
+
+    # prob_success (scalar) -> probability_of_success (structured)
+    if "probability_of_success" not in parsed and "prob_success" in parsed:
+        prob = parsed.pop("prob_success")
+        if isinstance(prob, (int, float)):
+            # Delta returns 0-1 scale; full format uses 0-100
+            value = prob * 100 if prob <= 1 else prob
+            parsed["probability_of_success"] = {"value": value}
+        elif isinstance(prob, dict):
+            parsed["probability_of_success"] = prob
+
+    # summary -> deal_summary
+    if "deal_summary" not in parsed and "summary" in parsed:
+        parsed["deal_summary"] = parsed.pop("summary")
+
+    logger.debug("Normalized delta assessment to full format (keys: %s)", sorted(parsed.keys()))
+    return parsed
+
+
 def _extract_estimate_value(data: dict, key: str):
     """Handle both scalar (old) and structured (new) estimate formats.
 
@@ -588,6 +710,9 @@ class RiskAssessmentEngine:
             truncation_note = " [TRUNCATED]" if response.stop_reason == "max_tokens" else ""
             logger.error("Malformed JSON from Claude for %s%s: %s", ticker, truncation_note, raw_text[:500])
             raise ValueError(f"Claude returned invalid JSON for {ticker}")
+
+        # Normalize delta-format responses into full format before any downstream use
+        parsed = _normalize_assessment_json(parsed)
 
         # Enrich with metadata
         parsed["_meta"] = {
