@@ -1156,6 +1156,20 @@ export default function SignalsTab() {
         .map(d => d.strategyId)
         .filter((sid): sid is string => Boolean(sid))
     );
+    const representedCacheKeys = new Set(
+      baseDetails
+        .map(d => d.rm?.cache_key)
+        .filter((k): k is string => Boolean(k))
+    );
+    const representedContractKeys = new Set(
+      baseDetails
+        .map(d => d.optionContract)
+        .filter(
+          (oc): oc is { symbol: string; strike: number; expiry: string; right: string } =>
+            Boolean(oc)
+        )
+        .map(oc => `${oc.symbol}:${oc.strike}:${oc.expiry}:${oc.right}`)
+    );
 
     // Include orphan risk managers for this ticker that are active in the engine
     // but not represented in the derived base details (can happen after hot
@@ -1165,6 +1179,18 @@ export default function SignalsTab() {
       .filter(s => {
         const inst = s.config?.instrument;
         return inst?.symbol?.toUpperCase?.() === activeTicker.toUpperCase();
+      })
+      // Avoid duplicate rows when a stale/orphan RM references a contract that
+      // is already represented by ledger-derived lots for this ticker.
+      .filter(s => {
+        const cacheKey = s.strategy_state.cache_key;
+        if (cacheKey && representedCacheKeys.has(cacheKey)) return false;
+        const inst = s.config?.instrument;
+        if (inst?.symbol && inst?.strike != null && inst?.expiry && inst?.right) {
+          const ckey = `${inst.symbol}:${inst.strike}:${inst.expiry}:${inst.right}`;
+          if (representedContractKeys.has(ckey)) return false;
+        }
+        return true;
       })
       .map(s => {
         const rm = s.strategy_state;
