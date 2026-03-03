@@ -1,13 +1,31 @@
 {
   "date": "2026-03-03",
   "title": "Mar 3, 2026",
-  "summary": "Fix Active Positions undercount after directional strategy cutovers.",
+  "summary": "Fix direction gating and active-position quantity drift in BMC execution UI.",
   "features": [
     {
       "id": "bmc-active-positions-orphan-risk-managers",
       "title": "Show Orphan Active Risk Managers In Positions Panel",
       "summary": "Active Positions now includes active risk managers that are still open after strategy replacement events.",
       "description": "When a ticker is replaced from a single strategy to directional UP/DOWN while positions are already open, an older risk manager can remain active in execution telemetry and position_ledger but no longer appear in the current strategy.active_positions list. The Signals tab now merges unmatched active risk managers for the selected ticker into positionDetails so all open contracts are shown with live quote/PnL and close controls.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "bmc-direction-long-only-hard-gate",
+      "title": "Enforce Direction Mode At Order Build",
+      "summary": "Long Only mode now hard-blocks put entries (and Short Only blocks call entries).",
+      "description": "Added a final direction gate in BigMoveConvexityStrategy._build_entry_order so configured direction_mode is enforced immediately before contract side selection. This prevents edge cases where transformed model signals could bypass intent and produce the wrong option side.",
+      "category": "execution",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "signals-ledger-first-lot-rendering",
+      "title": "Active Positions Now Prefer Ledger Lots",
+      "summary": "Signals tab now builds active lots from position_ledger runtime lots/fills to avoid doubled contract counts.",
+      "description": "Position rendering now uses position_ledger as primary source and reconstructs lot rows from runtime_state.lot_entries (or entry fills fallback) before using in-memory active_positions. Group totals also dedupe shared risk-manager remaining_qty and trailing-state counts, preventing inflated xN displays after hot-swap/recovery.",
       "category": "signals",
       "image": null,
       "screenshot": null

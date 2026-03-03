@@ -91,6 +91,17 @@ interface PositionLedgerEntry {
   exit_reason?: string;
   entry: { order_id: number; price: number; quantity: number; fill_time: number; perm_id: number };
   instrument: { symbol: string; strike?: number; expiry?: string; right?: string };
+  runtime_state?: {
+    remaining_qty?: number;
+    initial_qty?: number;
+    lot_entries?: Array<{
+      order_id?: number;
+      entry_price?: number;
+      quantity?: number;
+      fill_time?: number;
+      perm_id?: number;
+    }>;
+  };
   fill_log: FillLogEntry[];
   lineage?: {
     model_version?: string;
@@ -959,13 +970,6 @@ export default function SignalsTab() {
 
   // ── Derived: position details with risk manager + live quotes ──
   const positionDetails = useMemo(() => {
-    // Aggregate active_positions from ALL strategies for this ticker.
-    // Directional pairs (bmc_spy_up + bmc_spy_down) each track their own fills in
-    // separate _active_positions arrays. Without aggregation, a fill that lands on the
-    // "non-primary" directional strategy shows as "0 positions" on the tab.
-    const allActivePositions = activeTickerStrategies.flatMap(
-      s => (s.signal?.active_positions ?? []) as NonNullable<typeof signal>["active_positions"]
-    );
     const riskStrategies = (executionStatus?.strategies || []).filter(
       s => s.strategy_id.includes("risk_") && s.strategy_state && "entry_price" in s.strategy_state,
     ) as (ExecutionStrategyInfo & { strategy_state: RiskManagerState })[];
@@ -974,77 +978,179 @@ export default function SignalsTab() {
       p => p.status === "active"
     );
     const ledgerByRiskId = new Map(activeLedger.map(p => [p.id, p]));
+    const riskById = new Map(riskStrategies.map(s => [s.strategy_id, s] as const));
 
-    // Track consumed strategy indices so each risk manager matches at most one position.
-    // The old find() approach returned the first match for every position, so when
-    // multiple positions share the same qty (e.g. all x1), only the first risk manager
-    // was ever matched — the rest lost their trailing state, level badges, and quotes.
-    const consumed = new Set<number>();
+    type Detail = {
+      pos: {
+        order_id: number;
+        entry_price: number;
+        quantity: number;
+        fill_time: number;
+        perm_id?: number;
+        signal?: {
+          option_contract?: {
+            symbol: string;
+            strike: number;
+            expiry: string;
+            right: string;
+          };
+        } | null;
+      };
+      rm: RiskManagerState | null;
+      quote: QuoteSnapshot | null;
+      pnlPct: number | null;
+      pnlDollar: number | null;
+      optionContract: { symbol: string; strike: number; expiry: string; right: string } | null;
+      strategyId: string | null;
+      recentErrors: string[];
+    };
 
-    const baseDetails = allActivePositions.map(pos => {
-      // Match positions to risk managers. With aggregate lots (v1.15.0+), one RM
-      // holds multiple fills for the same contract. We match by contract first
-      // (most robust), then fall back to price+qty for legacy compatibility.
-      let matchIdx = -1;
-      const posOc = pos.signal?.option_contract;
+    const baseDetails: Detail[] = [];
 
-      // Strategy 1: Contract-based match via cache_key.
-      // Build expected cache_key from position's option_contract and match against
-      // the RM's strategy_state.cache_key. Multiple positions can share one RM.
-      if (posOc?.symbol && posOc?.strike != null && posOc?.expiry && posOc?.right) {
-        const posCacheKey = `${posOc.symbol}:${posOc.strike}:${posOc.expiry}:${posOc.right}`;
-        for (let i = 0; i < riskStrategies.length; i++) {
-          const s = riskStrategies[i];
-          if (s.strategy_state.cache_key === posCacheKey) {
+    // Primary source of truth: persisted position ledger + lot_entries.
+    // This avoids stale or duplicated _active_positions after hot-swap/recovery.
+    if (activeLedger.length > 0) {
+      for (const ledger of activeLedger) {
+        const strategyId = ledger.id;
+        const matchedStrategy = riskById.get(strategyId);
+        const rm = matchedStrategy?.strategy_state ?? null;
+        const quote = rm?.cache_key ? quotes[rm.cache_key] ?? null : null;
+        const inst = (ledger.instrument || {}) as {
+          symbol?: string;
+          strike?: number;
+          expiry?: string;
+          right?: string;
+        };
+        const optionContract =
+          inst.symbol && inst.strike != null && inst.expiry && inst.right
+            ? {
+                symbol: inst.symbol,
+                strike: Number(inst.strike),
+                expiry: inst.expiry,
+                right: inst.right,
+              }
+            : null;
+
+        const runtimeLots = Array.isArray(ledger.runtime_state?.lot_entries)
+          ? ledger.runtime_state?.lot_entries || []
+          : [];
+
+        const fillLots =
+          runtimeLots.length === 0
+            ? (ledger.fill_log || [])
+                .filter(f => f.level === "entry" && (f.qty_filled ?? 0) > 0)
+                .map(f => ({
+                  order_id: f.order_id,
+                  entry_price: f.avg_price,
+                  quantity: f.qty_filled,
+                  fill_time: f.time,
+                  perm_id: ledger.entry?.perm_id,
+                }))
+            : [];
+
+        const lots =
+          runtimeLots.length > 0
+            ? runtimeLots
+            : fillLots.length > 0
+              ? fillLots
+              : [
+                  {
+                    order_id: ledger.entry?.order_id ?? 0,
+                    entry_price: ledger.entry?.price ?? 0,
+                    quantity: ledger.entry?.quantity ?? 0,
+                    fill_time: ledger.entry?.fill_time ?? Date.now() / 1000,
+                    perm_id: ledger.entry?.perm_id,
+                  },
+                ];
+
+        for (const lot of lots) {
+          const quantity = Math.max(0, Number(lot.quantity ?? 0));
+          if (quantity <= 0) continue;
+          const entryPrice = Number(lot.entry_price ?? ledger.entry?.price ?? 0);
+          const fillTime = Number(lot.fill_time ?? ledger.entry?.fill_time ?? Date.now() / 1000);
+          const pos = {
+            order_id: Number(lot.order_id ?? ledger.entry?.order_id ?? 0),
+            entry_price: entryPrice,
+            quantity,
+            fill_time: fillTime,
+            perm_id: Number(lot.perm_id ?? ledger.entry?.perm_id ?? 0),
+            signal: optionContract ? { option_contract: optionContract } : null,
+          };
+
+          let pnlPct: number | null = null;
+          let pnlDollar: number | null = null;
+          if (quote && quote.mid > 0 && entryPrice > 0) {
+            pnlPct = ((quote.mid - entryPrice) / entryPrice) * 100;
+            pnlDollar = (quote.mid - entryPrice) * quantity * 100;
+          }
+
+          const recentErrors = matchedStrategy?.recent_errors ?? [];
+          baseDetails.push({ pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors });
+        }
+      }
+    } else {
+      // Fallback for legacy sessions where position_ledger is empty:
+      // derive from in-memory strategy active_positions.
+      const allActivePositions = activeTickerStrategies.flatMap(
+        s => (s.signal?.active_positions ?? []) as NonNullable<typeof signal>["active_positions"]
+      );
+      const consumed = new Set<number>();
+      for (const pos of allActivePositions) {
+        let matchIdx = -1;
+        const posOc = pos.signal?.option_contract;
+
+        if (posOc?.symbol && posOc?.strike != null && posOc?.expiry && posOc?.right) {
+          const posCacheKey = `${posOc.symbol}:${posOc.strike}:${posOc.expiry}:${posOc.right}`;
+          for (let i = 0; i < riskStrategies.length; i++) {
+            if (consumed.has(i)) continue;
+            const s = riskStrategies[i];
+            if (s.strategy_state.cache_key === posCacheKey) {
+              matchIdx = i;
+              break;
+            }
+          }
+        }
+
+        if (matchIdx < 0) {
+          const posStrike = posOc?.strike;
+          for (let i = 0; i < riskStrategies.length; i++) {
+            if (consumed.has(i)) continue;
+            const s = riskStrategies[i];
+            const priceMatch = Math.abs(s.strategy_state.entry_price - pos.entry_price) < 0.005;
+            const qtyMatch = s.strategy_state.initial_qty === pos.quantity;
+            if (!priceMatch || !qtyMatch) continue;
+            const configStrike = s.config?.instrument?.strike;
+            if (posStrike != null && configStrike != null) {
+              if (Math.abs(configStrike - posStrike) < 0.005) {
+                matchIdx = i;
+                break;
+              }
+              continue;
+            }
             matchIdx = i;
             break;
           }
         }
-      }
-
-      // Strategy 2: Fall back to price+qty match (pre-aggregate positions).
-      if (matchIdx < 0) {
-        const posStrike = posOc?.strike;
-        for (let i = 0; i < riskStrategies.length; i++) {
-          if (consumed.has(i)) continue;
-          const s = riskStrategies[i];
-          const priceMatch = Math.abs(s.strategy_state.entry_price - pos.entry_price) < 0.005;
-          const qtyMatch = s.strategy_state.initial_qty === pos.quantity;
-          if (!priceMatch || !qtyMatch) continue;
-          const configStrike = s.config?.instrument?.strike;
-          if (posStrike != null && configStrike != null) {
-            if (Math.abs(configStrike - posStrike) < 0.005) {
-              matchIdx = i;
-              break;
-            }
-            continue;
-          }
-          matchIdx = i;
-          break;
-        }
-        // Only consume on fallback match (contract match allows sharing)
         if (matchIdx >= 0) consumed.add(matchIdx);
+
+        const matchedStrategy = matchIdx >= 0 ? riskStrategies[matchIdx] : undefined;
+        const rm = matchedStrategy?.strategy_state ?? null;
+        const strategyId = matchedStrategy?.strategy_id ?? null;
+        const quote = rm?.cache_key ? quotes[rm.cache_key] ?? null : null;
+
+        let pnlPct: number | null = null;
+        let pnlDollar: number | null = null;
+        if (quote && quote.mid > 0 && pos.entry_price > 0) {
+          pnlPct = ((quote.mid - pos.entry_price) / pos.entry_price) * 100;
+          pnlDollar = (quote.mid - pos.entry_price) * pos.quantity * 100;
+        }
+
+        const optionContract = pos.signal?.option_contract ?? null;
+        const recentErrors = matchedStrategy?.recent_errors ?? [];
+        baseDetails.push({ pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors });
       }
-      const matchedStrategy = matchIdx >= 0 ? riskStrategies[matchIdx] : undefined;
+    }
 
-      const rm = matchedStrategy?.strategy_state ?? null;
-      const strategyId = matchedStrategy?.strategy_id ?? null;
-      const quote = rm?.cache_key ? quotes[rm.cache_key] ?? null : null;
-
-      // Unrealized P&L (assumes long — BMC always buys)
-      let pnlPct: number | null = null;
-      let pnlDollar: number | null = null;
-      if (quote && quote.mid > 0 && pos.entry_price > 0) {
-        pnlPct = ((quote.mid - pos.entry_price) / pos.entry_price) * 100;
-        pnlDollar = (quote.mid - pos.entry_price) * pos.quantity * 100;
-      }
-
-      // Option info from the signal snapshot at fill time
-      const optionContract = pos.signal?.option_contract ?? null;
-
-      const recentErrors = matchedStrategy?.recent_errors ?? [];
-      return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors };
-    });
     const matchedRiskIds = new Set(
       baseDetails
         .map(d => d.strategyId)
@@ -1052,8 +1158,8 @@ export default function SignalsTab() {
     );
 
     // Include orphan risk managers for this ticker that are active in the engine
-    // but not referenced by current strategy.active_positions (can happen after
-    // hot strategy replace / directional expansion while positions stay open).
+    // but not represented in the derived base details (can happen after hot
+    // strategy replace / directional expansion while positions stay open).
     const orphanDetails = riskStrategies
       .filter(s => !matchedRiskIds.has(s.strategy_id))
       .filter(s => {
@@ -1133,6 +1239,7 @@ export default function SignalsTab() {
       totalInitial: number;
       quote: typeof positionDetails[0]["quote"];
       staleQuote: boolean;
+      countedStrategyIds: Set<string>;
     }>();
 
     for (const pd of positionDetails) {
@@ -1159,6 +1266,7 @@ export default function SignalsTab() {
           totalInitial: 0,
           quote: null,
           staleQuote: false,
+          countedStrategyIds: new Set<string>(),
         });
       }
       const g = groups.get(key)!;
@@ -1167,12 +1275,14 @@ export default function SignalsTab() {
       else g.activeCount++;
       if (pd.pnlDollar != null) g.totalPnlDollar += pd.pnlDollar;
       g.totalCostBasis += pd.pos.entry_price * pd.pos.quantity * 100;
-      if (pd.rm) {
-        g.totalRemaining += pd.rm.remaining_qty;
-        g.totalInitial += pd.rm.initial_qty;
+      g.totalInitial += pd.pos.quantity;
+      if (pd.rm && pd.strategyId) {
+        if (!g.countedStrategyIds.has(pd.strategyId)) {
+          g.totalRemaining += pd.rm.remaining_qty;
+          g.countedStrategyIds.add(pd.strategyId);
+        }
       } else {
         g.totalRemaining += pd.pos.quantity;
-        g.totalInitial += pd.pos.quantity;
       }
       if (!g.quote && pd.quote) {
         g.quote = pd.quote;
@@ -1188,8 +1298,13 @@ export default function SignalsTab() {
 
       // Aggregate trailing states
       const stateCounts = new Map<string, number>();
+      const countedStateStrategyIds = new Set<string>();
       for (const pd of g.items) {
         if (pd.rm) {
+          if (pd.strategyId) {
+            if (countedStateStrategyIds.has(pd.strategyId)) continue;
+            countedStateStrategyIds.add(pd.strategyId);
+          }
           const levels = pd.rm.level_states || {};
           for (const [, state] of Object.entries(levels)) {
             stateCounts.set(state, (stateCounts.get(state) || 0) + 1);

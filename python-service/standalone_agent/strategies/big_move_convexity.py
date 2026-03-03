@@ -1317,6 +1317,36 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             logger.warning("Cannot build entry order: no underlying price")
             return []
 
+        # Hard direction gate (post-signal): never allow an order side that
+        # conflicts with the configured direction_mode. This is a final safety
+        # check that protects against any upstream signal-direction transforms.
+        direction_mode = (cfg.get("direction_mode") or "auto").lower()
+        if direction_mode == "auto":
+            # "auto" follows model semantics:
+            # directional models default to long_only; symmetric models allow both.
+            direction_mode = "long_only" if self._target_column and ("UP" in self._target_column or "DOWN" in self._target_column) else "both"
+
+        if direction_mode == "long_only" and signal.direction != "long":
+            logger.warning(
+                "Direction gate blocked entry: mode=long_only signal=%s ticker=%s target=%s",
+                signal.direction,
+                self._ticker,
+                self._target_column or "unknown",
+            )
+            if self._last_signal is not None:
+                self._last_signal["suppressed"] = "direction_mode_long_only"
+            return []
+        if direction_mode == "short_only" and signal.direction != "short":
+            logger.warning(
+                "Direction gate blocked entry: mode=short_only signal=%s ticker=%s target=%s",
+                signal.direction,
+                self._ticker,
+                self._target_column or "unknown",
+            )
+            if self._last_signal is not None:
+                self._last_signal["suppressed"] = "direction_mode_short_only"
+            return []
+
         # Determine direction
         right = "C" if signal.direction == "long" else "P"
 
