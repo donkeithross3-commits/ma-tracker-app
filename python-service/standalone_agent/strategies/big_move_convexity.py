@@ -92,7 +92,7 @@ _DEFAULTS: dict[str, Any] = {
     "contract_budget_usd": 150.0,
     "scan_start": "09:45",            # HH:MM ET — 15 min after open (avoids auction noise)
     "scan_end": "15:45",              # last entry time; EOD exit at 15:57 (1DTE retains time value)
-    "otm_target_pct": 0.20,           # 20bp OTM
+    "otm_target_pct": 1.0,            # 1.0% OTM (targets $0.30-$0.60 premiums on 1DTE)
     "auto_entry": False,              # paper trading safety
     "model_registry_path": "",        # auto-resolved if empty
     "use_delayed_data": False,        # paid Polygon tier — real-time
@@ -128,6 +128,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "scan_end": "15:45",              # standardized: last entry time
         "signal_threshold": 0.40,         # model optimal (UP=0.40, DOWN=0.35)
         "contract_budget_usd": 150.0,
+        "otm_target_pct": 1.0,            # ~$6 OTM on ~$595 → $0.30-$0.60 premium (1DTE)
         "straddle_richness_max": 1.5,
         "straddle_richness_ideal": 0.9,
     },
@@ -142,6 +143,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "scan_end": "15:45",              # standardized: last entry time
         "direction_mode": "long_only",    # symmetric model (is_big_move) — no edge on puts
         "contract_budget_usd": 50.0,
+        "otm_target_pct": 3.0,            # ~$1 OTM on ~$33 → $0.30-$0.60 premium (1DTE)
         "straddle_richness_max": 2.5,     # SLV IV ~2x SPY, higher richness normal
         "straddle_richness_ideal": 1.5,
     },
@@ -155,6 +157,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "scan_start": "09:45",            # standardized: 15 min after open
         "scan_end": "15:45",              # standardized: last entry time
         "signal_threshold": 0.40,         # model optimal (DOWN=0.40)
+        "otm_target_pct": 1.2,            # ~$6 OTM on ~$510 → $0.30-$0.60 premium (1DTE)
     },
     "IWM": {
         "strike_increment": 1.00,         # IB lists $1 increments for IWM options
@@ -163,6 +166,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.10,
         "premium_min": 0.05,
         "premium_max": 2.00,
+        "otm_target_pct": 1.5,            # ~$3 OTM on ~$200 → $0.30-$0.60 premium (1DTE)
     },
     "GLD": {
         "strike_increment": 1.00,         # IB lists $1 increments for GLD options
@@ -174,6 +178,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "scan_start": "09:45",            # standardized: 15 min after open
         "scan_end": "15:45",              # standardized: last entry time
         "signal_threshold": 0.67,         # model optimal (UP=0.68, DOWN=0.66)
+        "otm_target_pct": 1.0,            # ~$2.60 OTM on ~$263 → $0.30-$0.60 premium (1DTE)
         "straddle_richness_max": 2.0,
         "straddle_richness_ideal": 1.2,
     },
@@ -1316,7 +1321,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         right = "C" if signal.direction == "long" else "P"
 
         # Calculate OTM strike
-        otm_pct = cfg.get("otm_target_pct", 0.20) / 100.0  # 0.20% = 0.0020
+        otm_pct = cfg.get("otm_target_pct", 1.0) / 100.0  # 1.0% = 0.010
         if right == "C":
             target_strike = underlying_price * (1 + otm_pct)
         else:
@@ -1503,7 +1508,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "direction_mode": cfg.get("direction_mode") or "auto",
             "cooldown_minutes": cfg.get("cooldown_minutes", 15),
             "decision_interval_seconds": cfg.get("decision_interval_seconds", 60),
-            "otm_target_pct": cfg.get("otm_target_pct", 0.20),
+            "otm_target_pct": cfg.get("otm_target_pct", 1.0),
             "contract_budget_usd": cfg.get("contract_budget_usd", 150.0),
             "max_contracts": cfg.get("max_contracts", 5),
             "auto_entry": cfg.get("auto_entry", False),
