@@ -18,7 +18,7 @@ interface FuturesQuote {
 export default function IBConnectionStatus() {
   const {
     isConnected, isChecking, lastMessage, checkConnection, reconnectIB, isReconnecting,
-    agentOnline,
+    agentOnline, agentVersion,
     gatewayRunning, isGatewayLoading, stopGateway, startGateway,
     restartAgent, isAgentRestarting,
   } = useIBConnection();
@@ -328,7 +328,7 @@ export default function IBConnectionStatus() {
                   : "text-red-400"
               }
             >
-              Agent: {isAgentRestarting ? "Restarting..." : agentOnline === null ? "..." : agentOnline ? "Online" : "Offline"}
+              Agent: {isAgentRestarting ? "Restarting..." : agentOnline === null ? "..." : agentOnline ? `Online${agentVersion ? ` v${agentVersion}` : ""}` : "Offline"}
             </span>
           </div>
 

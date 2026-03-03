@@ -12,6 +12,7 @@ interface IBConnectionContextType {
   isReconnecting: boolean;
   // Agent online status (WS registered in relay, separate from IB connected)
   agentOnline: boolean | null; // null = unknown/loading
+  agentVersion: string | null; // version reported by agent on WS auth
   // Gateway controls
   gatewayRunning: boolean | null; // null = unknown/loading
   isGatewayLoading: boolean;
@@ -34,6 +35,7 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
 
   // Agent online state (WS connected to relay, regardless of IB)
   const [agentOnline, setAgentOnline] = useState<boolean | null>(null);
+  const [agentVersion, setAgentVersion] = useState<string | null>(null);
 
   // Gateway state
   const [gatewayRunning, setGatewayRunning] = useState<boolean | null>(null);
@@ -76,6 +78,7 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
           const data = await reconnectResponse.json();
           setIsConnected(data.connected);
           setAgentOnline(data.agentConnected ?? (data.connected ? true : null));
+          setAgentVersion(data.agentVersion ?? null);
           setLastMessage(data.message);
           setLastChecked(new Date());
           hasInitialized.current = true;
@@ -90,16 +93,19 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
         const data = await response.json();
         setIsConnected(data.connected);
         setAgentOnline(data.agentConnected ?? (data.connected ? true : null));
+        setAgentVersion(data.agentVersion ?? null);
         setLastMessage(data.message ?? data.relayError);
         setLastChecked(new Date());
       } else {
         setIsConnected(false);
         setAgentOnline(null);
+        setAgentVersion(null);
         setLastMessage(undefined);
       }
     } catch (error) {
       setIsConnected(false);
       setAgentOnline(null);
+      setAgentVersion(null);
       setLastMessage(undefined);
     } finally {
       hasInitialized.current = true;
@@ -221,7 +227,7 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
   return (
     <IBConnectionContext.Provider value={{
       isConnected, isChecking, lastChecked, lastMessage, checkConnection, reconnectIB, isReconnecting,
-      agentOnline,
+      agentOnline, agentVersion,
       gatewayRunning, isGatewayLoading, stopGateway, startGateway,
       restartAgent, isAgentRestarting,
     }}>

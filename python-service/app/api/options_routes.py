@@ -1468,6 +1468,7 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
         providers_to_check = status["providers"]
         # Track whether this user's agent is registered in the relay (separate from IB)
         user_agent_connected = False
+        user_agent_version = None
         if target_user_id:
             user_providers = [
                 p for p in providers_to_check
@@ -1476,6 +1477,7 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
             if user_providers:
                 providers_to_check = user_providers
                 user_agent_connected = True
+                user_agent_version = user_providers[0].get("agent_version", "0.0.0")
             else:
                 # No agent for this user — fall back to any agent for status/market-data
                 # purposes only. Account-sensitive requests enforce strict user isolation.
@@ -1526,15 +1528,18 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
             f"(cached, {len(providers_to_check)} provider(s), user_filter={target_user_id})"
         )
 
-        return {
+        resp = {
             "connected": is_connected,
             "agent_connected": user_agent_connected,
             "source": "relay",
             "providers": status["providers"],
             "provider_statuses": provider_statuses,
             "connected_provider": connected_provider,
-            "message": "IB TWS connected" if is_connected else "IB TWS not connected"
+            "message": "IB TWS connected" if is_connected else "IB TWS not connected",
         }
+        if user_agent_version:
+            resp["agent_version"] = user_agent_version
+        return resp
 
     except Exception as e:
         logger.error(f"Relay IB status error: {e}")
