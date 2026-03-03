@@ -974,11 +974,61 @@ export default function SignalsTab() {
       s => s.strategy_id.includes("risk_") && s.strategy_state && "entry_price" in s.strategy_state,
     ) as (ExecutionStrategyInfo & { strategy_state: RiskManagerState })[];
     const quotes = executionStatus?.quote_snapshot || {};
-    const activeLedger = (executionStatus?.position_ledger || []).filter(
+    const activeLedgerRaw = (executionStatus?.position_ledger || []).filter(
       p => p.status === "active"
     );
+    const ledgerFidelityScore = (ledger: PositionLedgerEntry): number => {
+      const runtimeLots = Array.isArray(ledger.runtime_state?.lot_entries)
+        ? ledger.runtime_state?.lot_entries || []
+        : [];
+      if (runtimeLots.length > 0) {
+        return 1_000 + runtimeLots.length;
+      }
+      const entryFills = (ledger.fill_log || []).filter(
+        f => f.level === "entry" && (f.qty_filled ?? 0) > 0
+      );
+      if (entryFills.length > 0) {
+        return 100 + entryFills.length;
+      }
+      return Number(ledger.entry?.quantity ?? 0);
+    };
+    const activeLedger = (() => {
+      const byId = new Map<string, PositionLedgerEntry>();
+      for (const ledger of activeLedgerRaw) {
+        const existing = byId.get(ledger.id);
+        if (!existing) {
+          byId.set(ledger.id, ledger);
+          continue;
+        }
+        const existingScore = ledgerFidelityScore(existing);
+        const candidateScore = ledgerFidelityScore(ledger);
+        const existingFillTime = Number(existing.entry?.fill_time ?? 0);
+        const candidateFillTime = Number(ledger.entry?.fill_time ?? 0);
+        if (
+          candidateScore > existingScore ||
+          (candidateScore === existingScore && candidateFillTime >= existingFillTime)
+        ) {
+          byId.set(ledger.id, ledger);
+        }
+      }
+      return Array.from(byId.values());
+    })();
     const ledgerByRiskId = new Map(activeLedger.map(p => [p.id, p]));
     const riskById = new Map(riskStrategies.map(s => [s.strategy_id, s] as const));
+    const normalizeContractKey = (
+      oc:
+        | { symbol?: string; strike?: number | string; expiry?: string; right?: string }
+        | null
+        | undefined
+    ): string | null => {
+      if (!oc?.symbol || oc.strike == null || !oc.expiry || !oc.right) return null;
+      const strikeNum = Number(oc.strike);
+      const strike = Number.isFinite(strikeNum) ? String(strikeNum) : String(oc.strike);
+      const expiry = String(oc.expiry).replace(/-/g, "");
+      const rightRaw = String(oc.right).toUpperCase();
+      const right = rightRaw.startsWith("C") ? "C" : rightRaw.startsWith("P") ? "P" : rightRaw;
+      return `${String(oc.symbol).toUpperCase()}:${strike}:${expiry}:${right}`;
+    };
 
     type Detail = {
       pos: {
@@ -1163,12 +1213,8 @@ export default function SignalsTab() {
     );
     const representedContractKeys = new Set(
       baseDetails
-        .map(d => d.optionContract)
-        .filter(
-          (oc): oc is { symbol: string; strike: number; expiry: string; right: string } =>
-            Boolean(oc)
-        )
-        .map(oc => `${oc.symbol}:${oc.strike}:${oc.expiry}:${oc.right}`)
+        .map(d => normalizeContractKey(d.optionContract))
+        .filter((k): k is string => Boolean(k))
     );
 
     // Include orphan risk managers for this ticker that are active in the engine
@@ -1186,10 +1232,8 @@ export default function SignalsTab() {
         const cacheKey = s.strategy_state.cache_key;
         if (cacheKey && representedCacheKeys.has(cacheKey)) return false;
         const inst = s.config?.instrument;
-        if (inst?.symbol && inst?.strike != null && inst?.expiry && inst?.right) {
-          const ckey = `${inst.symbol}:${inst.strike}:${inst.expiry}:${inst.right}`;
-          if (representedContractKeys.has(ckey)) return false;
-        }
+        const ckey = normalizeContractKey(inst);
+        if (ckey && representedContractKeys.has(ckey)) return false;
         return true;
       })
       .map(s => {
