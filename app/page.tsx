@@ -23,7 +23,7 @@ export default async function Home() {
     {
       key: "ma-options",
       href: "/ma-options",
-      title: "IB Trading Tools",
+      title: "DR3 Trading Tools",
       description: "Manual & algorithmic trading with Interactive Brokers",
       badge: "Beta Testing",
       badgeClasses: "bg-yellow-500/20 text-yellow-400",

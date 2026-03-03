@@ -17,7 +17,7 @@ export const ALL_PROJECTS: Record<ProjectKey, ProjectMeta> = {
     description: "Weekly market signals",
   },
   "ma-options": {
-    label: "IB Trading Tools",
+    label: "DR3 Trading Tools",
     path: "/ma-options",
     description: "Manual & algorithmic trading with Interactive Brokers",
   },
