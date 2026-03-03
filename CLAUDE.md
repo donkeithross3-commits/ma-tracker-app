@@ -52,7 +52,7 @@ The dashboard has a continuous release notes system. Every user-visible change M
 ### Agent Coordination
 
 - **You are not the only agent working on this system.** Both Claude Code and Cursor work on these repos.
-- Before making architectural changes, check for in-progress work in recent commits.
+- Before making architectural changes, check for in-progress work in `.claude-session` or recent commits.
 - Guidance changes that affect both repos must update BOTH copies of `SHARED_BLOCK.md` and re-embed.
 - Repo-specific guidance stays in that repo's `.cursorrules` / `CLAUDE.md` only.
 - Read `docs/agent/AGENTS.md` for the full contract including onboarding and change protocol.

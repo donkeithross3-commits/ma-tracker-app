@@ -104,6 +104,14 @@ These are Cursor-only and do NOT need to be synced to `CLAUDE.md` (Claude Code r
 - py_proj: `init.md`, `research.md`, `bmc-dev.md`, `verify.md`
 - ma-tracker-app: `init.md`, `verify.md`, `bmc-strategy.md`, and others
 
+**Persona routing and skill pack (both repos, synced):**
+- `docs/agent/PERSONA_ROUTER.md` — role router and context layering model
+- `docs/agent/MEMORY_FILE_TEMPLATE.md` — strict line-budget memory template
+- `docs/agent/SKILL_MIGRATION_CHECKLIST.md` — migration playbook from memory-heavy personas
+- `docs/agent/personas/*.md` — starter persona memory files using the template
+- `docs/agent/skills/*` — specialist skill specs (SKILL.md format)
+- `docs/agent/scripts/install_codex_skills.sh` — installs repo skill pack into `$CODEX_HOME/skills`
+
 ---
 
 ## 4. Non-Negotiable Rules
@@ -261,6 +269,12 @@ python research/NN_script_name.py
 | `docs/agent/SHARED_BLOCK.md` | Shared block source |
 | `docs/agent/check_sync.sh` | Sync verification script |
 | `docs/agent/README.md` | Workflow documentation |
+| `docs/agent/PERSONA_ROUTER.md` | Persona routing + context layering |
+| `docs/agent/MEMORY_FILE_TEMPLATE.md` | Memory file template with line budgets |
+| `docs/agent/SKILL_MIGRATION_CHECKLIST.md` | Memory-to-skill migration workflow |
+| `docs/agent/personas/` | Starter persona memory files (routing-only) |
+| `docs/agent/scripts/install_codex_skills.sh` | Installs repo-managed skills to Codex home |
+| `docs/agent/skills/` | Synced specialist skill pack (first 4 domains) |
 
 ### Per-Repo Files
 

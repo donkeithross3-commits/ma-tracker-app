@@ -22,6 +22,12 @@ The DR3 Dashboard spans two repos (`ma-tracker-app` and `py_proj`). Both repos n
 | `docs/agent/SHARED_BLOCK.md` | Canonical source for the shared block embedded in instruction files | Yes (identical) |
 | `docs/agent/check_sync.sh` | Script to verify all files are in sync | Yes (identical) |
 | `docs/agent/README.md` | This file -- workflow documentation | Yes (identical) |
+| `docs/agent/PERSONA_ROUTER.md` | Persona routing and context layering model | Yes (identical) |
+| `docs/agent/MEMORY_FILE_TEMPLATE.md` | Persona memory template with line budgets | Yes (identical) |
+| `docs/agent/SKILL_MIGRATION_CHECKLIST.md` | Migration guide from memory-heavy personas to skills | Yes (identical) |
+| `docs/agent/personas/` | Starter persona memory files (routing-only) | Yes (identical) |
+| `docs/agent/scripts/install_codex_skills.sh` | Installer for repo-managed Codex skills | Yes (identical) |
+| `docs/agent/skills/` | Specialist skill pack (`SKILL.md` + references) | Yes (identical) |
 | `.cursorrules` | Cursor IDE instructions (shared block + repo-specific) | No (per-repo) |
 | `CLAUDE.md` | Claude Code instructions (shared block + repo-specific) | No (per-repo) |
 
@@ -86,6 +92,29 @@ If another new AI tool is introduced:
 
 ---
 
+## Persona Memory Scaling
+
+Use a layered model to avoid line-limit pressure in persona memory files:
+
+1. **Memory files stay short** (routing only): role, triggers, hard constraints, output contract.
+2. **Deep guidance lives in skills** under `docs/agent/skills/*`.
+3. **Skill references** hold long checklists and edge-case notes.
+4. **Live context** (DB/logs/infra) should come from MCP connectors when available.
+
+Use:
+- `docs/agent/PERSONA_ROUTER.md`
+- `docs/agent/MEMORY_FILE_TEMPLATE.md`
+- `docs/agent/SKILL_MIGRATION_CHECKLIST.md`
+- `docs/agent/personas/*.md` starter files
+
+To install these skills into Codex local skill home:
+
+```bash
+bash docs/agent/scripts/install_codex_skills.sh
+```
+
+---
+
 ## Running the Sync Check
 
 From either repo root:
@@ -108,6 +137,10 @@ docs/agent/check_sync.sh /path/to/other/repo
 - `AGENTS.md` identical across repos
 - `README.md` identical across repos
 - `check_sync.sh` identical across repos
+- Persona-router files identical across repos
+- `docs/agent/personas/` directory identical across repos
+- Skill-pack installer identical across repos
+- `docs/agent/skills/` directory identical across repos
 - Shared block in each `.cursorrules` and `CLAUDE.md` matches the canonical `SHARED_BLOCK.md`
 
 ---

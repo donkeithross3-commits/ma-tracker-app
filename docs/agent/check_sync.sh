@@ -200,6 +200,59 @@ else
     report "FAIL" "check_sync.sh differs between repos"
 fi
 
+# Persona routing and memory-template files
+for extra in \
+    "PERSONA_ROUTER.md" \
+    "MEMORY_FILE_TEMPLATE.md" \
+    "SKILL_MIGRATION_CHECKLIST.md" \
+    "scripts/install_codex_skills.sh"
+do
+    EXTRA_A="$REPO_ROOT/docs/agent/$extra"
+    EXTRA_B="$OTHER_REPO/docs/agent/$extra"
+
+    if [ ! -f "$EXTRA_A" ] && [ ! -f "$EXTRA_B" ]; then
+        report "PASS" "$extra not yet created in either repo (OK)"
+    elif [ ! -f "$EXTRA_A" ]; then
+        report "FAIL" "$extra exists in $SIBLING_NAME but missing in $THIS_REPO"
+    elif [ ! -f "$EXTRA_B" ]; then
+        report "FAIL" "$extra exists in $THIS_REPO but missing in $SIBLING_NAME"
+    elif diff -q "$EXTRA_A" "$EXTRA_B" > /dev/null 2>&1; then
+        report "PASS" "$extra identical across repos"
+    else
+        report "FAIL" "$extra differs between repos"
+    fi
+done
+
+# Skill pack directory
+SKILLS_A="$REPO_ROOT/docs/agent/skills"
+SKILLS_B="$OTHER_REPO/docs/agent/skills"
+if [ ! -d "$SKILLS_A" ] && [ ! -d "$SKILLS_B" ]; then
+    report "PASS" "docs/agent/skills not yet created in either repo (OK)"
+elif [ ! -d "$SKILLS_A" ]; then
+    report "FAIL" "docs/agent/skills exists in $SIBLING_NAME but missing in $THIS_REPO"
+elif [ ! -d "$SKILLS_B" ]; then
+    report "FAIL" "docs/agent/skills exists in $THIS_REPO but missing in $SIBLING_NAME"
+elif diff -qr "$SKILLS_A" "$SKILLS_B" > /dev/null 2>&1; then
+    report "PASS" "docs/agent/skills directory identical across repos"
+else
+    report "FAIL" "docs/agent/skills directory differs between repos"
+fi
+
+# Persona starter directory
+PERSONAS_A="$REPO_ROOT/docs/agent/personas"
+PERSONAS_B="$OTHER_REPO/docs/agent/personas"
+if [ ! -d "$PERSONAS_A" ] && [ ! -d "$PERSONAS_B" ]; then
+    report "PASS" "docs/agent/personas not yet created in either repo (OK)"
+elif [ ! -d "$PERSONAS_A" ]; then
+    report "FAIL" "docs/agent/personas exists in $SIBLING_NAME but missing in $THIS_REPO"
+elif [ ! -d "$PERSONAS_B" ]; then
+    report "FAIL" "docs/agent/personas exists in $THIS_REPO but missing in $SIBLING_NAME"
+elif diff -qr "$PERSONAS_A" "$PERSONAS_B" > /dev/null 2>&1; then
+    report "PASS" "docs/agent/personas directory identical across repos"
+else
+    report "FAIL" "docs/agent/personas directory differs between repos"
+fi
+
 # --- Check 5: Repo-root AGENTS.md exists in both repos --------------------
 
 echo ""

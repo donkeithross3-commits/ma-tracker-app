@@ -151,3 +151,10 @@ ssh droplet 'DR3_AGENT=<agent> bash ~/apps/scripts/deploy.sh portfolio'      # P
 - Check `.claude-session` and recent commits before architectural changes.
 - Guidance changes affecting both repos must update `docs/agent/SHARED_BLOCK.md` in both.
 - Run `docs/agent/check_sync.sh` to verify sync.
+
+## Persona Scaling
+
+- Keep persona memory files short (routing only), then load depth from `docs/agent/skills/*`.
+- Use `docs/agent/PERSONA_ROUTER.md` and `docs/agent/MEMORY_FILE_TEMPLATE.md` for role setup.
+- Use `docs/agent/SKILL_MIGRATION_CHECKLIST.md` when extracting deep content from memory files.
+- Install repo-managed Codex skills with: `bash docs/agent/scripts/install_codex_skills.sh`
