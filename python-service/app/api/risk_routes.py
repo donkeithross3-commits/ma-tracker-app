@@ -916,7 +916,7 @@ async def scan_covered_calls(
     Uses Polygon for option chain data and the MergerArbAnalyzer for strategy analysis.
     """
     from app.options.polygon_options import get_polygon_client
-    from app.scanner import MergerArbAnalyzer, DealInput, OptionData
+    from app.options.analyzer import MergerArbAnalyzer, DealInput, OptionData
 
     pool = _get_pool()
     client = get_polygon_client()
@@ -1138,7 +1138,7 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
     """
     import time as _time
     from app.options.polygon_options import get_polygon_client, PolygonError
-    from app.scanner import MergerArbAnalyzer, DealInput, OptionData
+    from app.options.analyzer import MergerArbAnalyzer, DealInput, OptionData
 
     t0 = _time.monotonic()
     ticker = ticker.upper()
