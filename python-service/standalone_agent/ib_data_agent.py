@@ -1717,6 +1717,31 @@ class IBDataAgent:
         self.engine_config_store.clear()
         self.execution_engine._auto_restart_paused = False
         self.execution_engine.stop()
+
+        # Push a final execution_telemetry with running=False so the relay cache
+        # is updated immediately.  Without this, the stale cached telemetry
+        # (running=True from the last heartbeat) keeps the dashboard showing
+        # "running" until the next heartbeat cycle — which never sends telemetry
+        # when the engine is stopped.
+        try:
+            if self.websocket:
+                await self.websocket.send(json.dumps({
+                    "type": "execution_telemetry",
+                    "running": False,
+                    "strategy_count": 0,
+                    "strategies": [],
+                    "active_orders": [],
+                    "inflight_orders_total": 0,
+                    "lines_held": self.resource_manager.execution_lines_held,
+                    "order_budget": 0,
+                    "total_algo_orders": self.execution_engine._total_entries_placed,
+                    "budget_status": {},
+                    "position_ledger": self.execution_engine._get_position_ledger(),
+                    "engine_mode": "running",
+                }))
+        except Exception as e:
+            logger.warning("Failed to push final telemetry on stop: %s", e)
+
         return {
             "running": False,
             "lines_held": self.resource_manager.execution_lines_held,
