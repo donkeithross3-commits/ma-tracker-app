@@ -1394,6 +1394,14 @@ export default function SignalsTab() {
 
     return Array.from(groups.values());
   }, [positionDetails]);
+  const positionSummary = useMemo(() => {
+    const totalQty = groupedPositions.reduce((sum, g) => sum + g.totalInitial, 0);
+    return {
+      contracts: groupedPositions.length,
+      lots: positionDetails.length,
+      quantity: totalQty,
+    };
+  }, [groupedPositions, positionDetails.length]);
 
   // ── Derived: all fills from position ledger (persists across restarts) ──
   const allFills = useMemo(() => {
@@ -1798,7 +1806,7 @@ export default function SignalsTab() {
           {groupedPositions.length > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded p-3">
               <h3 className="text-sm font-medium text-gray-300 mb-2">
-                Active Positions ({positionDetails.length}{groupedPositions.length < positionDetails.length ? ` in ${groupedPositions.length} contracts` : ""})
+                Active Positions ({positionSummary.quantity} qty in {positionSummary.contracts} contracts{positionSummary.lots !== positionSummary.contracts ? `, ${positionSummary.lots} lots` : ""})
               </h3>
               <div className="space-y-1">
                 {groupedPositions.map(group => {
