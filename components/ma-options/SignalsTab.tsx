@@ -431,6 +431,9 @@ export default function SignalsTab() {
   const [resuming, setResuming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Grace period: after clicking Start, suppress poll overrides for up to 15s
+  // so the UI doesn't flicker back to "Start" while the engine is booting.
+  const startingUntilRef = useRef<number>(0);
 
   // Model availability per ticker (fetched from registry on mount)
   const [modelAvailability, setModelAvailability] = useState<Record<string, ModelAvailability>>({});
@@ -518,7 +521,18 @@ export default function SignalsTab() {
       const res = await fetch("/api/ma-options/bmc-signal", { credentials: "include" });
       if (!res.ok) return;
       const data = await res.json();
-      setRunning(data.running ?? false);
+      const polledRunning = data.running ?? false;
+      // If we're in the start grace period and the poll says not running yet,
+      // keep showing "Starting..." — the engine is still booting up.
+      const inStartGrace = startingUntilRef.current > Date.now();
+      if (polledRunning) {
+        // Engine confirmed running — clear any grace period
+        startingUntilRef.current = 0;
+        setRunning(true);
+      } else if (!inStartGrace) {
+        setRunning(false);
+      }
+      // else: in grace period + not running yet → keep optimistic running=true
       setEngineMode(data.engine_mode ?? "running");
 
       // Multi-ticker: use strategies array if available
@@ -680,6 +694,8 @@ export default function SignalsTab() {
     setError(null);
     // Optimistic: show running immediately, revert on error
     setRunning(true);
+    // Grace period: suppress poll overrides for 15s while engine boots
+    startingUntilRef.current = Date.now() + 15_000;
     try {
       const tickers = enabledTickers.map(t => ({
         ticker: t,
@@ -693,10 +709,12 @@ export default function SignalsTab() {
       });
       const data = await res.json();
       if (data.error) {
+        startingUntilRef.current = 0;
         setRunning(false);
         setError(data.error);
       }
     } catch (e: any) {
+      startingUntilRef.current = 0;
       setRunning(false);
       setError(e.message || "Failed to start");
     } finally {
@@ -1310,9 +1328,21 @@ export default function SignalsTab() {
       {/* ── Status Bar ── */}
       <div className="flex items-center gap-3 text-sm">
         <div className="flex items-center gap-1.5">
-          <div className={`w-2 h-2 rounded-full ${running ? "bg-green-500" : "bg-gray-600"}`} />
-          <span className="text-gray-400">{running ? "Running" : "Stopped"}</span>
-          {running && (
+          <div className={`w-2 h-2 rounded-full ${
+            running && runningTickers.length === 0
+              ? "bg-amber-500 animate-pulse"
+              : running
+              ? "bg-green-500"
+              : "bg-gray-600"
+          }`} />
+          <span className={running && runningTickers.length === 0 ? "text-amber-400" : "text-gray-400"}>
+            {running
+              ? runningTickers.length === 0
+                ? "Starting..."
+                : "Running"
+              : "Stopped"}
+          </span>
+          {running && runningTickers.length > 0 && (
             <span className="text-gray-600 text-xs">
               ({runningTickers.length} ticker{runningTickers.length !== 1 ? "s" : ""})
             </span>
@@ -1980,6 +2010,9 @@ export default function SignalsTab() {
                 </button>
               ) : (
                 <div className="flex items-center gap-1.5">
+                  {runningTickers.length === 0 && (
+                    <span className="text-xs text-amber-400 animate-pulse">Starting engine...</span>
+                  )}
                   {activeConfigDirty && runningTickers.includes(activeTicker) && (
                     <button
                       onClick={() => handleConfigUpdate(activeTicker)}
