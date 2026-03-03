@@ -18,6 +18,7 @@ COPY app/api/portfolio_routes.py app/api/portfolio_routes.py
 COPY app/api/scheduler_routes.py app/api/scheduler_routes.py
 COPY app/portfolio/ app/portfolio/
 COPY app/options/__init__.py app/options/__init__.py
+COPY app/options/analyzer.py app/options/analyzer.py
 COPY app/options/polygon_options.py app/options/polygon_options.py
 COPY app/services/ app/services/
 COPY app/scheduler/ app/scheduler/
