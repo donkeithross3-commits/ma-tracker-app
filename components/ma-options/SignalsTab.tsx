@@ -966,11 +966,14 @@ export default function SignalsTab() {
     const allActivePositions = activeTickerStrategies.flatMap(
       s => (s.signal?.active_positions ?? []) as NonNullable<typeof signal>["active_positions"]
     );
-    if (!allActivePositions.length) return [];
     const riskStrategies = (executionStatus?.strategies || []).filter(
       s => s.strategy_id.includes("risk_") && s.strategy_state && "entry_price" in s.strategy_state,
     ) as (ExecutionStrategyInfo & { strategy_state: RiskManagerState })[];
     const quotes = executionStatus?.quote_snapshot || {};
+    const activeLedger = (executionStatus?.position_ledger || []).filter(
+      p => p.status === "active"
+    );
+    const ledgerByRiskId = new Map(activeLedger.map(p => [p.id, p]));
 
     // Track consumed strategy indices so each risk manager matches at most one position.
     // The old find() approach returned the first match for every position, so when
@@ -978,7 +981,7 @@ export default function SignalsTab() {
     // was ever matched — the rest lost their trailing state, level badges, and quotes.
     const consumed = new Set<number>();
 
-    return allActivePositions.map(pos => {
+    const baseDetails = allActivePositions.map(pos => {
       // Match positions to risk managers. With aggregate lots (v1.15.0+), one RM
       // holds multiple fills for the same contract. We match by contract first
       // (most robust), then fall back to price+qty for legacy compatibility.
@@ -1042,7 +1045,72 @@ export default function SignalsTab() {
       const recentErrors = matchedStrategy?.recent_errors ?? [];
       return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors };
     });
-  }, [activeTickerStrategies, executionStatus?.strategies, executionStatus?.quote_snapshot]);
+    const matchedRiskIds = new Set(
+      baseDetails
+        .map(d => d.strategyId)
+        .filter((sid): sid is string => Boolean(sid))
+    );
+
+    // Include orphan risk managers for this ticker that are active in the engine
+    // but not referenced by current strategy.active_positions (can happen after
+    // hot strategy replace / directional expansion while positions stay open).
+    const orphanDetails = riskStrategies
+      .filter(s => !matchedRiskIds.has(s.strategy_id))
+      .filter(s => {
+        const inst = s.config?.instrument;
+        return inst?.symbol?.toUpperCase?.() === activeTicker.toUpperCase();
+      })
+      .map(s => {
+        const rm = s.strategy_state;
+        const strategyId = s.strategy_id;
+        const quote = rm?.cache_key ? quotes[rm.cache_key] ?? null : null;
+        const ledger = ledgerByRiskId.get(strategyId);
+        const inst = (s.config?.instrument || {}) as {
+          symbol?: string;
+          strike?: number;
+          expiry?: string;
+          right?: string;
+        };
+        const optionContract =
+          inst.symbol && inst.strike != null && inst.expiry && inst.right
+            ? {
+                symbol: inst.symbol,
+                strike: Number(inst.strike),
+                expiry: inst.expiry,
+                right: inst.right,
+              }
+            : null;
+        const entryPrice = rm?.entry_price ?? ledger?.entry?.price ?? 0;
+        const quantity = rm?.initial_qty ?? ledger?.entry?.quantity ?? 0;
+        const fillTime = ledger?.entry?.fill_time ?? Date.now() / 1000;
+        const pos = {
+          order_id: ledger?.entry?.order_id ?? 0,
+          entry_price: entryPrice,
+          quantity,
+          fill_time: fillTime,
+          perm_id: ledger?.entry?.perm_id,
+          signal: optionContract ? { option_contract: optionContract } : null,
+        };
+
+        let pnlPct: number | null = null;
+        let pnlDollar: number | null = null;
+        if (quote && quote.mid > 0 && entryPrice > 0) {
+          pnlPct = ((quote.mid - entryPrice) / entryPrice) * 100;
+          pnlDollar = (quote.mid - entryPrice) * quantity * 100;
+        }
+
+        const recentErrors = s.recent_errors ?? [];
+        return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors };
+      });
+
+    return [...baseDetails, ...orphanDetails];
+  }, [
+    activeTicker,
+    activeTickerStrategies,
+    executionStatus?.position_ledger,
+    executionStatus?.quote_snapshot,
+    executionStatus?.strategies,
+  ]);
 
   // ── Derived: group positions by contract for compact rendering ──
   const groupedPositions = useMemo(() => {

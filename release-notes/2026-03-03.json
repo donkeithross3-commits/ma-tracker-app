@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-03",
+  "title": "Mar 3, 2026",
+  "summary": "Fix Active Positions undercount after directional strategy cutovers.",
+  "features": [
+    {
+      "id": "bmc-active-positions-orphan-risk-managers",
+      "title": "Show Orphan Active Risk Managers In Positions Panel",
+      "summary": "Active Positions now includes active risk managers that are still open after strategy replacement events.",
+      "description": "When a ticker is replaced from a single strategy to directional UP/DOWN while positions are already open, an older risk manager can remain active in execution telemetry and position_ledger but no longer appear in the current strategy.active_positions list. The Signals tab now merges unmatched active risk managers for the selected ticker into positionDetails so all open contracts are shown with live quote/PnL and close controls.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
