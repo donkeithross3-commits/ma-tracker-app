@@ -18,6 +18,7 @@ interface FuturesQuote {
 export default function IBConnectionStatus() {
   const {
     isConnected, isChecking, lastMessage, checkConnection, reconnectIB, isReconnecting,
+    agentOnline,
     gatewayRunning, isGatewayLoading, stopGateway, startGateway,
     restartAgent, isAgentRestarting,
   } = useIBConnection();
@@ -294,6 +295,43 @@ export default function IBConnectionStatus() {
           {/* Separator */}
           <span className="text-gray-700">|</span>
 
+          {/* Agent online status indicator */}
+          <div className="flex items-center gap-1.5">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                isAgentRestarting
+                  ? "bg-amber-500 animate-pulse"
+                  : agentOnline === null
+                  ? "bg-gray-600"
+                  : agentOnline
+                  ? "bg-green-500"
+                  : "bg-red-500"
+              }`}
+              title={
+                isAgentRestarting
+                  ? "Agent restarting..."
+                  : agentOnline === null
+                  ? "Agent status unknown"
+                  : agentOnline
+                  ? "Trading agent connected to relay"
+                  : "Trading agent offline"
+              }
+            />
+            <span
+              className={
+                isAgentRestarting
+                  ? "text-amber-400"
+                  : agentOnline === null
+                  ? "text-gray-500"
+                  : agentOnline
+                  ? "text-green-400"
+                  : "text-red-400"
+              }
+            >
+              Agent: {isAgentRestarting ? "Restarting..." : agentOnline === null ? "..." : agentOnline ? "Online" : "Offline"}
+            </span>
+          </div>
+
           {/* Restart Agent */}
           <button
             onClick={handleRestartAgent}
@@ -301,7 +339,7 @@ export default function IBConnectionStatus() {
             className="px-2 py-0.5 bg-amber-900/50 hover:bg-amber-800/50 text-amber-300 rounded text-xs disabled:opacity-50"
             title="Restart trading agent process — systemd brings it back in ~10s"
           >
-            {isAgentRestarting ? "Restarting (~10s)..." : "Restart Agent"}
+            {isAgentRestarting ? "Restarting..." : "Restart Agent"}
           </button>
 
           {/* Separator */}

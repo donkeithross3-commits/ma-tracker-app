@@ -1458,6 +1458,7 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
             logger.info("relay_ib_status: no providers connected")
             return {
                 "connected": False,
+                "agent_connected": False,
                 "source": "relay",
                 "message": "No IB data provider connected"
             }
@@ -1465,6 +1466,8 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
         # Decide which providers to check
         target_user_id = user_id.strip() if user_id else None
         providers_to_check = status["providers"]
+        # Track whether this user's agent is registered in the relay (separate from IB)
+        user_agent_connected = False
         if target_user_id:
             user_providers = [
                 p for p in providers_to_check
@@ -1472,6 +1475,7 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
             ]
             if user_providers:
                 providers_to_check = user_providers
+                user_agent_connected = True
             else:
                 # No agent for this user — fall back to any agent for status/market-data
                 # purposes only. Account-sensitive requests enforce strict user isolation.
@@ -1479,6 +1483,8 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
                     f"relay_ib_status: no agent for user {target_user_id}, "
                     f"showing status from all {status['providers_connected']} provider(s)"
                 )
+        else:
+            user_agent_connected = status["providers_connected"] > 0
 
         # Check cached ib_connected from heartbeat data (instant, no WebSocket round-trip)
         connected_provider = None
@@ -1522,6 +1528,7 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
 
         return {
             "connected": is_connected,
+            "agent_connected": user_agent_connected,
             "source": "relay",
             "providers": status["providers"],
             "provider_statuses": provider_statuses,
@@ -1533,6 +1540,7 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
         logger.error(f"Relay IB status error: {e}")
         return {
             "connected": False,
+            "agent_connected": False,
             "source": "error",
             "message": str(e)
         }

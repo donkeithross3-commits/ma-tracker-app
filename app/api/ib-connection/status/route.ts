@@ -18,6 +18,7 @@ const RELAY_STATUS_TIMEOUT_MS = 15000; // 15s (relay may query multiple provider
  */
 async function checkRelayProviderStatus(userId?: string): Promise<{
   connected: boolean;
+  agentConnected: boolean; // Agent WS registered in relay (regardless of IB)
   providers?: any[];
   message?: string;
   relayError?: string; // Set when relay returned an error or fetch failed (for debugging)
@@ -42,19 +43,21 @@ async function checkRelayProviderStatus(userId?: string): Promise<{
     if (!response.ok) {
       return {
         connected: false,
+        agentConnected: false,
         relayError: `relay ${response.status}: ${text.slice(0, 200)}`,
       };
     }
 
-    let data: { connected?: boolean; providers?: any[]; message?: string };
+    let data: { connected?: boolean; agent_connected?: boolean; providers?: any[]; message?: string };
     try {
       data = JSON.parse(text);
     } catch {
-      return { connected: false, relayError: "relay invalid JSON" };
+      return { connected: false, agentConnected: false, relayError: "relay invalid JSON" };
     }
 
     return {
       connected: Boolean(data.connected),
+      agentConnected: Boolean(data.agent_connected),
       providers: data.providers,
       message: data.message,
     };
@@ -64,6 +67,7 @@ async function checkRelayProviderStatus(userId?: string): Promise<{
       error instanceof Error ? error.message : String(error);
     return {
       connected: false,
+      agentConnected: false,
       relayError: message.includes("abort") ? "relay timeout" : message,
     };
   }
@@ -76,7 +80,7 @@ async function testIBConnection(): Promise<boolean> {
   return new Promise((resolve) => {
     const pythonServicePath = path.join(process.cwd(), "python-service");
     const venvPython = path.join(pythonServicePath, ".venv", "bin", "python3");
-    
+
     const testScript = `
 from app.options.ib_client import IBClient
 import sys
@@ -123,11 +127,12 @@ export async function GET(request: NextRequest) {
 
     // 1. Check WebSocket relay provider first (preferred for remote setups)
     const relayStatus = await checkRelayProviderStatus(userId);
-    console.log("[ib-connection/status] PYTHON_SERVICE_URL=", pyUrl, "userId=", userId ?? "anon", "relayConnected=", relayStatus.connected, "relayError=", relayStatus.relayError ?? "none");
-    
+    console.log("[ib-connection/status] PYTHON_SERVICE_URL=", pyUrl, "userId=", userId ?? "anon", "relayConnected=", relayStatus.connected, "agentConnected=", relayStatus.agentConnected, "relayError=", relayStatus.relayError ?? "none");
+
     if (relayStatus.connected) {
       return NextResponse.json({
         connected: true,
+        agentConnected: true,
         source: "ws-relay",
         providers: relayStatus.providers,
         message: relayStatus.message || "IB connected via WebSocket relay",
@@ -145,6 +150,7 @@ export async function GET(request: NextRequest) {
     if (relayMessage && !relayError) {
       return NextResponse.json({
         connected: false,
+        agentConnected: relayStatus.agentConnected,
         source: "relay",
         message: relayMessage,
       });
@@ -152,7 +158,7 @@ export async function GET(request: NextRequest) {
 
     // 2. Test local IB TWS connection (only when relay had no useful info)
     const ibConnected = await testIBConnection();
-    
+
     if (ibConnected) {
       // Check if we have recent agent data for metadata
       const recentAgentData = await prisma.optionChainSnapshot.findFirst({
@@ -166,6 +172,7 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({
         connected: true,
+        agentConnected: relayStatus.agentConnected,
         source: "ib-tws",
         agentId: recentAgentData?.agentId,
         lastSeen: recentAgentData?.snapshotDate,
@@ -176,6 +183,7 @@ export async function GET(request: NextRequest) {
     // 3. Nothing connected
     return NextResponse.json({
       connected: false,
+      agentConnected: relayStatus.agentConnected,
       source: "none",
       message:
         relayError ||
@@ -185,9 +193,9 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     return NextResponse.json({
       connected: false,
+      agentConnected: false,
       source: "error",
       message: error instanceof Error ? error.message : "Error checking IB connection",
     });
   }
 }
-
