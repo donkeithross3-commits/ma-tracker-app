@@ -21,6 +21,13 @@ interface QuoteResult {
   close: number | null;
   stale: boolean;
   source: string;
+  priceSource: string | null;
+  timestamp: string | null;
+  lastTradeTs: string | null;
+  quoteTs: string | null;
+  minuteBarTs: string | null;
+  snapshotUpdatedTs: string | null;
+  marketAgeSec: number | null;
 }
 
 // Per-request timeout — prevents one slow/hung ticker from blocking the batch.
@@ -31,6 +38,19 @@ const PER_REQUEST_TIMEOUT_MS = 10_000;
 // Max concurrent requests to the relay. Processing too many at once overwhelms
 // the IB agent (sequential processing) and causes WebSocket disconnections.
 const MAX_CONCURRENT = 4;
+
+function parseAgeSeconds(ts: string | null): number | null {
+  if (!ts) return null;
+  const ms = Date.parse(ts);
+  if (!Number.isFinite(ms)) return null;
+  return Math.max(0, Math.round((Date.now() - ms) / 1000));
+}
+
+function staleThresholdSec(source: string, priceSource: string | null): number {
+  if (source === "polygon" && priceSource === "minute_bar") return 75;
+  if (source === "polygon" && priceSource === "day_close") return 300;
+  return 20;
+}
 
 /** Helper: resolve a stale/error result */
 function staleResult(ticker: string, source = "error"): QuoteResult {
@@ -45,6 +65,13 @@ function staleResult(ticker: string, source = "error"): QuoteResult {
     close: null,
     stale: true,
     source,
+    priceSource: null,
+    timestamp: null,
+    lastTradeTs: null,
+    quoteTs: null,
+    minuteBarTs: null,
+    snapshotUpdatedTs: null,
+    marketAgeSec: null,
   };
 }
 
@@ -82,6 +109,41 @@ async function fetchSingleQuote(
     const data = await resp.json();
     const price = data.price ?? null;
     const close = data.close ?? null;
+    const source =
+      typeof data.source === "string" && data.source ? data.source : "unknown";
+    const priceSource =
+      typeof data.price_source === "string" && data.price_source
+        ? data.price_source
+        : null;
+    const timestamp =
+      typeof data.timestamp === "string" && data.timestamp
+        ? data.timestamp
+        : null;
+    const lastTradeTs =
+      typeof data.last_trade_ts === "string" && data.last_trade_ts
+        ? data.last_trade_ts
+        : null;
+    const quoteTs =
+      typeof data.quote_ts === "string" && data.quote_ts
+        ? data.quote_ts
+        : null;
+    const minuteBarTs =
+      typeof data.minute_bar_ts === "string" && data.minute_bar_ts
+        ? data.minute_bar_ts
+        : null;
+    const snapshotUpdatedTs =
+      typeof data.snapshot_updated_ts === "string" && data.snapshot_updated_ts
+        ? data.snapshot_updated_ts
+        : null;
+    const freshnessTs =
+      lastTradeTs ?? quoteTs ?? minuteBarTs ?? snapshotUpdatedTs ?? timestamp;
+    const marketAgeSec = parseAgeSeconds(freshnessTs);
+    const stale =
+      price == null
+        ? true
+        : marketAgeSec != null
+          ? marketAgeSec > staleThresholdSec(source, priceSource)
+          : false;
     let change: number | null = null;
     let changePct: number | null = null;
 
@@ -99,8 +161,15 @@ async function fetchSingleQuote(
       bid: data.bid ?? null,
       ask: data.ask ?? null,
       close,
-      stale: price == null,
-      source: "ib",
+      stale,
+      source,
+      priceSource,
+      timestamp,
+      lastTradeTs,
+      quoteTs,
+      minuteBarTs,
+      snapshotUpdatedTs,
+      marketAgeSec,
     };
   } catch {
     return staleResult(ticker);

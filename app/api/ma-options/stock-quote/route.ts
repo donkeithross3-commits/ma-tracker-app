@@ -12,6 +12,12 @@ export interface StockQuoteResponse {
   close: number | null;
   volume: number | null;
   timestamp: string;
+  source?: string;
+  price_source?: string | null;
+  last_trade_ts?: string | null;
+  quote_ts?: string | null;
+  minute_bar_ts?: string | null;
+  snapshot_updated_ts?: string | null;
 }
 
 export async function POST(request: NextRequest) {

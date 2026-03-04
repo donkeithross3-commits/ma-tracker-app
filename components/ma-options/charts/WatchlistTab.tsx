@@ -38,6 +38,10 @@ export default function WatchlistTab() {
   );
 
   const { quotes, loading: quotesLoading, lastFetch } = useWatchlistQuotes(quoteItems);
+  const staleCount = useMemo(
+    () => Array.from(quotes.values()).filter((q) => q.stale).length,
+    [quotes]
+  );
 
   // --- Fetch all lists ---
   const fetchLists = useCallback(async () => {
@@ -291,7 +295,13 @@ export default function WatchlistTab() {
               {items.length} instrument{items.length !== 1 ? "s" : ""}
               {quotes.size > 0 && (
                 <span className="text-gray-600 ml-2">
-                  ({quotes.size} quotes)
+                  ({quotes.size} quotes
+                  {staleCount > 0 ? (
+                    <span className="text-amber-500">, {staleCount} stale</span>
+                  ) : (
+                    ""
+                  )}
+                  )
                 </span>
               )}
             </span>

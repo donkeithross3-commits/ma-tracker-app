@@ -13,7 +13,7 @@ import asyncio
 import logging
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -24,6 +24,35 @@ _BASE_URL = "https://api.polygon.io"
 _MAX_RETRIES = 3
 _BACKOFF_BASE_S = 1.0
 _DEFAULT_TIMEOUT = 15.0
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _timestamp_to_utc_iso(raw: Any) -> str | None:
+    """Convert Polygon epoch timestamps (s/ms/us/ns) to UTC ISO string."""
+    if raw in (None, "", 0):
+        return None
+    try:
+        # Preserve valid ISO inputs if provided by upstream.
+        if isinstance(raw, str) and ("T" in raw or raw.endswith("Z")):
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        value = float(raw)
+        if value <= 0:
+            return None
+        # Polygon fields vary by endpoint: seconds, ms, us, or ns.
+        if value >= 1e17:  # nanoseconds
+            value /= 1e9
+        elif value >= 1e14:  # microseconds
+            value /= 1e6
+        elif value >= 1e11:  # milliseconds
+            value /= 1e3
+        dt = datetime.fromtimestamp(value, tz=timezone.utc)
+        return dt.isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 class PolygonError(Exception):
@@ -83,23 +112,25 @@ class PolygonOptionsClient:
             )
             latency_ms = (_time.monotonic() - t0) * 1000
             snap = data.get("ticker", {})
-            updated_ns = snap.get("updated", 0)
-            # Polygon returns nanosecond epoch for 'updated'
-            if updated_ns > 1e15:  # nanoseconds
-                updated_dt = datetime.utcfromtimestamp(updated_ns / 1e9)
-            elif updated_ns > 1e12:  # milliseconds
-                updated_dt = datetime.utcfromtimestamp(updated_ns / 1e3)
-            else:
-                updated_dt = datetime.utcfromtimestamp(updated_ns) if updated_ns else None
+            updated_iso = _timestamp_to_utc_iso(snap.get("updated"))
+            updated_dt = (
+                datetime.fromisoformat(updated_iso.replace("Z", "+00:00"))
+                if updated_iso
+                else None
+            )
 
-            age_s = (datetime.utcnow() - updated_dt).total_seconds() if updated_dt else None
+            age_s = (
+                (datetime.now(timezone.utc) - updated_dt).total_seconds()
+                if updated_dt
+                else None
+            )
             prev_close = (snap.get("prevDay") or {}).get("c", 0)
             last_trade_price = (snap.get("lastTrade") or {}).get("p", 0)
 
             results["checks"]["stock_snapshot"] = {
                 "ok": True,
                 "latency_ms": round(latency_ms, 1),
-                "updated": updated_dt.isoformat() + "Z" if updated_dt else None,
+                "updated": updated_iso,
                 "age_seconds": round(age_s, 0) if age_s is not None else None,
                 "prev_close": prev_close,
                 "last_trade": last_trade_price,
@@ -176,9 +207,8 @@ class PolygonOptionsClient:
 
         Returns dict with keys: ticker, price, bid, ask, close, volume, timestamp.
 
-        Price priority: min.c (most recent 1-min aggregate, captures extended-hours)
-        → lastTrade.p → day.c. The min aggregate tracks after-hours/pre-market
-        activity, while lastTrade.p locks to the closing auction at 4:00 PM.
+        Price priority: lastTrade.p (true last trade) → min.c (1-minute aggregate)
+        → day.c. This keeps "Last" aligned with a trade print when available.
         """
         data = await self._get(
             f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker.upper()}"
@@ -190,13 +220,37 @@ class PolygonOptionsClient:
         minute = snap.get("min", {})
         prev_day = snap.get("prevDay", {})
 
-        # min.c is the most recent 1-minute aggregate close — it captures
-        # extended-hours trades that lastTrade.p and day.c miss.
-        price = minute.get("c") or last_trade.get("p", 0) or day.get("c", 0)
+        last_trade_price = last_trade.get("p")
+        minute_close = minute.get("c")
+        day_close = day.get("c")
+
+        if last_trade_price and last_trade_price > 0:
+            price = last_trade_price
+            price_source = "last_trade"
+        elif minute_close and minute_close > 0:
+            price = minute_close
+            price_source = "minute_bar"
+        elif day_close and day_close > 0:
+            price = day_close
+            price_source = "day_close"
+        else:
+            price = 0
+            price_source = "none"
+
         bid = last_quote.get("p", 0)  # lowercase p = bid price
         ask = last_quote.get("P", 0)  # uppercase P = ask price
         close = prev_day.get("c")  # previous day close
         volume = day.get("v")  # today's volume
+        last_trade_ts = _timestamp_to_utc_iso(last_trade.get("t"))
+        quote_ts = _timestamp_to_utc_iso(last_quote.get("t"))
+        minute_bar_ts = _timestamp_to_utc_iso(minute.get("t"))
+        snapshot_updated_ts = _timestamp_to_utc_iso(snap.get("updated"))
+        if price_source == "last_trade":
+            timestamp = last_trade_ts or snapshot_updated_ts or _utc_now_iso()
+        elif price_source == "minute_bar":
+            timestamp = minute_bar_ts or snapshot_updated_ts or _utc_now_iso()
+        else:
+            timestamp = snapshot_updated_ts or _utc_now_iso()
 
         return {
             "ticker": ticker.upper(),
@@ -205,7 +259,13 @@ class PolygonOptionsClient:
             "ask": ask,
             "close": close,
             "volume": volume,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "source": "polygon",
+            "price_source": price_source,
+            "last_trade_ts": last_trade_ts,
+            "quote_ts": quote_ts,
+            "minute_bar_ts": minute_bar_ts,
+            "snapshot_updated_ts": snapshot_updated_ts,
+            "timestamp": timestamp,
         }
 
     async def get_batch_stock_quotes(self, tickers: list[str]) -> dict[str, dict]:

@@ -75,6 +75,14 @@ function formatChangePct(c: number | null): string {
   return sign + c.toFixed(1) + "%";
 }
 
+function formatAge(ageSec: number | null): string {
+  if (ageSec == null) return "age unknown";
+  if (ageSec < 60) return `${ageSec}s old`;
+  const mins = Math.floor(ageSec / 60);
+  const secs = ageSec % 60;
+  return `${mins}m ${secs}s old`;
+}
+
 function changeColor(v: number | null): string {
   if (v == null || v === 0) return "text-gray-400";
   return v > 0 ? "text-green-400" : "text-red-400";
@@ -182,6 +190,19 @@ export default function WatchlistTable({
               const q = quotes.get(item.ticker);
               const isFirst = idx === 0;
               const isLast = idx === items.length - 1;
+              const priceTitleParts = [
+                q?.source ? `source=${q.source}` : null,
+                q?.priceSource ? `price=${q.priceSource}` : null,
+                q?.lastTradeTs ? `lastTrade=${q.lastTradeTs}` : null,
+                q?.quoteTs ? `quote=${q.quoteTs}` : null,
+                q?.minuteBarTs ? `minute=${q.minuteBarTs}` : null,
+                q?.snapshotUpdatedTs ? `snapshot=${q.snapshotUpdatedTs}` : null,
+                q ? formatAge(q.marketAgeSec) : null,
+              ].filter(Boolean);
+              const priceTitle =
+                priceTitleParts.length > 0
+                  ? priceTitleParts.join(" | ")
+                  : "No quote metadata";
 
               return (
                 <tr
@@ -234,8 +255,16 @@ export default function WatchlistTable({
                     );
                   })()}
                   {visibleSet.has("last") && (
-                    <td className="text-right py-1.5 sm:py-2 px-1 sm:px-2 font-mono text-gray-100 whitespace-nowrap">
+                    <td
+                      className={`text-right py-1.5 sm:py-2 px-1 sm:px-2 font-mono whitespace-nowrap ${q?.stale ? "text-amber-300" : "text-gray-100"}`}
+                      title={priceTitle}
+                    >
                       {formatPrice(q?.price ?? null)}
+                      {q?.stale && (
+                        <span className="ml-1 text-[10px] text-amber-400">
+                          stale
+                        </span>
+                      )}
                     </td>
                   )}
                   {visibleSet.has("change") && (

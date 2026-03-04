@@ -13,6 +13,13 @@ export interface QuoteData {
   close: number | null;
   stale: boolean;
   source: string;
+  priceSource: string | null;
+  timestamp: string | null;
+  lastTradeTs: string | null;
+  quoteTs: string | null;
+  minuteBarTs: string | null;
+  snapshotUpdatedTs: string | null;
+  marketAgeSec: number | null;
 }
 
 export interface WatchlistItemForQuote {

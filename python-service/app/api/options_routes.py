@@ -634,6 +634,12 @@ async def polygon_quote(ticker: str = Query("SPY")):
             "ask": data.get("ask"),
             "last": data.get("price"),
             "timestamp": data.get("timestamp"),
+            "source": data.get("source", "polygon"),
+            "price_source": data.get("price_source"),
+            "last_trade_ts": data.get("last_trade_ts"),
+            "quote_ts": data.get("quote_ts"),
+            "minute_bar_ts": data.get("minute_bar_ts"),
+            "snapshot_updated_ts": data.get("snapshot_updated_ts"),
             "latency_ms": latency_ms,
         }
     except Exception as e:
@@ -1850,6 +1856,12 @@ class StockQuoteResponse(BaseModel):
     close: Optional[float] = None
     volume: Optional[int] = None
     timestamp: str
+    source: str = "unknown"
+    price_source: Optional[str] = None
+    last_trade_ts: Optional[str] = None
+    quote_ts: Optional[str] = None
+    minute_bar_ts: Optional[str] = None
+    snapshot_updated_ts: Optional[str] = None
 
 @router.post("/relay/stock-quote")
 async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
@@ -1875,6 +1887,12 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
                         close=data.get("close"),
                         volume=data.get("volume"),
                         timestamp=data.get("timestamp", datetime.utcnow().isoformat() + "Z"),
+                        source=data.get("source", "polygon"),
+                        price_source=data.get("price_source"),
+                        last_trade_ts=data.get("last_trade_ts"),
+                        quote_ts=data.get("quote_ts"),
+                        minute_bar_ts=data.get("minute_bar_ts"),
+                        snapshot_updated_ts=data.get("snapshot_updated_ts"),
                     )
                 # Price is 0/None — might be outside market hours, try IB
                 logger.info("Polygon returned zero price for %s, trying IB", request.ticker)
@@ -1930,7 +1948,9 @@ async def relay_stock_quote(request: StockQuoteRequest) -> StockQuoteResponse:
             ask=response_data.get("ask"),
             close=response_data.get("close"),
             volume=response_data.get("volume"),
-            timestamp=datetime.utcnow().isoformat() + "Z"
+            timestamp=datetime.utcnow().isoformat() + "Z",
+            source="ib",
+            price_source="ib_last",
         )
 
     except HTTPException:
@@ -2895,4 +2915,3 @@ async def relay_agent_restart(request: AgentRestartRequest):
     except Exception as e:
         logger.error(f"Relay agent/restart error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-

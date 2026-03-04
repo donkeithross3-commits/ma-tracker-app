@@ -12,6 +12,9 @@ interface FuturesQuote {
   mid?: number;
   delayed?: boolean;
   timestamp?: string;
+  price_source?: string;
+  last_trade_ts?: string;
+  quote_ts?: string;
   error?: string;
 }
 
@@ -218,8 +221,17 @@ export default function IBConnectionStatus() {
               <span>Bid: <span className="text-green-400">{polygonQuote.bid?.toFixed(2)}</span></span>
               <span>Ask: <span className="text-red-400">{polygonQuote.ask?.toFixed(2)}</span></span>
               <span>Last: <span className="text-yellow-400">{polygonQuote.last?.toFixed(2)}</span></span>
+              {polygonQuote.price_source && (
+                <span className="text-gray-400 text-[10px]">[{polygonQuote.price_source}]</span>
+              )}
               <span className="text-gray-500 text-[10px]">
-                {polygonQuote.timestamp ? new Date(polygonQuote.timestamp).toLocaleTimeString() : ""}
+                {polygonQuote.last_trade_ts
+                  ? new Date(polygonQuote.last_trade_ts).toLocaleTimeString()
+                  : polygonQuote.quote_ts
+                    ? new Date(polygonQuote.quote_ts).toLocaleTimeString()
+                    : polygonQuote.timestamp
+                      ? new Date(polygonQuote.timestamp).toLocaleTimeString()
+                      : ""}
               </span>
             </div>
           )}
