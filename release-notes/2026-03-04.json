@@ -1,0 +1,34 @@
+{
+  "date": "2026-03-04",
+  "title": "March 4, 2026",
+  "summary": "Per-ticker trade modes for granular execution control, risk hot-modify correctness fixes, and optimistic UI for instant feedback.",
+  "features": [
+    {
+      "id": "ticker-trade-modes",
+      "title": "Per-Ticker Trade Modes",
+      "summary": "Control each ticker independently: Normal, Exit Only, or No Orders mode with instant UI feedback.",
+      "description": "New per-ticker trade mode system adds granular control over the execution engine. Each ticker can be set to one of three modes:\n\n• **Normal** — full trading, entries and exits allowed\n• **Exit Only** — only exit/risk orders allowed, no new entries\n• **No Orders** — all automated orders blocked, existing working orders cancelled\n\nModes are enforced as Gate 0 in the order submission path, before budget checks. NO_ORDERS mode automatically cancels all working orders for the ticker when activated. Modes persist across agent restarts and are visible on the Signals tab with color-coded controls and ticker tab badges.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "risk-hot-modify-fix",
+      "title": "Risk Hot-Modify Correctness Fix",
+      "summary": "Fixed broken risk config updates that silently failed when modifying running positions.",
+      "description": "Fixed a critical bug where updating risk parameters on running positions via the dashboard config panel would silently fail. The risk manager's `update_risk_config()` method referenced an uninitialized `self.config` attribute instead of the correct `_risk_config` snapshot.\n\nAdditionally fixed a key mismatch between the dashboard UI (sending `risk_profit_targets_enabled`) and the backend translator (expecting `risk_profit_taking_enabled`). The translator now accepts both keys with a fallback chain.\n\nWhen disabling risk levels that have TRIGGERED orders in flight, those orders are now properly cancelled via IB.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "optimistic-ticker-modes",
+      "title": "Optimistic UI for Trade Mode Changes",
+      "summary": "Instant visual feedback when changing ticker modes, with stale-poll protection.",
+      "description": "Trade mode changes now update the UI instantly without waiting for the server round-trip. A `fresh=1` query parameter bypasses the relay's cached telemetry to confirm the mutation landed. A pending-modes guard prevents stale poll responses from reverting the optimistic state. On error, the UI rolls back to the previous mode automatically.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
