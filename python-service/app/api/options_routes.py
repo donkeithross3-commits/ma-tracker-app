@@ -2257,6 +2257,33 @@ async def relay_execution_budget(request: ExecutionBudgetRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ExecutionTickerModeRequest(BaseModel):
+    userId: str
+    ticker: str
+    mode: str  # NORMAL, EXIT_ONLY, NO_ORDERS
+
+
+@router.post("/relay/execution/ticker-mode")
+async def relay_execution_ticker_mode(request: ExecutionTickerModeRequest):
+    """Set per-ticker trade mode (NORMAL, EXIT_ONLY, NO_ORDERS)."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_ticker_mode",
+            payload={"ticker": request.ticker, "mode": request.mode},
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/ticker-mode error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class ExecutionAddTickerRequest(BaseModel):
     userId: str
     strategy_id: str
@@ -2542,8 +2569,12 @@ def _extract_bmc_strategies(strategies_list: list) -> list:
 
 
 @router.get("/relay/bmc-signal")
-async def relay_bmc_signal(user_id: str = ""):
+async def relay_bmc_signal(user_id: str = "", fresh: int = 0):
     """Read all BMC strategy states from execution telemetry.
+
+    Query params:
+        fresh=1: bypass cached telemetry, force direct agent query.
+                 Use after mutations to get immediate confirmation.
 
     Returns signals for ALL running BMC tickers (multi-ticker).
     Response format:
@@ -2561,13 +2592,13 @@ async def relay_bmc_signal(user_id: str = ""):
     if not user_id:
         return {"error": "user_id required", "signal": None}
     try:
-        # Try cached telemetry first (no round-trip)
+        # Try cached telemetry first (no round-trip) — skip if fresh=1
         registry = get_registry()
         provider = await registry.get_active_provider(
             user_id=user_id,
             allow_fallback_to_any=False,
         )
-        if provider and provider.execution_telemetry:
+        if not fresh and provider and provider.execution_telemetry:
             telemetry = provider.execution_telemetry
             bmc_strategies = _extract_bmc_strategies(telemetry.get("strategies", []))
             result = {

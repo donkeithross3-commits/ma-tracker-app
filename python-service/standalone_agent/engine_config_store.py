@@ -47,6 +47,7 @@ class EngineConfigStore:
         global_entry_cap: int,
         risk_budget_usd: float,
         reason: str = "",
+        ticker_modes: Optional[dict] = None,
     ) -> None:
         """Persist current engine configuration to disk."""
         data = {
@@ -58,6 +59,8 @@ class EngineConfigStore:
             "risk_budget_usd": risk_budget_usd,
             "strategies": strategies,
         }
+        if ticker_modes is not None:
+            data["ticker_modes"] = ticker_modes
         with self._lock:
             self._write(data)
         logger.info(

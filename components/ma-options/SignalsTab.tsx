@@ -249,6 +249,20 @@ interface BMCConfig {
   risk_profit_targets: Array<{ trigger_pct: number; exit_pct: number }>;
 }
 
+type TickerMode = "NORMAL" | "EXIT_ONLY" | "NO_ORDERS";
+
+const TICKER_MODE_LABELS: Record<TickerMode, string> = {
+  NORMAL: "Normal",
+  EXIT_ONLY: "Exit Only",
+  NO_ORDERS: "No Orders",
+};
+
+const TICKER_MODE_COLORS: Record<TickerMode, string> = {
+  NORMAL: "bg-green-700 text-white",
+  EXIT_ONLY: "bg-amber-600 text-white",
+  NO_ORDERS: "bg-red-600 text-white",
+};
+
 const DEFAULT_CONFIG: BMCConfig = {
   ticker: "SPY",
   signal_threshold: 0.5,
@@ -470,6 +484,12 @@ export default function SignalsTab() {
   // Currently selected ticker tab for viewing signal details
   const [activeTicker, setActiveTicker] = useState("SPY");
 
+  // ── Per-ticker trade modes ──
+  const [tickerModes, setTickerModes] = useState<Record<string, TickerMode>>({});
+  const [pendingModes, setPendingModes] = useState<Record<string, TickerMode | null>>({});
+  const pendingModesRef = useRef(pendingModes);
+  pendingModesRef.current = pendingModes;
+
   // ── Model chooser state ──
   const [modelModalOpen, setModelModalOpen] = useState(false);
   const [modelList, setModelList] = useState<Array<{
@@ -606,6 +626,19 @@ export default function SignalsTab() {
       if (res.ok) {
         const data = await res.json();
         setExecutionStatus(data);
+        // Sync ticker modes from telemetry (guard against pending optimistic updates)
+        const polledModes: Record<string, TickerMode> =
+          data?.budget_status?.ticker_modes || data?.ticker_modes || {};
+        if (Object.keys(polledModes).length > 0) {
+          setTickerModes(prev => {
+            const merged = { ...prev };
+            for (const [t, m] of Object.entries(polledModes)) {
+              // Don't overwrite pending optimistic updates
+              if (!pendingModesRef.current[t]) merged[t] = m as TickerMode;
+            }
+            return merged;
+          });
+        }
       }
     } catch { /* silent */ }
   }, []);
@@ -819,6 +852,44 @@ export default function SignalsTab() {
       setError(e.message || "Failed to update config");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── Set per-ticker trade mode with optimistic update ──
+  const handleSetTickerMode = async (ticker: string, mode: TickerMode) => {
+    const prevMode = tickerModes[ticker] || "NORMAL";
+    if (prevMode === mode) return;
+    // Optimistic update
+    setTickerModes(prev => ({ ...prev, [ticker]: mode }));
+    setPendingModes(prev => ({ ...prev, [ticker]: mode }));
+    try {
+      const res = await fetch("/api/ma-options/execution/ticker-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, mode }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.error) {
+        // Rollback on failure
+        setTickerModes(prev => ({ ...prev, [ticker]: prevMode }));
+        setError(data.error);
+      } else {
+        // Trigger fresh fetch to confirm server state
+        try {
+          const freshRes = await fetch("/api/ma-options/bmc-signal?fresh=1", { credentials: "include" });
+          const freshData = await freshRes.json();
+          const polledModes = freshData?.budget_status?.ticker_modes || freshData?.ticker_modes || {};
+          if (Object.keys(polledModes).length > 0) {
+            setTickerModes(prev => ({ ...prev, ...polledModes }));
+          }
+        } catch { /* fresh fetch is best-effort */ }
+      }
+    } catch (e: any) {
+      setTickerModes(prev => ({ ...prev, [ticker]: prevMode }));
+      setError(e.message || "Failed to set ticker mode");
+    } finally {
+      setPendingModes(prev => ({ ...prev, [ticker]: null }));
     }
   };
 
@@ -1580,6 +1651,13 @@ export default function SignalsTab() {
                 {running && hasFailed && (
                   <span className="ml-1 text-[9px] text-red-400">{"\u26A0"}</span>
                 )}
+                {running && tickerModes[t] && tickerModes[t] !== "NORMAL" && (
+                  <span className={`ml-1 text-[9px] px-0.5 rounded ${
+                    tickerModes[t] === "NO_ORDERS" ? "bg-red-900/50 text-red-400" : "bg-amber-900/50 text-amber-400"
+                  }`}>
+                    {tickerModes[t] === "NO_ORDERS" ? "\u26D4" : "\uD83D\uDD12"}
+                  </span>
+                )}
               </button>
             </div>
           );
@@ -1678,6 +1756,44 @@ export default function SignalsTab() {
       {!running && signal?.startup_error && (
         <div className="bg-red-900/30 border border-red-800 text-red-300 text-sm px-3 py-1.5 rounded">
           Startup error: {signal.startup_error}
+        </div>
+      )}
+
+      {/* ── Per-Ticker Mode Controls ── */}
+      {running && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Trade Mode:</span>
+          {(["NORMAL", "EXIT_ONLY", "NO_ORDERS"] as TickerMode[]).map(mode => {
+            const current = tickerModes[activeTicker] || "NORMAL";
+            const isPending = pendingModes[activeTicker] === mode;
+            const isActive = current === mode;
+            return (
+              <button
+                key={mode}
+                onClick={() => handleSetTickerMode(activeTicker, mode)}
+                disabled={isActive && !isPending}
+                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  isActive
+                    ? TICKER_MODE_COLORS[mode]
+                    : "text-gray-400 hover:text-gray-200 hover:bg-gray-800"
+                } ${isPending ? "animate-pulse" : ""} disabled:cursor-default`}
+              >
+                {TICKER_MODE_LABELS[mode]}
+                {isPending && " …"}
+              </button>
+            );
+          })}
+          {(tickerModes[activeTicker] || "NORMAL") !== "NORMAL" && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+              tickerModes[activeTicker] === "NO_ORDERS"
+                ? "bg-red-900/30 text-red-400 border border-red-800"
+                : "bg-amber-900/30 text-amber-400 border border-amber-800"
+            }`}>
+              {tickerModes[activeTicker] === "NO_ORDERS"
+                ? "All automated orders blocked"
+                : "New entries blocked, exits active"}
+            </span>
+          )}
         </div>
       )}
 

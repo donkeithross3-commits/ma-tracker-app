@@ -88,7 +88,7 @@ CACHE_TTL_SECONDS = 60  # How long to cache option chain data
 _BMC_RISK_FIELDS = frozenset({
     "risk_stop_loss_enabled", "risk_stop_loss_type", "risk_stop_loss_trigger_pct",
     "risk_trailing_enabled", "risk_trailing_activation_pct", "risk_trailing_trail_pct",
-    "risk_profit_taking_enabled", "risk_profit_targets",
+    "risk_profit_taking_enabled", "risk_profit_targets_enabled", "risk_profit_targets",
     "risk_preset",
 })
 
@@ -112,7 +112,8 @@ def _translate_bmc_to_risk_config(bmc_config: dict) -> dict:
     if any(k.startswith("risk_trailing_") or k.startswith("risk_profit_") for k in bmc_config):
         pt = {}
         if any(k.startswith("risk_profit_") for k in bmc_config):
-            pt["enabled"] = bmc_config.get("risk_profit_taking_enabled", False)
+            pt["enabled"] = bmc_config.get("risk_profit_targets_enabled",
+                                          bmc_config.get("risk_profit_taking_enabled", False))
             pt["targets"] = bmc_config.get("risk_profit_targets", [])
         if any(k.startswith("risk_trailing_") for k in bmc_config):
             pt["trailing_stop"] = {
@@ -481,6 +482,8 @@ class IBDataAgent:
                 return await self._handle_execution_swap_model(payload)
             elif request_type == "execution_resume":
                 return await self._handle_execution_resume(payload)
+            elif request_type == "execution_ticker_mode":
+                return await self._handle_execution_ticker_mode(payload)
             elif request_type == "ib_reconnect":
                 return await self._handle_ib_reconnect(payload)
             elif request_type == "get_ib_executions":
@@ -1795,6 +1798,14 @@ class IBDataAgent:
                                 self.position_store.update_runtime_state(
                                     rm_sid, rm.get_runtime_snapshot()
                                 )
+                            # Execute cancellation intents from disabled levels
+                            cancel_ids = changes.get("cancel_order_ids", [])
+                            for oid in cancel_ids:
+                                try:
+                                    self.scanner.cancelOrder(oid)
+                                    logger.info("Cancelled order %d (risk config change on %s)", oid, rm_sid)
+                                except Exception as ce:
+                                    logger.error("Failed to cancel order %d: %s", oid, ce)
                             rm_updated += 1
                             logger.info("Hot-modified risk manager %s: %s", rm_sid, changes)
                         except Exception as e:
@@ -1857,6 +1868,31 @@ class IBDataAgent:
                     logger.info("Cleared auto-restart PAUSED state (user set budget)")
 
         self._persist_engine_config("budget_change")
+        return result
+
+    async def _handle_execution_ticker_mode(self, payload: dict) -> dict:
+        """Set per-ticker trade mode (NORMAL, EXIT_ONLY, NO_ORDERS).
+
+        Payload:
+            ticker: str (e.g. "SPY")
+            mode: str ("NORMAL", "EXIT_ONLY", "NO_ORDERS")
+        """
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+
+        ticker = payload.get("ticker", "").upper()
+        mode_str = payload.get("mode", "NORMAL").upper()
+        if not ticker:
+            return {"error": "ticker is required"}
+
+        from execution_engine import TickerMode
+        try:
+            mode = TickerMode(mode_str)
+        except ValueError:
+            return {"error": f"Invalid mode: {mode_str}. Valid: NORMAL, EXIT_ONLY, NO_ORDERS"}
+
+        result = self.execution_engine.set_ticker_mode(ticker, mode)
+        self._persist_engine_config("ticker_mode_change")
         return result
 
     async def _handle_execution_add_ticker(self, payload: dict) -> dict:
@@ -2763,6 +2799,7 @@ class IBDataAgent:
                 global_entry_cap=self.execution_engine._global_entry_cap,
                 risk_budget_usd=self.execution_engine._risk_budget_usd,
                 reason=reason,
+                ticker_modes=self.execution_engine.get_all_ticker_modes(),
             )
         except Exception as e:
             logger.error("Error persisting engine config: %s", e)
@@ -2847,6 +2884,11 @@ class IBDataAgent:
                             logger.info("Auto-restart: restored model pin %s on %s", model_pin, sid)
                         except Exception as e:
                             logger.warning("Auto-restart: model pin restore failed for %s: %s", sid, e)
+
+            # Restore ticker modes
+            ticker_modes = saved.get("ticker_modes", {})
+            if ticker_modes:
+                self.execution_engine.restore_ticker_modes(ticker_modes)
 
             # Mark as paused
             self.execution_engine._auto_restart_paused = True

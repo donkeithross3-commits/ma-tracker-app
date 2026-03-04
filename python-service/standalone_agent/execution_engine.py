@@ -77,6 +77,13 @@ class OrderType(Enum):
     TRAIL = "TRAIL"
 
 
+class TickerMode(Enum):
+    """Per-ticker trade mode controlling what orders are allowed."""
+    NORMAL = "NORMAL"        # All orders allowed (default)
+    EXIT_ONLY = "EXIT_ONLY"  # Block new entries, risk exits continue
+    NO_ORDERS = "NO_ORDERS"  # Block all automated orders, quotes stay live
+
+
 @dataclass
 class OrderAction:
     """An order instruction produced by a strategy's evaluate() method."""
@@ -315,6 +322,9 @@ class ExecutionEngine:
         # ── Auto-restart pause: entries blocked, risk managers active ──
         self._auto_restart_paused: bool = False
 
+        # ── Per-ticker trade modes ──
+        self._ticker_modes: Dict[str, TickerMode] = {}
+
         # ── Flip-flop detection ──
         # strategy_id -> list of submission timestamps
         self._order_timestamps: Dict[str, List[float]] = {}
@@ -397,7 +407,62 @@ class ExecutionEngine:
                     "ticker_entries_placed": state.ticker_entries_placed,
                     "is_active": state.is_active,
                 }
+        result["ticker_modes"] = self.get_all_ticker_modes()
         return result
+
+    # ── Per-Ticker Trade Modes ──
+
+    def set_ticker_mode(self, ticker: str, mode: TickerMode) -> dict:
+        """Set the trade mode for a ticker. Returns status dict.
+
+        On transition to NO_ORDERS, all working algo orders for that ticker
+        are cancelled immediately.
+        """
+        old_mode = self._ticker_modes.get(ticker, TickerMode.NORMAL)
+        self._ticker_modes[ticker] = mode
+        logger.info("Ticker mode %s: %s -> %s", ticker, old_mode.value, mode.value)
+        result = {"ticker": ticker, "mode": mode.value, "old_mode": old_mode.value}
+
+        # On transition to NO_ORDERS, cancel all working algo orders for this ticker
+        if mode == TickerMode.NO_ORDERS and old_mode != TickerMode.NO_ORDERS:
+            cancelled = self._cancel_ticker_algo_orders(ticker)
+            result["orders_cancelled"] = cancelled
+
+        return result
+
+    def get_ticker_mode(self, ticker: str) -> TickerMode:
+        """Return the current trade mode for a ticker (default: NORMAL)."""
+        return self._ticker_modes.get(ticker, TickerMode.NORMAL)
+
+    def get_all_ticker_modes(self) -> dict:
+        """Return all non-default ticker modes as {ticker: mode_name}."""
+        return {t: m.value for t, m in self._ticker_modes.items()}
+
+    def _cancel_ticker_algo_orders(self, ticker: str) -> int:
+        """Cancel all active algo working orders for a ticker. Returns count cancelled."""
+        cancelled = 0
+        with self._active_orders_lock:
+            for oid, ao in list(self._active_orders.items()):
+                if ao.status in ("Submitted", "PreSubmitted"):
+                    state = self._strategies.get(ao.strategy_id)
+                    if state and state.ticker == ticker:
+                        try:
+                            self._scanner.cancelOrder(oid)
+                            cancelled += 1
+                            logger.info("Cancelled order %d for ticker %s (mode=NO_ORDERS)", oid, ticker)
+                        except Exception as e:
+                            logger.error("Failed to cancel order %d: %s", oid, e)
+        return cancelled
+
+    def restore_ticker_modes(self, modes: dict) -> None:
+        """Restore ticker modes from persisted config (auto-restart)."""
+        for ticker, mode_str in modes.items():
+            try:
+                self._ticker_modes[ticker] = TickerMode(mode_str)
+            except ValueError:
+                logger.warning("Unknown ticker mode '%s' for %s, defaulting to NORMAL", mode_str, ticker)
+        if self._ticker_modes:
+            logger.info("Restored ticker modes: %s", self.get_all_ticker_modes())
 
     def get_risk_managers_for_parent(self, parent_strategy_id: str) -> list:
         """Return all active risk manager strategies whose parent matches.
@@ -1061,6 +1126,25 @@ class ExecutionEngine:
         dedicated order-exec thread.
         """
         is_entry = not action.is_exit
+
+        # ── Gate 0: Ticker Mode ──
+        ticker = state.ticker or ""
+        if ticker:
+            mode = self._ticker_modes.get(ticker, TickerMode.NORMAL)
+            if mode == TickerMode.NO_ORDERS:
+                mode_msg = f"Order rejected: ticker {ticker} in NO_ORDERS mode"
+                logger.warning("NO_ORDERS mode -- rejecting %s %d x %s for strategy %s",
+                               action.side.value, action.quantity,
+                               action.contract_dict.get("symbol", "?"), action.strategy_id)
+                state.errors.append(mode_msg)
+                return
+            if mode == TickerMode.EXIT_ONLY and is_entry:
+                mode_msg = f"Entry rejected: ticker {ticker} in EXIT_ONLY mode"
+                logger.warning("EXIT_ONLY mode -- rejecting entry %s %d x %s for strategy %s",
+                               action.side.value, action.quantity,
+                               action.contract_dict.get("symbol", "?"), action.strategy_id)
+                state.errors.append(mode_msg)
+                return
 
         # ── Gate 1: Entry Budget (skip for exits) ──
         if is_entry:

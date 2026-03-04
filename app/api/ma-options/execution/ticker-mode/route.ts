@@ -4,24 +4,36 @@ import { getCurrentUser } from "@/lib/auth-api";
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user?.id) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const fresh = request.nextUrl.searchParams.get("fresh") || "";
-    const freshParam = fresh ? `&fresh=${fresh}` : "";
+    const body = await request.json();
+    const { ticker, mode } = body;
+
+    if (!ticker || !mode) {
+      return NextResponse.json(
+        { error: "ticker and mode are required" },
+        { status: 400 }
+      );
+    }
+
     const response = await fetch(
-      `${PYTHON_SERVICE_URL}/options/relay/bmc-signal?user_id=${encodeURIComponent(user.id)}${freshParam}`,
-      { method: "GET", headers: { "Content-Type": "application/json" } }
+      `${PYTHON_SERVICE_URL}/options/relay/execution/ticker-mode`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id, ticker, mode }),
+      }
     );
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       return NextResponse.json(
-        { error: errorData.detail || `BMC signal fetch failed: ${response.status}` },
+        { error: errorData.detail || `Ticker mode update failed: ${response.status}` },
         { status: response.status }
       );
     }
@@ -29,9 +41,9 @@ export async function GET(request: NextRequest) {
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error fetching BMC signal:", error);
+    console.error("Error setting ticker mode:", error);
     return NextResponse.json(
-      { error: "Failed to fetch BMC signal" },
+      { error: "Failed to set ticker mode" },
       { status: 500 }
     );
   }

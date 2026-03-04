@@ -278,6 +278,9 @@ class RiskManagerStrategy(ExecutionStrategy):
         self._trailing_tranche_idx: int = 0         # which tranche we're on
         self._trailing_tranche_pending: bool = False  # True while waiting for tranche fill
 
+        # Snapshot of risk-related config for hot-modify comparison
+        self._risk_config: dict = {}
+
         # EOD close-out: timestamp when position was opened (for same-day detection)
         self._entry_timestamp: float = 0.0
 
@@ -374,6 +377,12 @@ class RiskManagerStrategy(ExecutionStrategy):
             trail = profit_cfg.get("trailing_stop", {})
             if trail.get("enabled"):
                 self._level_states["trailing"] = LevelState.ARMED
+
+        # Snapshot risk config for hot-modify comparison
+        self._risk_config = {
+            "stop_loss": config.get("stop_loss", {}),
+            "profit_taking": config.get("profit_taking", {}),
+        }
 
         logger.info(
             "RiskManager started: %s %s %d @ %.4f, levels=%s",
@@ -797,12 +806,18 @@ class RiskManagerStrategy(ExecutionStrategy):
         Called from the eval thread context — no lock needed since evaluate()
         and update_risk_config() both run on the eval thread.
 
-        Returns dict with {updated_fields, added_levels, removed_levels, skipped_levels}.
+        Returns dict with {updated_fields, added_levels, removed_levels,
+        skipped_levels, cancel_order_ids}.
+        cancel_order_ids contains order IDs for pending orders tied to
+        disabled/invalidated levels that should be cancelled immediately.
         """
-        changes = {"updated_fields": [], "added_levels": [], "removed_levels": [], "skipped_levels": []}
+        changes = {
+            "updated_fields": [], "added_levels": [], "removed_levels": [],
+            "skipped_levels": [], "cancel_order_ids": [],
+        }
 
         # --- Stop Loss ---
-        old_sl = self.config.get("stop_loss", {})
+        old_sl = self._risk_config.get("stop_loss", {})
         new_sl = new_config.get("stop_loss", old_sl)
         if new_sl != old_sl:
             changes["updated_fields"].append("stop_loss")
@@ -820,16 +835,19 @@ class RiskManagerStrategy(ExecutionStrategy):
                         self._level_states["stop_simple"] = LevelState.ARMED
                         changes["added_levels"].append("stop_simple")
             elif not new_sl.get("enabled") and old_sl.get("enabled"):
-                # Disabling stop loss — remove only ARMED levels
+                # Disabling stop loss — remove ARMED levels and cancel TRIGGERED orders
                 for key in list(self._level_states):
-                    if key.startswith("stop_") and self._level_states[key] == LevelState.ARMED:
-                        del self._level_states[key]
-                        changes["removed_levels"].append(key)
-                    elif key.startswith("stop_"):
-                        changes["skipped_levels"].append(key)
+                    if key.startswith("stop_"):
+                        if self._level_states[key] in (LevelState.ARMED, LevelState.TRIGGERED):
+                            # Cancel any pending order for this level
+                            self._collect_cancel_ids(key, changes["cancel_order_ids"])
+                            del self._level_states[key]
+                            changes["removed_levels"].append(key)
+                        else:
+                            changes["skipped_levels"].append(key)
 
         # --- Profit Taking ---
-        old_pt = self.config.get("profit_taking", {})
+        old_pt = self._risk_config.get("profit_taking", {})
         new_pt = new_config.get("profit_taking", old_pt)
         if new_pt != old_pt:
             changes["updated_fields"].append("profit_taking")
@@ -841,11 +859,13 @@ class RiskManagerStrategy(ExecutionStrategy):
                         changes["added_levels"].append(key)
             elif not new_pt.get("enabled") and old_pt.get("enabled"):
                 for key in list(self._level_states):
-                    if key.startswith("profit_") and self._level_states[key] == LevelState.ARMED:
-                        del self._level_states[key]
-                        changes["removed_levels"].append(key)
-                    elif key.startswith("profit_"):
-                        changes["skipped_levels"].append(key)
+                    if key.startswith("profit_"):
+                        if self._level_states[key] in (LevelState.ARMED, LevelState.TRIGGERED):
+                            self._collect_cancel_ids(key, changes["cancel_order_ids"])
+                            del self._level_states[key]
+                            changes["removed_levels"].append(key)
+                        else:
+                            changes["skipped_levels"].append(key)
 
         # --- Trailing Stop (activation_pct, trail_pct, exit_tranches) ---
         old_ts = old_pt.get("trailing_stop", {})
@@ -857,9 +877,13 @@ class RiskManagerStrategy(ExecutionStrategy):
                     self._level_states["trailing"] = LevelState.ARMED
                     changes["added_levels"].append("trailing")
             elif not new_ts.get("enabled") and old_ts.get("enabled"):
-                if self._level_states.get("trailing") == LevelState.ARMED and not self._trailing_active:
+                trail_state = self._level_states.get("trailing")
+                if trail_state in (LevelState.ARMED, LevelState.TRIGGERED):
+                    self._collect_cancel_ids("trailing", changes["cancel_order_ids"])
                     del self._level_states["trailing"]
                     changes["removed_levels"].append("trailing")
+                    self._trailing_active = False
+                    self._trailing_stop_price = 0.0
                 elif "trailing" in self._level_states:
                     changes["skipped_levels"].append("trailing")
             # If trail_pct changed and trailing IS active, recalculate trail price from HWM
@@ -875,12 +899,23 @@ class RiskManagerStrategy(ExecutionStrategy):
                     self._trailing_stop_price = self.high_water_mark * (1 + new_trail_pct / 100)
                 changes["updated_fields"].append("trailing_stop_price_recalc")
 
-        # --- Merge new config into self.config ---
+        # --- Merge new config into _risk_config ---
         for key in ("stop_loss", "profit_taking"):
             if key in new_config:
-                self.config[key] = new_config[key]
+                self._risk_config[key] = new_config[key]
 
         return changes
+
+    def _collect_cancel_ids(self, level_key: str, cancel_list: list) -> None:
+        """Find pending order IDs associated with a level and add to cancel list."""
+        for oid, po in list(self._pending_orders.items()):
+            # Match level key: stop_simple, stop_0, profit_0, trailing
+            po_key = f"{po.level_type}_{po.level_idx}" if po.level_type != "trailing" else "trailing"
+            if po_key == level_key or (level_key == "stop_simple" and po.level_type == "stop" and po.level_idx == -1):
+                cancel_list.append(oid)
+                # Remove from pending orders — the cancel callback will handle cleanup
+                del self._pending_orders[oid]
+                logger.info("Queued cancel for order %d (level %s disabled)", oid, level_key)
 
     # ── Internal helpers ──
 
