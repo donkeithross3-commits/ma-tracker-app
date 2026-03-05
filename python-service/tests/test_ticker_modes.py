@@ -127,6 +127,67 @@ class TestNoOrdersCancellation:
         assert result.get("orders_cancelled", 0) == 0
         mock_engine._scanner.cancelOrder.assert_not_called()
 
+    def test_no_orders_cancels_risk_manager_via_ticker(self, mock_engine):
+        """Risk managers with state.ticker set are cancelled by NO_ORDERS."""
+        mock_engine._active_orders[300] = ActiveOrder(
+            order_id=300, strategy_id="bmc_risk_123", status="Submitted", placed_at=0,
+        )
+        mock_engine._strategies["bmc_risk_123"] = StrategyState(
+            strategy_id="bmc_risk_123", strategy=MagicMock(), config={}, ticker="SPY",
+        )
+        result = mock_engine.set_ticker_mode("SPY", TickerMode.NO_ORDERS)
+        assert result["orders_cancelled"] == 1
+        mock_engine._scanner.cancelOrder.assert_called_once_with(300)
+
+    def test_no_orders_cancels_risk_manager_via_parent_fallback(self, mock_engine):
+        """Risk managers without state.ticker are cancelled via parent strategy lookup."""
+        rm = MagicMock()
+        rm._parent_strategy_id = "bmc_spy_up"
+        mock_engine._active_orders[400] = ActiveOrder(
+            order_id=400, strategy_id="bmc_risk_456", status="Submitted", placed_at=0,
+        )
+        mock_engine._strategies["bmc_risk_456"] = StrategyState(
+            strategy_id="bmc_risk_456", strategy=rm, config={}, ticker="",
+        )
+        mock_engine._strategies["bmc_spy_up"] = StrategyState(
+            strategy_id="bmc_spy_up", strategy=MagicMock(), config={}, ticker="SPY",
+        )
+        result = mock_engine.set_ticker_mode("SPY", TickerMode.NO_ORDERS)
+        assert result["orders_cancelled"] == 1
+
+    def test_no_orders_cancels_risk_manager_via_instrument_fallback(self, mock_engine):
+        """Risk managers without ticker or parent are cancelled via config instrument symbol."""
+        rm = MagicMock()
+        rm._parent_strategy_id = None
+        mock_engine._active_orders[500] = ActiveOrder(
+            order_id=500, strategy_id="bmc_risk_789", status="PreSubmitted", placed_at=0,
+        )
+        mock_engine._strategies["bmc_risk_789"] = StrategyState(
+            strategy_id="bmc_risk_789",
+            strategy=rm,
+            config={"instrument": {"symbol": "SPY", "secType": "OPT"}},
+            ticker="",
+        )
+        result = mock_engine.set_ticker_mode("SPY", TickerMode.NO_ORDERS)
+        assert result["orders_cancelled"] == 1
+        mock_engine._scanner.cancelOrder.assert_called_once_with(500)
+
+    def test_no_orders_skips_risk_manager_wrong_ticker(self, mock_engine):
+        """Risk managers for a different ticker are not cancelled."""
+        rm = MagicMock()
+        rm._parent_strategy_id = None
+        mock_engine._active_orders[600] = ActiveOrder(
+            order_id=600, strategy_id="bmc_risk_999", status="Submitted", placed_at=0,
+        )
+        mock_engine._strategies["bmc_risk_999"] = StrategyState(
+            strategy_id="bmc_risk_999",
+            strategy=rm,
+            config={"instrument": {"symbol": "QQQ"}},
+            ticker="",
+        )
+        result = mock_engine.set_ticker_mode("SPY", TickerMode.NO_ORDERS)
+        assert result.get("orders_cancelled", 0) == 0
+
 
 # ── Restore ──
 
@@ -195,6 +256,77 @@ class TestTickerModePersistence:
         assert loaded is not None
         assert loaded["ticker_modes"] == {"SPY": "NO_ORDERS", "QQQ": "EXIT_ONLY"}
         assert loaded["global_entry_cap"] == 5
+
+
+# ── Budget status includes ticker_modes ──
+
+
+# ── Gate 0: Risk manager order blocking ──
+
+
+class TestGate0RiskManagerBlocking:
+    """Gate 0 must block risk-manager orders when ticker is in NO_ORDERS mode."""
+
+    def _make_action(self, strategy_id="bmc_risk_123"):
+        return OrderAction(
+            strategy_id=strategy_id,
+            side=OrderSide.SELL,
+            quantity=1,
+            order_type=OrderType.MARKET,
+            contract_dict={"symbol": "SPY", "secType": "OPT", "exchange": "SMART"},
+            reason="trailing stop",
+            is_exit=True,
+        )
+
+    def test_blocks_risk_manager_with_ticker_set(self, mock_engine):
+        """Risk managers with state.ticker set are blocked by NO_ORDERS."""
+        mock_engine.set_ticker_mode("SPY", TickerMode.NO_ORDERS)
+        state = StrategyState(
+            strategy_id="bmc_risk_123", strategy=MagicMock(), config={}, ticker="SPY",
+        )
+        action = self._make_action()
+        mock_engine._process_order_action(state, action)
+        # Order should be rejected (never reach the order-exec thread)
+        assert any("NO_ORDERS" in e for e in state.errors)
+
+    def test_blocks_risk_manager_via_parent_fallback(self, mock_engine):
+        """Risk managers without ticker resolve from parent strategy."""
+        mock_engine.set_ticker_mode("SPY", TickerMode.NO_ORDERS)
+        rm = MagicMock()
+        rm._parent_strategy_id = "bmc_spy_up"
+        state = StrategyState(
+            strategy_id="bmc_risk_123", strategy=rm, config={}, ticker="",
+        )
+        mock_engine._strategies["bmc_spy_up"] = StrategyState(
+            strategy_id="bmc_spy_up", strategy=MagicMock(), config={}, ticker="SPY",
+        )
+        action = self._make_action()
+        mock_engine._process_order_action(state, action)
+        assert any("NO_ORDERS" in e for e in state.errors)
+
+    def test_blocks_risk_manager_via_contract_symbol(self, mock_engine):
+        """Risk managers without ticker or parent resolve from contract symbol."""
+        mock_engine.set_ticker_mode("SPY", TickerMode.NO_ORDERS)
+        rm = MagicMock()
+        rm._parent_strategy_id = None
+        state = StrategyState(
+            strategy_id="bmc_risk_123", strategy=rm, config={}, ticker="",
+        )
+        action = self._make_action()
+        mock_engine._process_order_action(state, action)
+        assert any("NO_ORDERS" in e for e in state.errors)
+
+    def test_allows_risk_manager_in_normal_mode(self, mock_engine):
+        """Risk managers are NOT blocked when ticker is in NORMAL mode."""
+        # Don't set any ticker mode (default is NORMAL)
+        state = StrategyState(
+            strategy_id="bmc_risk_123", strategy=MagicMock(), config={}, ticker="SPY",
+        )
+        action = self._make_action()
+        # _process_order_action will proceed past Gate 0 and likely fail at
+        # order submission (no real IB), but Gate 0 should not reject
+        mock_engine._process_order_action(state, action)
+        assert not any("NO_ORDERS" in e for e in state.errors)
 
 
 # ── Budget status includes ticker_modes ──
