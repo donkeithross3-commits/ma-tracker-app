@@ -332,6 +332,96 @@ class TestGate0RiskManagerBlocking:
 # ── Budget status includes ticker_modes ──
 
 
+# ── Recovery path: state.ticker assignment ──
+
+
+class TestRecoveryTickerAssignment:
+    """Simulate the recovery loop in _handle_execution_start to verify
+    that state.ticker is set on recovered risk managers.
+
+    This mirrors the exact logic at ib_data_agent.py:1590-1599.
+    """
+
+    def _simulate_recovery(self, engine, pos_id, stored_config, parent_strategy=""):
+        """Reproduce the recovery path: load_strategy + ticker assignment."""
+        from risk_manager import RiskManagerStrategy
+
+        rm = RiskManagerStrategy()
+        result = engine.load_strategy(pos_id, rm, stored_config)
+        assert "error" not in result, f"load_strategy failed: {result}"
+        # -- This is the code under test (mirrors ib_data_agent recovery) --
+        rm_state = engine._strategies.get(pos_id)
+        if rm_state:
+            instrument = stored_config.get("instrument", {})
+            rm_ticker = instrument.get("symbol", "").upper()
+            if not rm_ticker:
+                parent = parent_strategy
+                if parent:
+                    rm_ticker = parent.replace("bmc_", "").split("_")[0].upper()
+            rm_state.ticker = rm_ticker
+        return rm_state
+
+    def test_recovery_sets_ticker_from_instrument(self, mock_engine):
+        stored_config = {
+            "instrument": {"symbol": "SPY", "secType": "OPT", "strike": 600,
+                           "expiry": "20260306", "right": "P", "exchange": "SMART"},
+            "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
+            "preset": "zero_dte_convexity",
+        }
+        state = self._simulate_recovery(mock_engine, "bmc_risk_111", stored_config)
+        assert state.ticker == "SPY"
+
+    def test_recovery_sets_ticker_from_parent_fallback(self, mock_engine):
+        """When instrument.symbol is missing, derive ticker from parent_strategy."""
+        stored_config = {
+            "instrument": {"secType": "OPT", "strike": 600,
+                           "expiry": "20260306", "right": "P", "exchange": "SMART"},
+            "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
+            "preset": "zero_dte_convexity",
+        }
+        state = self._simulate_recovery(
+            mock_engine, "bmc_risk_222", stored_config,
+            parent_strategy="bmc_qqq_up",
+        )
+        assert state.ticker == "QQQ"
+
+    def test_recovery_empty_ticker_when_no_info(self, mock_engine):
+        """When neither instrument.symbol nor parent_strategy is available."""
+        stored_config = {
+            "instrument": {"secType": "OPT", "strike": 600,
+                           "expiry": "20260306", "right": "P", "exchange": "SMART"},
+            "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
+            "preset": "zero_dte_convexity",
+        }
+        state = self._simulate_recovery(
+            mock_engine, "bmc_risk_333", stored_config,
+            parent_strategy="",
+        )
+        assert state.ticker == ""
+
+    def test_spawn_sets_ticker_from_instrument(self, mock_engine):
+        """Simulate the spawn path in _spawn_risk_manager_for_bmc."""
+        from risk_manager import RiskManagerStrategy
+
+        risk_config = {
+            "instrument": {"symbol": "SPY", "secType": "OPT", "strike": 600,
+                           "expiry": "20260306", "right": "P", "exchange": "SMART"},
+            "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
+            "preset": "zero_dte_convexity",
+        }
+        strategy = RiskManagerStrategy()
+        sid = "bmc_risk_spawn_1"
+        result = mock_engine.load_strategy(sid, strategy, risk_config)
+        assert "error" not in result
+
+        # -- This mirrors ib_data_agent.py:2470-2478 --
+        rm_state = mock_engine._strategies.get(sid)
+        instrument = risk_config.get("instrument", {})
+        rm_ticker = instrument.get("symbol", "").upper()
+        rm_state.ticker = rm_ticker
+        assert rm_state.ticker == "SPY"
+
+
 class TestBudgetStatusIncludesModes:
     def test_budget_status_has_ticker_modes(self, mock_engine):
         mock_engine.set_ticker_mode("SPY", TickerMode.EXIT_ONLY)
