@@ -161,6 +161,25 @@ class OptionChainCache:
         logger.info("Cache cleared")
 
 
+def resolve_rm_ticker(instrument: dict, parent_strategy_id: str = "") -> str:
+    """Resolve the underlying ticker for a risk manager.
+
+    Used by both the spawn path (_spawn_risk_manager_for_bmc) and the
+    recovery path (_handle_execution_start) to set state.ticker on risk
+    manager StrategyStates. Centralised here so both paths use identical
+    logic and the function is independently testable.
+
+    Resolution order:
+    1. instrument["symbol"] (the option's underlying)
+    2. Parsed from parent_strategy_id (e.g. "bmc_spy_up" → "SPY")
+    3. Empty string (no ticker info available)
+    """
+    ticker = instrument.get("symbol", "").upper()
+    if not ticker and parent_strategy_id:
+        ticker = parent_strategy_id.replace("bmc_", "").split("_")[0].upper()
+    return ticker
+
+
 class IBDataAgent:
     """Local agent that bridges IB TWS to the remote WebSocket relay"""
     
@@ -1590,13 +1609,10 @@ class IBDataAgent:
                         # Set ticker on StrategyState so Gate 0 (ticker mode) applies
                         rm_state = self.execution_engine._strategies.get(pos_id)
                         if rm_state:
-                            instrument = stored_config.get("instrument", {})
-                            rm_ticker = instrument.get("symbol", "").upper()
-                            if not rm_ticker:
-                                parent = pos.get("parent_strategy", "")
-                                if parent:
-                                    rm_ticker = parent.replace("bmc_", "").split("_")[0].upper()
-                            rm_state.ticker = rm_ticker
+                            rm_state.ticker = resolve_rm_ticker(
+                                stored_config.get("instrument", {}),
+                                pos.get("parent_strategy", ""),
+                            )
 
                         recovered += 1
                         logger.info("Recovered risk manager %s (remaining=%d, ticker=%s)",
@@ -2483,11 +2499,7 @@ class IBDataAgent:
             # risk manager orders — e.g. NO_ORDERS blocks exits too.
             rm_state = self.execution_engine._strategies.get(strategy_id)
             if rm_state:
-                rm_ticker = instrument.get("symbol", "").upper()
-                if not rm_ticker and parent_sid:
-                    # Fallback: derive from parent strategy ID (bmc_spy_up → SPY)
-                    rm_ticker = parent_sid.replace("bmc_", "").split("_")[0].upper()
-                rm_state.ticker = rm_ticker
+                rm_state.ticker = resolve_rm_ticker(instrument, parent_sid)
             # Persist the new position in the store
             self.position_store.add_position(
                 position_id=strategy_id,

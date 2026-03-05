@@ -332,94 +332,121 @@ class TestGate0RiskManagerBlocking:
 # ── Budget status includes ticker_modes ──
 
 
-# ── Recovery path: state.ticker assignment ──
+# ── resolve_rm_ticker (production function) ──
 
 
-class TestRecoveryTickerAssignment:
-    """Simulate the recovery loop in _handle_execution_start to verify
-    that state.ticker is set on recovered risk managers.
+class TestResolveRmTicker:
+    """Test the real resolve_rm_ticker() function from ib_data_agent.py.
 
-    This mirrors the exact logic at ib_data_agent.py:1590-1599.
+    Both the spawn path and recovery path call this function to set
+    state.ticker on risk managers.
     """
 
-    def _simulate_recovery(self, engine, pos_id, stored_config, parent_strategy=""):
-        """Reproduce the recovery path: load_strategy + ticker assignment."""
-        from risk_manager import RiskManagerStrategy
+    def test_resolves_from_instrument_symbol(self):
+        from ib_data_agent import resolve_rm_ticker
+        assert resolve_rm_ticker({"symbol": "SPY", "secType": "OPT"}) == "SPY"
 
-        rm = RiskManagerStrategy()
-        result = engine.load_strategy(pos_id, rm, stored_config)
-        assert "error" not in result, f"load_strategy failed: {result}"
-        # -- This is the code under test (mirrors ib_data_agent recovery) --
-        rm_state = engine._strategies.get(pos_id)
-        if rm_state:
-            instrument = stored_config.get("instrument", {})
-            rm_ticker = instrument.get("symbol", "").upper()
-            if not rm_ticker:
-                parent = parent_strategy
-                if parent:
-                    rm_ticker = parent.replace("bmc_", "").split("_")[0].upper()
-            rm_state.ticker = rm_ticker
-        return rm_state
+    def test_resolves_from_parent_when_symbol_missing(self):
+        from ib_data_agent import resolve_rm_ticker
+        assert resolve_rm_ticker({"secType": "OPT"}, "bmc_qqq_up") == "QQQ"
 
-    def test_recovery_sets_ticker_from_instrument(self, mock_engine):
-        stored_config = {
-            "instrument": {"symbol": "SPY", "secType": "OPT", "strike": 600,
-                           "expiry": "20260306", "right": "P", "exchange": "SMART"},
-            "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
-            "preset": "zero_dte_convexity",
-        }
-        state = self._simulate_recovery(mock_engine, "bmc_risk_111", stored_config)
-        assert state.ticker == "SPY"
+    def test_resolves_from_parent_down_variant(self):
+        from ib_data_agent import resolve_rm_ticker
+        assert resolve_rm_ticker({}, "bmc_spy_down") == "SPY"
 
-    def test_recovery_sets_ticker_from_parent_fallback(self, mock_engine):
-        """When instrument.symbol is missing, derive ticker from parent_strategy."""
-        stored_config = {
-            "instrument": {"secType": "OPT", "strike": 600,
-                           "expiry": "20260306", "right": "P", "exchange": "SMART"},
-            "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
-            "preset": "zero_dte_convexity",
-        }
-        state = self._simulate_recovery(
-            mock_engine, "bmc_risk_222", stored_config,
-            parent_strategy="bmc_qqq_up",
-        )
-        assert state.ticker == "QQQ"
+    def test_resolves_from_parent_simple(self):
+        from ib_data_agent import resolve_rm_ticker
+        assert resolve_rm_ticker({}, "bmc_iwm") == "IWM"
 
-    def test_recovery_empty_ticker_when_no_info(self, mock_engine):
-        """When neither instrument.symbol nor parent_strategy is available."""
-        stored_config = {
-            "instrument": {"secType": "OPT", "strike": 600,
-                           "expiry": "20260306", "right": "P", "exchange": "SMART"},
-            "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
-            "preset": "zero_dte_convexity",
-        }
-        state = self._simulate_recovery(
-            mock_engine, "bmc_risk_333", stored_config,
-            parent_strategy="",
-        )
-        assert state.ticker == ""
+    def test_empty_when_no_info(self):
+        from ib_data_agent import resolve_rm_ticker
+        assert resolve_rm_ticker({}, "") == ""
+
+    def test_empty_instrument_with_no_parent(self):
+        from ib_data_agent import resolve_rm_ticker
+        assert resolve_rm_ticker({"secType": "OPT"}) == ""
+
+    def test_symbol_takes_priority_over_parent(self):
+        """instrument.symbol wins even if parent_strategy_id is set."""
+        from ib_data_agent import resolve_rm_ticker
+        assert resolve_rm_ticker({"symbol": "SPY"}, "bmc_qqq_up") == "SPY"
+
+    def test_lowercased_symbol_is_uppercased(self):
+        from ib_data_agent import resolve_rm_ticker
+        assert resolve_rm_ticker({"symbol": "spy"}) == "SPY"
+
+
+# ── Spawn path: _spawn_risk_manager_for_bmc ──
+
+
+class TestSpawnRmTickerAssignment:
+    """Test the real _spawn_risk_manager_for_bmc() method to verify
+    state.ticker is set on the StrategyState after spawn.
+
+    Uses a minimally-mocked IBDataAgent with a real ExecutionEngine.
+    """
+
+    def _make_agent_stub(self, engine):
+        """Create a minimal object with the attrs _spawn_risk_manager_for_bmc needs."""
+        from ib_data_agent import IBDataAgent
+        agent = object.__new__(IBDataAgent)
+        agent.execution_engine = engine
+        agent.position_store = MagicMock()
+        # _find_risk_manager_for_contract returns None (no existing RM)
+        agent._find_risk_manager_for_contract = MagicMock(return_value=None)
+        return agent
 
     def test_spawn_sets_ticker_from_instrument(self, mock_engine):
-        """Simulate the spawn path in _spawn_risk_manager_for_bmc."""
-        from risk_manager import RiskManagerStrategy
-
+        agent = self._make_agent_stub(mock_engine)
         risk_config = {
             "instrument": {"symbol": "SPY", "secType": "OPT", "strike": 600,
                            "expiry": "20260306", "right": "P", "exchange": "SMART"},
             "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
             "preset": "zero_dte_convexity",
+            "_parent_strategy_id": "bmc_spy_up",
         }
-        strategy = RiskManagerStrategy()
-        sid = "bmc_risk_spawn_1"
-        result = mock_engine.load_strategy(sid, strategy, risk_config)
-        assert "error" not in result
+        agent._spawn_risk_manager_for_bmc(risk_config)
+        # Find the spawned risk manager
+        rm_states = [s for sid, s in mock_engine._strategies.items()
+                     if sid.startswith("bmc_risk_")]
+        assert len(rm_states) == 1
+        assert rm_states[0].ticker == "SPY"
 
-        # -- This mirrors ib_data_agent.py:2470-2478 --
-        rm_state = mock_engine._strategies.get(sid)
-        instrument = risk_config.get("instrument", {})
-        rm_ticker = instrument.get("symbol", "").upper()
-        rm_state.ticker = rm_ticker
-        assert rm_state.ticker == "SPY"
+    def test_spawn_sets_ticker_from_parent_fallback(self, mock_engine):
+        """When instrument.symbol is empty, ticker is derived from parent_strategy_id."""
+        agent = self._make_agent_stub(mock_engine)
+        risk_config = {
+            "instrument": {"secType": "OPT", "strike": 600,
+                           "expiry": "20260306", "right": "P", "exchange": "SMART"},
+            "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
+            "preset": "zero_dte_convexity",
+            "_parent_strategy_id": "bmc_qqq_down",
+        }
+        agent._spawn_risk_manager_for_bmc(risk_config)
+        rm_states = [s for sid, s in mock_engine._strategies.items()
+                     if sid.startswith("bmc_risk_")]
+        assert len(rm_states) == 1
+        assert rm_states[0].ticker == "QQQ"
+
+    def test_spawn_ticker_when_no_explicit_parent(self, mock_engine):
+        """When _parent_strategy_id is absent, parent_sid defaults to "bmc"
+        (since symbol is also empty). resolve_rm_ticker("bmc") produces "BMC"
+        which is harmless (no real ticker) but not empty.
+        """
+        agent = self._make_agent_stub(mock_engine)
+        risk_config = {
+            "instrument": {"secType": "OPT", "strike": 600,
+                           "expiry": "20260306", "right": "P", "exchange": "SMART"},
+            "position": {"side": "LONG", "quantity": 1, "entry_price": 0.50},
+            "preset": "zero_dte_convexity",
+        }
+        agent._spawn_risk_manager_for_bmc(risk_config)
+        rm_states = [s for sid, s in mock_engine._strategies.items()
+                     if sid.startswith("bmc_risk_")]
+        assert len(rm_states) == 1
+        # parent_sid defaults to "bmc" (no underscore after "bmc_" prefix),
+        # so resolve_rm_ticker produces "BMC" — junk but non-empty.
+        assert rm_states[0].ticker == "BMC"
 
 
 class TestBudgetStatusIncludesModes:
