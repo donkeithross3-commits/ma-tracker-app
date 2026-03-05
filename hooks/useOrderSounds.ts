@@ -5,7 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // ---------------------------------------------------------------------------
 // Web Audio tone synthesizer for order events.
 // No audio files — procedurally-generated short tones via OscillatorNode.
-// AudioContext is created lazily on first user interaction (autoplay policy).
+//
+// IMPORTANT: Browser autoplay policy requires AudioContext to be created or
+// resumed during a user gesture (click/keypress/touch). We register a one-shot
+// global click listener that warms up the context on the very first interaction.
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = "dr3-order-sounds-muted";
@@ -14,7 +17,9 @@ const STORAGE_KEY = "dr3-order-sounds-muted";
 let _audioCtx: AudioContext | null = null;
 let _muted: boolean = false;
 let _listeners: Set<() => void> = new Set();
+let _warmupRegistered = false;
 
+/** Create or resume AudioContext. Returns null if unavailable. */
 function getAudioCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
   if (!_audioCtx) {
@@ -24,11 +29,33 @@ function getAudioCtx(): AudioContext | null {
       return null;
     }
   }
-  // Resume if suspended (browser autoplay policy)
-  if (_audioCtx.state === "suspended") {
-    _audioCtx.resume().catch(() => {});
-  }
   return _audioCtx;
+}
+
+/**
+ * Must be called from a user-gesture handler (click/keypress/touch).
+ * Creates the AudioContext if needed and resumes it from suspended state.
+ */
+function warmupAudioCtx() {
+  const ctx = getAudioCtx();
+  if (ctx && ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+}
+
+/** One-shot global listener: first user click warms up audio. */
+function ensureWarmupListener() {
+  if (_warmupRegistered || typeof window === "undefined") return;
+  _warmupRegistered = true;
+
+  const handler = () => {
+    warmupAudioCtx();
+    // Keep listening — Chrome may re-suspend if no audio plays for a while
+  };
+
+  // These are user-gesture events that satisfy autoplay policy
+  document.addEventListener("click", handler, { capture: true });
+  document.addEventListener("keydown", handler, { capture: true, once: true });
 }
 
 function initMuted() {
@@ -56,18 +83,18 @@ function playTone(
   freq: number,
   duration: number,
   type: OscillatorType = "sine",
-  gainVal = 0.15,
+  gainVal = 0.35,
 ) {
   const ctx = getAudioCtx();
-  if (!ctx || _muted) return;
+  if (!ctx || ctx.state !== "running" || _muted) return;
 
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = type;
   osc.frequency.setValueAtTime(freq, ctx.currentTime);
   gain.gain.setValueAtTime(gainVal, ctx.currentTime);
-  // Fade out over last 30ms to avoid clicks
-  gain.gain.setValueAtTime(gainVal, ctx.currentTime + duration - 0.03);
+  // Fade out over last 40ms to avoid clicks
+  gain.gain.setValueAtTime(gainVal, ctx.currentTime + duration - 0.04);
   gain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration);
   osc.connect(gain);
   gain.connect(ctx.destination);
@@ -75,18 +102,19 @@ function playTone(
   osc.stop(ctx.currentTime + duration);
 }
 
-function playTwoNote(freq1: number, freq2: number, duration = 0.2, type: OscillatorType = "sine") {
+function playTwoNote(freq1: number, freq2: number, duration = 0.25, type: OscillatorType = "sine") {
   const ctx = getAudioCtx();
-  if (!ctx || _muted) return;
+  if (!ctx || ctx.state !== "running" || _muted) return;
 
   const half = duration / 2;
+  const gainVal = 0.35;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = type;
   osc.frequency.setValueAtTime(freq1, ctx.currentTime);
   osc.frequency.setValueAtTime(freq2, ctx.currentTime + half);
-  gain.gain.setValueAtTime(0.15, ctx.currentTime);
-  gain.gain.setValueAtTime(0.15, ctx.currentTime + duration - 0.03);
+  gain.gain.setValueAtTime(gainVal, ctx.currentTime);
+  gain.gain.setValueAtTime(gainVal, ctx.currentTime + duration - 0.04);
   gain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration);
   osc.connect(gain);
   gain.connect(ctx.destination);
@@ -100,17 +128,17 @@ const E5 = 659.25;
 
 /** Ascending C5→E5 — "money deployed" */
 function playEntryFill() {
-  playTwoNote(C5, E5, 0.2);
+  playTwoNote(C5, E5, 0.25);
 }
 
 /** Descending E5→C5 — "position closed" */
 function playExitFill() {
-  playTwoNote(E5, C5, 0.2);
+  playTwoNote(E5, C5, 0.25);
 }
 
 /** Low buzz 150Hz — "something wrong" */
 function playRejection() {
-  playTone(150, 0.3, "sawtooth", 0.12);
+  playTone(150, 0.35, "sawtooth", 0.25);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,10 +157,13 @@ export interface AccountEvent {
  * Returns the sound type played, or null if no sound.
  */
 export function classifyAndPlay(evt: AccountEvent): "entry" | "exit" | "rejection" | null {
-  if (evt.event === "order_status" && evt.status === "Rejected") {
+  // Rejection: order_status with Rejected or Inactive (IB async rejection)
+  if (evt.event === "order_status" && (evt.status === "Rejected" || evt.status === "Inactive")) {
     playRejection();
     return "rejection";
   }
+  // Fills: execution events have side field
+  // IB sends "BOT" for buys, "SLD" for sells in execDetails callback
   if (evt.event === "execution") {
     if (evt.side === "BOT" || evt.side === "BUY") {
       playEntryFill();
@@ -154,13 +185,15 @@ export function useOrderSounds() {
   const [muted, setMutedState] = useState(_muted);
   const initialized = useRef(false);
 
-  // Init from localStorage once
+  // Init from localStorage once + register global warmup listener
   useEffect(() => {
     if (!initialized.current) {
       initMuted();
       setMutedState(_muted);
       initialized.current = true;
     }
+    // Register global click/keydown listener to warm up AudioContext
+    ensureWarmupListener();
     // Subscribe to cross-component mute changes
     const listener = () => setMutedState(_muted);
     _listeners.add(listener);
@@ -168,6 +201,8 @@ export function useOrderSounds() {
   }, []);
 
   const toggleMute = useCallback(() => {
+    // Toggle also warms up audio (this IS a user gesture)
+    warmupAudioCtx();
     setMuted(!_muted);
   }, []);
 
