@@ -6,6 +6,7 @@ import { useIBConnection } from "./IBConnectionContext";
 import { useUIPreferences } from "@/lib/ui-preferences";
 import { ColumnChooser, type ColumnDef } from "@/components/ui/ColumnChooser";
 import { OrderConfirmationModal } from "./OrderConfirmationModal";
+import { classifyAndPlay, type AccountEvent } from "@/hooks/useOrderSounds";
 
 /* ─── Column definitions for Position Details table ─── */
 const POSITIONS_COLUMNS: ColumnDef[] = [
@@ -1306,6 +1307,10 @@ export default function IBPositionsTab({ autoRefresh = true }: IBPositionsTabPro
         const data = await res.json();
         if (data.events?.length > 0) {
           lastEventCheckRef.current = Date.now() / 1000;
+          // Play sound notifications for order events
+          for (const evt of data.events as AccountEvent[]) {
+            classifyAndPlay(evt);
+          }
           // Trigger full position + order refresh
           fetchPositions();
           fetchOpenOrders();

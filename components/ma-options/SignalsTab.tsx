@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useOrderSounds } from "@/hooks/useOrderSounds";
 import { OrderBudgetControl } from "./OrderBudgetControl";
 
 // ---------------------------------------------------------------------------
@@ -449,6 +450,7 @@ function saveCachedConfigs(configs: Record<string, BMCConfig>) {
 // ---------------------------------------------------------------------------
 
 export default function SignalsTab() {
+  const { muted, toggleMute } = useOrderSounds();
   // Multi-ticker state: strategy entries from the agent, keyed by ticker
   const [strategies, setStrategies] = useState<StrategyEntry[]>([]);
   const [running, setRunning] = useState(false);
@@ -1713,6 +1715,26 @@ export default function SignalsTab() {
             {signal.decisions_run} decisions &middot; {signal.signals_generated} signals &middot; {totalPositionsSpawned} positions
           </span>
         )}
+
+        {/* Sound mute toggle */}
+        <button
+          onClick={toggleMute}
+          className="ml-auto text-gray-500 hover:text-gray-300 transition-colors p-0.5 no-density"
+          title={muted ? "Unmute order sounds" : "Mute order sounds"}
+        >
+          {muted ? (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+              <path d="M9.547 3.062A.75.75 0 0110 3.75v12.5a.75.75 0 01-1.264.546L5.203 13.5H2.667a.75.75 0 01-.7-.48A6.985 6.985 0 011.5 10c0-.887.165-1.737.468-2.52a.75.75 0 01.7-.48h2.535l3.533-3.296a.75.75 0 01.811-.142z" />
+              <path d="M13.28 7.22a.75.75 0 10-1.06 1.06L13.94 10l-1.72 1.72a.75.75 0 101.06 1.06L15 11.06l1.72 1.72a.75.75 0 101.06-1.06L16.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L15 8.94l-1.72-1.72z" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+              <path d="M10 3.75a.75.75 0 00-1.264-.546L5.203 6.5H2.667a.75.75 0 00-.7.48A6.985 6.985 0 001.5 10c0 .887.165 1.737.468 2.52.111.29.39.48.7.48h2.535l3.533 3.296A.75.75 0 0010 15.75V3.75z" />
+              <path d="M14.462 4.56a.75.75 0 011.06-.025 9.96 9.96 0 010 10.93.75.75 0 01-1.085-1.035 8.46 8.46 0 000-8.86.75.75 0 01.025-1.06z" />
+              <path d="M12.53 7.47a.75.75 0 011.06 0 5.98 5.98 0 010 5.06.75.75 0 01-1.06-1.06 4.48 4.48 0 000-2.94.75.75 0 010-1.06z" />
+            </svg>
+          )}
+        </button>
       </div>
 
       {/* PAUSED banner — auto-restarted, entries blocked */}

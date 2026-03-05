@@ -1,0 +1,47 @@
+{
+  "date": "2026-03-05",
+  "title": "March 5, 2026",
+  "summary": "Added a fleet utilization dashboard with daily/weekly attainment rollups and live GPU fleet status telemetry.",
+  "features": [
+    {
+      "id": "fleet-utilization-dashboard",
+      "title": "Fleet Utilization Dashboard",
+      "summary": "Track trailing 24h/7d and calendar daily/weekly GPU utilization attainment vs theoretical 100% capacity.",
+      "description": "Added a new Fleet Utilization page at /fleet with real-time status plus historical rollups built from fleet telemetry checkins. The dashboard reports utilization attainment (achieved GPU-hours / possible GPU-hours), telemetry coverage, and per-machine breakdowns. It includes trailing windows (24h, 7d), daily buckets, weekly buckets, and current machine run state for operations monitoring.",
+      "category": "general",
+      "project": "ma-options",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "fleet-utilization-api",
+      "title": "Fleet Utilization API Endpoint",
+      "summary": "New /fleet/utilization endpoint computes utilization rollups with conservative gap handling.",
+      "description": "Implemented backend rollups from /home/don/apps/data/fleet/telemetry.jsonl. The API supports query parameters for day/week horizon, timezone, and carry-forward cap. Gap handling is conservative: stale samples only carry utilization credit for a bounded interval, preventing overstated utilization during telemetry silence.",
+      "category": "general",
+      "project": "ma-options",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "fleet-auth-hardening",
+      "title": "Fleet API Auth Hardening",
+      "summary": "Restricted anonymous fleet API access to checkin only; status/utilization now require app auth.",
+      "description": "Tightened middleware authorization so only /api/fleet/checkin remains session-free for machine checkins using X-Fleet-Key. Fleet status and utilization reads now require authenticated user sessions and ma-options project access, reducing telemetry exposure while preserving collector functionality.",
+      "category": "general",
+      "project": "ma-options",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "order-sound-notifications",
+      "title": "Order Sound Notifications",
+      "summary": "Audible tones for entry fills, exit fills, and order rejections — no audio files needed.",
+      "description": "Added procedurally-generated sound notifications using Web Audio API for key order events. Entry fills play an ascending two-note tone (C5→E5), exit fills play a descending tone (E5→C5), and rejections play a low buzz. Sounds hook into the existing 500ms account-events polling loop — zero additional network requests. A mute/unmute toggle on the Signals tab status bar persists to localStorage.",
+      "category": "signals",
+      "project": "ma-options",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
