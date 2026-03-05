@@ -1631,23 +1631,30 @@ class ExecutionEngine:
         from zoneinfo import ZoneInfo
         et = ZoneInfo("America/New_York")
         midnight = datetime.now(et).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-        return [
-            {
+        results = []
+        for p in self._position_store.get_all_positions():
+            if p.get("created_at", 0) < midnight:
+                continue
+            entry = p.get("entry", {})
+            lineage = p.get("lineage", {})
+            # Orphan: reconciliation-spawned position (order_id 0, no model lineage)
+            is_orphan = (entry.get("order_id", 0) == 0 and not lineage)
+            results.append({
                 "id": p["id"],
                 "status": p.get("status", "active"),
                 "created_at": p.get("created_at", 0),
                 "closed_at": p.get("closed_at"),
                 "exit_reason": p.get("exit_reason", ""),
-                "entry": p.get("entry", {}),
+                "entry": entry,
                 "instrument": p.get("instrument", {}),
                 "risk_config": p.get("risk_config", {}),
                 "runtime_state": p.get("runtime_state", {}),
                 "fill_log": p.get("fill_log", []),
-                "lineage": p.get("lineage", {}),
-            }
-            for p in self._position_store.get_all_positions()
-            if p.get("created_at", 0) >= midnight
-        ]
+                "lineage": lineage,
+                "parent_strategy": p.get("parent_strategy", ""),
+                "is_orphan": is_orphan,
+            })
+        return results
 
     def get_status(self) -> dict:
         """Return current engine status for telemetry/dashboard."""

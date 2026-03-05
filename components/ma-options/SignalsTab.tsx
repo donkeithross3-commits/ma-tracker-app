@@ -91,6 +91,7 @@ interface PositionLedgerEntry {
   closed_at: number | null;
   exit_reason?: string;
   parent_strategy?: string;
+  is_orphan?: boolean;
   entry: { order_id: number; price: number; quantity: number; fill_time: number; perm_id: number };
   instrument: { symbol: string; strike?: number; expiry?: string; right?: string };
   runtime_state?: {
@@ -1127,6 +1128,7 @@ export default function SignalsTab() {
       optionContract: { symbol: string; strike: number; expiry: string; right: string } | null;
       strategyId: string | null;
       recentErrors: string[];
+      isOrphan: boolean;
     };
 
     const baseDetails: Detail[] = [];
@@ -1219,7 +1221,8 @@ export default function SignalsTab() {
           }
 
           const recentErrors = matchedStrategy?.recent_errors ?? [];
-          baseDetails.push({ pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors });
+          const isOrphan = ledger.is_orphan === true;
+          baseDetails.push({ pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan });
         }
       }
     } else {
@@ -1281,7 +1284,7 @@ export default function SignalsTab() {
 
         const optionContract = pos.signal?.option_contract ?? null;
         const recentErrors = matchedStrategy?.recent_errors ?? [];
-        baseDetails.push({ pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors });
+        baseDetails.push({ pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan: false });
       }
     }
 
@@ -1360,7 +1363,8 @@ export default function SignalsTab() {
         }
 
         const recentErrors = s.recent_errors ?? [];
-        return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors };
+        const isOrphan = ledger?.is_orphan === true;
+        return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan };
       });
 
     return [...baseDetails, ...orphanDetails];
@@ -1394,6 +1398,7 @@ export default function SignalsTab() {
       quote: typeof positionDetails[0]["quote"];
       staleQuote: boolean;
       countedStrategyIds: Set<string>;
+      hasOrphan: boolean;
     }>();
 
     for (const pd of positionDetails) {
@@ -1421,10 +1426,12 @@ export default function SignalsTab() {
           quote: null,
           staleQuote: false,
           countedStrategyIds: new Set<string>(),
+          hasOrphan: false,
         });
       }
       const g = groups.get(key)!;
       g.items.push(pd);
+      if (pd.isOrphan) g.hasOrphan = true;
       if (pd.rm?.completed) g.closedCount++;
       else g.activeCount++;
       if (pd.pnlDollar != null) g.totalPnlDollar += pd.pnlDollar;
@@ -2112,6 +2119,9 @@ export default function SignalsTab() {
                                 ) : (
                                   <span className="text-gray-400">Option</span>
                                 )}
+                                {group.hasOrphan && (
+                                  <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-amber-900/50 text-amber-300 border border-amber-700/50" title="Recovered from IB reconciliation — no model signal lineage">ORPHAN</span>
+                                )}
                                 <span className="text-gray-400">x{pos.quantity}</span>
                                 <span className="text-gray-500">Entry <span className="text-gray-300 font-mono">${pos.entry_price.toFixed(2)}</span></span>
                                 {quote ? (
@@ -2185,6 +2195,9 @@ export default function SignalsTab() {
                                   </>
                                 ) : (
                                   <span className="text-gray-400">Unknown</span>
+                                )}
+                                {group.hasOrphan && (
+                                  <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-amber-900/50 text-amber-300 border border-amber-700/50" title="Recovered from IB reconciliation — no model signal lineage">ORPHAN</span>
                                 )}
                                 <span className="text-gray-400">x{group.totalInitial}</span>
                                 <span className="text-gray-500">
