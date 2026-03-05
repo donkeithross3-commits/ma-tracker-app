@@ -255,8 +255,8 @@ class IBMergerArbScanner(EWrapper, EClient):
                 "avgCost": float(averageCost) if averageCost is not None else 0,
                 "marketPrice": float(marketPrice) if marketPrice is not None else 0,
                 "marketValue": float(marketValue) if marketValue is not None else 0,
-                "unrealizedPNL": float(unrealizedPNL) if unrealizedPNL is not None else 0,
-                "realizedPNL": float(realizedPNL) if realizedPNL is not None else 0,
+                "unrealizedPNL": self._sanitize_ib_float(unrealizedPNL) or 0,
+                "realizedPNL": self._sanitize_ib_float(realizedPNL) or 0,
             })
 
     def accountDownloadEnd(self, accountName: str):
@@ -1245,14 +1245,25 @@ class IBMergerArbScanner(EWrapper, EClient):
         if self._batch_exec_req_id is not None and reqId == self._batch_exec_req_id:
             self._batch_exec_done.set()
 
+    @staticmethod
+    def _sanitize_ib_float(val: float) -> float | None:
+        """Replace IB's 1.7976931348623157e+308 sentinel with None.
+
+        IB uses ``sys.float_info.max`` (~1.8e308) as a "not available"
+        marker for fields like ``realizedPNL`` and ``commission``.
+        """
+        if val is None or abs(val) > 1e300:
+            return None
+        return val
+
     def commissionReport(self, commissionReport):
         """IB callback: commission data for a fill (arrives after execDetails)."""
         exec_id = commissionReport.execId
         report = {
             "exec_id": exec_id,
-            "commission": commissionReport.commission,
+            "commission": self._sanitize_ib_float(commissionReport.commission),
             "currency": commissionReport.currency,
-            "realized_pnl": commissionReport.realizedPNL,
+            "realized_pnl": self._sanitize_ib_float(commissionReport.realizedPNL),
         }
         with self._commission_lock:
             self._commission_reports[exec_id] = report
@@ -1262,8 +1273,8 @@ class IBMergerArbScanner(EWrapper, EClient):
                 listener(0, {"_commission_report": report, "execId": exec_id})
             except Exception:
                 pass  # never block the IB thread
-        self.logger.debug("commissionReport execId=%s commission=%.4f realized_pnl=%.2f",
-                          exec_id, commissionReport.commission, commissionReport.realizedPNL)
+        self.logger.debug("commissionReport execId=%s commission=%s realized_pnl=%s",
+                          exec_id, report["commission"], report["realized_pnl"])
 
     def get_commission_report(self, exec_id: str) -> Optional[dict]:
         """Retrieve a stored commission report by exec ID (for async pickup)."""

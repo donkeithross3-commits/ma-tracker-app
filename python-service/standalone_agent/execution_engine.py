@@ -914,9 +914,12 @@ class ExecutionEngine:
                     self._position_store.update_fill_commission(
                         position_id, cr_exec_id, cr
                     )
-                    logger.info("Commission captured (event-driven) for exec %s → %s: $%.4f rpnl=$%.2f",
+                    comm = cr.get("commission")
+                    rpnl = cr.get("realized_pnl")
+                    logger.info("Commission captured (event-driven) for exec %s → %s: $%s rpnl=$%s",
                                 cr_exec_id, position_id,
-                                cr.get("commission", 0), cr.get("realized_pnl", 0))
+                                f"{comm:.4f}" if comm is not None else "n/a",
+                                f"{rpnl:.2f}" if rpnl is not None else "n/a")
                 elif cr_exec_id:
                     logger.debug("Commission for unmapped exec %s — deferred polling will pick it up",
                                  cr_exec_id)
@@ -1532,9 +1535,12 @@ class ExecutionEngine:
             report = self._scanner.get_commission_report(exec_id)
             if report:
                 self._position_store.update_fill_commission(position_id, exec_id, report)
-                logger.info("Commission captured (deferred poll) for exec %s → %s: $%.4f rpnl=$%.2f",
+                comm = report.get("commission")
+                rpnl = report.get("realized_pnl")
+                logger.info("Commission captured (deferred poll) for exec %s → %s: $%s rpnl=$%s",
                             exec_id, position_id,
-                            report.get("commission", 0), report.get("realized_pnl", 0))
+                            f"{comm:.4f}" if comm is not None else "n/a",
+                            f"{rpnl:.2f}" if rpnl is not None else "n/a")
                 return
             time.sleep(0.1)
         logger.warning("No commission report for exec %s within %.1fs (position %s)",
