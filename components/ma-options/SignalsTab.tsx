@@ -90,6 +90,7 @@ interface PositionLedgerEntry {
   created_at: number;
   closed_at: number | null;
   exit_reason?: string;
+  parent_strategy?: string;
   entry: { order_id: number; price: number; quantity: number; fill_time: number; perm_id: number };
   instrument: { symbol: string; strike?: number; expiry?: string; right?: string };
   runtime_state?: {
@@ -1135,6 +1136,8 @@ export default function SignalsTab() {
     if (activeLedger.length > 0) {
       for (const ledger of activeLedger) {
         // Filter by active ticker — instrument.symbol is the underlying (SPY, SLV, etc.)
+        // Also check parent_strategy field (e.g. "bmc_slv_up") as a fallback when
+        // instrument.symbol is missing or doesn't match expectations.
         const inst = (ledger.instrument || {}) as {
           symbol?: string;
           strike?: number;
@@ -1142,7 +1145,11 @@ export default function SignalsTab() {
           right?: string;
         };
         const ledgerTicker = inst.symbol?.toUpperCase?.() ?? "";
-        if (ledgerTicker && ledgerTicker !== activeTicker.toUpperCase()) continue;
+        const parentTicker = ledger.parent_strategy
+          ? ledger.parent_strategy.replace(/^bmc_/, "").replace(/_(up|down)$/, "").toUpperCase()
+          : "";
+        const resolvedTicker = ledgerTicker || parentTicker;
+        if (resolvedTicker && resolvedTicker !== activeTicker.toUpperCase()) continue;
 
         const strategyId = ledger.id;
         const matchedStrategy = riskById.get(strategyId);
