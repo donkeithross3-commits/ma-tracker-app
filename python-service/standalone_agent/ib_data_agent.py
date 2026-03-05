@@ -1791,6 +1791,11 @@ class IBDataAgent:
                         try:
                             rm = rm_state.strategy
                             changes = rm.update_risk_config(risk_update)
+                            # Sync updated risk config back into state.config
+                            # so the eval loop passes current values to evaluate()
+                            for rk in ("stop_loss", "profit_taking"):
+                                if rk in rm._risk_config:
+                                    rm_state.config[rk] = rm._risk_config[rk]
                             # Persist updated config to position store
                             self.position_store.update_risk_config(rm_sid, risk_update)
                             # Persist runtime state (level_states may have changed)
@@ -2462,6 +2467,15 @@ class IBDataAgent:
             logger.error("Failed to spawn risk manager for BMC: %s", result["error"])
         else:
             logger.info("Spawned RiskManagerStrategy %s for BMC position", strategy_id)
+            # Set ticker on the StrategyState so Gate 0 (ticker mode) applies to
+            # risk manager orders — e.g. NO_ORDERS blocks exits too.
+            rm_state = self.execution_engine._strategies.get(strategy_id)
+            if rm_state:
+                rm_ticker = instrument.get("symbol", "").upper()
+                if not rm_ticker and parent_sid:
+                    # Fallback: derive from parent strategy ID (bmc_spy_up → SPY)
+                    rm_ticker = parent_sid.replace("bmc_", "").split("_")[0].upper()
+                rm_state.ticker = rm_ticker
             # Persist the new position in the store
             self.position_store.add_position(
                 position_id=strategy_id,

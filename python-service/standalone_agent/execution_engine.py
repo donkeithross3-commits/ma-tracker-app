@@ -439,13 +439,33 @@ class ExecutionEngine:
         return {t: m.value for t, m in self._ticker_modes.items()}
 
     def _cancel_ticker_algo_orders(self, ticker: str) -> int:
-        """Cancel all active algo working orders for a ticker. Returns count cancelled."""
+        """Cancel all active algo working orders for a ticker. Returns count cancelled.
+
+        Matches both direct strategies (state.ticker == ticker) and risk managers
+        whose parent strategy trades this ticker.
+        """
         cancelled = 0
         with self._active_orders_lock:
             for oid, ao in list(self._active_orders.items()):
                 if ao.status in ("Submitted", "PreSubmitted"):
                     state = self._strategies.get(ao.strategy_id)
-                    if state and state.ticker == ticker:
+                    if not state:
+                        continue
+                    # Direct ticker match (works for both entry strategies and
+                    # risk managers that have state.ticker set)
+                    order_ticker = state.ticker or ""
+                    # Fallback for risk managers without state.ticker set:
+                    # resolve from parent strategy
+                    if not order_ticker and state.strategy_id.startswith("bmc_risk_"):
+                        parent_id = (
+                            getattr(state.strategy, '_parent_strategy_id', None)
+                            or state.config.get('_parent_strategy_id', '')
+                        )
+                        if parent_id:
+                            parent_state = self._strategies.get(parent_id)
+                            if parent_state:
+                                order_ticker = parent_state.ticker or ""
+                    if order_ticker == ticker:
                         try:
                             self._scanner.cancelOrder(oid)
                             cancelled += 1
@@ -1129,6 +1149,19 @@ class ExecutionEngine:
 
         # ── Gate 0: Ticker Mode ──
         ticker = state.ticker or ""
+        # Fallback for risk managers spawned before ticker was set on state:
+        # resolve from parent strategy or from the order's contract symbol.
+        if not ticker and state.strategy_id.startswith("bmc_risk_"):
+            parent_id = (
+                getattr(state.strategy, '_parent_strategy_id', None)
+                or state.config.get('_parent_strategy_id', '')
+            )
+            if parent_id:
+                parent_state = self._strategies.get(parent_id)
+                if parent_state:
+                    ticker = parent_state.ticker or ""
+            if not ticker:
+                ticker = action.contract_dict.get("symbol", "").upper()
         if ticker:
             mode = self._ticker_modes.get(ticker, TickerMode.NORMAL)
             if mode == TickerMode.NO_ORDERS:

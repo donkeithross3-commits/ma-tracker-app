@@ -2605,6 +2605,7 @@ async def relay_bmc_signal(user_id: str = "", fresh: int = 0):
                 "source": "cached_telemetry",
                 "running": telemetry.get("running", False),
                 "strategies": bmc_strategies,
+                "budget_status": telemetry.get("budget_status", {}),
             }
             # Legacy compat: populate top-level signal/config from first strategy
             if bmc_strategies:
@@ -2631,6 +2632,7 @@ async def relay_bmc_signal(user_id: str = "", fresh: int = 0):
             "source": "direct_query",
             "running": response_data.get("running", False),
             "strategies": bmc_strategies,
+            "budget_status": response_data.get("budget_status", {}),
         }
         if bmc_strategies:
             result["signal"] = bmc_strategies[0]["signal"]
