@@ -455,7 +455,7 @@ class ExecutionEngine:
                     # risk managers that have state.ticker set)
                     order_ticker = state.ticker or ""
                     # Fallback for risk managers without state.ticker set:
-                    # resolve from parent strategy
+                    # resolve from parent strategy, then from contract instrument
                     if not order_ticker and state.strategy_id.startswith("bmc_risk_"):
                         parent_id = (
                             getattr(state.strategy, '_parent_strategy_id', None)
@@ -465,6 +465,10 @@ class ExecutionEngine:
                             parent_state = self._strategies.get(parent_id)
                             if parent_state:
                                 order_ticker = parent_state.ticker or ""
+                        if not order_ticker:
+                            order_ticker = (
+                                state.config.get("instrument", {}).get("symbol", "").upper()
+                            )
                     if order_ticker == ticker:
                         try:
                             self._scanner.cancelOrder(oid)

@@ -1587,8 +1587,20 @@ class IBDataAgent:
                         fill_log = pos.get("fill_log", [])
                         if fill_log:
                             rm._fill_log = fill_log
+                        # Set ticker on StrategyState so Gate 0 (ticker mode) applies
+                        rm_state = self.execution_engine._strategies.get(pos_id)
+                        if rm_state:
+                            instrument = stored_config.get("instrument", {})
+                            rm_ticker = instrument.get("symbol", "").upper()
+                            if not rm_ticker:
+                                parent = pos.get("parent_strategy", "")
+                                if parent:
+                                    rm_ticker = parent.replace("bmc_", "").split("_")[0].upper()
+                            rm_state.ticker = rm_ticker
+
                         recovered += 1
-                        logger.info("Recovered risk manager %s (remaining=%d)", pos_id, rm.remaining_qty)
+                        logger.info("Recovered risk manager %s (remaining=%d, ticker=%s)",
+                                    pos_id, rm.remaining_qty, rm_state.ticker if rm_state else "?")
 
                         # Populate parent BMC strategy's _active_positions list + counter.
                         # Aggregate positions have multiple lot_entries -- expand each
