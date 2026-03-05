@@ -1134,16 +1134,20 @@ export default function SignalsTab() {
     // This avoids stale or duplicated _active_positions after hot-swap/recovery.
     if (activeLedger.length > 0) {
       for (const ledger of activeLedger) {
-        const strategyId = ledger.id;
-        const matchedStrategy = riskById.get(strategyId);
-        const rm = matchedStrategy?.strategy_state ?? null;
-        const quote = rm?.cache_key ? quotes[rm.cache_key] ?? null : null;
+        // Filter by active ticker — instrument.symbol is the underlying (SPY, SLV, etc.)
         const inst = (ledger.instrument || {}) as {
           symbol?: string;
           strike?: number;
           expiry?: string;
           right?: string;
         };
+        const ledgerTicker = inst.symbol?.toUpperCase?.() ?? "";
+        if (ledgerTicker && ledgerTicker !== activeTicker.toUpperCase()) continue;
+
+        const strategyId = ledger.id;
+        const matchedStrategy = riskById.get(strategyId);
+        const rm = matchedStrategy?.strategy_state ?? null;
+        const quote = rm?.cache_key ? quotes[rm.cache_key] ?? null : null;
         const optionContract =
           inst.symbol && inst.strike != null && inst.expiry && inst.right
             ? {
