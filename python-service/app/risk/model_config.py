@@ -21,12 +21,13 @@ MODEL_REGISTRY = {
 }
 
 # Per-million token pricing: (input_cost, output_cost)
+# Source: https://docs.anthropic.com/en/docs/about-claude/models (March 2026)
 MODEL_PRICING = {
-    "claude-opus-4-6": (5.0, 25.0),
+    "claude-opus-4-6": (15.0, 75.0),
     "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-haiku-4-5-20251001": (1.0, 5.0),
+    "claude-haiku-4-5-20251001": (0.80, 4.0),
     # Legacy entries for backward compatibility
-    "claude-opus-4-6-20250514": (5.0, 25.0),
+    "claude-opus-4-6-20250514": (15.0, 75.0),
     "claude-sonnet-4-6-20250514": (3.0, 15.0),
     "claude-sonnet-4-20250514": (3.0, 15.0),
     "claude-opus-4-20250514": (15.0, 75.0),

@@ -11,6 +11,81 @@ from typing import Optional
 from .research_refresher import _extract_research_sections
 
 
+# Shared reference block appended to BOTH full and delta system prompts.
+# This ensures both prompt paths exceed the minimum cacheable token threshold
+# (Sonnet: 2048 tokens, Opus: 4096 tokens), enabling prompt caching across
+# the morning run where most calls are delta (Sonnet) assessments.
+_SHARED_REFERENCE_BLOCK = """
+## Risk Factor Analysis Guide
+
+When assessing each factor, look for these specific signals in the filing data and news:
+
+### Vote Risk Signals
+- Proxy filings (DEFM14A, PREM14A): Look for board recommendation, ISS/Glass Lewis opinions, activist positions
+- Keywords: "dissenting shareholders", "proxy contest", "withhold recommendation", "insufficient quorum"
+- Required vote threshold (simple majority vs supermajority) and insider ownership % that pre-commits
+- Go-shop results: competing bids or lack thereof signal shareholder satisfaction
+
+### Financing Risk Signals
+- Commitment letters in 8-K Item 1.01: fully committed vs "highly confident" vs market-flex provisions
+- Keywords: "financing condition", "reverse termination fee", "debt commitment", "bridge loan", "credit facility"
+- Acquirer credit rating changes, leverage multiples, refinancing risk
+- Cash-on-hand vs deal value ratio for all-cash deals
+
+### Legal Risk Signals
+- SC 14D-9 filings: target board recommendation changes, fiduciary out exercises
+- Keywords: "class action", "appraisal rights", "fiduciary duty", "injunction", "TRO", "preliminary injunction"
+- Litigation filed (check for complaint docket numbers in 8-K Item 8.01)
+- Appraisal petition filings (esp. for low-premium deals <20%)
+
+### Regulatory Risk Signals
+- HSR filing date and 30-day waiting period status, second request issuance
+- Keywords: "second request", "consent decree", "divestiture", "remedies", "phase II", "CFIUS"
+- International filings: EC Phase I/II, CMA, ACCC, SAMR timelines
+- Industry-specific regulators: FCC (telecom), FERC (energy), OCC/FDIC (banking)
+
+### MAC Risk Signals
+- Target's quarterly earnings (10-Q/10-K) relative to deal signing date
+- Keywords: "material adverse change", "material adverse effect", "ordinary course", "interim covenants"
+- Revenue/EBITDA trajectory vs projections used in fairness opinion
+- Sector-wide headwinds: compare target's stock to sector ETF since announcement
+- Covenant compliance in credit agreements
+
+## SEC Filing Type Quick Reference
+
+When analyzing recent filings, use this guide to interpret their significance:
+- **8-K** (Current Report): Material events — merger announcement (Item 1.01), amendments, terminations,
+  shareholder vote results (Item 5.07), financing commitments. Urgency: check within 24h of filing.
+- **DEFM14A/PREM14A** (Proxy Statement): Shareholder vote details — record date, meeting date, vote
+  threshold, board recommendation, fairness opinion summary, dissent rights. Key for vote risk.
+- **S-4** (Registration Statement): Stock-for-stock deal registration — contains full merger agreement,
+  risk factors, pro forma financials. Watch for amendments (S-4/A) indicating deal changes.
+- **SC 14D-9** (Solicitation/Recommendation): Target board recommendation in tender offers — look for
+  recommendation changes, competing proposals, superior offer determinations, fiduciary outs.
+- **SC TO-T/SC TO-I** (Tender Offer): Offer terms, conditions, expiration date, proration provisions.
+  Amendments signal extended deadlines or changed conditions.
+- **SC 13D/13D-A** (Beneficial Ownership): Activist positions >5% — check for stated intentions
+  (support deal, oppose deal, seek higher price). Amendments show position changes.
+- **425** (Prospectus Communications): Deal-related communications — often contain management statements
+  about deal progress, integration plans, or responses to opposition.
+- **10-Q/10-K** (Quarterly/Annual Reports): Target financial health since deal announcement — compare
+  actual results to projections in fairness opinion for MAC risk assessment.
+
+## Supplemental Score Interpretation
+
+For the 0-10 supplemental scores, use these ranges consistently:
+- **Market (0-10)**: 0-2 = spread stable/tightening, normal volume; 3-5 = spread widening slightly,
+  above-average volume; 6-7 = spread >5% of deal price, significant volume spikes; 8-10 = extreme
+  spread widening suggesting market doubts deal completion.
+- **Timing (0-10)**: 0-2 = on schedule, >3 months buffer to outside date; 3-5 = minor delays,
+  1-3 months buffer, regulatory timeline extending; 6-7 = material delays, <1 month buffer,
+  extension likely needed; 8-10 = past expected close, approaching outside date, extension uncertain.
+- **Competing Bid (0-10)**: 0-2 = go-shop expired, no interest, deal at full premium; 3-5 = modest
+  strategic interest, premium below sector average; 6-7 = active go-shop, known interested parties,
+  activist involvement; 8-10 = competing bid filed or imminent, bidding war underway.
+"""
+
+
 def _parse_date(val) -> Optional[date]:
     """Safely parse a date from str, date, datetime, or None."""
     if val is None:
@@ -257,74 +332,7 @@ When a SIGNAL COMPARISON section is provided, you MUST:
    b. Update your estimate toward the consensus if you lack contrary evidence
 3. Never ignore the market-implied signal — it represents real money at risk
 
-## Risk Factor Analysis Guide
-
-When assessing each factor, look for these specific signals in the filing data and news:
-
-### Vote Risk Signals
-- Proxy filings (DEFM14A, PREM14A): Look for board recommendation, ISS/Glass Lewis opinions, activist positions
-- Keywords: "dissenting shareholders", "proxy contest", "withhold recommendation", "insufficient quorum"
-- Required vote threshold (simple majority vs supermajority) and insider ownership % that pre-commits
-- Go-shop results: competing bids or lack thereof signal shareholder satisfaction
-
-### Financing Risk Signals
-- Commitment letters in 8-K Item 1.01: fully committed vs "highly confident" vs market-flex provisions
-- Keywords: "financing condition", "reverse termination fee", "debt commitment", "bridge loan", "credit facility"
-- Acquirer credit rating changes, leverage multiples, refinancing risk
-- Cash-on-hand vs deal value ratio for all-cash deals
-
-### Legal Risk Signals
-- SC 14D-9 filings: target board recommendation changes, fiduciary out exercises
-- Keywords: "class action", "appraisal rights", "fiduciary duty", "injunction", "TRO", "preliminary injunction"
-- Litigation filed (check for complaint docket numbers in 8-K Item 8.01)
-- Appraisal petition filings (esp. for low-premium deals <20%)
-
-### Regulatory Risk Signals
-- HSR filing date and 30-day waiting period status, second request issuance
-- Keywords: "second request", "consent decree", "divestiture", "remedies", "phase II", "CFIUS"
-- International filings: EC Phase I/II, CMA, ACCC, SAMR timelines
-- Industry-specific regulators: FCC (telecom), FERC (energy), OCC/FDIC (banking)
-
-### MAC Risk Signals
-- Target's quarterly earnings (10-Q/10-K) relative to deal signing date
-- Keywords: "material adverse change", "material adverse effect", "ordinary course", "interim covenants"
-- Revenue/EBITDA trajectory vs projections used in fairness opinion
-- Sector-wide headwinds: compare target's stock to sector ETF since announcement
-- Covenant compliance in credit agreements
-
-## SEC Filing Type Quick Reference
-
-When analyzing recent filings, use this guide to interpret their significance:
-- **8-K** (Current Report): Material events — merger announcement (Item 1.01), amendments, terminations,
-  shareholder vote results (Item 5.07), financing commitments. Urgency: check within 24h of filing.
-- **DEFM14A/PREM14A** (Proxy Statement): Shareholder vote details — record date, meeting date, vote
-  threshold, board recommendation, fairness opinion summary, dissent rights. Key for vote risk.
-- **S-4** (Registration Statement): Stock-for-stock deal registration — contains full merger agreement,
-  risk factors, pro forma financials. Watch for amendments (S-4/A) indicating deal changes.
-- **SC 14D-9** (Solicitation/Recommendation): Target board recommendation in tender offers — look for
-  recommendation changes, competing proposals, superior offer determinations, fiduciary outs.
-- **SC TO-T/SC TO-I** (Tender Offer): Offer terms, conditions, expiration date, proration provisions.
-  Amendments signal extended deadlines or changed conditions.
-- **SC 13D/13D-A** (Beneficial Ownership): Activist positions >5% — check for stated intentions
-  (support deal, oppose deal, seek higher price). Amendments show position changes.
-- **425** (Prospectus Communications): Deal-related communications — often contain management statements
-  about deal progress, integration plans, or responses to opposition.
-- **10-Q/10-K** (Quarterly/Annual Reports): Target financial health since deal announcement — compare
-  actual results to projections in fairness opinion for MAC risk assessment.
-
-## Supplemental Score Interpretation
-
-For the 0-10 supplemental scores, use these ranges consistently:
-- **Market (0-10)**: 0-2 = spread stable/tightening, normal volume; 3-5 = spread widening slightly,
-  above-average volume; 6-7 = spread >5% of deal price, significant volume spikes; 8-10 = extreme
-  spread widening suggesting market doubts deal completion.
-- **Timing (0-10)**: 0-2 = on schedule, >3 months buffer to outside date; 3-5 = minor delays,
-  1-3 months buffer, regulatory timeline extending; 6-7 = material delays, <1 month buffer,
-  extension likely needed; 8-10 = past expected close, approaching outside date, extension uncertain.
-- **Competing Bid (0-10)**: 0-2 = go-shop expired, no interest, deal at full premium; 3-5 = modest
-  strategic interest, premium below sector average; 6-7 = active go-shop, known interested parties,
-  activist involvement; 8-10 = competing bid filed or imminent, bidding war underway.
-
+""" + _SHARED_REFERENCE_BLOCK + """
 Be precise and concise. Base grades and scores on the evidence provided, not speculation.
 If data is missing for a factor, note it and assign a moderate default (Medium grade or score 4-5).
 """
@@ -705,9 +713,6 @@ Your job: update grades and scores ONLY where the new information warrants it.
 Preserve unchanged grades/scores exactly as they were. Update reasoning/detail
 fields to reference new developments where relevant.
 
-Respond with the SAME JSON format as a full assessment. Every field must be present.
-If a grade hasn't changed, keep the previous value but you may update the detail text.
-
 For production_disagreements, use the structured format with evidence citations:
 each disagreement must include factor, sheet_says, ai_says, severity, is_new, evidence
 (with source/date/detail), and reasoning. Check previous disagreements to set is_new
@@ -718,7 +723,41 @@ previous assessment. Cite the specific trigger (event + date) and direction
 (improved or worsened).
 
 Be precise and concise. Only change grades when evidence clearly justifies it.
-"""
+
+You MUST respond with valid JSON in exactly this NESTED format (do NOT use flat format):
+{
+    "grades": {
+        "vote": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.85, "vs_production": "agree|disagree|no_production_grade"},
+        "financing": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.90, "vs_production": "agree|disagree|no_production_grade"},
+        "legal": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.80, "vs_production": "agree|disagree|no_production_grade"},
+        "regulatory": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.75, "vs_production": "no_production_grade"},
+        "mac": {"grade": "Low|Medium|High", "detail": "...", "confidence": 0.70, "vs_production": "no_production_grade"}
+    },
+    "supplemental_scores": {
+        "market": {"score": 0, "detail": "..."},
+        "timing": {"score": 0, "detail": "..."},
+        "competing_bid": {"score": 0, "detail": "..."}
+    },
+    "investable_assessment": "Yes|No|Conditional",
+    "investable_reasoning": "...",
+    "investable_vs_production": "agree|disagree",
+    "probability_of_success": {"value": 95.5, "confidence": 0.85, "factors": [...]},
+    "probability_of_higher_offer": {"value": 12.0, "confidence": 0.70, "factors": [...]},
+    "break_price_estimate": {"value": 28.50, "confidence": 0.60, "anchors": [...], "methodology": "..."},
+    "implied_downside_estimate": -15.2,
+    "deal_summary": "2-3 sentence overview",
+    "key_risks": ["risk1", "risk2", "risk3"],
+    "watchlist_items": ["item1", "item2"],
+    "needs_attention": true,
+    "attention_reason": "reason or null",
+    "production_disagreements": [...],
+    "assessment_changes": [...],
+    "predictions": [...]
+}
+
+CRITICAL: Every field must be present. Use the NESTED format with "grades" and
+"supplemental_scores" wrapper objects. Do NOT use flat format like {"vote": {"grade": "Low"}}.
+""" + _SHARED_REFERENCE_BLOCK
 
 
 def build_delta_assessment_prompt(

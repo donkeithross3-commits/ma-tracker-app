@@ -776,15 +776,18 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         **_SAFE,
     )
 
-    scheduler.add_job(
-        job_morning_baseline_run,
-        "cron",
-        id="morning_baseline_run",
-        day_of_week="mon-fri",
-        hour=5, minute=35,
-        replace_existing=True,
-        **_SAFE,
-    )
+    # Baseline disabled — was costing ~$4/day for Opus+Sonnet x all tickers.
+    # Research phase complete (Sonnet = best value, 92% JSON, $0.027/assessment).
+    # Keep the job function for manual triggering via /risk/baseline endpoint.
+    # scheduler.add_job(
+    #     job_morning_baseline_run,
+    #     "cron",
+    #     id="morning_baseline_run",
+    #     day_of_week="mon-fri",
+    #     hour=5, minute=35,
+    #     replace_existing=True,
+    #     **_SAFE,
+    # )
 
     scheduler.add_job(
         job_morning_report_compile,
