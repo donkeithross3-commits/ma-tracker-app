@@ -1476,6 +1476,101 @@ export default function SignalsTab() {
     };
   }, [groupedPositions, positionDetails.length]);
 
+  // ── Derived: group positions by expiry date for visual hierarchy ──
+  const expiryGroups = useMemo(() => {
+    if (groupedPositions.length === 0) return [];
+
+    const byExpiry = new Map<string, {
+      expiry: string;
+      expiryLabel: string;
+      contracts: typeof groupedPositions;
+      totalPnlDollar: number;
+      totalCostBasis: number;
+      weightedPnlPct: number;
+      totalQty: number;
+      isExpired: boolean;
+    }>();
+
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10).replace(/-/g, "");
+
+    for (const group of groupedPositions) {
+      const expiry = group.optionContract?.expiry?.replace(/-/g, "") ?? "unknown";
+
+      if (!byExpiry.has(expiry)) {
+        // Format expiry for display: "20260306" -> "Mar 6" or "Mar 6 (Today)" etc.
+        let expiryLabel = expiry;
+        let isExpired = false;
+        if (expiry !== "unknown" && expiry.length === 8) {
+          const y = parseInt(expiry.slice(0, 4));
+          const m = parseInt(expiry.slice(4, 6)) - 1;
+          const d = parseInt(expiry.slice(6, 8));
+          const expiryDate = new Date(y, m, d);
+          const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+          expiryLabel = `${monthNames[m]} ${d}`;
+          if (expiry === todayStr) expiryLabel += " (0DTE)";
+          else if (expiry < todayStr) {
+            expiryLabel += " (Expired)";
+            isExpired = true;
+          } else {
+            // Show DTE
+            const diffMs = expiryDate.getTime() - new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const dte = Math.round(diffMs / (1000 * 60 * 60 * 24));
+            if (dte === 1) expiryLabel += " (1DTE)";
+            else if (dte > 1) expiryLabel += ` (${dte}DTE)`;
+          }
+        }
+        byExpiry.set(expiry, {
+          expiry,
+          expiryLabel,
+          contracts: [],
+          totalPnlDollar: 0,
+          totalCostBasis: 0,
+          weightedPnlPct: 0,
+          totalQty: 0,
+          isExpired,
+        });
+      }
+
+      const eg = byExpiry.get(expiry)!;
+      eg.contracts.push(group);
+      eg.totalPnlDollar += group.totalPnlDollar;
+      eg.totalCostBasis += group.totalCostBasis;
+      eg.totalQty += group.totalInitial;
+    }
+
+    // Compute weighted P&L per expiry group
+    for (const eg of byExpiry.values()) {
+      eg.weightedPnlPct = eg.totalCostBasis > 0
+        ? (eg.totalPnlDollar / eg.totalCostBasis) * 100
+        : 0;
+      // Sort contracts within expiry by strike ascending
+      eg.contracts.sort((a, b) => {
+        const sa = a.optionContract?.strike ?? 0;
+        const sb = b.optionContract?.strike ?? 0;
+        return sa - sb;
+      });
+    }
+
+    // Sort expiry groups: most recent first (today > tomorrow > yesterday)
+    return Array.from(byExpiry.values()).sort((a, b) => b.expiry.localeCompare(a.expiry));
+  }, [groupedPositions]);
+
+  // ── Derived: overall position P&L totals ──
+  const overallPnl = useMemo(() => {
+    let totalPnlDollar = 0;
+    let totalCostBasis = 0;
+    for (const g of groupedPositions) {
+      totalPnlDollar += g.totalPnlDollar;
+      totalCostBasis += g.totalCostBasis;
+    }
+    return {
+      pnlDollar: totalPnlDollar,
+      pnlPct: totalCostBasis > 0 ? (totalPnlDollar / totalCostBasis) * 100 : 0,
+      costBasis: totalCostBasis,
+    };
+  }, [groupedPositions]);
+
   // ── Derived: all fills from position ledger (persists across restarts) ──
   const allFills = useMemo(() => {
     const ledger = executionStatus?.position_ledger;
@@ -1940,230 +2035,258 @@ export default function SignalsTab() {
             )}
           </div>
 
-          {/* ── Active Positions (grouped by contract) ── */}
+          {/* ── Active Positions (grouped by expiry, then by contract) ── */}
           {groupedPositions.length > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded p-3">
-              <h3 className="text-sm font-medium text-gray-300 mb-2">
-                Active Positions ({positionSummary.quantity} qty in {positionSummary.contracts} contracts{positionSummary.lots !== positionSummary.contracts ? `, ${positionSummary.lots} lots` : ""})
-              </h3>
-              <div className="space-y-1">
-                {groupedPositions.map(group => {
-                  const isSingle = group.items.length === 1;
-                  const isExpanded = expandedGroups.has(group.key);
-                  const oc = group.optionContract;
-                  const isCall = oc?.right?.toUpperCase() === "C" || oc?.right?.toUpperCase() === "CALL";
-                  const allClosed = group.activeCount === 0 && group.closedCount > 0;
+              {/* Header with overall summary */}
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-gray-300">
+                  Active Positions ({positionSummary.quantity} qty in {positionSummary.contracts} contracts{positionSummary.lots !== positionSummary.contracts ? `, ${positionSummary.lots} lots` : ""})
+                </h3>
+                {overallPnl.costBasis > 0 && (
+                  <span className={`text-sm font-mono font-semibold ${overallPnl.pnlDollar >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {overallPnl.pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(overallPnl.pnlDollar).toFixed(0)}
+                    <span className="text-gray-500 font-normal ml-1">({overallPnl.pnlPct >= 0 ? "+" : ""}{overallPnl.pnlPct.toFixed(1)}%)</span>
+                  </span>
+                )}
+              </div>
 
-                  // Average entry price across group
-                  const avgEntry = group.items.length > 0
-                    ? group.items.reduce((s, pd) => s + pd.pos.entry_price, 0) / group.items.length
-                    : 0;
+              <div className="space-y-2">
+                {expiryGroups.map(eg => (
+                  <div key={eg.expiry}>
+                    {/* Expiry group header */}
+                    <div className={`flex items-center gap-2 mb-1 ${eg.isExpired ? "opacity-60" : ""}`}>
+                      <span className={`text-[11px] font-semibold tracking-wide ${eg.isExpired ? "text-gray-500" : "text-gray-400"}`}>
+                        {eg.expiryLabel}
+                      </span>
+                      <span className="text-gray-500 text-[10px]">{eg.totalQty} qty in {eg.contracts.length} strike{eg.contracts.length !== 1 ? "s" : ""}</span>
+                      <div className="flex-1 border-t border-gray-700/50 ml-1" />
+                      <span className={`text-[11px] font-mono font-medium ${eg.weightedPnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {eg.totalPnlDollar >= 0 ? "+$" : "-$"}{Math.abs(eg.totalPnlDollar).toFixed(0)}
+                        <span className="text-gray-500 font-normal ml-1">({eg.weightedPnlPct >= 0 ? "+" : ""}{eg.weightedPnlPct.toFixed(1)}%)</span>
+                      </span>
+                    </div>
 
-                  // For single-position groups, render inline with close button
-                  if (isSingle) {
-                    const pd = group.items[0];
-                    const { pos, rm, quote, pnlPct, pnlDollar, strategyId, recentErrors } = pd;
-                    const staleQuote = quote && quote.age_seconds > 30;
-                    const isCompleted = rm?.completed;
-                    const posLabel = oc ? `${oc.strike} ${isCall ? "C" : "P"}` : "position";
-                    return (
-                      <div key={group.key} className={`border rounded px-2 py-1.5 ${isCompleted ? "border-gray-700 bg-gray-800/30" : "border-gray-700"}`}>
-                        <div className="flex items-center gap-2 text-xs">
-                          {oc ? (
-                            <>
-                              <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${isCall ? "bg-green-900/60 text-green-300" : "bg-red-900/60 text-red-300"}`}>
-                                {isCall ? "CALL" : "PUT"}
-                              </span>
-                              <span className="text-gray-200 font-mono">{oc.strike}</span>
-                              <span className="text-gray-500">{oc.expiry}</span>
-                            </>
-                          ) : (
-                            <span className="text-gray-400">Option</span>
-                          )}
-                          <span className="text-gray-400">x{pos.quantity}</span>
-                          <span className="text-gray-500">Entry <span className="text-gray-300 font-mono">${pos.entry_price.toFixed(2)}</span></span>
-                          {quote ? (
-                            <span className={`text-gray-400 ${staleQuote ? "opacity-50" : ""}`}>
-                              Mid <span className="text-gray-200 font-mono">{quote.mid.toFixed(2)}</span>
-                            </span>
-                          ) : rm ? (
-                            <span className="text-gray-600 italic text-[10px]">waiting...</span>
-                          ) : null}
-                          {rm && Object.entries(rm.level_states || {}).map(([key, state]) => (
-                            <span
-                              key={key}
-                              className={`px-1 py-0.5 rounded font-mono text-[10px] ${
-                                state === "FILLED" ? "bg-green-900 text-green-300" :
-                                state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
-                                state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
-                                state === "FAILED" ? "bg-red-900 text-red-300" :
-                                "bg-gray-700 text-gray-300"
-                              }`}
-                            >
-                              {state}
-                            </span>
-                          ))}
-                          {rm?.trailing_active && (
-                            <span className="text-yellow-300 font-mono text-[10px]">trail@{rm.trailing_stop_price.toFixed(2)}</span>
-                          )}
-                          {pnlPct !== null && pnlDollar !== null && (
-                            <span className={`ml-auto font-mono font-medium ${staleQuote ? "opacity-50" : ""} ${pnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
-                              {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
-                            </span>
-                          )}
-                          {isCompleted && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-600 text-gray-200">CLOSED</span>
-                          )}
-                          {!isCompleted && strategyId && (
-                            <button
-                              onClick={() => handleClosePosition(strategyId, posLabel)}
-                              className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-900/40 text-red-400 hover:bg-red-900/70 transition-colors"
-                              title="Mark position as manually closed"
-                            >
-                              Close
-                            </button>
-                          )}
-                        </div>
-                        {recentErrors.length > 0 && (
-                          <div className="text-[10px] text-red-400 mt-0.5 truncate" title={recentErrors[recentErrors.length - 1]}>
-                            {recentErrors[recentErrors.length - 1]}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
+                    {/* Contracts within this expiry */}
+                    <div className={`space-y-1 ${eg.isExpired ? "opacity-60" : ""}`}>
+                      {eg.contracts.map(group => {
+                        const isSingle = group.items.length === 1;
+                        const isExpanded = expandedGroups.has(group.key);
+                        const oc = group.optionContract;
+                        const isCall = oc?.right?.toUpperCase() === "C" || oc?.right?.toUpperCase() === "CALL";
+                        const allClosed = group.activeCount === 0 && group.closedCount > 0;
 
-                  // Multi-position group: collapsible header + lot rows
-                  return (
-                    <div key={group.key} className={`border rounded ${allClosed ? "border-gray-700 bg-gray-800/30" : "border-gray-700"}`}>
-                      {/* Group header (clickable) */}
-                      <button
-                        onClick={() => togglePositionGroup(group.key)}
-                        className="w-full text-left px-2 py-1.5 hover:bg-gray-800/50 transition-colors"
-                      >
-                        {/* Header line 1: contract + count + P&L */}
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="text-gray-500 text-[10px] w-3">{isExpanded ? "▼" : "▶"}</span>
-                          {oc ? (
-                            <>
-                              <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${isCall ? "bg-green-900/60 text-green-300" : "bg-red-900/60 text-red-300"}`}>
-                                {isCall ? "CALL" : "PUT"}
-                              </span>
-                              <span className="text-gray-200 font-mono">{oc.strike}</span>
-                              <span className="text-gray-500">{oc.expiry}</span>
-                            </>
-                          ) : (
-                            <span className="text-gray-400">Unknown</span>
-                          )}
-                          <span className="text-gray-400">x{group.totalInitial}</span>
-                          <span className="text-gray-500">
-                            ({group.activeCount} active{group.closedCount > 0 ? `, ${group.closedCount} closed` : ""})
-                          </span>
-                          <span className={`ml-auto font-mono font-medium ${group.staleQuote ? "opacity-50" : ""} ${group.weightedPnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
-                            {group.weightedPnlPct >= 0 ? "+" : ""}{group.weightedPnlPct.toFixed(1)}% ({group.totalPnlDollar >= 0 ? "+$" : "-$"}{Math.abs(group.totalPnlDollar).toFixed(0)})
-                          </span>
-                        </div>
-                        {/* Header line 2: quote + trailing summary */}
-                        <div className="flex items-center gap-2 text-[10px] mt-0.5 pl-5">
-                          <span className="text-gray-500">Avg <span className="text-gray-300 font-mono">${avgEntry.toFixed(2)}</span></span>
-                          {group.quote ? (
-                            <>
-                              <span className={`text-gray-500 ${group.staleQuote ? "opacity-50" : ""}`}>
-                                Bid/Ask <span className="text-gray-400 font-mono">{group.quote.bid.toFixed(2)}/{group.quote.ask.toFixed(2)}</span>
-                              </span>
-                              <span className={`text-gray-500 ${group.staleQuote ? "opacity-50" : ""}`}>
-                                Mid <span className="text-gray-300 font-mono">{group.quote.mid.toFixed(2)}</span>
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-gray-600 italic">waiting...</span>
-                          )}
-                          <span className="text-gray-600">│</span>
-                          {group.trailingStates.map(ts => (
-                            <span
-                              key={ts.state}
-                              className={`px-1 py-0.5 rounded font-mono ${
-                                ts.state === "FILLED" ? "bg-green-900 text-green-300" :
-                                ts.state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
-                                ts.state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
-                                ts.state === "FAILED" ? "bg-red-900 text-red-300" :
-                                "bg-gray-700 text-gray-300"
-                              }`}
-                            >
-                              {ts.count} {ts.state}
-                            </span>
-                          ))}
-                          {group.trailingActiveCount > 0 && (
-                            <span className="text-yellow-300 font-mono">
-                              trail@{group.trailPriceMin === group.trailPriceMax
-                                ? group.trailPriceMin?.toFixed(2)
-                                : `${group.trailPriceMin?.toFixed(2)}-${group.trailPriceMax?.toFixed(2)}`}
-                            </span>
-                          )}
-                          <span className="text-gray-600 ml-auto">{group.totalRemaining}/{group.totalInitial} remaining</span>
-                        </div>
-                      </button>
+                        // Average entry price across group
+                        const avgEntry = group.items.length > 0
+                          ? group.items.reduce((s, pd) => s + pd.pos.entry_price, 0) / group.items.length
+                          : 0;
 
-                      {/* Expanded: compact 1-line per lot */}
-                      {isExpanded && (
-                        <div className="border-t border-gray-700/50 px-2 py-1 space-y-0.5">
-                          {group.items.map((pd, i) => {
-                            const { pos, rm, pnlPct, pnlDollar, strategyId, recentErrors } = pd;
-                            const isCompleted = rm?.completed;
-                            const posLabel = oc ? `${oc.strike} ${isCall ? "C" : "P"}` : "position";
-                            return (
-                              <div key={i}>
-                                <div className={`flex items-center gap-2 text-[10px] py-0.5 ${isCompleted ? "opacity-50" : ""}`}>
-                                  <span className="text-gray-500 font-mono w-[52px]">{new Date(pos.fill_time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                                  <span className="text-gray-400">Entry <span className="text-gray-300 font-mono">${pos.entry_price.toFixed(2)}</span></span>
-                                  <span className="text-gray-500">x{pos.quantity}</span>
-                                  {pnlPct !== null && pnlDollar !== null && (
-                                    <span className={`font-mono ${pnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
-                                      {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
+                        // For single-position groups, render inline with close button
+                        if (isSingle) {
+                          const pd = group.items[0];
+                          const { pos, rm, quote, pnlPct, pnlDollar, strategyId, recentErrors } = pd;
+                          const staleQuote = quote && quote.age_seconds > 30;
+                          const isCompleted = rm?.completed;
+                          const posLabel = oc ? `${oc.strike} ${isCall ? "C" : "P"}` : "position";
+                          return (
+                            <div key={group.key} className={`border rounded px-2 py-1.5 ${isCompleted ? "border-gray-700 bg-gray-800/30" : "border-gray-700"}`}>
+                              <div className="flex items-center gap-2 text-xs">
+                                {oc ? (
+                                  <>
+                                    <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${isCall ? "bg-green-900/60 text-green-300" : "bg-red-900/60 text-red-300"}`}>
+                                      {isCall ? "CALL" : "PUT"}
                                     </span>
-                                  )}
-                                  {rm && Object.entries(rm.level_states || {}).map(([key, state]) => (
-                                    <span
-                                      key={key}
-                                      className={`px-1 py-0.5 rounded font-mono ${
-                                        state === "FILLED" ? "bg-green-900 text-green-300" :
-                                        state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
-                                        state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
-                                        state === "FAILED" ? "bg-red-900 text-red-300" :
-                                        "bg-gray-700 text-gray-300"
-                                      }`}
-                                    >
-                                      {state}
-                                    </span>
-                                  ))}
-                                  {rm?.trailing_active && (
-                                    <span className="text-yellow-300 font-mono">trail@{rm.trailing_stop_price.toFixed(2)}</span>
-                                  )}
-                                  {isCompleted ? (
-                                    <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-600 text-gray-200">CLOSED</span>
-                                  ) : strategyId ? (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleClosePosition(strategyId, posLabel); }}
-                                      className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-900/40 text-red-400 hover:bg-red-900/70 transition-colors"
-                                      title="Mark position as manually closed"
-                                    >
-                                      Close
-                                    </button>
-                                  ) : null}
-                                </div>
-                                {recentErrors.length > 0 && (
-                                  <div className="text-[10px] text-red-400 truncate pl-[52px]" title={recentErrors[recentErrors.length - 1]}>
-                                    {recentErrors[recentErrors.length - 1]}
-                                  </div>
+                                    <span className="text-gray-200 font-mono">{oc.strike}</span>
+                                  </>
+                                ) : (
+                                  <span className="text-gray-400">Option</span>
+                                )}
+                                <span className="text-gray-400">x{pos.quantity}</span>
+                                <span className="text-gray-500">Entry <span className="text-gray-300 font-mono">${pos.entry_price.toFixed(2)}</span></span>
+                                {quote ? (
+                                  <span className={`text-gray-400 ${staleQuote ? "opacity-50" : ""}`}>
+                                    Mid <span className="text-gray-200 font-mono">{quote.mid.toFixed(2)}</span>
+                                  </span>
+                                ) : rm ? (
+                                  <span className="text-gray-600 italic text-[10px]">waiting...</span>
+                                ) : null}
+                                {rm && Object.entries(rm.level_states || {}).map(([key, state]) => (
+                                  <span
+                                    key={key}
+                                    className={`px-1 py-0.5 rounded font-mono text-[10px] ${
+                                      state === "FILLED" ? "bg-green-900 text-green-300" :
+                                      state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
+                                      state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
+                                      state === "FAILED" ? "bg-red-900 text-red-300" :
+                                      "bg-gray-700 text-gray-300"
+                                    }`}
+                                  >
+                                    {state}
+                                  </span>
+                                ))}
+                                {rm?.trailing_active && (
+                                  <span className="text-yellow-300 font-mono text-[10px]">trail@{rm.trailing_stop_price.toFixed(2)}</span>
+                                )}
+                                {pnlPct !== null && pnlDollar !== null && (
+                                  <span className={`ml-auto font-mono font-medium ${staleQuote ? "opacity-50" : ""} ${pnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                    {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
+                                  </span>
+                                )}
+                                {isCompleted && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-600 text-gray-200">CLOSED</span>
+                                )}
+                                {!isCompleted && strategyId && (
+                                  <button
+                                    onClick={() => handleClosePosition(strategyId, posLabel)}
+                                    className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-900/40 text-red-400 hover:bg-red-900/70 transition-colors"
+                                    title="Mark position as manually closed"
+                                  >
+                                    Close
+                                  </button>
                                 )}
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                              {recentErrors.length > 0 && (
+                                <div className="text-[10px] text-red-400 mt-0.5 truncate" title={recentErrors[recentErrors.length - 1]}>
+                                  {recentErrors[recentErrors.length - 1]}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        // Multi-position group: collapsible header + lot rows
+                        return (
+                          <div key={group.key} className={`border rounded ${allClosed ? "border-gray-700 bg-gray-800/30" : "border-gray-700"}`}>
+                            {/* Group header (clickable) */}
+                            <button
+                              onClick={() => togglePositionGroup(group.key)}
+                              className="w-full text-left px-2 py-1.5 hover:bg-gray-800/50 transition-colors"
+                            >
+                              {/* Header line 1: contract + count + P&L */}
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="text-gray-500 text-[10px] w-3">{isExpanded ? "▼" : "▶"}</span>
+                                {oc ? (
+                                  <>
+                                    <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${isCall ? "bg-green-900/60 text-green-300" : "bg-red-900/60 text-red-300"}`}>
+                                      {isCall ? "CALL" : "PUT"}
+                                    </span>
+                                    <span className="text-gray-200 font-mono">{oc.strike}</span>
+                                  </>
+                                ) : (
+                                  <span className="text-gray-400">Unknown</span>
+                                )}
+                                <span className="text-gray-400">x{group.totalInitial}</span>
+                                <span className="text-gray-500">
+                                  ({group.activeCount} active{group.closedCount > 0 ? `, ${group.closedCount} closed` : ""})
+                                </span>
+                                <span className={`ml-auto font-mono font-medium ${group.staleQuote ? "opacity-50" : ""} ${group.weightedPnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                  {group.weightedPnlPct >= 0 ? "+" : ""}{group.weightedPnlPct.toFixed(1)}% ({group.totalPnlDollar >= 0 ? "+$" : "-$"}{Math.abs(group.totalPnlDollar).toFixed(0)})
+                                </span>
+                              </div>
+                              {/* Header line 2: quote + trailing summary */}
+                              <div className="flex items-center gap-2 text-[10px] mt-0.5 pl-5">
+                                <span className="text-gray-500">Avg <span className="text-gray-300 font-mono">${avgEntry.toFixed(2)}</span></span>
+                                {group.quote ? (
+                                  <>
+                                    <span className={`text-gray-500 ${group.staleQuote ? "opacity-50" : ""}`}>
+                                      Bid/Ask <span className="text-gray-400 font-mono">{group.quote.bid.toFixed(2)}/{group.quote.ask.toFixed(2)}</span>
+                                    </span>
+                                    <span className={`text-gray-500 ${group.staleQuote ? "opacity-50" : ""}`}>
+                                      Mid <span className="text-gray-300 font-mono">{group.quote.mid.toFixed(2)}</span>
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="text-gray-600 italic">waiting...</span>
+                                )}
+                                <span className="text-gray-600">│</span>
+                                {group.trailingStates.map(ts => (
+                                  <span
+                                    key={ts.state}
+                                    className={`px-1 py-0.5 rounded font-mono ${
+                                      ts.state === "FILLED" ? "bg-green-900 text-green-300" :
+                                      ts.state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
+                                      ts.state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
+                                      ts.state === "FAILED" ? "bg-red-900 text-red-300" :
+                                      "bg-gray-700 text-gray-300"
+                                    }`}
+                                  >
+                                    {ts.count} {ts.state}
+                                  </span>
+                                ))}
+                                {group.trailingActiveCount > 0 && (
+                                  <span className="text-yellow-300 font-mono">
+                                    trail@{group.trailPriceMin === group.trailPriceMax
+                                      ? group.trailPriceMin?.toFixed(2)
+                                      : `${group.trailPriceMin?.toFixed(2)}-${group.trailPriceMax?.toFixed(2)}`}
+                                  </span>
+                                )}
+                                <span className="text-gray-600 ml-auto">{group.totalRemaining}/{group.totalInitial} remaining</span>
+                              </div>
+                            </button>
+
+                            {/* Expanded: compact 1-line per lot */}
+                            {isExpanded && (
+                              <div className="border-t border-gray-700/50 px-2 py-1 space-y-0.5">
+                                {group.items.map((pd, i) => {
+                                  const { pos, rm, pnlPct, pnlDollar, strategyId, recentErrors } = pd;
+                                  const isCompleted = rm?.completed;
+                                  const posLabel = oc ? `${oc.strike} ${isCall ? "C" : "P"}` : "position";
+                                  return (
+                                    <div key={i}>
+                                      <div className={`flex items-center gap-2 text-[10px] py-0.5 ${isCompleted ? "opacity-50" : ""}`}>
+                                        <span className="text-gray-500 font-mono w-[52px]">{new Date(pos.fill_time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                                        <span className="text-gray-400">Entry <span className="text-gray-300 font-mono">${pos.entry_price.toFixed(2)}</span></span>
+                                        <span className="text-gray-500">x{pos.quantity}</span>
+                                        {pnlPct !== null && pnlDollar !== null && (
+                                          <span className={`font-mono ${pnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                            {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
+                                          </span>
+                                        )}
+                                        {rm && Object.entries(rm.level_states || {}).map(([key, state]) => (
+                                          <span
+                                            key={key}
+                                            className={`px-1 py-0.5 rounded font-mono ${
+                                              state === "FILLED" ? "bg-green-900 text-green-300" :
+                                              state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
+                                              state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
+                                              state === "FAILED" ? "bg-red-900 text-red-300" :
+                                              "bg-gray-700 text-gray-300"
+                                            }`}
+                                          >
+                                            {state}
+                                          </span>
+                                        ))}
+                                        {rm?.trailing_active && (
+                                          <span className="text-yellow-300 font-mono">trail@{rm.trailing_stop_price.toFixed(2)}</span>
+                                        )}
+                                        {isCompleted ? (
+                                          <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-600 text-gray-200">CLOSED</span>
+                                        ) : strategyId ? (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); handleClosePosition(strategyId, posLabel); }}
+                                            className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-900/40 text-red-400 hover:bg-red-900/70 transition-colors"
+                                            title="Mark position as manually closed"
+                                          >
+                                            Close
+                                          </button>
+                                        ) : null}
+                                      </div>
+                                      {recentErrors.length > 0 && (
+                                        <div className="text-[10px] text-red-400 truncate pl-[52px]" title={recentErrors[recentErrors.length - 1]}>
+                                          {recentErrors[recentErrors.length - 1]}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             </div>
           )}
