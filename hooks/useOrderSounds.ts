@@ -157,6 +157,11 @@ export interface AccountEvent {
  * Returns the sound type played, or null if no sound.
  */
 export function classifyAndPlay(evt: AccountEvent): "entry" | "exit" | "rejection" | null {
+  const ctx = getAudioCtx();
+  console.debug("[order-sounds] event:", evt.event,
+    "status:", evt.status, "side:", evt.side,
+    "audioCtx:", ctx?.state ?? "null", "muted:", _muted);
+
   // Rejection: order_status with Rejected or Inactive (IB async rejection)
   if (evt.event === "order_status" && (evt.status === "Rejected" || evt.status === "Inactive")) {
     playRejection();
@@ -201,9 +206,15 @@ export function useOrderSounds() {
   }, []);
 
   const toggleMute = useCallback(() => {
-    // Toggle also warms up audio (this IS a user gesture)
+    // This IS a user gesture — warm up audio context
     warmupAudioCtx();
+    const wasMuted = _muted;
     setMuted(!_muted);
+    // Play a short test tone when unmuting so the user gets immediate feedback
+    // and confirms audio is working. Small delay lets the context finish resuming.
+    if (wasMuted) {
+      setTimeout(() => playEntryFill(), 100);
+    }
   }, []);
 
   return {
