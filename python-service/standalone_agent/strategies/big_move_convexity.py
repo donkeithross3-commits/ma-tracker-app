@@ -128,7 +128,7 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "scan_end": "15:45",              # standardized: last entry time
         "signal_threshold": 0.40,         # model optimal (UP=0.40, DOWN=0.35)
         "contract_budget_usd": 150.0,
-        "otm_target_pct": 1.0,            # ~$6 OTM on ~$595 → $0.30-$0.60 premium (1DTE)
+        "otm_target_pct": 1.5,            # ~$10 OTM on ~$680 → $0.30-$0.80 premium (1DTE)
         "straddle_richness_max": 1.5,
         "straddle_richness_ideal": 0.9,
     },
@@ -1343,6 +1343,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         """Select an OTM option contract and return an OrderAction."""
         if underlying_price is None or underlying_price <= 0:
             logger.warning("Cannot build entry order: no underlying price")
+            if self._last_signal is not None:
+                self._last_signal["suppressed"] = "no_underlying_price"
             return []
 
         # Hard direction gate (post-signal): never allow an order side that
@@ -1431,6 +1433,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         if not _candidate_expiries:
             logger.warning("No valid expiry candidates for %s — skipping entry", self._ticker)
+            if self._last_signal is not None:
+                self._last_signal["suppressed"] = "no_valid_expiry"
             return []
 
         # Default to first candidate; the quote-fetch loop below may advance it
@@ -1456,6 +1460,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 "Budget gate: $%.0f budget (max $%.2f/share) below premium_min $%.2f — skipping %s entry",
                 budget, max_affordable_premium, premium_min, self._ticker,
             )
+            if self._last_signal is not None:
+                self._last_signal["suppressed"] = f"budget_too_low (${budget:.0f} max ${max_affordable_premium:.2f}/sh < min ${premium_min:.2f})"
             return []
 
         estimated_premium = (premium_min + effective_premium_max) / 2.0
@@ -1517,6 +1523,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 "No valid contract found for %s %.1f%s across %d expiry candidates — skipping entry",
                 self._ticker, strike, right, len(_candidate_expiries),
             )
+            if self._last_signal is not None:
+                self._last_signal["suppressed"] = f"no_contract ({self._ticker} {strike:.0f}{right}, {len(_candidate_expiries)} expiries tried)"
             return []
 
         # Finalize expiry_str from the winning contract
@@ -1561,6 +1569,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 "Ask $%.2f exceeds budget cap $%.2f — skipping %s entry",
                 opt_ask, max_affordable_premium, self._ticker,
             )
+            if self._last_signal is not None:
+                self._last_signal["suppressed"] = f"ask_exceeds_budget (ask ${opt_ask:.2f} > cap ${max_affordable_premium:.2f})"
             return []
 
         # Attach option selection details to pending lineage (WS2)

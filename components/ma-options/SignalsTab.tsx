@@ -2052,7 +2052,7 @@ export default function SignalsTab() {
                     <span>{activeTicker} ${currentSig.underlying_price.toFixed(2)}</span>
                   )}
                   {currentSig.suppressed && (
-                    <span className="text-yellow-500">suppressed: {currentSig.suppressed}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-yellow-900/40 text-yellow-400 font-medium">{currentSig.suppressed}</span>
                   )}
                 </div>
                 {currentSig.option_contract && (
