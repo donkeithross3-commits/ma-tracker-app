@@ -269,3 +269,6 @@ class TestFloatToIntFix:
 
         # Should decrement by 3 (rounded), not 2 (truncated)
         assert rm.remaining_qty == 2
+        # Fill log must agree with runtime decrement (RH-LOG-01)
+        assert rm._fill_log[-1]["qty_filled"] == 3
+        assert rm._fill_log[-1]["remaining_qty"] == 2

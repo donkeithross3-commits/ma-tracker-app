@@ -552,7 +552,8 @@ class RiskManagerStrategy(ExecutionStrategy):
             return
 
         pending.filled_so_far = fill_data.get("filled", 0.0)
-        self.remaining_qty = max(0, self.remaining_qty - int(round(new_filled)))
+        filled_delta = int(round(new_filled))
+        self.remaining_qty = max(0, self.remaining_qty - filled_delta)
 
         level_key = pending.level_key
 
@@ -560,7 +561,7 @@ class RiskManagerStrategy(ExecutionStrategy):
             "time": time.time(),
             "order_id": order_id,
             "level": level_key,
-            "qty_filled": int(new_filled),
+            "qty_filled": filled_delta,
             "avg_price": fill_data.get("avgFillPrice", 0),
             "remaining_qty": self.remaining_qty,
             "pnl_pct": self._calc_pnl_pct(fill_data.get("avgFillPrice", 0)),
