@@ -2321,27 +2321,10 @@ export default function SignalsTab() {
                                   <span className="text-gray-600 italic">waiting...</span>
                                 )}
                                 <span className="text-gray-600">│</span>
-                                {group.trailingStates.map(ts => (
-                                  <span
-                                    key={ts.state}
-                                    className={`px-1 py-0.5 rounded font-mono ${
-                                      ts.state === "FILLED" ? "bg-green-900 text-green-300" :
-                                      ts.state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
-                                      ts.state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
-                                      ts.state === "FAILED" ? "bg-red-900 text-red-300" :
-                                      "bg-gray-700 text-gray-300"
-                                    }`}
-                                  >
-                                    {ts.count} {ts.state}
-                                  </span>
-                                ))}
-                                {group.trailingActiveCount > 0 && (
-                                  <span className="text-yellow-300 font-mono">
-                                    trail@{group.trailPriceMin === group.trailPriceMax
-                                      ? group.trailPriceMin?.toFixed(2)
-                                      : `${group.trailPriceMin?.toFixed(2)}-${group.trailPriceMax?.toFixed(2)}`}
-                                  </span>
-                                )}
+                                {(() => {
+                                  const firstActiveRm = group.items.find(pd => pd.rm && !pd.rm.completed)?.rm || group.items[0]?.rm;
+                                  return renderRiskBadges(firstActiveRm ?? null);
+                                })()}
                                 <span className="text-gray-600 ml-auto">{group.totalRemaining}/{group.totalInitial} remaining</span>
                               </div>
                             </button>
