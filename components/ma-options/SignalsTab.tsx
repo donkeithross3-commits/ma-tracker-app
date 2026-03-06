@@ -493,6 +493,7 @@ export default function SignalsTab() {
   const [pendingModes, setPendingModes] = useState<Record<string, TickerMode | null>>({});
   const pendingModesRef = useRef(pendingModes);
   pendingModesRef.current = pendingModes;
+  const pendingModeTimestamps = useRef<Record<string, number>>({});
 
   // ── Model chooser state ──
   const [modelModalOpen, setModelModalOpen] = useState(false);
@@ -637,8 +638,22 @@ export default function SignalsTab() {
           setTickerModes(prev => {
             const merged = { ...prev };
             for (const [t, m] of Object.entries(polledModes)) {
-              // Don't overwrite pending optimistic updates
-              if (!pendingModesRef.current[t]) merged[t] = m as TickerMode;
+              const pending = pendingModesRef.current[t];
+              if (pending) {
+                const age = Date.now() - (pendingModeTimestamps.current[t] || 0);
+                if (m === pending) {
+                  // Server confirmed our optimistic mode — accept and clear guard
+                  merged[t] = m as TickerMode;
+                  setPendingModes(p => ({ ...p, [t]: null }));
+                } else if (age > 15_000) {
+                  // Pending expired (engine never confirmed) — accept server state
+                  merged[t] = m as TickerMode;
+                  setPendingModes(p => ({ ...p, [t]: null }));
+                }
+                // else: server hasn't caught up yet — keep optimistic value
+              } else {
+                merged[t] = m as TickerMode;
+              }
             }
             return merged;
           });
@@ -863,9 +878,10 @@ export default function SignalsTab() {
   const handleSetTickerMode = async (ticker: string, mode: TickerMode) => {
     const prevMode = tickerModes[ticker] || "NORMAL";
     if (prevMode === mode) return;
-    // Optimistic update
+    // Optimistic update — stays until poll confirms or 15s timeout
     setTickerModes(prev => ({ ...prev, [ticker]: mode }));
     setPendingModes(prev => ({ ...prev, [ticker]: mode }));
+    pendingModeTimestamps.current[ticker] = Date.now();
     try {
       const res = await fetch("/api/ma-options/execution/ticker-mode", {
         method: "POST",
@@ -877,23 +893,15 @@ export default function SignalsTab() {
       if (data.error) {
         // Rollback on failure
         setTickerModes(prev => ({ ...prev, [ticker]: prevMode }));
+        setPendingModes(prev => ({ ...prev, [ticker]: null }));
         setError(data.error);
-      } else {
-        // Trigger fresh fetch to confirm server state
-        try {
-          const freshRes = await fetch("/api/ma-options/bmc-signal?fresh=1", { credentials: "include" });
-          const freshData = await freshRes.json();
-          const polledModes = freshData?.budget_status?.ticker_modes || freshData?.ticker_modes || {};
-          if (Object.keys(polledModes).length > 0) {
-            setTickerModes(prev => ({ ...prev, ...polledModes }));
-          }
-        } catch { /* fresh fetch is best-effort */ }
       }
+      // On success: keep pendingModes guard active — poll will clear it
+      // when the engine echoes back the confirmed mode (see fetchExecutionStatus)
     } catch (e: any) {
       setTickerModes(prev => ({ ...prev, [ticker]: prevMode }));
-      setError(e.message || "Failed to set ticker mode");
-    } finally {
       setPendingModes(prev => ({ ...prev, [ticker]: null }));
+      setError(e.message || "Failed to set ticker mode");
     }
   };
 
