@@ -1392,13 +1392,50 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             increment = profile["strike_increment"]
         strike = round(target_strike / increment) * increment
 
-        # Expiry selection: pick the nearest acceptable DTE.
-        # SPY has daily 0DTE; SLV only has weekly (Fri) expirations.
+        # Expiry selection: iterate through preferred DTEs, skipping weekends.
+        # SPY/QQQ/IWM have daily expirations; SLV/GLD have weekly (Fri) only.
+        # The quote fetch below will validate whether the contract actually exists.
         preferred_dte = cfg.get("preferred_dte", [1, 2])
         from datetime import timedelta
-        min_dte = min(preferred_dte) if preferred_dte else 1
-        expiry_date = datetime.now(ZoneInfo("America/New_York")) + timedelta(days=min_dte)
-        expiry_str = expiry_date.strftime("%Y%m%d")
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+
+        # Build candidate expiry dates from preferred DTEs.
+        # For each DTE, advance past weekends (Sat→Mon, Sun→Mon).
+        # Then fill in any remaining weekdays up to max_dte+2 business days
+        # so that weekly-only tickers (SLV, GLD) can reach the next Friday
+        # even when preferred_dte doesn't span a full week.
+        _candidate_expiries = []
+        _seen = set()
+        max_dte = max(preferred_dte) if preferred_dte else 5
+        # Start with the preferred DTEs
+        for dte in sorted(preferred_dte):
+            candidate = now_et + timedelta(days=dte)
+            if candidate.weekday() >= 5:  # weekend → next Monday
+                candidate += timedelta(days=(7 - candidate.weekday()))
+            expiry_s = candidate.strftime("%Y%m%d")
+            if expiry_s not in _seen:
+                _seen.add(expiry_s)
+                _candidate_expiries.append((expiry_s, candidate))
+        # Extend: add each weekday from tomorrow through max_dte+4 calendar days
+        # to cover gaps (e.g. Friday→next Friday for weekly-only tickers)
+        for extra_day in range(1, max_dte + 5):
+            candidate = now_et + timedelta(days=extra_day)
+            if candidate.weekday() >= 5:
+                continue  # skip weekends
+            expiry_s = candidate.strftime("%Y%m%d")
+            if expiry_s not in _seen:
+                _seen.add(expiry_s)
+                _candidate_expiries.append((expiry_s, candidate))
+        # Sort by date
+        _candidate_expiries.sort(key=lambda x: x[0])
+
+        if not _candidate_expiries:
+            logger.warning("No valid expiry candidates for %s — skipping entry", self._ticker)
+            return []
+
+        # Default to first candidate; the quote-fetch loop below may advance it
+        expiry_str = _candidate_expiries[0][0]
+        expiry_date = _candidate_expiries[0][1]
 
         # Premium / spread constraints
         max_spread = cfg.get("max_spread", 0.05)
@@ -1424,18 +1461,68 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         estimated_premium = (premium_min + effective_premium_max) / 2.0
         qty = min(max_contracts, max(1, int(budget / (estimated_premium * 100))))
 
-        trading_class = _get_option_trading_class(self._ticker, expiry_date)
-        contract_dict = {
-            "symbol": self._ticker,
-            "secType": "OPT",
-            "exchange": "SMART",
-            "currency": "USD",
-            "strike": strike,
-            "lastTradeDateOrContractMonth": expiry_str,
-            "right": right,
-            "multiplier": "100",
-            "tradingClass": trading_class,
-        }
+        # ── Try each candidate expiry until we get a valid quote ──
+        # Tickers like SLV/GLD only have weekly (Fri) expirations, so the
+        # nearest DTE may not have a listed contract.  We iterate through
+        # candidates and use the first one that returns quote data.
+        limit_price = round(max_affordable_premium, 2)  # budget cap fallback
+        opt_bid = None
+        opt_ask = None
+        contract_dict = None
+
+        for expiry_str, expiry_date in _candidate_expiries:
+            trading_class = _get_option_trading_class(self._ticker, expiry_date)
+            candidate_contract = {
+                "symbol": self._ticker,
+                "secType": "OPT",
+                "exchange": "SMART",
+                "currency": "USD",
+                "strike": strike,
+                "lastTradeDateOrContractMonth": expiry_str,
+                "right": right,
+                "multiplier": "100",
+                "tradingClass": trading_class,
+            }
+
+            if self._fetch_option_quote is not None:
+                try:
+                    quote = self._fetch_option_quote(candidate_contract)
+                    q_bid = quote.get("bid")
+                    q_ask = quote.get("ask")
+                    if (q_ask is not None and q_ask > 0) or (q_bid is not None and q_bid > 0):
+                        # Valid quote — use this expiry
+                        opt_bid = q_bid
+                        opt_ask = q_ask
+                        contract_dict = candidate_contract
+                        break
+                    else:
+                        logger.info(
+                            "No quote data for %s %.1f%s %s — trying next expiry",
+                            self._ticker, strike, right, expiry_str,
+                        )
+                        continue
+                except Exception:
+                    logger.info(
+                        "Quote fetch failed for %s %.1f%s %s — trying next expiry",
+                        self._ticker, strike, right, expiry_str,
+                    )
+                    continue
+            else:
+                # No quote fetcher — use first candidate
+                contract_dict = candidate_contract
+                break
+
+        if contract_dict is None:
+            logger.warning(
+                "No valid contract found for %s %.1f%s across %d expiry candidates — skipping entry",
+                self._ticker, strike, right, len(_candidate_expiries),
+            )
+            return []
+
+        # Finalize expiry_str from the winning contract
+        expiry_str = contract_dict["lastTradeDateOrContractMonth"]
+        actual_dte = (datetime.strptime(expiry_str, "%Y%m%d").date() - now_et.date()).days
+        dte_label = "0DTE" if actual_dte == 0 else f"{actual_dte}d"
 
         # Store contract info in signal record for risk manager spawn
         self._last_signal["option_contract"] = {
@@ -1448,44 +1535,25 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "premium_range": [premium_min, premium_max],
         }
 
-        dte_label = "0DTE" if min_dte == 0 else f"{min_dte}d"
-
         # Compute limit price: ask + spread (adaptive to current market),
         # capped at the budget maximum. This avoids paying dumb prices in
         # fast markets while still filling in normal conditions.
-        limit_price = round(max_affordable_premium, 2)  # budget cap fallback
-        opt_bid = None
-        opt_ask = None
-
-        if self._fetch_option_quote is not None:
-            try:
-                quote = self._fetch_option_quote(contract_dict)
-                opt_bid = quote.get("bid")
-                opt_ask = quote.get("ask")
-                if opt_ask is not None and opt_ask > 0 and opt_bid is not None and opt_bid > 0:
-                    spread = opt_ask - opt_bid
-                    adaptive_limit = opt_ask + spread
-                    limit_price = round(min(adaptive_limit, max_affordable_premium), 2)
-                    logger.info(
-                        "Option quote: bid=$%.2f ask=$%.2f spread=$%.2f → adaptive limit=$%.2f (budget cap=$%.2f)",
-                        opt_bid, opt_ask, spread, adaptive_limit, max_affordable_premium,
-                    )
-                elif opt_ask is not None and opt_ask > 0:
-                    # Have ask but no bid — use ask + 20% as limit
-                    adaptive_limit = opt_ask * 1.20
-                    limit_price = round(min(adaptive_limit, max_affordable_premium), 2)
-                    logger.info(
-                        "Option quote: bid=none ask=$%.2f → adaptive limit=$%.2f (budget cap=$%.2f)",
-                        opt_ask, adaptive_limit, max_affordable_premium,
-                    )
-                else:
-                    logger.warning(
-                        "No quote data for %s %.1f%s %s — contract may not exist, skipping entry",
-                        self._ticker, strike, right, expiry_str,
-                    )
-                    return []
-            except Exception:
-                logger.warning("Failed to fetch option quote — using budget cap $%.2f", max_affordable_premium, exc_info=True)
+        if opt_ask is not None and opt_ask > 0 and opt_bid is not None and opt_bid > 0:
+            spread_val = opt_ask - opt_bid
+            adaptive_limit = opt_ask + spread_val
+            limit_price = round(min(adaptive_limit, max_affordable_premium), 2)
+            logger.info(
+                "Option quote: bid=$%.2f ask=$%.2f spread=$%.2f → adaptive limit=$%.2f (budget cap=$%.2f)",
+                opt_bid, opt_ask, spread_val, adaptive_limit, max_affordable_premium,
+            )
+        elif opt_ask is not None and opt_ask > 0:
+            # Have ask but no bid — use ask + 20% as limit
+            adaptive_limit = opt_ask * 1.20
+            limit_price = round(min(adaptive_limit, max_affordable_premium), 2)
+            logger.info(
+                "Option quote: bid=none ask=$%.2f → adaptive limit=$%.2f (budget cap=$%.2f)",
+                opt_ask, adaptive_limit, max_affordable_premium,
+            )
 
         # Budget gate on actual ask: if the current ask exceeds our budget, skip
         if opt_ask is not None and opt_ask > max_affordable_premium:
@@ -1501,7 +1569,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 "strike": strike,
                 "right": right,
                 "expiry": expiry_str,
-                "dte": min_dte,
+                "dte": actual_dte,
                 "opt_bid": opt_bid,
                 "opt_ask": opt_ask,
                 "spread": (opt_ask - opt_bid) if opt_bid and opt_ask else None,
