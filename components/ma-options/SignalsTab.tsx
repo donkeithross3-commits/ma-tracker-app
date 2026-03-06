@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOrderSounds } from "@/hooks/useOrderSounds";
 import { OrderBudgetControl } from "./OrderBudgetControl";
 
@@ -1277,7 +1277,19 @@ export default function SignalsTab() {
 
         let pnlPct: number | null = null;
         let pnlDollar: number | null = null;
-        if (quote && quote.mid > 0 && pos.entry_price > 0) {
+        const isCompleted = rm?.completed === true;
+        if (isCompleted && rm?.fill_log) {
+          // Closed position: compute realized P&L from exit fills, not live quote
+          const exitFills = rm.fill_log.filter((f: FillLogEntry) => f.level !== "entry");
+          if (exitFills.length > 0 && pos.entry_price > 0) {
+            const totalExitQty = exitFills.reduce((s: number, f: FillLogEntry) => s + f.qty_filled, 0);
+            const weightedExitPrice = totalExitQty > 0
+              ? exitFills.reduce((s: number, f: FillLogEntry) => s + f.avg_price * f.qty_filled, 0) / totalExitQty
+              : 0;
+            pnlPct = ((weightedExitPrice - pos.entry_price) / pos.entry_price) * 100;
+            pnlDollar = (weightedExitPrice - pos.entry_price) * pos.quantity * 100;
+          }
+        } else if (quote && quote.mid > 0 && pos.entry_price > 0) {
           pnlPct = ((quote.mid - pos.entry_price) / pos.entry_price) * 100;
           pnlDollar = (quote.mid - pos.entry_price) * pos.quantity * 100;
         }
@@ -1357,7 +1369,18 @@ export default function SignalsTab() {
 
         let pnlPct: number | null = null;
         let pnlDollar: number | null = null;
-        if (quote && quote.mid > 0 && entryPrice > 0) {
+        const isCompleted = rm?.completed === true;
+        if (isCompleted && rm?.fill_log) {
+          const exitFills = rm.fill_log.filter((f: FillLogEntry) => f.level !== "entry");
+          if (exitFills.length > 0 && entryPrice > 0) {
+            const totalExitQty = exitFills.reduce((acc: number, f: FillLogEntry) => acc + f.qty_filled, 0);
+            const weightedExitPrice = totalExitQty > 0
+              ? exitFills.reduce((acc: number, f: FillLogEntry) => acc + f.avg_price * f.qty_filled, 0) / totalExitQty
+              : 0;
+            pnlPct = ((weightedExitPrice - entryPrice) / entryPrice) * 100;
+            pnlDollar = (weightedExitPrice - entryPrice) * quantity * 100;
+          }
+        } else if (quote && quote.mid > 0 && entryPrice > 0) {
           pnlPct = ((quote.mid - entryPrice) / entryPrice) * 100;
           pnlDollar = (quote.mid - entryPrice) * quantity * 100;
         }
@@ -1487,10 +1510,14 @@ export default function SignalsTab() {
   }, [positionDetails]);
   const positionSummary = useMemo(() => {
     const totalQty = groupedPositions.reduce((sum, g) => sum + g.totalInitial, 0);
+    const activeContracts = groupedPositions.filter(g => g.activeCount > 0).length;
+    const closedContracts = groupedPositions.filter(g => g.activeCount === 0 && g.closedCount > 0).length;
     return {
       contracts: groupedPositions.length,
       lots: positionDetails.length,
       quantity: totalQty,
+      activeContracts,
+      closedContracts,
     };
   }, [groupedPositions, positionDetails.length]);
 
@@ -1562,8 +1589,11 @@ export default function SignalsTab() {
       eg.weightedPnlPct = eg.totalCostBasis > 0
         ? (eg.totalPnlDollar / eg.totalCostBasis) * 100
         : 0;
-      // Sort contracts within expiry by strike ascending
+      // Sort contracts: active first, then closed; within each group by strike ascending
       eg.contracts.sort((a, b) => {
+        const aAllClosed = a.activeCount === 0 && a.closedCount > 0 ? 1 : 0;
+        const bAllClosed = b.activeCount === 0 && b.closedCount > 0 ? 1 : 0;
+        if (aAllClosed !== bAllClosed) return aAllClosed - bAllClosed;
         const sa = a.optionContract?.strike ?? 0;
         const sb = b.optionContract?.strike ?? 0;
         return sa - sb;
@@ -1661,9 +1691,10 @@ export default function SignalsTab() {
         if (comm != null && comm > 0) totalCommission += comm;
       }
     }
-    // Unrealized P&L from live position details (quotes-driven, unchanged)
+    // Unrealized P&L from ACTIVE position details only (quotes-driven)
     let unrealizedPnl = 0;
     for (const pd of positionDetails) {
+      if (pd.rm?.completed) continue; // closed positions have realized P&L, not unrealized
       if (pd.pnlDollar !== null) unrealizedPnl += pd.pnlDollar;
     }
     return {
@@ -2059,7 +2090,7 @@ export default function SignalsTab() {
               {/* Header with overall summary */}
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-medium text-gray-300">
-                  Active Positions ({positionSummary.quantity} qty in {positionSummary.contracts} contracts{positionSummary.lots !== positionSummary.contracts ? `, ${positionSummary.lots} lots` : ""})
+                  Positions ({positionSummary.quantity} qty in {positionSummary.contracts} contract{positionSummary.contracts !== 1 ? "s" : ""}{positionSummary.closedContracts > 0 ? <><span className="text-gray-500 font-normal"> · </span><span className="text-gray-500 font-normal">{positionSummary.closedContracts} closed</span></> : ""})
                 </h3>
                 {overallPnl.costBasis > 0 && (
                   <span className={`text-sm font-mono font-semibold ${overallPnl.pnlDollar >= 0 ? "text-green-400" : "text-red-400"}`}>
@@ -2087,12 +2118,17 @@ export default function SignalsTab() {
 
                     {/* Contracts within this expiry */}
                     <div className={`space-y-1 ${eg.isExpired ? "opacity-60" : ""}`}>
-                      {eg.contracts.map(group => {
+                      {eg.contracts.map((group, groupIdx) => {
                         const isSingle = group.items.length === 1;
                         const isExpanded = expandedGroups.has(group.key);
                         const oc = group.optionContract;
                         const isCall = oc?.right?.toUpperCase() === "C" || oc?.right?.toUpperCase() === "CALL";
                         const allClosed = group.activeCount === 0 && group.closedCount > 0;
+
+                        // Show "Closed" divider before first closed group
+                        const prevGroup = groupIdx > 0 ? eg.contracts[groupIdx - 1] : null;
+                        const prevAllClosed = prevGroup ? prevGroup.activeCount === 0 && prevGroup.closedCount > 0 : false;
+                        const showClosedDivider = allClosed && !prevAllClosed;
 
                         // Average entry price across group
                         const avgEntry = group.items.length > 0
@@ -2107,7 +2143,15 @@ export default function SignalsTab() {
                           const isCompleted = rm?.completed;
                           const posLabel = oc ? `${oc.strike} ${isCall ? "C" : "P"}` : "position";
                           return (
-                            <div key={group.key} className={`border rounded px-2 py-1.5 ${isCompleted ? "border-gray-700 bg-gray-800/30" : "border-gray-700"}`}>
+                            <React.Fragment key={group.key}>
+                              {showClosedDivider && (
+                                <div className="flex items-center gap-2 mt-1">
+                                  <div className="flex-1 border-t border-gray-700/40" />
+                                  <span className="text-[9px] text-gray-600 uppercase tracking-wider">Closed</span>
+                                  <div className="flex-1 border-t border-gray-700/40" />
+                                </div>
+                              )}
+                            <div className={`border rounded px-2 py-1.5 ${isCompleted ? "border-gray-700/50 bg-gray-800/20 opacity-50" : "border-gray-700"}`}>
                               <div className="flex items-center gap-2 text-xs">
                                 {oc ? (
                                   <>
@@ -2124,7 +2168,17 @@ export default function SignalsTab() {
                                 )}
                                 <span className="text-gray-400">x{pos.quantity}</span>
                                 <span className="text-gray-500">Entry <span className="text-gray-300 font-mono">${pos.entry_price.toFixed(2)}</span></span>
-                                {quote ? (
+                                {isCompleted && rm?.fill_log ? (() => {
+                                  const exitFills = rm.fill_log.filter((f: FillLogEntry) => f.level !== "entry");
+                                  if (exitFills.length > 0) {
+                                    const totalExitQty = exitFills.reduce((s: number, f: FillLogEntry) => s + f.qty_filled, 0);
+                                    const avgExit = totalExitQty > 0
+                                      ? exitFills.reduce((s: number, f: FillLogEntry) => s + f.avg_price * f.qty_filled, 0) / totalExitQty
+                                      : 0;
+                                    return <span className="text-gray-500">Exit <span className="text-gray-400 font-mono">${avgExit.toFixed(2)}</span></span>;
+                                  }
+                                  return null;
+                                })() : quote ? (
                                   <span className={`text-gray-400 ${staleQuote ? "opacity-50" : ""}`}>
                                     Mid <span className="text-gray-200 font-mono">{quote.mid.toFixed(2)}</span>
                                   </span>
@@ -2172,12 +2226,21 @@ export default function SignalsTab() {
                                 </div>
                               )}
                             </div>
+                            </React.Fragment>
                           );
                         }
 
                         // Multi-position group: collapsible header + lot rows
                         return (
-                          <div key={group.key} className={`border rounded ${allClosed ? "border-gray-700 bg-gray-800/30" : "border-gray-700"}`}>
+                          <React.Fragment key={group.key}>
+                            {showClosedDivider && (
+                              <div className="flex items-center gap-2 mt-1">
+                                <div className="flex-1 border-t border-gray-700/40" />
+                                <span className="text-[9px] text-gray-600 uppercase tracking-wider">Closed</span>
+                                <div className="flex-1 border-t border-gray-700/40" />
+                              </div>
+                            )}
+                          <div className={`border rounded ${allClosed ? "border-gray-700/50 bg-gray-800/20 opacity-50" : "border-gray-700"}`}>
                             {/* Group header (clickable) */}
                             <button
                               onClick={() => togglePositionGroup(group.key)}
@@ -2306,6 +2369,7 @@ export default function SignalsTab() {
                               </div>
                             )}
                           </div>
+                          </React.Fragment>
                         );
                       })}
                     </div>
