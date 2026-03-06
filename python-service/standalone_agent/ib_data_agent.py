@@ -99,8 +99,20 @@ def _translate_bmc_to_risk_config(bmc_config: dict) -> dict:
     The dashboard sends flat keys like risk_stop_loss_enabled=true. Risk managers
     expect nested dicts like {"stop_loss": {"enabled": true, ...}}.
     Only includes sections where at least one field is present in bmc_config.
+
+    IMPORTANT: The dashboard has no UI for exit_tranches — those are defined
+    in presets. When a preset is specified, we pull exit_tranches (and other
+    preset-only fields like eod_exit_time) from the preset so that
+    downstream merge operations don't lose them.
     """
+    from strategies.risk_manager import PRESETS
+
     risk = {}
+
+    # Resolve preset early so we can pull preset-only fields
+    preset_name = bmc_config.get("risk_preset")
+    preset = PRESETS.get(preset_name, {}) if preset_name else {}
+
     # Stop loss
     if any(k.startswith("risk_stop_loss_") for k in bmc_config):
         risk["stop_loss"] = {
@@ -116,18 +128,29 @@ def _translate_bmc_to_risk_config(bmc_config: dict) -> dict:
                                           bmc_config.get("risk_profit_taking_enabled", False))
             pt["targets"] = bmc_config.get("risk_profit_targets", [])
         if any(k.startswith("risk_trailing_") for k in bmc_config):
-            pt["trailing_stop"] = {
+            trailing = {
                 "enabled": bmc_config.get("risk_trailing_enabled", False),
                 "activation_pct": bmc_config.get("risk_trailing_activation_pct", 25.0),
                 "trail_pct": bmc_config.get("risk_trailing_trail_pct", 15.0),
             }
+            # Preserve exit_tranches from preset (no dashboard UI for these)
+            preset_tranches = (
+                preset.get("profit_taking", {})
+                .get("trailing_stop", {})
+                .get("exit_tranches")
+            )
+            if preset_tranches:
+                trailing["exit_tranches"] = preset_tranches
+            pt["trailing_stop"] = trailing
         risk["profit_taking"] = pt
     # Preset override
-    if "risk_preset" in bmc_config:
-        risk["preset"] = bmc_config["risk_preset"]
-    # EOD exit time (hot-modifiable)
+    if preset_name:
+        risk["preset"] = preset_name
+    # EOD exit time: dashboard field if present, else inherit from preset
     if "risk_eod_exit_time" in bmc_config:
         risk["eod_exit_time"] = bmc_config["risk_eod_exit_time"] or None
+    elif "eod_exit_time" in preset:
+        risk["eod_exit_time"] = preset["eod_exit_time"]
     return risk
 
 

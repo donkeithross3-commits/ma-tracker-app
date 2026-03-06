@@ -28,6 +28,25 @@ from execution_engine import ExecutionStrategy, OrderAction, OrderSide, OrderTyp
 logger = logging.getLogger(__name__)
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base*.
+
+    - Dict values are merged recursively (preserving keys only in base).
+    - Non-dict values in *override* replace those in *base*.
+    - Neither input is mutated; returns a new dict.
+
+    Used so that preset resolution keeps nested fields like
+    ``exit_tranches`` even when the override only sets ``trail_pct``.
+    """
+    result = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(result.get(k), dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
 # ── Tick sizes for common futures (used for limit order price rounding) ──
 # Stocks/options default to 0.01 if not found.
 TICK_SIZES: Dict[str, float] = {
@@ -338,10 +357,31 @@ class RiskManagerStrategy(ExecutionStrategy):
 
     def on_start(self, config: dict):
         """Initialize state from config."""
-        # Resolve named presets (e.g. "zero_dte_convexity") into full config
+        # Resolve named presets (e.g. "zero_dte_convexity") into full config.
+        # Deep merge so nested fields like exit_tranches survive partial overrides.
         preset_name = config.get("preset")
         if preset_name and preset_name in PRESETS:
-            config.update({k: v for k, v in PRESETS[preset_name].items() if k not in config})
+            merged = _deep_merge(PRESETS[preset_name], {k: v for k, v in config.items() if k != "preset"})
+            merged["preset"] = preset_name  # preserve preset name for hot-modify
+            config.clear()
+            config.update(merged)
+
+        # ── Repair corrupt stored configs (v1.29.3 and earlier) ──
+        # Hot-modify used to strip exit_tranches and preset from stored configs.
+        # If trailing is enabled but exit_tranches are missing, repair from the
+        # default preset (intraday_convexity). This is a one-time migration that
+        # fires on restore of corrupt position store data.
+        ts = config.get("profit_taking", {}).get("trailing_stop", {})
+        if ts.get("enabled") and "exit_tranches" not in ts and not preset_name:
+            repair_preset = "intraday_convexity"
+            logger.warning(
+                "RiskManager: trailing_stop missing exit_tranches and no preset — "
+                "repairing from '%s' preset", repair_preset,
+            )
+            merged = _deep_merge(PRESETS[repair_preset], config)
+            merged["preset"] = repair_preset
+            config.clear()
+            config.update(merged)
 
         pos = config.get("position", {})
         self.initial_qty = int(pos.get("quantity", 0))
@@ -834,13 +874,12 @@ class RiskManagerStrategy(ExecutionStrategy):
         cancel_order_ids contains order IDs for pending orders tied to
         disabled/invalidated levels that should be cancelled immediately.
         """
-        # Resolve preset name into concrete config fields
+        # Resolve preset name into concrete config fields.
+        # Deep merge so nested fields like exit_tranches survive partial overrides.
         preset_name = new_config.get("preset")
         if preset_name and preset_name in PRESETS:
-            resolved = dict(PRESETS[preset_name])
-            # Explicit fields override preset defaults
-            resolved.update({k: v for k, v in new_config.items() if k != "preset"})
-            new_config = resolved
+            override = {k: v for k, v in new_config.items() if k != "preset"}
+            new_config = _deep_merge(PRESETS[preset_name], override)
             logger.info("Resolved preset '%s' in hot-modify", preset_name)
 
         # Initialize changes dict early — eod_exit_time block may populate cancel_order_ids

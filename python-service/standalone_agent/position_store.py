@@ -150,23 +150,30 @@ class PositionStore:
             self._dirty_ids.add(position_id)
             self._save()
 
+    @staticmethod
+    def _deep_merge(base: dict, override: dict) -> dict:
+        """Recursively merge *override* into *base*, preserving nested keys."""
+        result = dict(base)
+        for k, v in override.items():
+            if isinstance(v, dict) and isinstance(result.get(k), dict):
+                result[k] = PositionStore._deep_merge(result[k], v)
+            else:
+                result[k] = v
+        return result
+
     def update_risk_config(self, position_id: str, risk_updates: dict) -> None:
         """Merge risk config updates into stored position.
 
         Used by hot-modify to persist config changes to running risk managers.
-        Shallow merge for nested dicts preserves existing fields not in the update.
+        Deep recursive merge preserves nested fields like exit_tranches
+        that may not be present in the update dict.
         """
         with self._lock:
             pos = self._positions.get(position_id)
             if not pos:
                 return
             rc = pos.get("risk_config", {})
-            for key, val in risk_updates.items():
-                if isinstance(val, dict) and isinstance(rc.get(key), dict):
-                    rc[key] = {**rc[key], **val}  # shallow merge for nested dicts
-                else:
-                    rc[key] = val
-            pos["risk_config"] = rc
+            pos["risk_config"] = self._deep_merge(rc, risk_updates)
             self._dirty_ids.add(position_id)
             self._save()
         logger.info("PositionStore: updated risk_config for %s (keys=%s)", position_id, list(risk_updates.keys()))
