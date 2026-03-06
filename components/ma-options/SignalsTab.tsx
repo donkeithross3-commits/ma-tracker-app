@@ -850,6 +850,33 @@ export default function SignalsTab() {
     }
   };
 
+  // ── Update EOD config for a specific position ──
+  const handlePositionEodUpdate = useCallback(async (
+    positionId: string,
+    eodEnabled: boolean,
+    eodTime: string,
+    minBid: number
+  ) => {
+    try {
+      const res = await fetch("/api/ma-options/execution/position-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          position_id: positionId,
+          config: {
+            eod_exit_time: eodEnabled ? eodTime : null,
+            eod_min_bid: minBid,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.error) setError(data.error);
+    } catch (e: any) {
+      setError(e.message || "Failed to update EOD config");
+    }
+  }, []);
+
   // ── Update config for a specific ticker ──
   const handleConfigUpdate = async (ticker: string) => {
     setLoading(true);
@@ -1130,6 +1157,7 @@ export default function SignalsTab() {
         } | null;
       };
       rm: RiskManagerState | null;
+      rmConfig: Record<string, any> | null;
       quote: QuoteSnapshot | null;
       pnlPct: number | null;
       pnlDollar: number | null;
@@ -1230,7 +1258,8 @@ export default function SignalsTab() {
 
           const recentErrors = matchedStrategy?.recent_errors ?? [];
           const isOrphan = ledger.is_orphan === true;
-          baseDetails.push({ pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan });
+          const rmConfig = matchedStrategy?.config ?? null;
+          baseDetails.push({ pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan });
         }
       }
     } else {
@@ -1304,7 +1333,8 @@ export default function SignalsTab() {
 
         const optionContract = pos.signal?.option_contract ?? null;
         const recentErrors = matchedStrategy?.recent_errors ?? [];
-        baseDetails.push({ pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan: false });
+        const rmConfig = matchedStrategy?.config ?? null;
+        baseDetails.push({ pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan: false });
       }
     }
 
@@ -1395,7 +1425,8 @@ export default function SignalsTab() {
 
         const recentErrors = s.recent_errors ?? [];
         const isOrphan = ledger?.is_orphan === true;
-        return { pos, rm, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan };
+        const rmConfig = s.config ?? null;
+        return { pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan };
       });
 
     return [...baseDetails, ...orphanDetails];
@@ -2197,7 +2228,7 @@ export default function SignalsTab() {
                         // For single-position groups, render inline with close button
                         if (isSingle) {
                           const pd = group.items[0];
-                          const { pos, rm, quote, pnlPct, pnlDollar, strategyId, recentErrors } = pd;
+                          const { pos, rm, rmConfig, quote, pnlPct, pnlDollar, strategyId, recentErrors } = pd;
                           const staleQuote = quote && quote.age_seconds > 30;
                           const isCompleted = rm?.completed;
                           const posLabel = oc ? `${oc.strike} ${isCall ? "C" : "P"}` : "position";
@@ -2268,6 +2299,68 @@ export default function SignalsTab() {
                                   {recentErrors[recentErrors.length - 1]}
                                 </div>
                               )}
+                              {!isCompleted && strategyId && (() => {
+                                const eodTime = rmConfig?.eod_exit_time as string | null | undefined;
+                                const eodMinBid = rmConfig?.eod_min_bid as number | undefined;
+                                const eodEnabled = !!eodTime;
+                                return (
+                                  <div className="flex items-center gap-2 mt-1 text-[10px]">
+                                    <button
+                                      onClick={() => handlePositionEodUpdate(
+                                        strategyId,
+                                        !eodEnabled,
+                                        eodTime || "15:30",
+                                        eodMinBid ?? 0.05
+                                      )}
+                                      className={`px-1.5 py-0.5 rounded font-bold transition-colors ${
+                                        eodEnabled
+                                          ? "bg-amber-900/60 text-amber-300 hover:bg-amber-900/80"
+                                          : "bg-gray-700/50 text-gray-500 hover:bg-gray-700/80 hover:text-gray-300"
+                                      }`}
+                                      title={eodEnabled ? "Click to disable EOD exit" : "Click to enable EOD exit"}
+                                    >
+                                      EOD {eodEnabled ? "ON" : "OFF"}
+                                    </button>
+                                    {eodEnabled && (
+                                      <>
+                                        <input
+                                          type="text"
+                                          defaultValue={eodTime || "15:30"}
+                                          className="inline-edit w-[44px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
+                                          title="EOD exit time (HH:MM ET)"
+                                          onBlur={(e) => {
+                                            const val = e.target.value.trim();
+                                            if (/^\d{1,2}:\d{2}$/.test(val) && val !== eodTime) {
+                                              handlePositionEodUpdate(strategyId, true, val, eodMinBid ?? 0.05);
+                                            }
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                          }}
+                                        />
+                                        <span className="text-gray-600">ET</span>
+                                        <span className="text-gray-600">|</span>
+                                        <span className="text-gray-500">min bid</span>
+                                        <input
+                                          type="text"
+                                          defaultValue={(eodMinBid ?? 0.05).toFixed(2)}
+                                          className="inline-edit w-[40px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
+                                          title="Minimum bid to sell at EOD (below this, let expire)"
+                                          onBlur={(e) => {
+                                            const val = parseFloat(e.target.value);
+                                            if (!isNaN(val) && val >= 0 && val !== (eodMinBid ?? 0.05)) {
+                                              handlePositionEodUpdate(strategyId, true, eodTime || "15:30", val);
+                                            }
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                          }}
+                                        />
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                             </React.Fragment>
                           );
@@ -2336,6 +2429,66 @@ export default function SignalsTab() {
                                 <span className="text-gray-600 ml-auto">{group.totalRemaining}/{group.totalInitial} remaining</span>
                               </div>
                             </button>
+
+                            {/* EOD controls for the group (uses first active RM) */}
+                            {!allClosed && (() => {
+                              const firstActivePd = group.items.find(pd => pd.rm && !pd.rm.completed && pd.strategyId);
+                              if (!firstActivePd || !firstActivePd.strategyId) return null;
+                              const eodTime = firstActivePd.rmConfig?.eod_exit_time as string | null | undefined;
+                              const eodMinBid = firstActivePd.rmConfig?.eod_min_bid as number | undefined;
+                              const eodEnabled = !!eodTime;
+                              const sid = firstActivePd.strategyId;
+                              return (
+                                <div className="flex items-center gap-2 px-2 py-1 text-[10px] border-t border-gray-700/30">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handlePositionEodUpdate(sid, !eodEnabled, eodTime || "15:30", eodMinBid ?? 0.05); }}
+                                    className={`px-1.5 py-0.5 rounded font-bold transition-colors ${
+                                      eodEnabled
+                                        ? "bg-amber-900/60 text-amber-300 hover:bg-amber-900/80"
+                                        : "bg-gray-700/50 text-gray-500 hover:bg-gray-700/80 hover:text-gray-300"
+                                    }`}
+                                    title={eodEnabled ? "Click to disable EOD exit" : "Click to enable EOD exit"}
+                                  >
+                                    EOD {eodEnabled ? "ON" : "OFF"}
+                                  </button>
+                                  {eodEnabled && (
+                                    <>
+                                      <input
+                                        type="text"
+                                        defaultValue={eodTime || "15:30"}
+                                        className="inline-edit w-[44px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
+                                        title="EOD exit time (HH:MM ET)"
+                                        onClick={(e) => e.stopPropagation()}
+                                        onBlur={(e) => {
+                                          const val = e.target.value.trim();
+                                          if (/^\d{1,2}:\d{2}$/.test(val) && val !== eodTime) {
+                                            handlePositionEodUpdate(sid, true, val, eodMinBid ?? 0.05);
+                                          }
+                                        }}
+                                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                      />
+                                      <span className="text-gray-600">ET</span>
+                                      <span className="text-gray-600">|</span>
+                                      <span className="text-gray-500">min bid</span>
+                                      <input
+                                        type="text"
+                                        defaultValue={(eodMinBid ?? 0.05).toFixed(2)}
+                                        className="inline-edit w-[40px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
+                                        title="Minimum bid to sell at EOD (below this, let expire)"
+                                        onClick={(e) => e.stopPropagation()}
+                                        onBlur={(e) => {
+                                          const val = parseFloat(e.target.value);
+                                          if (!isNaN(val) && val >= 0 && val !== (eodMinBid ?? 0.05)) {
+                                            handlePositionEodUpdate(sid, true, eodTime || "15:30", val);
+                                          }
+                                        }}
+                                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                      />
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })()}
 
                             {/* Expanded: compact 1-line per lot */}
                             {isExpanded && (

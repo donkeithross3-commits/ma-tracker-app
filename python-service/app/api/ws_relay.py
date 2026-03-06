@@ -56,7 +56,8 @@ EXECUTION_REQUESTS = frozenset({
     "execution_start", "execution_stop", "execution_status", "execution_config",
     "execution_budget", "execution_add_ticker", "execution_remove_ticker",
     "execution_close_position", "execution_list_models", "execution_swap_model",
-    "execution_resume", "execution_ticker_mode", "agent_restart",
+    "execution_resume", "execution_ticker_mode", "execution_position_config",
+    "agent_restart",
 })
 
 

@@ -89,7 +89,7 @@ _BMC_RISK_FIELDS = frozenset({
     "risk_stop_loss_enabled", "risk_stop_loss_type", "risk_stop_loss_trigger_pct",
     "risk_trailing_enabled", "risk_trailing_activation_pct", "risk_trailing_trail_pct",
     "risk_profit_taking_enabled", "risk_profit_targets_enabled", "risk_profit_targets",
-    "risk_preset", "risk_eod_exit_time",
+    "risk_preset", "risk_eod_exit_time", "risk_eod_min_bid",
 })
 
 
@@ -101,9 +101,9 @@ def _translate_bmc_to_risk_config(bmc_config: dict) -> dict:
     Only includes sections where at least one field is present in bmc_config.
 
     IMPORTANT: The dashboard has no UI for exit_tranches — those are defined
-    in presets. When a preset is specified, we pull exit_tranches (and other
-    preset-only fields like eod_exit_time) from the preset so that
-    downstream merge operations don't lose them.
+    in presets. When a preset is specified, we pull exit_tranches from the
+    preset so that downstream merge operations don't lose them.
+    EOD exit is per-position opt-in (not inherited from preset).
     """
     from strategies.risk_manager import PRESETS
 
@@ -146,11 +146,12 @@ def _translate_bmc_to_risk_config(bmc_config: dict) -> dict:
     # Preset override
     if preset_name:
         risk["preset"] = preset_name
-    # EOD exit time: dashboard field if present, else inherit from preset
+    # EOD exit time: per-position opt-in only (no preset fallback)
     if "risk_eod_exit_time" in bmc_config:
         risk["eod_exit_time"] = bmc_config["risk_eod_exit_time"] or None
-    elif "eod_exit_time" in preset:
-        risk["eod_exit_time"] = preset["eod_exit_time"]
+    # EOD min bid: minimum bid to actually sell at EOD (default $0.05 when EOD enabled)
+    if "risk_eod_min_bid" in bmc_config:
+        risk["eod_min_bid"] = bmc_config["risk_eod_min_bid"]
     return risk
 
 
@@ -529,6 +530,8 @@ class IBDataAgent:
                 return await self._handle_execution_resume(payload)
             elif request_type == "execution_ticker_mode":
                 return await self._handle_execution_ticker_mode(payload)
+            elif request_type == "execution_position_config":
+                return await self._handle_position_risk_config(payload)
             elif request_type == "ib_reconnect":
                 return await self._handle_ib_reconnect(payload)
             elif request_type == "get_ib_executions":
@@ -1849,7 +1852,7 @@ class IBDataAgent:
                             changes = rm.update_risk_config(risk_update)
                             # Sync updated risk config back into state.config
                             # so the eval loop passes current values to evaluate()
-                            for rk in ("stop_loss", "profit_taking", "eod_exit_time"):
+                            for rk in ("stop_loss", "profit_taking", "eod_exit_time", "eod_min_bid"):
                                 if rk in rm._risk_config:
                                     rm_state.config[rk] = rm._risk_config[rk]
                             # Persist updated config to position store
@@ -1955,6 +1958,60 @@ class IBDataAgent:
         result = self.execution_engine.set_ticker_mode(ticker, mode)
         self._persist_engine_config("ticker_mode_change")
         return result
+
+    async def _handle_position_risk_config(self, payload: dict) -> dict:
+        """Update risk config for a SPECIFIC position (risk manager).
+
+        Unlike execution_config (which targets all RMs under a ticker),
+        this targets a single RM by position_id.
+
+        Payload:
+            position_id: str (e.g. "bmc_risk_1709742000000")
+            config: dict (e.g. {"eod_exit_time": "15:30", "eod_min_bid": 0.05})
+        """
+        if not self.execution_engine:
+            return {"error": "Execution engine not initialized"}
+
+        position_id = payload.get("position_id")
+        config_update = payload.get("config", {})
+
+        if not position_id:
+            return {"error": "position_id is required"}
+
+        state = self.execution_engine._strategies.get(position_id)
+        if not state:
+            return {"error": f"Position {position_id} not found"}
+
+        rm = state.strategy
+        if not hasattr(rm, "update_risk_config"):
+            return {"error": f"{position_id} is not a risk manager"}
+
+        changes = rm.update_risk_config(config_update)
+
+        # Sync back to state.config so eval loop passes current values
+        for key in ("eod_exit_time", "eod_min_bid", "stop_loss", "profit_taking"):
+            if key in rm._risk_config:
+                state.config[key] = rm._risk_config[key]
+
+        # Persist to position store
+        if self.position_store:
+            self.position_store.update_risk_config(position_id, config_update)
+            if hasattr(rm, "get_runtime_snapshot"):
+                self.position_store.update_runtime_state(
+                    position_id, rm.get_runtime_snapshot()
+                )
+
+        # Cancel orders for disabled levels
+        for oid in changes.get("cancel_order_ids", []):
+            try:
+                self.scanner.cancelOrder(oid)
+                logger.info("Cancelled order %d (position risk config change on %s)", oid, position_id)
+            except Exception as ce:
+                logger.error("Failed to cancel order %d: %s", oid, ce)
+
+        self._persist_engine_config("position_risk_config")
+        logger.info("Position risk config updated for %s: %s", position_id, changes)
+        return {"ok": True, "changes": changes}
 
     async def _handle_execution_add_ticker(self, payload: dict) -> dict:
         """Add a single ticker/strategy to the running execution engine.

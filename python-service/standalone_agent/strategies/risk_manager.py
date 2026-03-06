@@ -180,7 +180,7 @@ PRESETS = {
                 ],
             },
         },
-        "eod_exit_time": "15:30",   # force exit before close (1DTE only — skip for 0DTE)
+        # eod_exit_time: OFF by default — user opts in per-position via dashboard
         "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
     },
     "intraday_premium": {
@@ -436,6 +436,11 @@ class RiskManagerStrategy(ExecutionStrategy):
             "stop_loss": config.get("stop_loss", {}),
             "profit_taking": config.get("profit_taking", {}),
         }
+        # EOD fields live in _risk_config for hot-modify (not in nested stop/profit dicts)
+        if config.get("eod_exit_time"):
+            self._risk_config["eod_exit_time"] = config["eod_exit_time"]
+        if "eod_min_bid" in config:
+            self._risk_config["eod_min_bid"] = config["eod_min_bid"]
 
         logger.info(
             "RiskManager started: %s %s %d @ %.4f, levels=%s",
@@ -906,6 +911,11 @@ class RiskManagerStrategy(ExecutionStrategy):
                     changes["removed_levels"].append("eod_closeout")
                     logger.info("Hot-modify: disabled eod_closeout level")
 
+        # Apply eod_min_bid if present in new_config
+        if "eod_min_bid" in new_config:
+            self._risk_config["eod_min_bid"] = new_config["eod_min_bid"]
+            changes["updated_fields"].append("eod_min_bid")
+
         # --- Stop Loss ---
         old_sl = self._risk_config.get("stop_loss", {})
         new_sl = new_config.get("stop_loss", old_sl)
@@ -1304,6 +1314,17 @@ class RiskManagerStrategy(ExecutionStrategy):
         # Arm the level if not present (first time we reach EOD window)
         if key not in self._level_states:
             self._level_states[key] = LevelState.ARMED
+
+        # Min bid gate: don't sell worthless options where transaction costs exceed proceeds
+        eod_min_bid = config.get("eod_min_bid", 0.05)
+        if eod_min_bid and quote:
+            bid = getattr(quote, "bid", 0) or 0
+            if bid < eod_min_bid:
+                logger.info(
+                    "EOD closeout skipped: bid %.4f < min_bid %.4f — letting expire",
+                    bid, eod_min_bid,
+                )
+                return None  # Don't sell — lotto value, let expire
 
         # Exit 100% at market
         qty = self.remaining_qty

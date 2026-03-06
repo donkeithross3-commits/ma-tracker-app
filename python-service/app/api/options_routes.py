@@ -2284,6 +2284,33 @@ async def relay_execution_ticker_mode(request: ExecutionTickerModeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ExecutionPositionConfigRequest(BaseModel):
+    userId: str
+    position_id: str
+    config: dict = {}
+
+
+@router.post("/relay/execution/position-config")
+async def relay_execution_position_config(request: ExecutionPositionConfigRequest):
+    """Update risk config for a specific position (risk manager)."""
+    try:
+        response_data = await send_request_to_provider(
+            request_type="execution_position_config",
+            payload={"position_id": request.position_id, "config": request.config},
+            timeout=10.0,
+            user_id=request.userId,
+            allow_fallback_to_any_provider=False,
+        )
+        if "error" in response_data:
+            raise HTTPException(status_code=500, detail=response_data["error"])
+        return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Relay execution/position-config error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class ExecutionAddTickerRequest(BaseModel):
     userId: str
     strategy_id: str
