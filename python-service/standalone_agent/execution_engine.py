@@ -1706,7 +1706,12 @@ class ExecutionEngine:
     # ── Status / telemetry ──
 
     def _get_position_ledger(self) -> list:
-        """Today's positions from persistent store for dashboard blotter."""
+        """Active + today's positions from persistent store for dashboard blotter.
+
+        Includes ALL active positions regardless of creation date (1DTE positions
+        are created the day before they expire) plus any positions created or
+        closed today for the trade log.
+        """
         if not self._position_store:
             return []
         from datetime import datetime
@@ -1715,7 +1720,11 @@ class ExecutionEngine:
         midnight = datetime.now(et).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         results = []
         for p in self._position_store.get_all_positions():
-            if p.get("created_at", 0) < midnight:
+            status = p.get("status", "active")
+            created_at = p.get("created_at", 0)
+            closed_at = p.get("closed_at") or 0
+            # Include if: (a) still active, OR (b) created today, OR (c) closed today
+            if status != "active" and created_at < midnight and closed_at < midnight:
                 continue
             entry = p.get("entry", {})
             lineage = p.get("lineage", {})
