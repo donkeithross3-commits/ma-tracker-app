@@ -78,13 +78,20 @@ class LevelType(Enum):
 
 
 class PendingOrder:
-    """Tracks a pending order for a specific level."""
-    __slots__ = ("order_id", "level_type", "level_idx", "expected_qty",
-                 "filled_so_far", "placed_at")
+    """Tracks a pending order for a specific level.
 
-    def __init__(self, order_id: int, level_type: str, level_idx: int,
-                 expected_qty: int, placed_at: float):
+    ``level_key`` stores the canonical key used in ``_level_states``
+    (e.g. ``"stop_simple"``, ``"stop_0"``, ``"trailing"``, ``"eod_closeout"``).
+    This eliminates the parse/reconstruct round-trip that previously caused
+    ``"stop_simple"`` -> ``("stop_simple", 0)`` -> ``"stop_simple_0"`` mismatch.
+    """
+    __slots__ = ("order_id", "level_key", "level_type", "level_idx",
+                 "expected_qty", "filled_so_far", "placed_at")
+
+    def __init__(self, order_id: int, level_key: str, level_type: str,
+                 level_idx: int, expected_qty: int, placed_at: float):
         self.order_id = order_id
+        self.level_key = level_key
         self.level_type = level_type
         self.level_idx = level_idx
         self.expected_qty = expected_qty
@@ -243,7 +250,8 @@ class RiskManagerStrategy(ExecutionStrategy):
     def __init__(self):
         # ── State (initialized in on_start) ──
         self.remaining_qty: int = 0
-        self.initial_qty: int = 0
+        self.initial_qty: int = 0       # peak remaining (backward-compat for P&L% display)
+        self.lifetime_opened_qty: int = 0  # monotonic total contracts ever added (audit only)
         self.entry_price: float = 0.0
         self.is_long: bool = True
         self.cache_key: str = ""
@@ -338,6 +346,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         pos = config.get("position", {})
         self.initial_qty = int(pos.get("quantity", 0))
         self.remaining_qty = self.initial_qty
+        self.lifetime_opened_qty = self.initial_qty
         self.entry_price = float(pos.get("entry_price", 0))
         self.is_long = pos.get("side", "LONG").upper() == "LONG"
 
@@ -378,6 +387,10 @@ class RiskManagerStrategy(ExecutionStrategy):
             if trail.get("enabled"):
                 self._level_states["trailing"] = LevelState.ARMED
 
+        # EOD close-out level (armed from start if eod_exit_time is configured)
+        if config.get("eod_exit_time"):
+            self._level_states["eod_closeout"] = LevelState.ARMED
+
         # Snapshot risk config for hot-modify comparison
         self._risk_config = {
             "stop_loss": config.get("stop_loss", {}),
@@ -404,11 +417,16 @@ class RiskManagerStrategy(ExecutionStrategy):
 
         Called when BMC buys another lot of the same contract that this
         manager is already guarding. Recomputes weighted average entry
-        and increases position size.
+        against REMAINING (open) contracts, not lifetime total.
 
         Trailing activation state is preserved (sticky). The HWM and
         trail price are price-based, not P&L-based, so adding a lot
         only affects the P&L% display — not the actual stop behavior.
+
+        Position Semantics V2 (risk hardening):
+        - Cost basis averaged against remaining_qty (open inventory only)
+        - lifetime_opened_qty tracks monotonic total (audit only)
+        - initial_qty tracks peak remaining for backward compat
 
         Args:
             entry_price: Fill price of the new lot.
@@ -417,16 +435,18 @@ class RiskManagerStrategy(ExecutionStrategy):
             fill_time: Timestamp of the fill (defaults to now).
             perm_id: IB permanent order ID.
         """
-        old_qty = self.initial_qty
+        old_remaining = self.remaining_qty
         old_avg = self.entry_price
 
-        # Weighted average entry price
-        new_total_qty = old_qty + quantity
-        if new_total_qty > 0:
-            self.entry_price = (old_avg * old_qty + entry_price * quantity) / new_total_qty
+        # Cost basis: weighted average against REMAINING (open) contracts
+        new_remaining = old_remaining + quantity
+        if new_remaining > 0:
+            self.entry_price = (old_avg * old_remaining + entry_price * quantity) / new_remaining
 
-        self.initial_qty = new_total_qty
-        self.remaining_qty += quantity
+        self.remaining_qty = new_remaining
+        self.lifetime_opened_qty += quantity
+        # initial_qty tracks peak remaining for backward compat (P&L% display)
+        self.initial_qty = max(self.initial_qty, self.remaining_qty)
 
         # Track individual lot for audit/dashboard
         self._lot_entries.append({
@@ -454,9 +474,8 @@ class RiskManagerStrategy(ExecutionStrategy):
         for oid, pending in list(self._pending_orders.items()):
             age = now - pending.placed_at
             if age > self.PENDING_ORDER_WARN_SEC:
-                level_key = f"{pending.level_type}_{pending.level_idx}" if pending.level_type != "trailing" else "trailing"
                 logger.warning("RiskManager: pending order %d for level %s is %.0fs old",
-                               oid, level_key, age)
+                               oid, pending.level_key, age)
 
         quote = quotes.get(self.cache_key)
         if quote is None:
@@ -533,11 +552,9 @@ class RiskManagerStrategy(ExecutionStrategy):
             return
 
         pending.filled_so_far = fill_data.get("filled", 0.0)
-        self.remaining_qty = max(0, self.remaining_qty - int(new_filled))
+        self.remaining_qty = max(0, self.remaining_qty - int(round(new_filled)))
 
-        level_key = f"{pending.level_type}_{pending.level_idx}"
-        if pending.level_type == "trailing":
-            level_key = "trailing"
+        level_key = pending.level_key
 
         fill_entry = {
             "time": time.time(),
@@ -622,8 +639,7 @@ class RiskManagerStrategy(ExecutionStrategy):
                 continue
             # Check if this level already has a pending order
             already_pending = any(
-                p.level_type == self._parse_level_key(level_key)[0]
-                and p.level_idx == self._parse_level_key(level_key)[1]
+                p.level_key == level_key
                 for p in self._pending_orders.values()
             )
             if not already_pending:
@@ -634,6 +650,7 @@ class RiskManagerStrategy(ExecutionStrategy):
                     expected_qty = self.remaining_qty  # fallback
                 self._pending_orders[order_id] = PendingOrder(
                     order_id=order_id,
+                    level_key=level_key,
                     level_type=lt,
                     level_idx=li,
                     expected_qty=expected_qty,
@@ -665,8 +682,7 @@ class RiskManagerStrategy(ExecutionStrategy):
             for lk, ls in self._level_states.items():
                 if ls == LevelState.TRIGGERED:
                     has_pending = any(
-                        p.level_type == self._parse_level_key(lk)[0]
-                        and p.level_idx == self._parse_level_key(lk)[1]
+                        p.level_key == lk
                         for p in self._pending_orders.values()
                     )
                     if not has_pending:
@@ -679,9 +695,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         if not pending:
             return
 
-        level_key = f"{pending.level_type}_{pending.level_idx}"
-        if pending.level_type == "trailing":
-            level_key = "trailing"
+        level_key = pending.level_key
 
         # Track consecutive rejections per level
         count = self._rejection_counts.get(level_key, 0) + 1
@@ -705,6 +719,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         return {
             "remaining_qty": self.remaining_qty,
             "initial_qty": self.initial_qty,
+            "lifetime_opened_qty": self.lifetime_opened_qty,
             "entry_price": self.entry_price,
             "high_water_mark": self.high_water_mark,
             "is_long": self.is_long,
@@ -715,7 +730,7 @@ class RiskManagerStrategy(ExecutionStrategy):
             "level_states": {k: v.value for k, v in self._level_states.items()},
             "pending_orders": {
                 str(oid): {
-                    "level": f"{p.level_type}_{p.level_idx}" if p.level_type != "trailing" else "trailing",
+                    "level": p.level_key,
                     "expected_qty": p.expected_qty,
                     "filled_so_far": p.filled_so_far,
                     "placed_at": p.placed_at,
@@ -737,6 +752,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         return {
             "remaining_qty": self.remaining_qty,
             "initial_qty": self.initial_qty,
+            "lifetime_opened_qty": self.lifetime_opened_qty,
             "entry_price": self.entry_price,
             "high_water_mark": self.high_water_mark,
             "trailing_active": self._trailing_active,
@@ -758,6 +774,8 @@ class RiskManagerStrategy(ExecutionStrategy):
         """
         self.remaining_qty = int(state.get("remaining_qty", self.remaining_qty))
         self.initial_qty = int(state.get("initial_qty", self.initial_qty))
+        # Backward compat: pre-V2 snapshots won't have lifetime_opened_qty
+        self.lifetime_opened_qty = int(state.get("lifetime_opened_qty", self.initial_qty))
         self.entry_price = float(state.get("entry_price", self.entry_price))
         self.high_water_mark = float(state.get("high_water_mark", self.high_water_mark))
         self._trailing_active = bool(state.get("trailing_active", self._trailing_active))
@@ -806,11 +824,38 @@ class RiskManagerStrategy(ExecutionStrategy):
         Called from the eval thread context — no lock needed since evaluate()
         and update_risk_config() both run on the eval thread.
 
+        If new_config contains a "preset" key, the named preset is resolved
+        first and its fields are used as defaults (explicit fields in
+        new_config still override the preset).
+
         Returns dict with {updated_fields, added_levels, removed_levels,
         skipped_levels, cancel_order_ids}.
         cancel_order_ids contains order IDs for pending orders tied to
         disabled/invalidated levels that should be cancelled immediately.
         """
+        # Resolve preset name into concrete config fields
+        preset_name = new_config.get("preset")
+        if preset_name and preset_name in PRESETS:
+            resolved = dict(PRESETS[preset_name])
+            # Explicit fields override preset defaults
+            resolved.update({k: v for k, v in new_config.items() if k != "preset"})
+            new_config = resolved
+            logger.info("Resolved preset '%s' in hot-modify", preset_name)
+
+        # Apply eod_exit_time if present in new_config
+        if "eod_exit_time" in new_config:
+            new_eod = new_config["eod_exit_time"]
+            old_eod = self._risk_config.get("eod_exit_time")
+            self._risk_config["eod_exit_time"] = new_eod
+            if new_eod and "eod_closeout" not in self._level_states:
+                self._level_states["eod_closeout"] = LevelState.ARMED
+                logger.info("Hot-modify: enabled eod_closeout level (exit_time=%s)", new_eod)
+            elif not new_eod and "eod_closeout" in self._level_states:
+                state = self._level_states.get("eod_closeout")
+                if state in (LevelState.ARMED, LevelState.TRIGGERED):
+                    del self._level_states["eod_closeout"]
+                    logger.info("Hot-modify: disabled eod_closeout level")
+
         changes = {
             "updated_fields": [], "added_levels": [], "removed_levels": [],
             "skipped_levels": [], "cancel_order_ids": [],
@@ -909,9 +954,7 @@ class RiskManagerStrategy(ExecutionStrategy):
     def _collect_cancel_ids(self, level_key: str, cancel_list: list) -> None:
         """Find pending order IDs associated with a level and add to cancel list."""
         for oid, po in list(self._pending_orders.items()):
-            # Match level key: stop_simple, stop_0, profit_0, trailing
-            po_key = f"{po.level_type}_{po.level_idx}" if po.level_type != "trailing" else "trailing"
-            if po_key == level_key or (level_key == "stop_simple" and po.level_type == "stop" and po.level_idx == -1):
+            if po.level_key == level_key:
                 cancel_list.append(oid)
                 # Remove from pending orders — the cancel callback will handle cleanup
                 del self._pending_orders[oid]
@@ -976,18 +1019,6 @@ class RiskManagerStrategy(ExecutionStrategy):
             is_exit=True,  # EXIT orders bypass entry budget
         )
 
-    def _register_pending(self, action: OrderAction, level_type: str,
-                          level_idx: int, level_key: str) -> OrderAction:
-        """Mark a level as TRIGGERED and prepare pending order tracking.
-
-        The actual order_id will be assigned by the engine after placement.
-        We use a sentinel order_id of -1 until on_fill maps it.
-        """
-        self._level_states[level_key] = LevelState.TRIGGERED
-        # We can't know the order_id yet -- the engine will call on_fill
-        # with the real order_id. We store a "pre-pending" record that
-        # we'll match in on_fill by checking if the level is TRIGGERED.
-        return action
 
     def _check_stop_loss(self, config: dict, pnl_pct: float,
                          current_price: float, quote) -> Optional[OrderAction]:
@@ -1201,6 +1232,11 @@ class RiskManagerStrategy(ExecutionStrategy):
 
         # Only close positions opened today (don't force-close recovered overnight positions)
         if not self._position_opened_today():
+            return None
+
+        # Wait for in-flight exits (trailing/stop) to complete before EOD fires
+        # Prevents over-sell when trailing tranche is pending at EOD boundary
+        if self._pending_orders:
             return None
 
         # Check if we've already triggered an EOD level

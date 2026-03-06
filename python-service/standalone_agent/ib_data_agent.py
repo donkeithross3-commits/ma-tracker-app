@@ -89,7 +89,7 @@ _BMC_RISK_FIELDS = frozenset({
     "risk_stop_loss_enabled", "risk_stop_loss_type", "risk_stop_loss_trigger_pct",
     "risk_trailing_enabled", "risk_trailing_activation_pct", "risk_trailing_trail_pct",
     "risk_profit_taking_enabled", "risk_profit_targets_enabled", "risk_profit_targets",
-    "risk_preset",
+    "risk_preset", "risk_eod_exit_time",
 })
 
 
@@ -125,6 +125,9 @@ def _translate_bmc_to_risk_config(bmc_config: dict) -> dict:
     # Preset override
     if "risk_preset" in bmc_config:
         risk["preset"] = bmc_config["risk_preset"]
+    # EOD exit time (hot-modifiable)
+    if "risk_eod_exit_time" in bmc_config:
+        risk["eod_exit_time"] = bmc_config["risk_eod_exit_time"] or None
     return risk
 
 
@@ -2450,7 +2453,7 @@ class IBDataAgent:
         found = [v for v in variants if v in self.execution_engine._strategies]
         return found if found else [strategy_id]  # return original if no variants found
 
-    def _spawn_risk_manager_for_bmc(self, risk_config: dict, record_fill: bool = True) -> None:
+    def _spawn_risk_manager_for_bmc(self, risk_config: dict, record_fill: bool = True) -> bool:
         """Spawn or aggregate a RiskManagerStrategy for a BMC entry fill.
 
         Called by BigMoveConvexityStrategy.on_fill() to create a position
@@ -2464,10 +2467,12 @@ class IBDataAgent:
         record_fill: if False, skip add_fill() for the entry. Used by
             _spawn_missing_risk_managers (IB reconciliation) so that
             recovery spawns don't create phantom Trade Log entries.
+
+        Returns True if RM was spawned/aggregated successfully, False on failure.
         """
         if not self.execution_engine:
             logger.warning("Cannot spawn risk manager: execution engine not initialized")
-            return
+            return False
 
         # Extract lineage before passing to risk manager (WS2)
         lineage = risk_config.pop("lineage", None)
@@ -2482,7 +2487,7 @@ class IBDataAgent:
         existing_sid = self._find_risk_manager_for_contract(instrument)
         if existing_sid:
             self._aggregate_lot_into_manager(existing_sid, pos_info, instrument, lineage)
-            return
+            return True
 
         # ── No existing manager — create a new one ──
         from strategies.risk_manager import RiskManagerStrategy
@@ -2492,7 +2497,8 @@ class IBDataAgent:
 
         result = self.execution_engine.load_strategy(strategy_id, strategy, risk_config)
         if "error" in result:
-            logger.error("Failed to spawn risk manager for BMC: %s", result["error"])
+            logger.error("CRITICAL: Failed to spawn risk manager for BMC — position UNMANAGED: %s", result["error"])
+            return False
         else:
             logger.info("Spawned RiskManagerStrategy %s for BMC position", strategy_id)
             # Set ticker on the StrategyState so Gate 0 (ticker mode) applies to
@@ -2535,6 +2541,7 @@ class IBDataAgent:
                 self.position_store.update_runtime_state(
                     strategy_id, strategy.get_runtime_snapshot()
                 )
+            return True
 
     def _find_risk_manager_for_contract(self, instrument: dict) -> Optional[str]:
         """Find an active risk manager guarding the same contract.

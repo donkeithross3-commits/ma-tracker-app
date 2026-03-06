@@ -523,15 +523,28 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 # Attach lineage for position store persistence (WS2)
                 if self._pending_lineage:
                     risk_config["lineage"] = self._pending_lineage
+                    self._pending_lineage = None  # consumed — prevent stale lineage on next fill
                 # Pass parent strategy ID for risk manager lineage tracking
                 risk_config["_parent_strategy_id"] = getattr(self, "_parent_strategy_id", None) or f"bmc_{self._ticker.lower()}"
-                self._spawn_risk_manager(risk_config)
-                logger.info(
-                    "Spawned RiskManagerStrategy for BMC position: strike=%.2f, qty=%d",
-                    contract_info.get("strike", 0), int(filled_qty),
-                )
+                spawn_ok = self._spawn_risk_manager(risk_config)
+                if spawn_ok is False:
+                    # Spawn failed — position is UNMANAGED. Log critical alert.
+                    # The agent's reconciliation loop will catch this on the next
+                    # 60s cycle and retry via _spawn_missing_risk_managers.
+                    logger.error(
+                        "CRITICAL: RM spawn FAILED for %s strike=%.2f qty=%d — "
+                        "position UNMANAGED until reconciliation recovery",
+                        self._ticker, contract_info.get("strike", 0), int(filled_qty),
+                    )
+                else:
+                    logger.info(
+                        "Spawned RiskManagerStrategy for BMC position: strike=%.2f, qty=%d",
+                        contract_info.get("strike", 0), int(filled_qty),
+                    )
             except Exception:
-                logger.exception("Failed to spawn RiskManagerStrategy")
+                logger.exception(
+                    "CRITICAL: Failed to spawn RiskManagerStrategy — position UNMANAGED"
+                )
 
     def on_order_placed(self, order_id: int, result: dict, config: dict) -> None:
         logger.info("BMC order placed: order_id=%d, result=%s", order_id, result)
@@ -1218,6 +1231,19 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 metadata={**signal.metadata, "signal_inverted": True, "target_column": _snap_target_column},
             )
 
+        # Build NaN breakdown for debugging feature health in live telemetry.
+        nan_features = [
+            k for k, v in fv.features.items()
+            if v is None or (isinstance(v, float) and math.isnan(v))
+        ]
+        nan_group_counts: dict[str, int] = {}
+        for feature_name in nan_features:
+            if "__" in feature_name:
+                group = feature_name.split("__", 1)[0]
+            else:
+                group = feature_name.split("_", 1)[0]
+            nan_group_counts[group] = nan_group_counts.get(group, 0) + 1
+
         # Record signal state for telemetry
         signal_record = {
             "timestamp": str(t),
@@ -1226,6 +1252,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "strength": signal.strength,
             "n_features": fv.n_features,
             "n_nan": fv.n_nan,
+            "nan_group_counts": nan_group_counts,
+            "nan_feature_sample": nan_features[:20],
             "computation_ms": fv.computation_time_ms,
             "bars_available": {k: len(v) for k, v in bars_by_res.items()},
             "underlying_price": underlying_price,
@@ -1482,6 +1510,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 "max_affordable_premium": max_affordable_premium,
             }
 
+        multiplier = float(contract_dict.get("multiplier", 100))
         order = OrderAction(
             strategy_id="",  # filled by engine
             side=OrderSide.BUY,
@@ -1489,6 +1518,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             quantity=qty,
             contract_dict=contract_dict,
             limit_price=limit_price,
+            estimated_notional=limit_price * qty * multiplier,
             reason=f"BMC[{self._ticker}] signal: {signal.direction} p={signal.probability:.3f} "
                    f"strike={strike} {right} {dte_label} limit=${limit_price:.2f}",
         )

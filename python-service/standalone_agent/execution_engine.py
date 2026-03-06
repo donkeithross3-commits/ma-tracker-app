@@ -98,6 +98,7 @@ class OrderAction:
     outside_rth: bool = False  # fill outside regular trading hours (pre/post market)
     reason: str = ""  # human-readable explanation for logging/audit
     is_exit: bool = False  # True for risk manager exits — bypasses entry budget
+    estimated_notional: Optional[float] = None  # pre-computed $ cost for MKT orders (qty × price × multiplier)
 
 
 @dataclass
@@ -267,6 +268,7 @@ class ExecutionEngine:
     LIFECYCLE_SWEEP_TICKS = 20   # run lifecycle sweep every N ticks (2s at 100ms)
     STALE_ORDER_WARN_SEC = 60.0  # warn if order has no update for this long
     STALE_ORDER_CANCEL_SEC = 120.0  # auto-cancel after 2 minutes with no update
+    STALE_ORDER_GC_SEC = 300.0     # force-remove after 5 min if cancel got no response
     FLIPFLOP_MAX_ORDERS = 5      # max orders per strategy in the flip-flop window
     FLIPFLOP_WINDOW_SEC = 10.0   # flip-flop detection window
     FLIPFLOP_COOLDOWN_SEC = 60.0 # resume after cooldown instead of permanent pause
@@ -317,6 +319,10 @@ class ExecutionEngine:
         self._risk_budget_usd: float = 0.0    # 0 = disabled, >0 = max total dollar exposure
 
         # ── Reconnect hold: blocks eval loop until post-reconnect reconciliation ──
+        # NOTE: Written by async agent thread (set_reconnect_hold), read by eval
+        # thread (_evaluate_all, _process_order_action). Safe under CPython GIL +
+        # x86 memory ordering. If migrating to no-GIL Python or ARM, replace with
+        # threading.Event. See Finding L6 in risk-management-code-review-2026-03-05.
         self._reconnect_hold: bool = False
 
         # ── Auto-restart pause: entries blocked, risk managers active ──
@@ -1082,6 +1088,34 @@ class ExecutionEngine:
                 if since_update > self.STALE_ORDER_CANCEL_SEC:
                     to_cancel.append(order_id)
 
+        # Force-GC orders stuck longer than STALE_ORDER_GC_SEC
+        # (cancel was sent but IB never acknowledged — e.g. dead socket)
+        to_gc = []
+        with self._active_orders_lock:
+            for order_id, active in list(self._active_orders.items()):
+                age = now - active.placed_at
+                since_update = now - active.last_update if active.last_update > 0 else age
+                if (since_update > self.STALE_ORDER_GC_SEC
+                        and active.status in ("Submitted", "PreSubmitted", "PendingCancel")):
+                    to_gc.append((order_id, active))
+
+        for order_id, active in to_gc:
+            logger.warning(
+                "Force-GC stale order %d (strategy=%s, status=%s, age=%.0fs)",
+                order_id, active.strategy_id, active.status,
+                now - active.placed_at,
+            )
+            strategy_id = self._order_strategy_map.pop(order_id, None)
+            with self._active_orders_lock:
+                self._active_orders.pop(order_id, None)
+            sid = strategy_id or active.strategy_id
+            state = self._strategies.get(sid)
+            if state and state.strategy:
+                try:
+                    state.strategy.on_order_dead(order_id, "stale_gc_timeout", state.config)
+                except Exception as e:
+                    logger.error("Strategy %s on_order_dead error (GC): %s", sid, e)
+
         for order_id in to_cancel:
             logger.warning("Auto-cancelling stale order %d", order_id)
             try:
@@ -1214,9 +1248,14 @@ class ExecutionEngine:
 
             # Gate 1c: Risk budget (total dollar exposure cap)
             if self._risk_budget_usd > 0:
-                est_price = action.limit_price or 0
-                multiplier = float(action.contract_dict.get("multiplier", 100))
-                new_cost = est_price * action.quantity * multiplier
+                # Use estimated_notional if provided (covers MKT orders where
+                # limit_price is None), otherwise fall back to limit_price calc.
+                if action.estimated_notional is not None and action.estimated_notional > 0:
+                    new_cost = action.estimated_notional
+                else:
+                    est_price = action.limit_price or 0
+                    multiplier = float(action.contract_dict.get("multiplier", 100))
+                    new_cost = est_price * action.quantity * multiplier
                 current_exposure = self._compute_current_exposure()
                 if (current_exposure + new_cost) > self._risk_budget_usd:
                     self._refund_entry_cap()
@@ -1606,6 +1645,40 @@ class ExecutionEngine:
                 report["orphaned_ib"].append({
                     "instrument": key, "qty": qty, "avg_cost": ib_pos.get("avgCost"),
                 })
+
+        # ── Auto-repair quantity mismatches (WS-E) ──
+        # When IB shows a different qty than the agent, update the runtime RM
+        # so subsequent exits size correctly. Toggle via RECON_AUTO_REPAIR.
+        for adj in report["adjusted"]:
+            position_id = adj["position_id"]
+            ib_qty = adj["ib_qty"]
+            agent_qty = adj["agent_qty"]
+            # Find the matching risk manager strategy
+            state = self._strategies.get(position_id)
+            if not state or not state.strategy:
+                continue
+            rm = state.strategy
+            if not hasattr(rm, "remaining_qty"):
+                continue
+            old_qty = rm.remaining_qty
+            rm.remaining_qty = ib_qty
+            # Bump initial_qty if IB has more than we thought
+            if hasattr(rm, "initial_qty") and ib_qty > rm.initial_qty:
+                rm.initial_qty = ib_qty
+            # If IB shows 0, mark position completed
+            if ib_qty <= 0 and hasattr(rm, "_completed"):
+                rm._completed = True
+            adj["repaired"] = True
+            adj["old_qty"] = old_qty
+            logger.warning(
+                "Reconciliation AUTO-REPAIR: %s qty %d -> %d (IB authoritative)",
+                position_id, old_qty, ib_qty,
+            )
+            # Persist repaired state immediately
+            if self._position_store and hasattr(rm, "get_runtime_snapshot"):
+                self._position_store.update_runtime_state(
+                    position_id, rm.get_runtime_snapshot()
+                )
 
         # Check for agent positions not in IB
         for key, agent_pos in store_positions.items():

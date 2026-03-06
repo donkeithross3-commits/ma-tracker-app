@@ -93,8 +93,9 @@ class TestDisableStopLoss:
         risk_manager._level_states["stop_simple"] = LevelState.TRIGGERED
         risk_manager._pending_orders[42] = PendingOrder(
             order_id=42,
-            level_type="stop",
-            level_idx=-1,
+            level_key="stop_simple",
+            level_type="stop_simple",
+            level_idx=0,
             expected_qty=5,
             placed_at=0,
         )
@@ -150,6 +151,7 @@ class TestDisableTrailing:
         risk_manager._trailing_active = True
         risk_manager._pending_orders[99] = PendingOrder(
             order_id=99,
+            level_key="trailing",
             level_type="trailing",
             level_idx=0,
             expected_qty=2,
