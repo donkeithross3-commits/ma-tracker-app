@@ -2185,20 +2185,29 @@ export default function SignalsTab() {
                                 ) : rm ? (
                                   <span className="text-gray-600 italic text-[10px]">waiting...</span>
                                 ) : null}
-                                {rm && Object.entries(rm.level_states || {}).map(([key, state]) => (
-                                  <span
-                                    key={key}
-                                    className={`px-1 py-0.5 rounded font-mono text-[10px] ${
-                                      state === "FILLED" ? "bg-green-900 text-green-300" :
-                                      state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
-                                      state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
-                                      state === "FAILED" ? "bg-red-900 text-red-300" :
-                                      "bg-gray-700 text-gray-300"
-                                    }`}
-                                  >
-                                    {state}
-                                  </span>
-                                ))}
+                                {rm && (() => {
+                                  const ls = rm.level_states || {};
+                                  const grouped: Record<string, string[]> = {};
+                                  for (const [key, state] of Object.entries(ls)) {
+                                    const s = state as string;
+                                    (grouped[s] ||= []).push(key.replace(/_/g, " "));
+                                  }
+                                  return Object.entries(grouped).map(([state, levels]) => (
+                                    <span
+                                      key={state}
+                                      title={levels.join(", ")}
+                                      className={`px-1 py-0.5 rounded font-mono text-[10px] cursor-default ${
+                                        state === "FILLED" ? "bg-green-900 text-green-300" :
+                                        state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
+                                        state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
+                                        state === "FAILED" ? "bg-red-900 text-red-300" :
+                                        "bg-gray-700 text-gray-300"
+                                      }`}
+                                    >
+                                      {levels.length > 1 ? `${levels.length} ${state}` : `${levels[0]} ${state}`}
+                                    </span>
+                                  ));
+                                })()}
                                 {rm?.trailing_active && (
                                   <span className="text-yellow-300 font-mono text-[10px]">trail@{rm.trailing_stop_price.toFixed(2)}</span>
                                 )}
@@ -2329,20 +2338,29 @@ export default function SignalsTab() {
                                             {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
                                           </span>
                                         )}
-                                        {rm && Object.entries(rm.level_states || {}).map(([key, state]) => (
-                                          <span
-                                            key={key}
-                                            className={`px-1 py-0.5 rounded font-mono ${
-                                              state === "FILLED" ? "bg-green-900 text-green-300" :
-                                              state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
-                                              state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
-                                              state === "FAILED" ? "bg-red-900 text-red-300" :
-                                              "bg-gray-700 text-gray-300"
-                                            }`}
-                                          >
-                                            {state}
-                                          </span>
-                                        ))}
+                                        {rm && (() => {
+                                          const ls = rm.level_states || {};
+                                          const grouped: Record<string, string[]> = {};
+                                          for (const [key, state] of Object.entries(ls)) {
+                                            const s = state as string;
+                                            (grouped[s] ||= []).push(key.replace(/_/g, " "));
+                                          }
+                                          return Object.entries(grouped).map(([state, levels]) => (
+                                            <span
+                                              key={state}
+                                              title={levels.join(", ")}
+                                              className={`px-1 py-0.5 rounded font-mono cursor-default ${
+                                                state === "FILLED" ? "bg-green-900 text-green-300" :
+                                                state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
+                                                state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
+                                                state === "FAILED" ? "bg-red-900 text-red-300" :
+                                                "bg-gray-700 text-gray-300"
+                                              }`}
+                                            >
+                                              {levels.length > 1 ? `${levels.length} ${state}` : `${levels[0]} ${state}`}
+                                            </span>
+                                          ));
+                                        })()}
                                         {rm?.trailing_active && (
                                           <span className="text-yellow-300 font-mono">trail@{rm.trailing_stop_price.toFixed(2)}</span>
                                         )}
