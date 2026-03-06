@@ -843,6 +843,12 @@ class RiskManagerStrategy(ExecutionStrategy):
             new_config = resolved
             logger.info("Resolved preset '%s' in hot-modify", preset_name)
 
+        # Initialize changes dict early — eod_exit_time block may populate cancel_order_ids
+        changes = {
+            "updated_fields": [], "added_levels": [], "removed_levels": [],
+            "skipped_levels": [], "cancel_order_ids": [],
+        }
+
         # Apply eod_exit_time if present in new_config
         if "eod_exit_time" in new_config:
             new_eod = new_config["eod_exit_time"]
@@ -850,17 +856,16 @@ class RiskManagerStrategy(ExecutionStrategy):
             self._risk_config["eod_exit_time"] = new_eod
             if new_eod and "eod_closeout" not in self._level_states:
                 self._level_states["eod_closeout"] = LevelState.ARMED
+                changes["added_levels"].append("eod_closeout")
                 logger.info("Hot-modify: enabled eod_closeout level (exit_time=%s)", new_eod)
             elif not new_eod and "eod_closeout" in self._level_states:
                 state = self._level_states.get("eod_closeout")
                 if state in (LevelState.ARMED, LevelState.TRIGGERED):
+                    # Cancel any pending EOD order before removing the level
+                    self._collect_cancel_ids("eod_closeout", changes["cancel_order_ids"])
                     del self._level_states["eod_closeout"]
+                    changes["removed_levels"].append("eod_closeout")
                     logger.info("Hot-modify: disabled eod_closeout level")
-
-        changes = {
-            "updated_fields": [], "added_levels": [], "removed_levels": [],
-            "skipped_levels": [], "cancel_order_ids": [],
-        }
 
         # --- Stop Loss ---
         old_sl = self._risk_config.get("stop_loss", {})

@@ -1665,9 +1665,18 @@ class ExecutionEngine:
             # Bump initial_qty if IB has more than we thought
             if hasattr(rm, "initial_qty") and ib_qty > rm.initial_qty:
                 rm.initial_qty = ib_qty
-            # If IB shows 0, mark position completed
-            if ib_qty <= 0 and hasattr(rm, "_completed"):
-                rm._completed = True
+            # Sync _completed flag with IB truth
+            if hasattr(rm, "_completed"):
+                if ib_qty <= 0:
+                    rm._completed = True
+                elif rm._completed:
+                    # IB shows live position but agent thought it was done —
+                    # clear _completed so evaluate() runs again
+                    rm._completed = False
+                    logger.warning(
+                        "Reconciliation: cleared _completed flag for %s (IB shows qty=%d)",
+                        position_id, ib_qty,
+                    )
             adj["repaired"] = True
             adj["old_qty"] = old_qty
             logger.warning(

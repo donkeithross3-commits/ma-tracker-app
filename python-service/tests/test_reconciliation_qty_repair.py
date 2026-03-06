@@ -234,3 +234,24 @@ class TestReconciliationQtyRepair:
         engine.reconcile_with_ib(ib_positions)
         assert rm.remaining_qty == 5
         assert rm.initial_qty == 5
+
+    def test_completed_cleared_when_ib_has_qty(self):
+        """If agent has _completed=True but IB shows live qty, clear _completed."""
+        engine, rm, store = self._make_engine_with_rm("bmc_risk_006", rm_qty=0, rm_initial_qty=5)
+        rm._completed = True  # agent thinks position is done
+
+        ib_positions = [{
+            "contract": {
+                "symbol": "SPY",
+                "secType": "OPT",
+                "strike": 500,
+                "lastTradeDateOrContractMonth": "20260306",
+                "right": "P",
+            },
+            "position": 2,
+            "avgCost": 150.0,
+        }]
+
+        engine.reconcile_with_ib(ib_positions)
+        assert rm.remaining_qty == 2
+        assert rm._completed is False  # cleared — position is live in IB

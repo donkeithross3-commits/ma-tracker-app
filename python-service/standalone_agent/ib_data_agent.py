@@ -1824,7 +1824,7 @@ class IBDataAgent:
                             changes = rm.update_risk_config(risk_update)
                             # Sync updated risk config back into state.config
                             # so the eval loop passes current values to evaluate()
-                            for rk in ("stop_loss", "profit_taking"):
+                            for rk in ("stop_loss", "profit_taking", "eod_exit_time"):
                                 if rk in rm._risk_config:
                                     rm_state.config[rk] = rm._risk_config[rk]
                             # Persist updated config to position store
@@ -2688,7 +2688,14 @@ class IBDataAgent:
             }
 
             try:
-                self._spawn_risk_manager_for_bmc(risk_config, record_fill=False)
+                spawn_ok = self._spawn_risk_manager_for_bmc(risk_config, record_fill=False)
+                if spawn_ok is False:
+                    logger.error(
+                        "CRITICAL: IB reconciliation spawn FAILED for %s %s %s %s "
+                        "qty=%d — position UNMANAGED",
+                        symbol, strike, expiry, right, qty,
+                    )
+                    continue
                 spawned += 1
                 logger.info(
                     "IB reconciliation: spawned risk manager for %s %s %s %s "

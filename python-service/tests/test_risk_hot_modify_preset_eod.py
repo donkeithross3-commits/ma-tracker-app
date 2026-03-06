@@ -7,7 +7,9 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "standalone_agent"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "standalone_agent", "strategies"))
 
-from risk_manager import RiskManagerStrategy, LevelState, PRESETS
+import time
+
+from risk_manager import RiskManagerStrategy, LevelState, PendingOrder, PRESETS
 from execution_engine import OrderAction, OrderSide, OrderType
 
 
@@ -109,19 +111,61 @@ class TestEodExitTimeHotModify:
         rm, config = _make_rm(preset="zero_dte_convexity")
         assert "eod_closeout" not in rm._level_states
 
-        rm.update_risk_config({"eod_exit_time": "15:30"})
+        changes = rm.update_risk_config({"eod_exit_time": "15:30"})
 
         assert "eod_closeout" in rm._level_states
         assert rm._level_states["eod_closeout"] == LevelState.ARMED
         assert rm._risk_config["eod_exit_time"] == "15:30"
+        assert "eod_closeout" in changes["added_levels"]
+
+    def test_eod_config_must_sync_to_state_config(self):
+        """Agent must sync eod_exit_time to state.config for evaluate() to see it.
+
+        update_risk_config() sets _risk_config["eod_exit_time"], but evaluate()
+        reads config.get("eod_exit_time") from state.config (passed by engine).
+        The agent's hot-modify handler must sync eod_exit_time to state.config
+        alongside stop_loss and profit_taking.
+        """
+        rm, config = _make_rm(preset="zero_dte_convexity")
+        # Simulate hot-modify
+        rm.update_risk_config({"eod_exit_time": "15:30"})
+
+        # _risk_config has the value
+        assert rm._risk_config["eod_exit_time"] == "15:30"
+
+        # Simulate what the agent handler must do: sync to state.config
+        # (This is what the agent code does at line 1827-1829)
+        for rk in ("stop_loss", "profit_taking", "eod_exit_time"):
+            if rk in rm._risk_config:
+                config[rk] = rm._risk_config[rk]
+
+        # Now config (which evaluate passes to _check_eod_closeout) has it
+        assert config.get("eod_exit_time") == "15:30"
 
     def test_disable_eod_via_hot_modify(self):
         """Setting eod_exit_time=None removes the armed eod_closeout level."""
         rm, config = _make_rm(preset="intraday_convexity", eod_exit_time="15:30")
         assert "eod_closeout" in rm._level_states
 
-        rm.update_risk_config({"eod_exit_time": None})
+        changes = rm.update_risk_config({"eod_exit_time": None})
 
+        assert "eod_closeout" not in rm._level_states
+        assert "eod_closeout" in changes["removed_levels"]
+
+    def test_disable_eod_cancels_pending_order(self):
+        """Disabling eod_exit_time cancels any pending EOD order."""
+        rm, config = _make_rm(preset="intraday_convexity", eod_exit_time="15:30")
+        rm._level_states["eod_closeout"] = LevelState.TRIGGERED
+        rm._pending_orders[777] = PendingOrder(
+            order_id=777, level_key="eod_closeout",
+            level_type="eod_closeout", level_idx=0,
+            expected_qty=5, placed_at=time.time(),
+        )
+
+        changes = rm.update_risk_config({"eod_exit_time": None})
+
+        assert 777 in changes["cancel_order_ids"]
+        assert 777 not in rm._pending_orders
         assert "eod_closeout" not in rm._level_states
 
     def test_change_eod_time_preserves_level(self):
