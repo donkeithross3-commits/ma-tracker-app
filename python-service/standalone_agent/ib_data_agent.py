@@ -1620,6 +1620,8 @@ class IBDataAgent:
                         continue
                     try:
                         rm = RiskManagerStrategy()
+                        parent_sid = pos.get("parent_strategy", "")
+                        rm._parent_strategy_id = parent_sid
                         load_result = self.execution_engine.load_strategy(pos_id, rm, stored_config)
                         if "error" in load_result:
                             logger.error("Recovery of %s failed: %s", pos_id, load_result["error"])
@@ -1637,7 +1639,7 @@ class IBDataAgent:
                         if rm_state:
                             rm_state.ticker = resolve_rm_ticker(
                                 stored_config.get("instrument", {}),
-                                pos.get("parent_strategy", ""),
+                                parent_sid,
                             )
 
                         recovered += 1
@@ -2516,6 +2518,7 @@ class IBDataAgent:
         from strategies.risk_manager import RiskManagerStrategy
 
         strategy = RiskManagerStrategy()
+        strategy._parent_strategy_id = parent_sid
         strategy_id = f"bmc_risk_{int(time.time() * 1000)}"
 
         result = self.execution_engine.load_strategy(strategy_id, strategy, risk_config)

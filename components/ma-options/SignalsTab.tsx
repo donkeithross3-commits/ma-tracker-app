@@ -1710,6 +1710,57 @@ export default function SignalsTab() {
     };
   }, [executionStatus?.position_ledger, positionDetails, signal?.active_positions]);
 
+  // ── Risk level badge renderer — shows categorized risk status ──
+  // Groups levels by category (stop/profit/trailing/eod) with meaningful labels
+  const renderRiskBadges = (rm: RiskManagerState | null) => {
+    if (!rm) return null;
+    const ls: Record<string, string> = rm.level_states || {};
+    // Categorize levels
+    const stops: { key: string; state: string }[] = [];
+    const profits: { key: string; state: string }[] = [];
+    let trailing: string | null = null;
+    let eod: string | null = null;
+    for (const [key, state] of Object.entries(ls)) {
+      if (key.startsWith("stop")) stops.push({ key, state });
+      else if (key.startsWith("profit")) profits.push({ key, state });
+      else if (key === "trailing") trailing = state;
+      else if (key === "eod_closeout") eod = state;
+    }
+    const stateColor = (s: string) =>
+      s === "FILLED" ? "bg-green-900/60 text-green-300" :
+      s === "TRIGGERED" ? "bg-yellow-900/60 text-yellow-300" :
+      s === "PARTIAL" ? "bg-blue-900/60 text-blue-300" :
+      s === "FAILED" ? "bg-red-900/60 text-red-300" :
+      "bg-gray-700/60 text-gray-400";
+    const badge = (label: string, state: string, key?: string) => (
+      <span key={key || label} className={`px-1 py-0.5 rounded font-mono text-[10px] cursor-default ${stateColor(state)}`}>
+        {label}
+      </span>
+    );
+    const badges: React.ReactNode[] = [];
+    // Stop loss
+    if (stops.length > 0) {
+      const filled = stops.filter(s => s.state === "FILLED").length;
+      if (filled > 0) badges.push(badge("SL hit", "FILLED", "sl"));
+      else badges.push(badge("SL", stops[0].state, "sl"));
+    }
+    // Profit targets
+    if (profits.length > 0) {
+      const filled = profits.filter(s => s.state === "FILLED" || s.state === "PARTIAL").length;
+      if (filled > 0 && filled < profits.length) badges.push(badge(`PT ${filled}/${profits.length}`, "PARTIAL", "pt"));
+      else if (filled === profits.length) badges.push(badge(`PT ${filled}/${profits.length}`, "FILLED", "pt"));
+      else badges.push(badge(`PT ×${profits.length}`, profits[0].state, "pt"));
+    }
+    // Trailing
+    if (trailing) {
+      if (rm.trailing_active) badges.push(badge(`trail @${rm.trailing_stop_price?.toFixed(2) || "?"}`, "TRIGGERED", "ts"));
+      else badges.push(badge("trail", trailing, "ts"));
+    }
+    // EOD closeout
+    if (eod) badges.push(badge("eod", eod, "eod"));
+    return <>{badges}</>;
+  };
+
   const ws = signal?.polygon_ws;
   const bars = signal?.bar_accumulator;
   const currentSig = signal?.current_signal;
@@ -2185,32 +2236,7 @@ export default function SignalsTab() {
                                 ) : rm ? (
                                   <span className="text-gray-600 italic text-[10px]">waiting...</span>
                                 ) : null}
-                                {rm && (() => {
-                                  const ls = rm.level_states || {};
-                                  const grouped: Record<string, string[]> = {};
-                                  for (const [key, state] of Object.entries(ls)) {
-                                    const s = state as string;
-                                    (grouped[s] ||= []).push(key.replace(/_/g, " "));
-                                  }
-                                  return Object.entries(grouped).map(([state, levels]) => (
-                                    <span
-                                      key={state}
-                                      title={levels.join(", ")}
-                                      className={`px-1 py-0.5 rounded font-mono text-[10px] cursor-default ${
-                                        state === "FILLED" ? "bg-green-900 text-green-300" :
-                                        state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
-                                        state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
-                                        state === "FAILED" ? "bg-red-900 text-red-300" :
-                                        "bg-gray-700 text-gray-300"
-                                      }`}
-                                    >
-                                      {levels.length > 1 ? `${levels.length} ${state}` : `${levels[0]} ${state}`}
-                                    </span>
-                                  ));
-                                })()}
-                                {rm?.trailing_active && (
-                                  <span className="text-yellow-300 font-mono text-[10px]">trail@{rm.trailing_stop_price.toFixed(2)}</span>
-                                )}
+                                {renderRiskBadges(rm)}
                                 {pnlPct !== null && pnlDollar !== null && (
                                   <span className={`ml-auto font-mono font-medium ${staleQuote ? "opacity-50" : ""} ${pnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
                                     {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
@@ -2338,32 +2364,7 @@ export default function SignalsTab() {
                                             {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
                                           </span>
                                         )}
-                                        {rm && (() => {
-                                          const ls = rm.level_states || {};
-                                          const grouped: Record<string, string[]> = {};
-                                          for (const [key, state] of Object.entries(ls)) {
-                                            const s = state as string;
-                                            (grouped[s] ||= []).push(key.replace(/_/g, " "));
-                                          }
-                                          return Object.entries(grouped).map(([state, levels]) => (
-                                            <span
-                                              key={state}
-                                              title={levels.join(", ")}
-                                              className={`px-1 py-0.5 rounded font-mono cursor-default ${
-                                                state === "FILLED" ? "bg-green-900 text-green-300" :
-                                                state === "TRIGGERED" ? "bg-yellow-900 text-yellow-300" :
-                                                state === "PARTIAL" ? "bg-blue-900 text-blue-300" :
-                                                state === "FAILED" ? "bg-red-900 text-red-300" :
-                                                "bg-gray-700 text-gray-300"
-                                              }`}
-                                            >
-                                              {levels.length > 1 ? `${levels.length} ${state}` : `${levels[0]} ${state}`}
-                                            </span>
-                                          ));
-                                        })()}
-                                        {rm?.trailing_active && (
-                                          <span className="text-yellow-300 font-mono">trail@{rm.trailing_stop_price.toFixed(2)}</span>
-                                        )}
+                                        {renderRiskBadges(rm)}
                                         {isCompleted ? (
                                           <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-600 text-gray-200">CLOSED</span>
                                         ) : strategyId ? (
