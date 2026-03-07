@@ -251,6 +251,7 @@ class TestTranslatorEodField:
             "risk_stop_loss_enabled", "risk_stop_loss_type", "risk_stop_loss_trigger_pct",
             "risk_trailing_enabled", "risk_trailing_activation_pct", "risk_trailing_trail_pct",
             "risk_profit_taking_enabled", "risk_profit_targets_enabled", "risk_profit_targets",
-            "risk_preset", "risk_eod_exit_time",
+            "risk_preset", "risk_eod_exit_time", "risk_eod_min_bid",
         })
         assert "risk_eod_exit_time" in BMC_RISK_FIELDS
+        assert "risk_eod_min_bid" in BMC_RISK_FIELDS
