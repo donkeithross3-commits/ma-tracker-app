@@ -7,12 +7,16 @@ Computes utilization attainment (% of theoretical 100% GPU-time) from
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 
 # Below this wattage = idle. Active training is 100-350W.
@@ -239,6 +243,82 @@ def _local_week_start(now_local: datetime) -> datetime:
     return day_start - timedelta(days=day_start.weekday())
 
 
+def rotate_telemetry(
+    telemetry_file: Path,
+    *,
+    max_age_days: int = 30,
+    min_size_mb: float = 10.0,
+) -> int:
+    """Rotate telemetry.jsonl: drop lines older than max_age_days.
+
+    Only runs when the file exceeds ``min_size_mb`` to avoid unnecessary I/O.
+    Returns the number of lines dropped.
+    """
+    if not telemetry_file.exists():
+        return 0
+    try:
+        size_mb = telemetry_file.stat().st_size / (1024 * 1024)
+    except OSError:
+        return 0
+    if size_mb < min_size_mb:
+        return 0
+
+    cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+    kept: list[str] = []
+    dropped = 0
+
+    try:
+        with open(telemetry_file, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line_stripped = line.strip()
+                if not line_stripped:
+                    continue
+                try:
+                    rec = json.loads(line_stripped)
+                except json.JSONDecodeError:
+                    dropped += 1
+                    continue
+                ts_raw = rec.get("received_at") or rec.get("timestamp")
+                if ts_raw:
+                    try:
+                        ts_str = ts_raw.strip()
+                        if ts_str.endswith("Z"):
+                            ts_str = ts_str[:-1] + "+00:00"
+                        ts = datetime.fromisoformat(ts_str)
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=UTC)
+                        if ts < cutoff:
+                            dropped += 1
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                kept.append(line_stripped)
+    except OSError as exc:
+        logger.warning("Failed to read telemetry for rotation: %s", exc)
+        return 0
+
+    if dropped == 0:
+        return 0
+
+    # Atomic write: temp file then replace
+    tmp = telemetry_file.with_suffix(".jsonl.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            for entry in kept:
+                fh.write(entry + "\n")
+        shutil.move(str(tmp), str(telemetry_file))
+        logger.info("Rotated telemetry: dropped %d old entries, kept %d", dropped, len(kept))
+    except OSError as exc:
+        logger.error("Failed to write rotated telemetry: %s", exc)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return 0
+
+    return dropped
+
+
 def build_utilization_report(
     *,
     fleet_data_dir: Path,
@@ -333,6 +413,9 @@ def build_utilization_report(
         summary["label"] = start_local.date().isoformat()
         summary["complete"] = end_local <= now_local
         weekly.append(summary)
+
+    # Opportunistic rotation — runs inline but skips if file is small
+    rotate_telemetry(telemetry_file, max_age_days=30, min_size_mb=10.0)
 
     return {
         "as_of": now_utc.isoformat(),

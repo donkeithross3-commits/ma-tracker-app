@@ -8,6 +8,7 @@ const PYTHON_SERVICE_URL =
  *
  * GET  /api/fleet/status  → GET  {PYTHON_SERVICE_URL}/fleet/status
  * GET  /api/fleet/alerts  → GET  {PYTHON_SERVICE_URL}/fleet/alerts
+ * GET  /api/fleet/utilization → GET {PYTHON_SERVICE_URL}/fleet/utilization
  * POST /api/fleet/checkin → POST {PYTHON_SERVICE_URL}/fleet/checkin
  */
 async function proxyFleet(request: NextRequest) {
@@ -40,7 +41,13 @@ async function proxyFleet(request: NextRequest) {
     const response = await fetch(targetUrl, fetchOptions);
     const data = await response.json();
 
-    return NextResponse.json(data, { status: response.status });
+    return NextResponse.json(data, {
+      status: response.status,
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+      },
+    });
   } catch (error: unknown) {
     console.error("Fleet proxy error:", error);
     const message =
