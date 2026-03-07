@@ -125,7 +125,7 @@ export function CrossAssetHeatmap({ market, loading }: Props) {
                         <span className={`font-mono text-xs ${group === "primary" ? "text-cyan-300" : "text-gray-300"}`}>
                           {row.ticker}
                         </span>
-                        <span className="text-[10px] text-gray-600 ml-1.5 hidden sm:inline">{row.name}</span>
+                        <span className="text-[11px] text-gray-400 ml-1.5">{row.name}</span>
                       </td>
                       <td className="px-2 py-1 text-right font-mono text-xs text-gray-200">
                         {row.price != null ? row.price.toFixed(2) : "—"}
