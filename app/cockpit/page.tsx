@@ -13,10 +13,31 @@ import type {
   DataHealthResponse,
 } from "@/components/cockpit/types";
 
+// Oscillator data shape (from py_proj cockpit_oscillators.py)
+interface OscillatorData {
+  tickers: Record<string, {
+    timescales: Record<string, {
+      timescale: string;
+      label: string;
+      state: string;
+      character: string;
+      hurst: number;
+      z_score: number;
+      percentile: number;
+      displacement: number;
+      dominant_cycle: number;
+      interpretation: string;
+    }>;
+  }>;
+  timescales_available: string[];
+  _stale?: boolean;
+}
+
 // Refresh intervals (ms)
 const MACRO_INTERVAL = 5 * 60 * 1000; // 5 min
 const MARKET_INTERVAL = 60 * 1000; // 1 min
 const HEALTH_INTERVAL = 2 * 60 * 1000; // 2 min
+const OSC_INTERVAL = 10 * 60 * 1000; // 10 min (pre-computed, changes infrequently)
 
 async function safeFetch<T>(url: string): Promise<T | null> {
   try {
@@ -33,22 +54,25 @@ export default function CockpitPage() {
   const [market, setMarket] = useState<MarketResponse | null>(null);
   const [regime, setRegime] = useState<RegimeResponse | null>(null);
   const [health, setHealth] = useState<DataHealthResponse | null>(null);
+  const [oscillators, setOscillators] = useState<OscillatorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<string>("");
 
   const fetchAll = useCallback(async () => {
     try {
-      const [m, mkt, r, h] = await Promise.all([
+      const [m, mkt, r, h, osc] = await Promise.all([
         safeFetch<MacroResponse>("/api/cockpit/macro"),
         safeFetch<MarketResponse>("/api/cockpit/market"),
         safeFetch<RegimeResponse>("/api/cockpit/regime"),
         safeFetch<DataHealthResponse>("/api/cockpit/data-health"),
+        safeFetch<OscillatorData>("/api/cockpit/oscillators"),
       ]);
       setMacro(m);
       setMarket(mkt);
       setRegime(r);
       setHealth(h);
+      setOscillators(osc);
       setLastRefresh(new Date().toLocaleTimeString());
       setError(null);
     } catch (err) {
@@ -71,12 +95,18 @@ export default function CockpitPage() {
     if (h) setHealth(h);
   }, []);
 
+  const fetchOscillators = useCallback(async () => {
+    const osc = await safeFetch<OscillatorData>("/api/cockpit/oscillators");
+    if (osc) setOscillators(osc);
+  }, []);
+
   useEffect(() => {
     fetchAll();
 
     const macroTimer = setInterval(fetchAll, MACRO_INTERVAL);
     const marketTimer = setInterval(fetchMarket, MARKET_INTERVAL);
     const healthTimer = setInterval(fetchHealth, HEALTH_INTERVAL);
+    const oscTimer = setInterval(fetchOscillators, OSC_INTERVAL);
 
     // Refresh on tab focus (skip ticks when hidden per CLAUDE.md)
     const handleVisibility = () => {
@@ -88,9 +118,10 @@ export default function CockpitPage() {
       clearInterval(macroTimer);
       clearInterval(marketTimer);
       clearInterval(healthTimer);
+      clearInterval(oscTimer);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [fetchAll, fetchMarket, fetchHealth]);
+  }, [fetchAll, fetchMarket, fetchHealth, fetchOscillators]);
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -138,7 +169,7 @@ export default function CockpitPage() {
         />
 
         {/* Panel 2: Cross-Asset Heatmap */}
-        <CrossAssetHeatmap market={market} loading={loading} />
+        <CrossAssetHeatmap market={market} oscillators={oscillators} loading={loading} />
 
         {/* Panel 3: Microstructure (placeholder) */}
         <MicrostructurePanel />

@@ -2,7 +2,29 @@
 
 import type { MarketResponse, AssetRow } from "./types";
 import { PRIMARY_TICKERS, SECTOR_TICKERS } from "./types";
-import { InfoTip } from "./CockpitTooltip";
+import { InfoTip, CockpitTooltip } from "./CockpitTooltip";
+
+// Oscillator types
+interface TimescaleReading {
+  timescale: string;
+  label: string;
+  state: string;
+  character: string;
+  hurst: number;
+  z_score: number;
+  percentile: number;
+  displacement: number;
+  dominant_cycle: number;
+  interpretation: string;
+}
+
+interface OscillatorData {
+  tickers: Record<string, {
+    timescales: Record<string, TimescaleReading>;
+  }>;
+  timescales_available: string[];
+  _stale?: boolean;
+}
 
 function ReturnCell({ val }: { val: number | null }) {
   if (val == null) return <td className="px-2 py-1 text-right font-mono text-gray-600">—</td>;
@@ -32,6 +54,40 @@ function SigmaCell({ val }: { val: number | null }) {
   );
 }
 
+// Oscillator state rendering
+const STATE_CONFIG: Record<string, { sym: string; color: string; shortLabel: string }> = {
+  overbought:    { sym: "▲▲", color: "text-red-400",    shortLabel: "OB" },
+  trending_up:   { sym: "▲",  color: "text-green-400",  shortLabel: "TU" },
+  neutral:       { sym: "→",  color: "text-gray-400",   shortLabel: "N"  },
+  trending_down: { sym: "▼",  color: "text-red-400",    shortLabel: "TD" },
+  oversold:      { sym: "▼▼", color: "text-green-400",  shortLabel: "OS" },
+  insufficient:  { sym: "?",  color: "text-gray-600",   shortLabel: "?"  },
+};
+
+const CHARACTER_LABEL: Record<string, string> = {
+  trending: "T",
+  mean_reverting: "M",
+  random: "R",
+};
+
+function OscCell({ reading }: { reading: TimescaleReading | undefined }) {
+  if (!reading) return <td className="px-1.5 py-1 text-center font-mono text-[11px] text-gray-600">—</td>;
+
+  const cfg = STATE_CONFIG[reading.state] ?? STATE_CONFIG.insufficient;
+  const charLabel = CHARACTER_LABEL[reading.character] ?? "?";
+
+  return (
+    <td className="px-1.5 py-1 text-center">
+      <CockpitTooltip content={`${reading.interpretation}\n\nHurst: ${reading.hurst} (${reading.character})\nz-score: ${reading.z_score.toFixed(1)} | percentile: ${reading.percentile.toFixed(0)}\nDominant cycle: ${reading.dominant_cycle.toFixed(0)} bars`}>
+        <span className={`font-mono text-[11px] ${cfg.color}`}>
+          {cfg.sym}{cfg.shortLabel}
+        </span>
+        <span className="text-[9px] text-gray-500 ml-0.5">{charLabel}</span>
+      </CockpitTooltip>
+    </td>
+  );
+}
+
 type GroupKey = "primary" | "macro" | "sector";
 
 function classifyGroup(ticker: string): GroupKey {
@@ -48,10 +104,11 @@ const GROUP_LABELS: Record<GroupKey, string> = {
 
 interface Props {
   market: MarketResponse | null;
+  oscillators: OscillatorData | null;
   loading: boolean;
 }
 
-export function CrossAssetHeatmap({ market, loading }: Props) {
+export function CrossAssetHeatmap({ market, oscillators, loading }: Props) {
   if (loading && !market) {
     return (
       <section className="rounded border border-gray-800 bg-gray-900 p-3 animate-pulse">
@@ -66,18 +123,22 @@ export function CrossAssetHeatmap({ market, loading }: Props) {
     groups[classifyGroup(a.ticker)].push(a);
   }
 
-  // Sector breadth: count sectors above 20d MA (return20d > 0 as proxy)
   const sectorAssets = groups.sector;
   const sectorsAbove = sectorAssets.filter((s) => (s.return20d ?? 0) > 0).length;
+
+  const hasOsc = oscillators && Object.keys(oscillators.tickers || {}).length > 0;
+  const timescales = oscillators?.timescales_available ?? ["monthly", "weekly", "daily"];
+  const tsLabels: Record<string, string> = { monthly: "Mo", weekly: "Wk", daily: "Dy" };
 
   return (
     <section className="rounded border border-gray-800 bg-gray-900">
       <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between">
         <div className="text-sm font-medium text-gray-300">
           Cross-Asset Heatmap
-          <InfoTip tip="Returns and vol-normalized moves for key symbols. Outliers (>2σ) flagged. Primary tickers are what we trade; cross-asset provides regime context." />
+          <InfoTip tip="Returns, vol-normalized moves, and multi-timescale trend oscillators. Oscillator states: OB=Overbought, TU=Trending Up, N=Neutral, TD=Trending Down, OS=Oversold. Character: T=Trending, M=Mean-Reverting, R=Random." />
         </div>
-        <div className="text-[10px] text-gray-500">
+        <div className="flex items-center gap-2 text-[10px] text-gray-500">
+          {oscillators?._stale && <span className="text-amber-400">Oscillators stale</span>}
           {market?.asOf ? new Date(market.asOf).toLocaleTimeString() : ""}
         </div>
       </div>
@@ -87,33 +148,34 @@ export function CrossAssetHeatmap({ market, loading }: Props) {
             <tr className="border-b border-gray-800">
               <th className="text-left px-2 py-1.5">Symbol</th>
               <th className="text-right px-2 py-1.5">Price</th>
+              <th className="text-right px-2 py-1.5">Δ1d</th>
+              <th className="text-right px-2 py-1.5">Δ5d</th>
+              <th className="text-right px-2 py-1.5">Δ20d</th>
               <th className="text-right px-2 py-1.5">
-                Δ1d <InfoTip tip="1-day return (close to close)" />
+                σ <InfoTip tip="Today's move in units of 20-day realized vol" />
               </th>
-              <th className="text-right px-2 py-1.5">
-                Δ5d <InfoTip tip="5-day return (1 trading week)" />
-              </th>
-              <th className="text-right px-2 py-1.5">
-                Δ20d <InfoTip tip="20-day return (~1 calendar month)" />
-              </th>
-              <th className="text-right px-2 py-1.5">
-                σ <InfoTip tip="Today's move in units of 20-day realized volatility. >2σ is an outlier." />
-              </th>
-              <th className="text-center px-2 py-1.5">Flag</th>
+              {hasOsc && timescales.map((ts) => (
+                <th key={ts} className="text-center px-1.5 py-1.5 border-l border-gray-800/30">
+                  {tsLabels[ts] ?? ts}
+                  <InfoTip tip={`${ts} oscillator. Ehlers cycle-adaptive with Hurst regime classification. Hover cells for details.`} />
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {(["primary", "macro", "sector"] as const).map((group) => {
               const rows = groups[group];
               if (!rows || rows.length === 0) return null;
+              const colSpan = 6 + (hasOsc ? timescales.length : 0);
               return [
                 <tr key={`label-${group}`} className="border-b border-gray-800/50">
-                  <td colSpan={7} className="px-2 py-1 text-[10px] text-gray-500 uppercase tracking-wider bg-gray-900/50">
+                  <td colSpan={colSpan} className="px-2 py-1 text-[10px] text-gray-500 uppercase tracking-wider bg-gray-900/50">
                     {GROUP_LABELS[group]}
                   </td>
                 </tr>,
                 ...rows.map((row) => {
                   const flagged = row.volNormMove != null && Math.abs(row.volNormMove) > 2;
+                  const tickerOsc = oscillators?.tickers?.[row.ticker];
                   return (
                     <tr
                       key={row.ticker}
@@ -134,9 +196,12 @@ export function CrossAssetHeatmap({ market, loading }: Props) {
                       <ReturnCell val={row.return5d} />
                       <ReturnCell val={row.return20d} />
                       <SigmaCell val={row.volNormMove} />
-                      <td className="px-2 py-1 text-center text-xs">
-                        {flagged ? <span className="text-amber-400">⚠</span> : ""}
-                      </td>
+                      {hasOsc && timescales.map((ts) => (
+                        <OscCell
+                          key={ts}
+                          reading={tickerOsc?.timescales?.[ts] as TimescaleReading | undefined}
+                        />
+                      ))}
                     </tr>
                   );
                 }),
@@ -150,6 +215,12 @@ export function CrossAssetHeatmap({ market, loading }: Props) {
           Sector breadth: {sectorsAbove}/{sectorAssets.length} positive over 20d
           <InfoTip tip="Sectors with positive 20-day returns. High = broad participation, Low = narrow rally." />
         </span>
+        {hasOsc && (
+          <span>
+            Oscillator: Ehlers adaptive cycle + Hurst regime
+            <InfoTip tip="T=Trending (Hurst>0.55, moves tend to continue), M=Mean-Reverting (Hurst<0.45, moves tend to reverse), R=Random. OB in T context = trend may extend. OS in M context = bounce likely." />
+          </span>
+        )}
       </div>
     </section>
   );
