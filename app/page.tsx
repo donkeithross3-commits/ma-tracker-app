@@ -22,6 +22,15 @@ export default async function Home() {
     },
     {
       key: "ma-options",
+      href: "/cockpit",
+      title: "DR3 Cockpit",
+      description: "Liquidity, regime, and data health — pre-market briefing and live monitoring",
+      badge: "New",
+      badgeClasses: "bg-red-500/20 text-red-400",
+      hoverBorder: "hover:border-red-500",
+    },
+    {
+      key: "ma-options",
       href: "/ma-options",
       title: "DR3 Trading Tools",
       description: "Manual & algorithmic trading with Interactive Brokers",
@@ -37,6 +46,15 @@ export default async function Home() {
       badge: "Beta Testing",
       badgeClasses: "bg-cyan-500/20 text-cyan-400",
       hoverBorder: "hover:border-cyan-500",
+    },
+    {
+      key: "ma-options",
+      href: "/fleet",
+      title: "Fleet Utilization",
+      description: "Daily/weekly GPU utilization attainment and live fleet snapshot",
+      badge: "Ops",
+      badgeClasses: "bg-indigo-500/20 text-indigo-400",
+      hoverBorder: "hover:border-indigo-500",
     },
     {
       key: "sheet-portfolio",
@@ -68,6 +86,7 @@ export default async function Home() {
         <main className="max-w-2xl mx-auto">
           <div className="grid gap-6">
             {projects.map((project) => {
+              const projectId = `${project.key}:${project.href}`;
               const accessible = hasProjectAccess(projectAccess, project.key);
 
               const content = (
@@ -95,7 +114,7 @@ export default async function Home() {
               if (accessible) {
                 return (
                   <Link
-                    key={project.key}
+                    key={projectId}
                     href={project.href}
                     className={`block p-8 bg-slate-800 border border-slate-700 rounded-xl ${project.hoverBorder} hover:bg-slate-700 transition-all`}
                   >
@@ -106,7 +125,7 @@ export default async function Home() {
 
               return (
                 <div
-                  key={project.key}
+                  key={projectId}
                   className="block p-8 bg-slate-800 border border-slate-700 rounded-xl opacity-50 cursor-not-allowed"
                 >
                   {content}
