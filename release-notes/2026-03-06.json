@@ -1,0 +1,25 @@
+{
+  "date": "2026-03-06",
+  "title": "Week of Mar 2-6, 2026",
+  "summary": "DR3 Cockpit launch: cross-asset heatmap with multi-timescale Hurst-aware trend oscillators, macro regime classification, and data health monitoring.",
+  "features": [
+    {
+      "id": "cockpit-launch",
+      "title": "DR3 Cockpit — Market Intelligence Dashboard",
+      "summary": "New /cockpit page with cross-asset heatmap, macro regime strip, microstructure baselines, and data health panel",
+      "description": "A foundational pre-market briefing and live monitoring dashboard covering 15 tickers across primary (SPY, QQQ, GLD, SLV), macro (IWM, TLT, HYG, EEM, UUP, MSTR), and sector (XLF, XLK, XLE, XLP, XLI) groups.\n\nThe cross-asset heatmap shows 1d/5d/20d returns and vol-normalized moves (sigma) for every covered ticker, with automatic color-coding by magnitude. Tickers are grouped into Primary (traded), Cross-Asset Context, and Sector Breadth sections.\n\nThe macro regime strip shows VIX level, treasury yields (2Y, 10Y, 30Y), curve steepness, credit spreads (HY OAS), and dollar index with 4-axis regime classification (volatility, liquidity, trend, correlation). VIX regime colors are inverted for BMC model context: low VIX = red (model dead zone).\n\nMicrostructure panel shows historical baselines from 786-date TAQ dataset. Data health panel monitors FRED, Polygon, fleet services, and dashboard API freshness.\n\nAll panels auto-refresh on staggered intervals and pause when the tab is backgrounded.",
+      "category": "general",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "cockpit-oscillators",
+      "title": "Multi-Timescale Trend Oscillators with Hurst Regime Classification",
+      "summary": "Ehlers cycle-adaptive oscillators at monthly/weekly/daily timescales with trending/mean-reverting/random character for all 15 cockpit tickers",
+      "description": "Each covered ticker now has a statistically calibrated trend oscillator at three timescales (Monthly, Weekly, Daily), displayed as compact columns in the cross-asset heatmap.\n\nThe oscillator engine uses Ehlers autocorrelation periodogram for dominant cycle detection, adaptive EMA with cycle-proportional lookback, and exponentially-weighted calibration for z-scores and percentiles. States are classified as Overbought, Trending Up, Neutral, Trending Down, or Oversold.\n\nCritically, each reading includes a Hurst exponent (via Detrended Fluctuation Analysis) that classifies the ticker's character as Trending (H>0.55), Mean-Reverting (H<0.45), or Random. This fundamentally changes interpretation: 'Overbought in Trending regime' means momentum may continue, while 'Overbought in Mean-Reverting regime' suggests reversal is likely.\n\nHover any oscillator cell for a detailed tooltip with z-score, percentile rank, dominant cycle period, Hurst value, and a human-readable interpretation combining state and character.\n\nPre-computed daily by py_proj and served via volume-mounted cache — no additional API latency.",
+      "category": "signals",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
