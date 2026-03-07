@@ -9,11 +9,13 @@ export const dynamic = "force-dynamic";
 // This route serves the pre-computed data to the dashboard
 
 const OSCILLATOR_PATHS = [
+  // Docker: market_state/cache volume-mounted to /app/data/market_state_cache
+  join(process.cwd(), "data", "market_state_cache", "cockpit_oscillators.json"),
   // Local dev: py_proj is a sibling directory
   join(process.cwd(), "..", "py_proj", "market_state", "cache", "cockpit_oscillators.json"),
-  // Droplet: py_proj is at /home/don/dev/py_proj
+  // Droplet host (non-Docker): py_proj is at /home/don/dev/py_proj
   "/home/don/dev/py_proj/market_state/cache/cockpit_oscillators.json",
-  // Alternative: data mounted in the app
+  // Fallback: data directory
   join(process.cwd(), "data", "cockpit_oscillators.json"),
 ];
 
