@@ -81,13 +81,22 @@ def check_heartbeat_stale(machine: str, heartbeats: dict[str, dict]) -> list[Ale
     return alerts
 
 
+GPU_POWER_IDLE_WATTS = 50  # Below this = truly idle (active training is 100-350W)
+
+
 def check_gpu_idle(
     machine: str,
     gpu_info: dict[str, Any],
     heartbeats: dict[str, dict],
     queues: dict[str, dict],
 ) -> list[Alert]:
-    """Flag GPU sitting idle (<5% util) while pending jobs exist."""
+    """Flag GPU sitting idle while pending jobs exist.
+
+    On WDDM drivers, nvidia-smi reports utilization.gpu as 0% even during
+    active compute. Power draw (watts) is the reliable activity signal:
+    idle ~20-30W, active training 100-350W. If util is 0 but power > 50W,
+    the GPU is working — not idle.
+    """
     alerts: list[Alert] = []
 
     util = gpu_info.get("util")
@@ -101,6 +110,15 @@ def check_gpu_idle(
 
     if util_int >= 5:
         return alerts
+
+    # WDDM workaround: check power draw before declaring idle
+    power_w = gpu_info.get("power_w")
+    if power_w is not None:
+        try:
+            if float(power_w) >= GPU_POWER_IDLE_WATTS:
+                return alerts  # GPU is active despite 0% util (WDDM bug)
+        except (ValueError, TypeError):
+            pass
 
     total_pending = 0
     for stem, qs in queues.items():
