@@ -2324,6 +2324,7 @@ export default function SignalsTab() {
                                     {eodEnabled && (
                                       <>
                                         <input
+                                          key={`eod-time-${strategyId}-${eodTime}`}
                                           type="text"
                                           defaultValue={eodTime || "15:30"}
                                           className="inline-edit w-[44px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
@@ -2342,6 +2343,7 @@ export default function SignalsTab() {
                                         <span className="text-gray-600">|</span>
                                         <span className="text-gray-500">min bid</span>
                                         <input
+                                          key={`eod-bid-${strategyId}-${eodMinBid}`}
                                           type="text"
                                           defaultValue={(eodMinBid ?? 0.05).toFixed(2)}
                                           className="inline-edit w-[40px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
@@ -2454,6 +2456,7 @@ export default function SignalsTab() {
                                   {eodEnabled && (
                                     <>
                                       <input
+                                        key={`eod-time-${sid}-${eodTime}`}
                                         type="text"
                                         defaultValue={eodTime || "15:30"}
                                         className="inline-edit w-[44px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
@@ -2471,6 +2474,7 @@ export default function SignalsTab() {
                                       <span className="text-gray-600">|</span>
                                       <span className="text-gray-500">min bid</span>
                                       <input
+                                        key={`eod-bid-${sid}-${eodMinBid}`}
                                         type="text"
                                         defaultValue={(eodMinBid ?? 0.05).toFixed(2)}
                                         className="inline-edit w-[40px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"

@@ -1320,10 +1320,14 @@ class RiskManagerStrategy(ExecutionStrategy):
         if eod_min_bid and quote:
             bid = getattr(quote, "bid", 0) or 0
             if bid < eod_min_bid:
-                logger.info(
-                    "EOD closeout skipped: bid %.4f < min_bid %.4f — letting expire",
-                    bid, eod_min_bid,
-                )
+                # Log once per minute (eval runs every 100ms — avoid 18k lines)
+                now_ts = time.time()
+                if now_ts - getattr(self, "_eod_skip_log_ts", 0) >= 60:
+                    logger.info(
+                        "EOD closeout skipped: bid %.4f < min_bid %.4f — letting expire",
+                        bid, eod_min_bid,
+                    )
+                    self._eod_skip_log_ts = now_ts
                 return None  # Don't sell — lotto value, let expire
 
         # Exit 100% at market
