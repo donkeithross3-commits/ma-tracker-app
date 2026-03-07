@@ -1207,7 +1207,18 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         else:
             _effective_threshold = _cfg_threshold
 
-        # Generate signal (with straddle richness gating if configured)
+        # Extract current VIX level for regime gating.
+        # Available from daily bootstrap via daily_features["vix_close"].
+        _vix_level: float | None = None
+        if daily_features:
+            _vix_raw = daily_features.get("vix_close")
+            if _vix_raw is not None:
+                try:
+                    _vix_level = float(_vix_raw)
+                except (TypeError, ValueError):
+                    pass
+
+        # Generate signal (with straddle richness + regime gating if configured)
         signal_config = SignalConfig(
             probability_threshold=_effective_threshold,
             min_strength=cfg.get("min_signal_strength", 0.3),
@@ -1216,8 +1227,10 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             straddle_richness_max=cfg.get("straddle_richness_max", 1.5),
             straddle_richness_ideal=cfg.get("straddle_richness_ideal", 0.9),
             options_gate_enabled=cfg.get("options_gate_enabled", False),
+            vix_gate_min=cfg.get("vix_gate_min"),
         )
-        signal = generate_signal(prediction, self._ticker, t, signal_config)
+        signal = generate_signal(prediction, self._ticker, t, signal_config,
+                                 vix_level=_vix_level)
 
         # Invert signal direction for DOWN models (flip long<->short)
         if _snap_invert_signal and signal.direction != "none":
@@ -1259,8 +1272,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "underlying_price": underlying_price,
             "n_cross_asset_tickers": len(extra_ticker_bars),
             "session_realized_vol": session_realized_vol,
+            "vix_level": _vix_level,
+            "regime_gate": signal.metadata.get("regime_gate"),
         }
         self._last_signal = signal_record
+
+        # Record regime gate suppression in signal record for dashboard display
+        if signal.metadata.get("regime_gate") == "suppressed":
+            signal_record["suppressed"] = (
+                f"regime_gate (VIX {_vix_level:.1f} < {cfg.get('vix_gate_min'):.0f})"
+            )
 
         # Log every decision cycle to JSONL for offline analysis (WS1)
         # Pass snapshot metadata to ensure log entry matches the model used for prediction
@@ -1276,9 +1297,10 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         if signal.direction == "none":
             logger.debug(
-                "Decision cycle: no signal (prob=%.4f, threshold=%.4f%s)",
+                "Decision cycle: no signal (prob=%.4f, threshold=%.4f%s%s)",
                 probability, _effective_threshold,
                 " [model-auto]" if _effective_threshold != _cfg_threshold else "",
+                f" [regime-gated VIX={_vix_level:.1f}]" if signal.metadata.get("regime_gate") == "suppressed" else "",
             )
             return []
 
