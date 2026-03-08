@@ -65,6 +65,15 @@ export default async function Home() {
       badgeClasses: "bg-purple-500/20 text-purple-400",
       hoverBorder: "hover:border-purple-500",
     },
+    {
+      key: "ma-options",
+      href: "/ai-research",
+      title: "AI Disruption Research",
+      description: "Saaspocalypse rotation scan — winners the market thinks are losers",
+      badge: "Research",
+      badgeClasses: "bg-amber-500/20 text-amber-400",
+      hoverBorder: "hover:border-amber-500",
+    },
   ] as const;
 
   return (
