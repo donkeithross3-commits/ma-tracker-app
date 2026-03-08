@@ -70,12 +70,20 @@ type FleetHealth = {
   last_collect_at?: string | null;
 };
 
+type CpuStatus = {
+  workers?: number;
+  nice?: number;
+  reason?: string;
+  idle_seconds?: number;
+};
+
 type OrchestratorStatus = {
   state?: string;
   current_task?: string | null;
   started_at?: string | null;
   last_collect_at?: string | null;
   pid?: number;
+  cpu?: CpuStatus;
   gpu_pipeline?: Record<string, GpuPipelineEntry>;
   recent_results?: RecentResult[];
   fleet_health?: FleetHealth;
@@ -544,6 +552,19 @@ export default function FleetUtilizationPage() {
               const retries = health?.retry_queue_size ?? orch.retry_queue_size ?? 0;
               const idleAlert = health?.idle_gpu_alert;
 
+              // CPU compute status
+              const cpu = orch.cpu;
+              const cpuLegacy = orch.cpu_budget; // fallback for old payloads
+              const cpuWorkers = cpu?.workers ?? cpuLegacy?.max_workers ?? 0;
+              const cpuReason = cpu?.reason ?? cpuLegacy?.reason ?? "unknown";
+              const cpuIdleSec = cpu?.idle_seconds ?? orch.idle_seconds ?? 0;
+              const cpuTask = orch.current_task;
+              const cpuIdleLabel = cpuIdleSec < 60 ? `${Math.round(cpuIdleSec)}s` :
+                cpuIdleSec < 3600 ? `${Math.round(cpuIdleSec / 60)}m` :
+                `${(cpuIdleSec / 3600).toFixed(1)}h`;
+              // Mac: 10 cores, 2 designated. Active = workers > 0 && state is cpu_job
+              const cpuActive = orchState === "cpu_job";
+
               return (
                 <section className="rounded border border-gray-800 bg-gray-900">
                   {/* Header */}
@@ -555,6 +576,31 @@ export default function FleetUtilizationPage() {
                     </span>
                     <span className={`text-xs ${ageClass(orchestratorMachine.age_seconds)}`}>
                       checkin {fmtAge(orchestratorMachine.age_seconds)} ago
+                    </span>
+                  </div>
+
+                  {/* CPU Compute row */}
+                  <div className="px-3 py-1.5 border-b border-gray-800/60 flex items-center gap-4 text-xs flex-wrap">
+                    <span className="text-gray-500 font-medium">CPU</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${cpuActive ? "bg-emerald-400" : cpuWorkers > 0 ? "bg-cyan-400" : "bg-gray-600"}`} />
+                      <span className="text-gray-400">mac</span>
+                      {cpuActive ? (
+                        <span className="text-emerald-300">{cpuWorkers}w · {cpuTask || "working"}</span>
+                      ) : cpuWorkers > 0 ? (
+                        <span className="text-cyan-300">{cpuWorkers}w ready · {cpuReason}</span>
+                      ) : (
+                        <span className="text-gray-500">{cpuReason}</span>
+                      )}
+                      <span className={`ml-1 ${cpuIdleSec >= 1800 ? "text-emerald-400" : cpuIdleSec >= 300 ? "text-cyan-400" : "text-gray-600"}`}>
+                        idle {cpuIdleLabel}
+                      </span>
+                    </span>
+                    <span className="text-gray-700">|</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-gray-600" />
+                      <span className="text-gray-400">droplet</span>
+                      <span className="text-gray-500">weekend only · 6w</span>
                     </span>
                   </div>
 
