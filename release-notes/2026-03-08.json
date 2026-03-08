@@ -11,6 +11,15 @@
       "category": "intel",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "ai-research-data-quality",
+      "title": "AI Research Data Quality Corrections",
+      "summary": "Re-ran scanner with 21 fundamental data overrides fixing Polygon API errors — corrected gross margins, operating margins, FCF, and missing foreign ADR data.",
+      "description": "Applied manual data overrides for 21 tickers where the Polygon API returned incorrect or missing fundamental data. Key fixes: SAP, TSM, CYBR, WIT now show full fundamental data (were blank before due to ADR/foreign listing gaps). PYPL, LMND, AFRM no longer show 100% gross margin (Polygon was omitting COGS). SOFI operating margin corrected from -162% to +14.7%. DOCU net margin corrected from 36% to 9.6% (was inflated by one-time investment gain). AMZN FCF now positive at $7.7B (was showing -$2.9B). PLTR moved from rank 2 to rank 31 as its inflated scores from bad data were corrected.",
+      "category": "intel",
+      "image": null,
+      "screenshot": null
     }
   ]
 }
