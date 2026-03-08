@@ -461,7 +461,7 @@ export default function FleetUtilizationPage() {
             </section>
 
             {/* --- Bottom three-panel: Gauge + Daily + Weekly --- */}
-            <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               {/* Fleet Gauge + Machine Bars */}
               <div className="rounded border border-gray-800 bg-gray-900">
                 <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
