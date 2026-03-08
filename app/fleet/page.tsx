@@ -444,9 +444,9 @@ export default function FleetUtilizationPage() {
                   </span>
                 </div>
                 <div className="px-3 pt-2 pb-2.5">
-                  <div className="relative rounded-xl border border-cyan-900/40 bg-gradient-to-br from-slate-950 via-cyan-950/40 to-gray-900 p-1 overflow-hidden">
+                  <div className="rounded-xl border border-cyan-900/40 bg-gradient-to-br from-slate-950 via-cyan-950/40 to-gray-900 overflow-hidden relative">
                     <div className="pointer-events-none absolute inset-0 fleet-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 200" className="mx-auto h-32 w-32">
+                    <svg viewBox="0 0 200 240" className="mx-auto w-full max-w-[240px]">
                       <defs>
                         <linearGradient id="fleetDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
                           <stop offset="0%" stopColor="#22d3ee" />
@@ -454,10 +454,11 @@ export default function FleetUtilizationPage() {
                           <stop offset="100%" stopColor="#facc15" />
                         </linearGradient>
                       </defs>
-                      <circle cx="100" cy="100" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
+                      <text x="100" y="18" textAnchor="middle" fill="rgba(165,243,252,0.7)" fontSize="9" fontWeight="500" letterSpacing="0.18em" className="uppercase">THROTTLE</text>
+                      <circle cx="100" cy="115" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
                       <circle
                         cx="100"
-                        cy="100"
+                        cy="115"
                         r="74"
                         fill="none"
                         stroke="url(#fleetDialGradient)"
@@ -465,28 +466,23 @@ export default function FleetUtilizationPage() {
                         strokeLinecap="round"
                         strokeDasharray={ringCircumference}
                         strokeDashoffset={ringOffset}
-                        transform="rotate(-90 100 100)"
+                        transform="rotate(-90 100 115)"
                         className="transition-all duration-700 ease-out"
                       />
                       <line
                         x1="100"
-                        y1="100"
+                        y1="115"
                         x2="100"
-                        y2="34"
+                        y2="49"
                         stroke="#67e8f9"
                         strokeWidth="4"
                         strokeLinecap="round"
-                        transform={`rotate(${speedNeedleDeg} 100 100)`}
+                        transform={`rotate(${speedNeedleDeg} 100 115)`}
                         className="transition-all duration-700 ease-out"
                       />
-                      <circle cx="100" cy="100" r="7" fill="#e2e8f0" />
+                      <circle cx="100" cy="115" r="7" fill="#e2e8f0" />
+                      <text x="100" y="230" textAnchor="middle" fill="#a5f3fc" fontSize="24" fontWeight="600">{fmtPct(fleetSpeedPct)}</text>
                     </svg>
-                    <div className="absolute left-0 right-0 top-1.5 text-center">
-                      <div className="text-[10px] uppercase tracking-[0.18em] text-cyan-200/70 font-medium">Throttle</div>
-                    </div>
-                    <div className="absolute left-0 right-0 bottom-1.5 text-center">
-                      <div className="text-xl font-semibold text-cyan-200 tabular-nums">{fmtPct(fleetSpeedPct)}</div>
-                    </div>
                   </div>
 
                   <div className="mt-2.5 space-y-1.5">
@@ -554,9 +550,9 @@ export default function FleetUtilizationPage() {
                   </span>
                 </div>
                 <div className="px-3 pt-2 pb-2.5">
-                  <div className="relative rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-gray-900 p-1 overflow-hidden">
+                  <div className="rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-gray-900 overflow-hidden relative">
                     <div className="pointer-events-none absolute inset-0 cpu-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 200" className="mx-auto h-32 w-32">
+                    <svg viewBox="0 0 200 240" className="mx-auto w-full max-w-[240px]">
                       <defs>
                         <linearGradient id="cpuDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
                           <stop offset="0%" stopColor="#34d399" />
@@ -564,10 +560,11 @@ export default function FleetUtilizationPage() {
                           <stop offset="100%" stopColor="#facc15" />
                         </linearGradient>
                       </defs>
-                      <circle cx="100" cy="100" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
+                      <text x="100" y="18" textAnchor="middle" fill="rgba(167,243,208,0.7)" fontSize="9" fontWeight="500" letterSpacing="0.18em" className="uppercase">THROTTLE</text>
+                      <circle cx="100" cy="115" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
                       <circle
                         cx="100"
-                        cy="100"
+                        cy="115"
                         r="74"
                         fill="none"
                         stroke="url(#cpuDialGradient)"
@@ -575,30 +572,25 @@ export default function FleetUtilizationPage() {
                         strokeLinecap="round"
                         strokeDasharray={ringCircumference}
                         strokeDashoffset={cpuRingOffset}
-                        transform="rotate(-90 100 100)"
+                        transform="rotate(-90 100 115)"
                         className="transition-all duration-700 ease-out"
                       />
                       <line
                         x1="100"
-                        y1="100"
+                        y1="115"
                         x2="100"
-                        y2="34"
+                        y2="49"
                         stroke="#34d399"
                         strokeWidth="4"
                         strokeLinecap="round"
-                        transform={`rotate(${cpuNeedleDeg} 100 100)`}
+                        transform={`rotate(${cpuNeedleDeg} 100 115)`}
                         className="transition-all duration-700 ease-out"
                       />
-                      <circle cx="100" cy="100" r="7" fill="#e2e8f0" />
-                    </svg>
-                    <div className="absolute left-0 right-0 top-1.5 text-center">
-                      <div className="text-[10px] uppercase tracking-[0.18em] text-emerald-200/70 font-medium">Throttle</div>
-                    </div>
-                    <div className="absolute left-0 right-0 bottom-1.5 text-center">
-                      <div className="text-xl font-semibold text-emerald-200 tabular-nums">
+                      <circle cx="100" cy="115" r="7" fill="#e2e8f0" />
+                      <text x="100" y="230" textAnchor="middle" fill="#a7f3d0" fontSize="22" fontWeight="600">
                         {cpuSpeedPct > 0 ? `${(cpuSpeedPct / 10).toFixed(1)} cores` : "0.0 cores"}
-                      </div>
-                    </div>
+                      </text>
+                    </svg>
                   </div>
 
                   {/* Machine bars */}
