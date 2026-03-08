@@ -46,6 +46,25 @@ type UtilizationResponse = {
   weekly: WindowBucket[];
 };
 
+type OrchestratorStatus = {
+  state?: string;
+  current_task?: string | null;
+  idle_seconds?: number;
+  cpu_budget?: {
+    max_workers?: number;
+    nice?: number;
+    reason?: string;
+  };
+  collected_jobs_count?: number;
+  collected_profitable?: number;
+  best_pf?: number;
+  retry_queue_size?: number;
+  cpu_jobs_completed?: number;
+  started_at?: string | null;
+  last_collect_at?: string | null;
+  pid?: number;
+};
+
 type StatusMachine = {
   machine: string;
   age_seconds?: number | null;
@@ -59,6 +78,7 @@ type StatusMachine = {
   };
   heartbeats?: Record<string, { state?: string; current_job?: string; timestamp?: string }>;
   queues?: Record<string, { jobs?: Array<{ status?: string; name?: string }> }>;
+  orchestrator?: OrchestratorStatus;
 };
 
 type StatusResponse = {
@@ -215,6 +235,14 @@ export default function FleetUtilizationPage() {
       map.set(row.machine, row);
     }
     return map;
+  }, [status]);
+
+  // Extract CPU orchestrator data (Mac node)
+  const orchestratorMachine = useMemo(() => {
+    for (const row of status?.machines || []) {
+      if (row.orchestrator) return row;
+    }
+    return null;
   }, [status]);
 
   const dailyRows = useMemo(() => {
@@ -459,6 +487,89 @@ export default function FleetUtilizationPage() {
                 Low coverage means 24h attainment may understate true usage.
               </div>
             </section>
+
+            {/* --- CPU Orchestrator Status (Mac) --- */}
+            {orchestratorMachine && orchestratorMachine.orchestrator && (() => {
+              const orch = orchestratorMachine.orchestrator!;
+              const orchState = orch.state || "unknown";
+              const stateColor =
+                orchState === "collecting" ? "text-cyan-300" :
+                orchState === "cpu_job" ? "text-emerald-300" :
+                orchState === "idle" ? "text-gray-400" :
+                orchState === "stopped" ? "text-red-400" : "text-gray-500";
+              const budgetReason = orch.cpu_budget?.reason || "unknown";
+              const workers = orch.cpu_budget?.max_workers ?? 0;
+              const idleSec = orch.idle_seconds ?? 0;
+              const idleLabel = idleSec < 60 ? `${Math.round(idleSec)}s` :
+                idleSec < 3600 ? `${Math.round(idleSec / 60)}m` :
+                `${(idleSec / 3600).toFixed(1)}h`;
+              const uptime = orch.started_at ? (() => {
+                const start = Date.parse(orch.started_at!);
+                if (!Number.isFinite(start)) return "--";
+                const hrs = (Date.now() - start) / 3600000;
+                return hrs < 1 ? `${Math.round(hrs * 60)}m` : `${hrs.toFixed(1)}h`;
+              })() : "--";
+
+              return (
+                <section className="rounded border border-gray-800 bg-gray-900">
+                  <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <span className="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                      CPU Orchestrator
+                      <span className="text-xs font-normal text-gray-500">mac</span>
+                    </span>
+                    <span className={`text-xs ${ageClass(orchestratorMachine.age_seconds)}`}>
+                      checkin {fmtAge(orchestratorMachine.age_seconds)} ago
+                    </span>
+                  </div>
+                  <div className="px-3 py-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-x-4 gap-y-1 text-xs">
+                    <div>
+                      <span className="text-gray-500">State</span>
+                      <div className={`font-medium ${stateColor}`}>{orchState}</div>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Task</span>
+                      <div className="text-gray-200 truncate max-w-[140px]">{orch.current_task || "—"}</div>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">CPU Budget</span>
+                      <div className="text-gray-200">{workers} workers · {budgetReason}</div>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">User Idle</span>
+                      <div className={idleSec >= 1800 ? "text-emerald-300" : idleSec >= 300 ? "text-cyan-300" : "text-amber-300"}>
+                        {idleLabel}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Collected</span>
+                      <div className="text-gray-200">{orch.collected_jobs_count ?? 0} jobs</div>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Profitable</span>
+                      <div className={`${(orch.collected_profitable ?? 0) > 0 ? "text-emerald-300" : "text-gray-400"}`}>
+                        {orch.collected_profitable ?? 0}
+                        {(orch.collected_jobs_count ?? 0) > 0 && (
+                          <span className="text-gray-500 ml-1">
+                            ({((orch.collected_profitable ?? 0) / (orch.collected_jobs_count || 1) * 100).toFixed(0)}%)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Best PF</span>
+                      <div className={(orch.best_pf ?? 0) >= 3.01 ? "text-emerald-300 font-medium" : "text-gray-200"}>
+                        {(orch.best_pf ?? 0) > 0 ? (orch.best_pf ?? 0).toFixed(2) : "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Uptime</span>
+                      <div className="text-gray-200">{uptime}</div>
+                    </div>
+                  </div>
+                </section>
+              );
+            })()}
 
             {/* --- Bottom three-panel: Gauge + Daily + Weekly --- */}
             <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
