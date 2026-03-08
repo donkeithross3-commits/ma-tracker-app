@@ -116,6 +116,25 @@ type OrchestratorStatus = {
   cpu_jobs_completed?: number;
 };
 
+type CpuWindowSummary = {
+  avg_cores?: number;
+  peak_cores?: number;
+  total_core_hours?: number;
+  samples?: number;
+  coverage_pct?: number;
+  label?: string;
+  complete?: boolean;
+};
+
+type CpuUtilizationResponse = {
+  as_of?: string;
+  trailing?: {
+    day?: CpuWindowSummary;
+    week?: CpuWindowSummary;
+  };
+  daily?: CpuWindowSummary[];
+};
+
 type StatusMachine = {
   machine: string;
   age_seconds?: number | null;
@@ -225,6 +244,7 @@ const SAMPLE_RATE_WARN_PCT = 0.80; // warn below 80% of expected
 
 export default function FleetUtilizationPage() {
   const [util, setUtil] = useState<UtilizationResponse | null>(null);
+  const [cpuUtil, setCpuUtil] = useState<CpuUtilizationResponse | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -233,9 +253,10 @@ export default function FleetUtilizationPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [utilRes, statusRes] = await Promise.all([
+      const [utilRes, statusRes, cpuUtilRes] = await Promise.all([
         fetch("/api/fleet/utilization?daily_days=14&weekly_weeks=8", { cache: "no-store" }),
         fetch("/api/fleet/status", { cache: "no-store" }),
+        fetch("/api/fleet/cpu-utilization?daily_days=7", { cache: "no-store" }),
       ]);
 
       if (!utilRes.ok) throw new Error(`utilization API ${utilRes.status}`);
@@ -245,6 +266,9 @@ export default function FleetUtilizationPage() {
       const statusJson = (await statusRes.json()) as StatusResponse;
       setUtil(utilJson);
       setStatus(statusJson);
+      if (cpuUtilRes.ok) {
+        setCpuUtil((await cpuUtilRes.json()) as CpuUtilizationResponse);
+      }
       setRefreshAt(new Date().toISOString());
       setError(null);
     } catch (err) {
@@ -643,13 +667,49 @@ export default function FleetUtilizationPage() {
                     <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
                       <span className="flex items-center gap-2">
                         CPU Compute
-                        <span className="text-xs font-normal text-gray-500">research workers · 2 cores each</span>
+                        <span className="text-xs font-normal text-gray-500">research workers</span>
                       </span>
                       <span className={`text-xs ${ageClass(orchestratorMachine.age_seconds)}`}>
                         checkin {fmtAge(orchestratorMachine.age_seconds)} ago
                       </span>
                     </div>
-                    <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+                    {/* CPU KPI row — trailing 24h + 7d averages */}
+                    {cpuUtil?.trailing && (
+                      <div className="px-3 py-2 border-b border-gray-800/60 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div>
+                          <div className="text-xs text-gray-500">Avg Cores (24h)</div>
+                          <div className={`text-lg font-semibold tabular-nums ${(cpuUtil.trailing.day?.avg_cores ?? 0) >= 1 ? "text-cyan-300" : "text-gray-400"}`}>
+                            {(cpuUtil.trailing.day?.avg_cores ?? 0).toFixed(1)}
+                          </div>
+                          <div className="text-xs text-gray-600">peak {cpuUtil.trailing.day?.peak_cores?.toFixed(1) ?? "0"}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500">Avg Cores (7d)</div>
+                          <div className={`text-lg font-semibold tabular-nums ${(cpuUtil.trailing.week?.avg_cores ?? 0) >= 1 ? "text-emerald-300" : "text-gray-400"}`}>
+                            {(cpuUtil.trailing.week?.avg_cores ?? 0).toFixed(1)}
+                          </div>
+                          <div className="text-xs text-gray-600">peak {cpuUtil.trailing.week?.peak_cores?.toFixed(1) ?? "0"}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500">Core·Hours (24h)</div>
+                          <div className="text-lg font-semibold tabular-nums text-gray-300">
+                            {(cpuUtil.trailing.day?.total_core_hours ?? 0).toFixed(1)}
+                          </div>
+                          <div className="text-xs text-gray-600">{cpuUtil.trailing.day?.samples ?? 0} samples</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500">Core·Hours (7d)</div>
+                          <div className="text-lg font-semibold tabular-nums text-gray-300">
+                            {(cpuUtil.trailing.week?.total_core_hours ?? 0).toFixed(1)}
+                          </div>
+                          <div className="text-xs text-gray-600">{cpuUtil.trailing.week?.samples ?? 0} samples</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Machine status cards */}
+                    <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-2 gap-3 border-b border-gray-800/60">
                       {/* Mac card */}
                       <div className="rounded border border-gray-800 bg-gray-950/50 px-3 py-2">
                         <div className="flex items-center justify-between mb-1.5">
@@ -663,12 +723,6 @@ export default function FleetUtilizationPage() {
                         </div>
                         {rpTotalCpu > 0 ? (
                           <>
-                            <div className="flex items-center gap-3 text-xs mb-1.5">
-                              <span className="text-emerald-300 font-medium tabular-nums">{rpTotalCpu.toFixed(0)}% CPU</span>
-                              <span className="text-gray-400">{rpTotalWorkers} active workers</span>
-                              <span className="text-gray-600">{rpJobs.length} {rpJobs.length === 1 ? "job" : "jobs"}</span>
-                            </div>
-                            {/* CPU utilization bar (out of 1000% = 10 cores) */}
                             <div className="flex items-center gap-2 mb-1.5">
                               <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
                                 <div
@@ -680,7 +734,6 @@ export default function FleetUtilizationPage() {
                                 {(rpTotalCpu / 100).toFixed(1)}/10 cores
                               </span>
                             </div>
-                            {/* Job list */}
                             <div className="space-y-0.5">
                               {rpJobs.map((job, i) => (
                                 <div key={i} className="flex items-center gap-2 text-xs">
@@ -691,26 +744,15 @@ export default function FleetUtilizationPage() {
                                   <span className={`tabular-nums ${(job.cpu_pct ?? 0) > 200 ? "text-amber-300" : "text-gray-400"}`}>
                                     {(job.cpu_pct ?? 0).toFixed(0)}%
                                   </span>
-                                  {job.elapsed && (
-                                    <span className="text-gray-600">{job.elapsed}</span>
-                                  )}
+                                  {job.elapsed && <span className="text-gray-600">{job.elapsed}</span>}
                                 </div>
                               ))}
                             </div>
                           </>
                         ) : cpuActive ? (
-                          <div className="text-xs text-emerald-300">
-                            {cpuWorkers}w · {cpuTask || "working"}
-                          </div>
+                          <div className="text-xs text-emerald-300">{cpuWorkers}w · {cpuTask || "working"}</div>
                         ) : (
-                          <div className="text-xs text-gray-500">
-                            No active research processes
-                            {cpuIdleSec > 0 && (
-                              <span className="ml-2 text-gray-600">
-                                user idle {cpuIdleSec < 60 ? `${Math.round(cpuIdleSec)}s` : cpuIdleSec < 3600 ? `${Math.round(cpuIdleSec / 60)}m` : `${(cpuIdleSec / 3600).toFixed(1)}h`}
-                              </span>
-                            )}
-                          </div>
+                          <div className="text-xs text-gray-500">No active research processes</div>
                         )}
                       </div>
                       {/* Droplet card */}
@@ -722,11 +764,52 @@ export default function FleetUtilizationPage() {
                           </span>
                           <span className="text-xs text-gray-500">weekend only</span>
                         </div>
-                        <div className="text-xs text-gray-500">
-                          py_proj deployed · CPU-only venv · weekend cron TBD
-                        </div>
+                        <div className="text-xs text-gray-500">py_proj deployed · CPU-only venv · weekend cron TBD</div>
                       </div>
                     </div>
+
+                    {/* Daily CPU utilization table */}
+                    {cpuUtil?.daily && cpuUtil.daily.length > 0 && (
+                      <div className="max-h-[260px] overflow-auto">
+                        <table className="w-full text-xs">
+                          <thead className="text-gray-500">
+                            <tr className="border-b border-gray-800 sticky top-0 bg-gray-900">
+                              <th className="text-left px-3 py-1.5">Date</th>
+                              <th className="text-right px-3 py-1.5">Avg Cores</th>
+                              <th className="text-right px-3 py-1.5">Peak</th>
+                              <th className="text-right px-3 py-1.5">Core·Hours</th>
+                              <th className="text-right px-3 py-1.5">Samples</th>
+                              <th className="text-right px-3 py-1.5">Coverage</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...cpuUtil.daily].reverse().map((row) => (
+                              <tr key={`cpu-${row.label}`} className="border-b border-gray-800/60">
+                                <td className="px-3 py-1.5 text-gray-300">
+                                  {row.label} {!row.complete && <span className="text-amber-400">(partial)</span>}
+                                </td>
+                                <td className={`px-3 py-1.5 text-right tabular-nums ${(row.avg_cores ?? 0) >= 2 ? "text-emerald-300" : (row.avg_cores ?? 0) >= 0.5 ? "text-cyan-300" : "text-gray-500"}`}>
+                                  {(row.avg_cores ?? 0).toFixed(1)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-gray-400">
+                                  {(row.peak_cores ?? 0).toFixed(1)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
+                                  {(row.total_core_hours ?? 0).toFixed(1)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">
+                                  {row.samples ?? 0}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-gray-400">
+                                  {(row.coverage_pct ?? 0).toFixed(0)}%
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
                     {/* Orchestrator status footer */}
                     <div className="px-3 py-1.5 border-t border-gray-800 text-xs flex items-center gap-3 flex-wrap text-gray-500">
                       <span>Orchestrator: <span className={

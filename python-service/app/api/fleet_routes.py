@@ -16,7 +16,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.fleet_monitor import process_checkin, load_latest_statuses, load_watchdog_state
-from app.fleet_utilization import build_utilization_report
+from app.fleet_utilization import build_cpu_utilization_report, build_utilization_report
 
 logger = logging.getLogger(__name__)
 
@@ -171,3 +171,18 @@ async def fleet_utilization(
         carry_max_seconds=carry_max_seconds,
     )
     return report
+
+
+@router.get("/cpu-utilization")
+async def fleet_cpu_utilization(
+    daily_days: int = Query(7, ge=1, le=30),
+    tz: str = Query("America/New_York"),
+    carry_max_seconds: int = Query(600, ge=0, le=3600),
+) -> dict[str, Any]:
+    """CPU utilization rollups for Mac research workers."""
+    return build_cpu_utilization_report(
+        fleet_data_dir=FLEET_DATA_DIR,
+        daily_days=daily_days,
+        timezone_name=tz,
+        carry_max_seconds=carry_max_seconds,
+    )

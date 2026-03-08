@@ -434,3 +434,208 @@ def build_utilization_report(
         "weekly": weekly,
     }
 
+
+# ---------------------------------------------------------------------------
+# CPU utilization rollups
+# ---------------------------------------------------------------------------
+
+CPU_MACHINES = ["mac"]  # Expandable when droplet comes online
+
+
+def _load_cpu_points(
+    telemetry_file: Path,
+    *,
+    earliest_start: datetime,
+) -> dict[str, list[TelemetryPoint]]:
+    """Load CPU utilization points from telemetry.jsonl.
+
+    Extracts ``orchestrator.research_processes.total_cpu_pct`` from Mac
+    checkins.  Values are in "percent of one core" (e.g. 400 = 4 cores
+    fully loaded).  We store them directly as util_pct so the existing
+    ``_integrate_window`` can be reused.
+    """
+    points: dict[str, list[TelemetryPoint]] = {m: [] for m in CPU_MACHINES}
+    last_before: dict[str, TelemetryPoint] = {}
+
+    if not telemetry_file.exists():
+        return points
+
+    target_machines = set(CPU_MACHINES)
+
+    with open(telemetry_file, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            machine = str(rec.get("machine", "")).strip()
+            if machine not in target_machines:
+                continue
+
+            ts = _parse_ts(rec.get("received_at")) or _parse_ts(rec.get("timestamp"))
+            if ts is None:
+                continue
+
+            orch = rec.get("orchestrator") or {}
+            rp = orch.get("research_processes") or {}
+            cpu_pct = rp.get("total_cpu_pct")
+            if cpu_pct is None:
+                continue
+            try:
+                cpu_pct = float(cpu_pct)
+            except (TypeError, ValueError):
+                continue
+
+            # Store raw cpu_pct (e.g. 400 = 4 cores).  We'll convert to
+            # "cores" in the summary, not here.
+            pt = TelemetryPoint(ts=ts, util_pct=int(cpu_pct))
+
+            if ts < earliest_start:
+                prev = last_before.get(machine)
+                if prev is None or prev.ts < ts:
+                    last_before[machine] = pt
+            else:
+                points[machine].append(pt)
+
+    for machine in CPU_MACHINES:
+        machine_points = points[machine]
+        machine_points.sort(key=lambda p: p.ts)
+        if machine in last_before:
+            machine_points.insert(0, last_before[machine])
+
+    return points
+
+
+def _cpu_window_summary(
+    *,
+    points: list[TelemetryPoint],
+    start: datetime,
+    end: datetime,
+    carry_max_seconds: int,
+) -> dict[str, Any]:
+    """Summarise CPU utilization over a window.
+
+    Unlike GPU (0-100% of one device), CPU total_cpu_pct can be 0-1000%
+    (10 cores).  We report:
+      - avg_cores: average cores used over the window
+      - peak_cores: max instantaneous cores seen
+      - samples: number of checkins in window
+      - coverage_pct: fraction of window covered by telemetry
+    """
+    window_seconds = max(0.0, (end - start).total_seconds())
+    if window_seconds <= 0 or not points:
+        return {
+            "avg_cores": 0.0,
+            "peak_cores": 0.0,
+            "total_core_hours": 0.0,
+            "samples": 0,
+            "coverage_pct": 0.0,
+        }
+
+    # _integrate_window gives us "achieved seconds" where util_pct is raw
+    # cpu_pct.  E.g. if cpu_pct=400 for 3600s, achieved = 400/100 * 3600
+    # = 14400 "GPU-equivalent seconds".  Divide by window_seconds to get
+    # average cores.
+    achieved, observed, samples = _integrate_window(
+        points, start=start, end=end, carry_max_seconds=carry_max_seconds,
+    )
+
+    avg_cores = achieved / window_seconds if window_seconds > 0 else 0.0
+    coverage_pct = (observed / window_seconds * 100.0) if window_seconds > 0 else 0.0
+    total_core_hours = achieved / 3600.0
+
+    # Peak cores: max util_pct in window
+    peak_pct = 0
+    for pt in points:
+        if start <= pt.ts < end:
+            peak_pct = max(peak_pct, pt.util_pct)
+    peak_cores = peak_pct / 100.0
+
+    return {
+        "avg_cores": round(avg_cores, 2),
+        "peak_cores": round(peak_cores, 1),
+        "total_core_hours": round(total_core_hours, 2),
+        "samples": samples,
+        "coverage_pct": round(coverage_pct, 2),
+    }
+
+
+def build_cpu_utilization_report(
+    *,
+    fleet_data_dir: Path,
+    daily_days: int = 7,
+    timezone_name: str = "America/New_York",
+    carry_max_seconds: int = 600,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
+    """Build a CPU utilization report analogous to the GPU report.
+
+    Returns trailing 24h/7d summaries plus daily breakdown with average
+    cores used, peak cores, total core·hours, and sample coverage.
+    """
+    daily_days = max(1, min(30, int(daily_days)))
+    carry_max_seconds = max(0, min(3600, int(carry_max_seconds)))
+
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        tz = ZoneInfo("UTC")
+
+    now_utc = now_utc.astimezone(UTC) if now_utc else datetime.now(UTC)
+    now_local = now_utc.astimezone(tz)
+    day_start_local = _local_day_start(now_local)
+
+    oldest_daily_start_local = day_start_local - timedelta(days=daily_days - 1)
+    earliest_start = min(
+        oldest_daily_start_local.astimezone(UTC),
+        (now_utc - timedelta(days=7)),
+    )
+
+    telemetry_file = fleet_data_dir / "telemetry.jsonl"
+    cpu_points = _load_cpu_points(telemetry_file, earliest_start=earliest_start)
+    mac_points = cpu_points.get("mac", [])
+
+    trailing_day = _cpu_window_summary(
+        points=mac_points,
+        start=now_utc - timedelta(days=1),
+        end=now_utc,
+        carry_max_seconds=carry_max_seconds,
+    )
+    trailing_week = _cpu_window_summary(
+        points=mac_points,
+        start=now_utc - timedelta(days=7),
+        end=now_utc,
+        carry_max_seconds=carry_max_seconds,
+    )
+
+    daily: list[dict[str, Any]] = []
+    for offset in range(daily_days - 1, -1, -1):
+        start_local = day_start_local - timedelta(days=offset)
+        end_local = start_local + timedelta(days=1)
+        start_utc_d = start_local.astimezone(UTC)
+        end_utc_d = min(end_local.astimezone(UTC), now_utc)
+        if end_utc_d <= start_utc_d:
+            continue
+        summary = _cpu_window_summary(
+            points=mac_points,
+            start=start_utc_d,
+            end=end_utc_d,
+            carry_max_seconds=carry_max_seconds,
+        )
+        summary["label"] = start_local.date().isoformat()
+        summary["complete"] = end_local <= now_local
+        daily.append(summary)
+
+    return {
+        "as_of": now_utc.isoformat(),
+        "trailing": {
+            "day": trailing_day,
+            "week": trailing_week,
+        },
+        "daily": daily,
+    }
+
