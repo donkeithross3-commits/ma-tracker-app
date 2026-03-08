@@ -116,7 +116,7 @@ async def fleet_status() -> dict[str, Any]:
             except (ValueError, TypeError):
                 pass
 
-        machines.append({
+        entry: dict[str, Any] = {
             "machine": machine,
             "gpu": data.get("gpu", {}),
             "processes": data.get("processes", []),
@@ -126,7 +126,11 @@ async def fleet_status() -> dict[str, Any]:
             "timestamp": data.get("timestamp"),
             "received_at": data.get("received_at"),
             "age_seconds": age_seconds,
-        })
+        }
+        # Include orchestrator status if present (Mac CPU orchestrator)
+        if data.get("orchestrator"):
+            entry["orchestrator"] = data["orchestrator"]
+        machines.append(entry)
 
     return {"machines": machines}
 
@@ -153,9 +157,14 @@ async def fleet_utilization(
 ) -> dict[str, Any]:
     """Daily/weekly GPU utilization attainment rollups for the dashboard."""
     statuses = load_latest_statuses(FLEET_DATA_DIR)
+    # Filter out machines with no GPU data (e.g. Mac CPU orchestrator node)
+    gpu_machines = [
+        m for m, data in statuses.items()
+        if data.get("gpu") and any(v is not None for v in data["gpu"].values())
+    ]
     report = build_utilization_report(
         fleet_data_dir=FLEET_DATA_DIR,
-        latest_machines=sorted(statuses.keys()),
+        latest_machines=sorted(gpu_machines),
         daily_days=daily_days,
         weekly_weeks=weekly_weeks,
         timezone_name=tz,
