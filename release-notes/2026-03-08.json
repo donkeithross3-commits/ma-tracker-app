@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-08",
+  "title": "Week of Mar 3-8, 2026",
+  "summary": "AI Disruption Research page: Saaspocalypse rotation scanner identifying winners the market thinks are losers.",
+  "features": [
+    {
+      "id": "ai-disruption-research",
+      "title": "AI Disruption Research Page",
+      "summary": "New research page with cross-industry AI disruption opportunity scan covering 60 tickers across 9 industries.",
+      "description": "Comprehensive Saaspocalypse rotation scanner that identifies stocks where AI-fear repricing has created a gap between market perception and actual competitive moat. Four tabs: Opportunities (sortable ranked table with Long/Short signals and rationale), Industry Map (switching cost analysis showing which industries are genuinely threatened vs overreacting), AI Fear & Dislocation (sentiment breakdown with fear ratio, concrete execution, and net sentiment), and Methodology (scoring weights, industry priors, and NLP term definitions). Top picks include OKTA, HUBS, ADBE where high switching costs protect against AI disruption but the market is punishing them like vulnerable horizontal SaaS.",
+      "category": "intel",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
