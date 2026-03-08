@@ -399,9 +399,9 @@ export default function FleetUtilizationPage() {
       <header className="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">Fleet Utilization Dashboard</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Fleet Dashboard</h1>
             <p className="text-xs text-gray-500">
-              Daily/weekly attainment vs theoretical 100% GPU-time
+              GPU + CPU compute · {refreshAt ? `refreshed ${new Date(refreshAt).toLocaleTimeString()}` : "loading..."}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -430,43 +430,224 @@ export default function FleetUtilizationPage() {
 
         {util && (
           <>
-            {/* --- Top KPI Cards --- */}
-            <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="rounded border border-gray-800 bg-gray-900 p-3">
-                <div className="text-xs text-gray-500">Trailing 24h Attainment</div>
-                <div className="text-2xl font-semibold text-cyan-300">
-                  {fmtPct(util.trailing.day.fleet_attainment_pct)}
+            {/* --- Warp Speed Gauges: GPU + CPU side-by-side (hero) --- */}
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* GPU Warp Speed Gauge */}
+              <div className="rounded border border-gray-800 bg-gray-900">
+                <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                  <span>GPU Warp Speed</span>
+                  <span className="text-xs font-normal text-gray-500">
+                    24h {fmtPct(util.trailing.day.fleet_attainment_pct)} · 7d {fmtPct(util.trailing.week.fleet_attainment_pct)}
+                  </span>
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  {fmtHours(util.trailing.day.achieved_gpu_hours)} /{" "}
-                  {fmtHours(util.trailing.day.possible_gpu_hours)}
+                <div className="p-3">
+                  <div className="relative rounded-xl border border-cyan-900/40 bg-gradient-to-br from-slate-950 via-cyan-950/40 to-gray-900 p-2 overflow-hidden">
+                    <div className="pointer-events-none absolute inset-0 fleet-speed-grid opacity-25" />
+                    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40">
+                      <defs>
+                        <linearGradient id="fleetDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stopColor="#22d3ee" />
+                          <stop offset="50%" stopColor="#34d399" />
+                          <stop offset="100%" stopColor="#facc15" />
+                        </linearGradient>
+                      </defs>
+                      <circle cx="100" cy="100" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
+                      <circle
+                        cx="100"
+                        cy="100"
+                        r="74"
+                        fill="none"
+                        stroke="url(#fleetDialGradient)"
+                        strokeWidth="10"
+                        strokeLinecap="round"
+                        strokeDasharray={ringCircumference}
+                        strokeDashoffset={ringOffset}
+                        transform="rotate(-90 100 100)"
+                        className="transition-all duration-700 ease-out"
+                      />
+                      <line
+                        x1="100"
+                        y1="100"
+                        x2="100"
+                        y2="34"
+                        stroke="#67e8f9"
+                        strokeWidth="4"
+                        strokeLinecap="round"
+                        transform={`rotate(${speedNeedleDeg} 100 100)`}
+                        className="transition-all duration-700 ease-out"
+                      />
+                      <circle cx="100" cy="100" r="7" fill="#e2e8f0" />
+                    </svg>
+                    <div className="absolute left-0 right-0 top-2 text-center">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">Throttle</div>
+                    </div>
+                    <div className="absolute left-0 right-0 bottom-2 text-center">
+                      <div className="text-2xl font-semibold text-cyan-200">{fmtPct(fleetSpeedPct)}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    {machineSpeed.map((row) => {
+                      const statusRow = statusByMachine.get(row.machine);
+                      const gpu = statusRow?.gpu;
+                      return (
+                        <div key={`spd-${row.machine}`}>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-300">{row.machine}</span>
+                            <span className="text-cyan-200">
+                              {fmtPct(row.utilPct)}
+                              {row.powerW !== null && (
+                                <span className="text-gray-400 ml-1">({Math.round(row.powerW)}W)</span>
+                              )}
+                              {gpu?.temp != null && (
+                                <span className={`ml-1 ${tempColor(gpu.temp)}`}>{gpu.temp}°C</span>
+                              )}
+                              {" · "}
+                              {row.state}
+                            </span>
+                          </div>
+                          <div className="mt-1 h-2 rounded-full bg-gray-800 overflow-hidden border border-gray-700/70">
+                            <div
+                              className="h-full rounded-full fleet-speed-bar"
+                              style={{
+                                width: `${Math.max(3, row.utilPct)}%`,
+                                animationDuration: `${Math.max(0.45, 2.6 - row.utilPct / 55)}s`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* GPU attainment summary */}
+                  <div className="mt-3 pt-2 border-t border-gray-800/60 flex items-center gap-4 text-xs text-gray-500">
+                    <span>24h: {fmtHours(util.trailing.day.achieved_gpu_hours)} / {fmtHours(util.trailing.day.possible_gpu_hours)}</span>
+                    <span>7d: {fmtHours(util.trailing.week.achieved_gpu_hours)} / {fmtHours(util.trailing.week.possible_gpu_hours)}</span>
+                    <span>Cov {fmtPct(util.trailing.day.fleet_coverage_pct)}</span>
+                  </div>
                 </div>
               </div>
-              <div className="rounded border border-gray-800 bg-gray-900 p-3">
-                <div className="text-xs text-gray-500">Trailing 7d Attainment</div>
-                <div className="text-2xl font-semibold text-emerald-300">
-                  {fmtPct(util.trailing.week.fleet_attainment_pct)}
+
+              {/* CPU Warp Speed Gauge */}
+              <div className="rounded border border-gray-800 bg-gray-900">
+                <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                  <span>CPU Warp Speed</span>
+                  <span className="text-xs font-normal text-gray-500">
+                    {cpuUtil?.trailing ? `24h avg ${(cpuUtil.trailing.day?.avg_cores ?? 0).toFixed(1)} cores · 7d ${(cpuUtil.trailing.week?.avg_cores ?? 0).toFixed(1)} cores` : "loading..."}
+                  </span>
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  {fmtHours(util.trailing.week.achieved_gpu_hours)} /{" "}
-                  {fmtHours(util.trailing.week.possible_gpu_hours)}
-                </div>
-              </div>
-              <div className="rounded border border-gray-800 bg-gray-900 p-3">
-                <div className="text-xs text-gray-500">Telemetry Coverage (24h)</div>
-                <div className="text-2xl font-semibold text-amber-300">
-                  {fmtPct(util.trailing.day.fleet_coverage_pct)}
-                </div>
-                <div className="text-xs text-gray-500 mt-1">carry max {util.settings.carry_max_seconds}s</div>
-              </div>
-              <div className="rounded border border-gray-800 bg-gray-900 p-3">
-                <div className="text-xs text-gray-500">As Of</div>
-                <div className="text-sm font-medium text-gray-200 mt-1">
-                  {new Date(util.as_of).toLocaleString()}
-                </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  TZ {util.timezone} · refreshed{" "}
-                  {refreshAt ? new Date(refreshAt).toLocaleTimeString() : "--"}
+                <div className="p-3">
+                  <div className="relative rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-gray-900 p-2 overflow-hidden">
+                    <div className="pointer-events-none absolute inset-0 cpu-speed-grid opacity-25" />
+                    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40">
+                      <defs>
+                        <linearGradient id="cpuDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stopColor="#34d399" />
+                          <stop offset="50%" stopColor="#10b981" />
+                          <stop offset="100%" stopColor="#facc15" />
+                        </linearGradient>
+                      </defs>
+                      <circle cx="100" cy="100" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
+                      <circle
+                        cx="100"
+                        cy="100"
+                        r="74"
+                        fill="none"
+                        stroke="url(#cpuDialGradient)"
+                        strokeWidth="10"
+                        strokeLinecap="round"
+                        strokeDasharray={ringCircumference}
+                        strokeDashoffset={cpuRingOffset}
+                        transform="rotate(-90 100 100)"
+                        className="transition-all duration-700 ease-out"
+                      />
+                      <line
+                        x1="100"
+                        y1="100"
+                        x2="100"
+                        y2="34"
+                        stroke="#34d399"
+                        strokeWidth="4"
+                        strokeLinecap="round"
+                        transform={`rotate(${cpuNeedleDeg} 100 100)`}
+                        className="transition-all duration-700 ease-out"
+                      />
+                      <circle cx="100" cy="100" r="7" fill="#e2e8f0" />
+                    </svg>
+                    <div className="absolute left-0 right-0 top-2 text-center">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-200/80">Throttle</div>
+                    </div>
+                    <div className="absolute left-0 right-0 bottom-2 text-center">
+                      <div className="text-2xl font-semibold text-emerald-200">
+                        {cpuSpeedPct > 0 ? `${(cpuSpeedPct / 10).toFixed(1)} cores` : "idle"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Mac machine bar */}
+                  <div className="mt-3 space-y-2">
+                    {(() => {
+                      const rpTotalCpu = (() => {
+                        for (const row of status?.machines || []) {
+                          if (row.orchestrator?.research_processes?.total_cpu_pct != null) {
+                            return row.orchestrator.research_processes.total_cpu_pct;
+                          }
+                        }
+                        return 0;
+                      })();
+                      const rpJobs = (() => {
+                        for (const row of status?.machines || []) {
+                          if (row.orchestrator?.research_processes?.jobs) {
+                            return row.orchestrator.research_processes.jobs;
+                          }
+                        }
+                        return [] as ResearchJob[];
+                      })();
+                      const coresPct = Math.min(100, rpTotalCpu / 10);
+                      return (
+                        <div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-300">mac <span className="text-gray-600">M4 Pro · 10 cores</span></span>
+                            <span className="text-emerald-200">
+                              {(rpTotalCpu / 100).toFixed(1)}/10 cores
+                              {rpJobs.length > 0 && (
+                                <span className="text-gray-400 ml-1">· {rpJobs.length} job{rpJobs.length !== 1 ? "s" : ""}</span>
+                              )}
+                            </span>
+                          </div>
+                          <div className="mt-1 h-2 rounded-full bg-gray-800 overflow-hidden border border-gray-700/70">
+                            <div
+                              className="h-full rounded-full cpu-speed-bar"
+                              style={{
+                                width: `${Math.max(3, coresPct)}%`,
+                                animationDuration: `${Math.max(0.45, 2.6 - coresPct / 55)}s`,
+                              }}
+                            />
+                          </div>
+                          {rpJobs.length > 0 && (
+                            <div className="mt-1.5 space-y-0.5">
+                              {rpJobs.map((job, i) => (
+                                <div key={i} className="flex items-center gap-2 text-xs">
+                                  <span className="text-emerald-400 font-mono truncate max-w-[160px]">{job.script || "unknown"}</span>
+                                  {(job.workers ?? 0) > 0 && <span className="text-gray-500">{job.workers}w</span>}
+                                  <span className="tabular-nums text-gray-400">{(job.cpu_pct ?? 0).toFixed(0)}%</span>
+                                  {job.elapsed && <span className="text-gray-600">{job.elapsed}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  {/* CPU attainment summary */}
+                  {cpuUtil?.trailing && (
+                    <div className="mt-3 pt-2 border-t border-gray-800/60 flex items-center gap-4 text-xs text-gray-500">
+                      <span>24h: {(cpuUtil.trailing.day?.total_core_hours ?? 0).toFixed(1)} core·h (peak {(cpuUtil.trailing.day?.peak_cores ?? 0).toFixed(1)})</span>
+                      <span>7d: {(cpuUtil.trailing.week?.total_core_hours ?? 0).toFixed(1)} core·h</span>
+                      <span>Cov {fmtPct(cpuUtil.trailing.day?.coverage_pct)}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
@@ -687,40 +868,6 @@ export default function FleetUtilizationPage() {
                       </span>
                     </div>
 
-                    {/* CPU KPI row — trailing 24h + 7d averages */}
-                    {cpuUtil?.trailing && (
-                      <div className="px-3 py-2 border-b border-gray-800/60 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        <div>
-                          <div className="text-xs text-gray-500">Avg Cores (24h)</div>
-                          <div className={`text-lg font-semibold tabular-nums ${(cpuUtil.trailing.day?.avg_cores ?? 0) >= 1 ? "text-cyan-300" : "text-gray-400"}`}>
-                            {(cpuUtil.trailing.day?.avg_cores ?? 0).toFixed(1)}
-                          </div>
-                          <div className="text-xs text-gray-600">peak {cpuUtil.trailing.day?.peak_cores?.toFixed(1) ?? "0"}</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-gray-500">Avg Cores (7d)</div>
-                          <div className={`text-lg font-semibold tabular-nums ${(cpuUtil.trailing.week?.avg_cores ?? 0) >= 1 ? "text-emerald-300" : "text-gray-400"}`}>
-                            {(cpuUtil.trailing.week?.avg_cores ?? 0).toFixed(1)}
-                          </div>
-                          <div className="text-xs text-gray-600">peak {cpuUtil.trailing.week?.peak_cores?.toFixed(1) ?? "0"}</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-gray-500">Core·Hours (24h)</div>
-                          <div className="text-lg font-semibold tabular-nums text-gray-300">
-                            {(cpuUtil.trailing.day?.total_core_hours ?? 0).toFixed(1)}
-                          </div>
-                          <div className="text-xs text-gray-600">{cpuUtil.trailing.day?.samples ?? 0} samples</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-gray-500">Core·Hours (7d)</div>
-                          <div className="text-lg font-semibold tabular-nums text-gray-300">
-                            {(cpuUtil.trailing.week?.total_core_hours ?? 0).toFixed(1)}
-                          </div>
-                          <div className="text-xs text-gray-600">{cpuUtil.trailing.week?.samples ?? 0} samples</div>
-                        </div>
-                      </div>
-                    )}
-
                     {/* Machine status cards */}
                     <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-2 gap-3 border-b border-gray-800/60">
                       {/* Mac card */}
@@ -861,210 +1008,6 @@ export default function FleetUtilizationPage() {
                 </>
               );
             })()}
-
-            {/* --- Warp Speed Gauges: GPU + CPU side-by-side --- */}
-            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* GPU Warp Speed Gauge */}
-              <div className="rounded border border-gray-800 bg-gray-900">
-                <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                  <span>GPU Warp Speed</span>
-                  <span className="text-xs font-normal text-gray-500">live GPU thrust</span>
-                </div>
-                <div className="p-3">
-                  <div className="relative rounded-xl border border-cyan-900/40 bg-gradient-to-br from-slate-950 via-cyan-950/40 to-gray-900 p-2 overflow-hidden">
-                    <div className="pointer-events-none absolute inset-0 fleet-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40">
-                      <defs>
-                        <linearGradient id="fleetDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                          <stop offset="0%" stopColor="#22d3ee" />
-                          <stop offset="50%" stopColor="#34d399" />
-                          <stop offset="100%" stopColor="#facc15" />
-                        </linearGradient>
-                      </defs>
-                      <circle cx="100" cy="100" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
-                      <circle
-                        cx="100"
-                        cy="100"
-                        r="74"
-                        fill="none"
-                        stroke="url(#fleetDialGradient)"
-                        strokeWidth="10"
-                        strokeLinecap="round"
-                        strokeDasharray={ringCircumference}
-                        strokeDashoffset={ringOffset}
-                        transform="rotate(-90 100 100)"
-                        className="transition-all duration-700 ease-out"
-                      />
-                      <line
-                        x1="100"
-                        y1="100"
-                        x2="100"
-                        y2="34"
-                        stroke="#67e8f9"
-                        strokeWidth="4"
-                        strokeLinecap="round"
-                        transform={`rotate(${speedNeedleDeg} 100 100)`}
-                        className="transition-all duration-700 ease-out"
-                      />
-                      <circle cx="100" cy="100" r="7" fill="#e2e8f0" />
-                    </svg>
-                    <div className="absolute left-0 right-0 top-2 text-center">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">Throttle</div>
-                    </div>
-                    <div className="absolute left-0 right-0 bottom-2 text-center">
-                      <div className="text-2xl font-semibold text-cyan-200">{fmtPct(fleetSpeedPct)}</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 space-y-2">
-                    {machineSpeed.map((row) => {
-                      const statusRow = statusByMachine.get(row.machine);
-                      const gpu = statusRow?.gpu;
-                      return (
-                        <div key={`spd-${row.machine}`}>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-300">{row.machine}</span>
-                            <span className="text-cyan-200">
-                              {fmtPct(row.utilPct)}
-                              {row.powerW !== null && (
-                                <span className="text-gray-400 ml-1">({Math.round(row.powerW)}W)</span>
-                              )}
-                              {gpu?.temp != null && (
-                                <span className={`ml-1 ${tempColor(gpu.temp)}`}>{gpu.temp}°C</span>
-                              )}
-                              {" · "}
-                              {row.state}
-                            </span>
-                          </div>
-                          <div className="mt-1 h-2 rounded-full bg-gray-800 overflow-hidden border border-gray-700/70">
-                            <div
-                              className="h-full rounded-full fleet-speed-bar"
-                              style={{
-                                width: `${Math.max(3, row.utilPct)}%`,
-                                animationDuration: `${Math.max(0.45, 2.6 - row.utilPct / 55)}s`,
-                              }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* CPU Warp Speed Gauge */}
-              <div className="rounded border border-gray-800 bg-gray-900">
-                <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                  <span>CPU Warp Speed</span>
-                  <span className="text-xs font-normal text-gray-500">live research cores</span>
-                </div>
-                <div className="p-3">
-                  <div className="relative rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-gray-900 p-2 overflow-hidden">
-                    <div className="pointer-events-none absolute inset-0 cpu-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40">
-                      <defs>
-                        <linearGradient id="cpuDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                          <stop offset="0%" stopColor="#34d399" />
-                          <stop offset="50%" stopColor="#10b981" />
-                          <stop offset="100%" stopColor="#facc15" />
-                        </linearGradient>
-                      </defs>
-                      <circle cx="100" cy="100" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
-                      <circle
-                        cx="100"
-                        cy="100"
-                        r="74"
-                        fill="none"
-                        stroke="url(#cpuDialGradient)"
-                        strokeWidth="10"
-                        strokeLinecap="round"
-                        strokeDasharray={ringCircumference}
-                        strokeDashoffset={cpuRingOffset}
-                        transform="rotate(-90 100 100)"
-                        className="transition-all duration-700 ease-out"
-                      />
-                      <line
-                        x1="100"
-                        y1="100"
-                        x2="100"
-                        y2="34"
-                        stroke="#34d399"
-                        strokeWidth="4"
-                        strokeLinecap="round"
-                        transform={`rotate(${cpuNeedleDeg} 100 100)`}
-                        className="transition-all duration-700 ease-out"
-                      />
-                      <circle cx="100" cy="100" r="7" fill="#e2e8f0" />
-                    </svg>
-                    <div className="absolute left-0 right-0 top-2 text-center">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-200/80">Throttle</div>
-                    </div>
-                    <div className="absolute left-0 right-0 bottom-2 text-center">
-                      <div className="text-2xl font-semibold text-emerald-200">
-                        {cpuSpeedPct > 0 ? `${(cpuSpeedPct / 10).toFixed(1)} cores` : "idle"}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Mac machine bar */}
-                  <div className="mt-3 space-y-2">
-                    {(() => {
-                      const rpTotalCpu = (() => {
-                        for (const row of status?.machines || []) {
-                          if (row.orchestrator?.research_processes?.total_cpu_pct != null) {
-                            return row.orchestrator.research_processes.total_cpu_pct;
-                          }
-                        }
-                        return 0;
-                      })();
-                      const rpJobs = (() => {
-                        for (const row of status?.machines || []) {
-                          if (row.orchestrator?.research_processes?.jobs) {
-                            return row.orchestrator.research_processes.jobs;
-                          }
-                        }
-                        return [] as ResearchJob[];
-                      })();
-                      const coresPct = Math.min(100, rpTotalCpu / 10);
-                      return (
-                        <div>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-300">mac</span>
-                            <span className="text-emerald-200">
-                              {(rpTotalCpu / 100).toFixed(1)}/10 cores
-                              {rpJobs.length > 0 && (
-                                <span className="text-gray-400 ml-1">· {rpJobs.length} job{rpJobs.length !== 1 ? "s" : ""}</span>
-                              )}
-                            </span>
-                          </div>
-                          <div className="mt-1 h-2 rounded-full bg-gray-800 overflow-hidden border border-gray-700/70">
-                            <div
-                              className="h-full rounded-full cpu-speed-bar"
-                              style={{
-                                width: `${Math.max(3, coresPct)}%`,
-                                animationDuration: `${Math.max(0.45, 2.6 - coresPct / 55)}s`,
-                              }}
-                            />
-                          </div>
-                          {rpJobs.length > 0 && (
-                            <div className="mt-1.5 space-y-0.5">
-                              {rpJobs.map((job, i) => (
-                                <div key={i} className="flex items-center gap-2 text-xs">
-                                  <span className="text-emerald-400 font-mono truncate max-w-[160px]">{job.script || "unknown"}</span>
-                                  {(job.workers ?? 0) > 0 && <span className="text-gray-500">{job.workers}w</span>}
-                                  <span className="tabular-nums text-gray-400">{(job.cpu_pct ?? 0).toFixed(0)}%</span>
-                                  {job.elapsed && <span className="text-gray-600">{job.elapsed}</span>}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-            </section>
 
             {/* --- Attainment Tables: GPU Daily + GPU Weekly + CPU Daily --- */}
             <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
