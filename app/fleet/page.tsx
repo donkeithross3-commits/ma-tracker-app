@@ -77,6 +77,20 @@ type CpuStatus = {
   idle_seconds?: number;
 };
 
+type ResearchJob = {
+  script?: string;
+  cpu_pct?: number;
+  elapsed?: string;
+  workers?: number;
+  pid?: number;
+};
+
+type ResearchProcesses = {
+  jobs?: ResearchJob[];
+  total_workers?: number;
+  total_cpu_pct?: number;
+};
+
 type OrchestratorStatus = {
   state?: string;
   current_task?: string | null;
@@ -87,6 +101,7 @@ type OrchestratorStatus = {
   gpu_pipeline?: Record<string, GpuPipelineEntry>;
   recent_results?: RecentResult[];
   fleet_health?: FleetHealth;
+  research_processes?: ResearchProcesses;
   // Legacy fields (kept for backward compat with old telemetry)
   idle_seconds?: number;
   cpu_budget?: {
@@ -562,6 +577,12 @@ export default function FleetUtilizationPage() {
               const cpuIdleLabel = cpuIdleSec < 60 ? `${Math.round(cpuIdleSec)}s` :
                 cpuIdleSec < 3600 ? `${Math.round(cpuIdleSec / 60)}m` :
                 `${(cpuIdleSec / 3600).toFixed(1)}h`;
+
+              // Research processes (agent-spawned CPU jobs)
+              const rp = orch.research_processes;
+              const rpJobs = rp?.jobs ?? [];
+              const rpTotalCpu = rp?.total_cpu_pct ?? 0;
+              const rpTotalWorkers = rp?.total_workers ?? 0;
               // Mac: 10 cores, 2 designated. Active = workers > 0 && state is cpu_job
               const cpuActive = orchState === "cpu_job";
 
@@ -580,28 +601,50 @@ export default function FleetUtilizationPage() {
                   </div>
 
                   {/* CPU Compute row */}
-                  <div className="px-3 py-1.5 border-b border-gray-800/60 flex items-center gap-4 text-xs flex-wrap">
-                    <span className="text-gray-500 font-medium">CPU</span>
-                    <span className="flex items-center gap-1.5">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${cpuActive ? "bg-emerald-400" : cpuWorkers > 0 ? "bg-cyan-400" : "bg-gray-600"}`} />
-                      <span className="text-gray-400">mac</span>
-                      {cpuActive ? (
-                        <span className="text-emerald-300">{cpuWorkers}w · {cpuTask || "working"}</span>
-                      ) : cpuWorkers > 0 ? (
-                        <span className="text-cyan-300">{cpuWorkers}w ready · {cpuReason}</span>
-                      ) : (
-                        <span className="text-gray-500">{cpuReason}</span>
-                      )}
-                      <span className={`ml-1 ${cpuIdleSec >= 1800 ? "text-emerald-400" : cpuIdleSec >= 300 ? "text-cyan-400" : "text-gray-600"}`}>
-                        idle {cpuIdleLabel}
+                  <div className="px-3 py-1.5 border-b border-gray-800/60 text-xs">
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <span className="text-gray-500 font-medium">CPU</span>
+                      {/* Mac orchestrator status */}
+                      <span className="flex items-center gap-1.5">
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full ${rpTotalCpu > 50 ? "bg-emerald-400 animate-pulse" : cpuActive ? "bg-emerald-400" : cpuWorkers > 0 ? "bg-cyan-400" : "bg-gray-600"}`} />
+                        <span className="text-gray-400">mac</span>
+                        {rpTotalCpu > 0 ? (
+                          <span className="text-emerald-300">{rpTotalCpu.toFixed(0)}% · {rpTotalWorkers}w active</span>
+                        ) : cpuActive ? (
+                          <span className="text-emerald-300">{cpuWorkers}w · {cpuTask || "working"}</span>
+                        ) : cpuWorkers > 0 ? (
+                          <span className="text-cyan-300">{cpuWorkers}w ready · {cpuReason}</span>
+                        ) : (
+                          <span className="text-gray-500">{cpuReason || "idle"}</span>
+                        )}
                       </span>
-                    </span>
-                    <span className="text-gray-700">|</span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-gray-600" />
-                      <span className="text-gray-400">droplet</span>
-                      <span className="text-gray-500">weekend only · 6w</span>
-                    </span>
+                      <span className="text-gray-700">|</span>
+                      {/* Droplet status */}
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-gray-600" />
+                        <span className="text-gray-400">droplet</span>
+                        <span className="text-gray-500">weekend only · 6w</span>
+                      </span>
+                    </div>
+                    {/* Active research jobs detail */}
+                    {rpJobs.length > 0 && (
+                      <div className="mt-1 ml-9 space-y-0.5">
+                        {rpJobs.map((job, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-cyan-400 font-mono">{job.script || "unknown"}</span>
+                            {(job.workers ?? 0) > 0 && (
+                              <span className="text-gray-500">{job.workers}w</span>
+                            )}
+                            <span className={`${(job.cpu_pct ?? 0) > 100 ? "text-amber-300" : "text-gray-400"}`}>
+                              {(job.cpu_pct ?? 0).toFixed(0)}%
+                            </span>
+                            {job.elapsed && (
+                              <span className="text-gray-600">{job.elapsed}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Section A: GPU Pipeline */}
