@@ -431,19 +431,22 @@ export default function FleetUtilizationPage() {
         {util && (
           <>
             {/* --- Warp Speed Gauges: GPU + CPU side-by-side (hero) --- */}
-            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* GPU Warp Speed Gauge */}
               <div className="rounded border border-gray-800 bg-gray-900">
-                <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                <div className="px-3 py-1.5 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
                   <span>GPU Warp Speed</span>
-                  <span className="text-xs font-normal text-gray-500">
-                    24h {fmtPct(util.trailing.day.fleet_attainment_pct)} · 7d {fmtPct(util.trailing.week.fleet_attainment_pct)}
+                  <span className="text-xs font-normal tabular-nums">
+                    <span className="text-cyan-400">{fmtPct(util.trailing.day.fleet_attainment_pct)}</span>
+                    <span className="text-gray-600 mx-1">24h</span>
+                    <span className="text-emerald-400">{fmtPct(util.trailing.week.fleet_attainment_pct)}</span>
+                    <span className="text-gray-600 ml-1">7d</span>
                   </span>
                 </div>
-                <div className="p-3">
-                  <div className="relative rounded-xl border border-cyan-900/40 bg-gradient-to-br from-slate-950 via-cyan-950/40 to-gray-900 p-2 overflow-hidden">
+                <div className="px-3 pt-2 pb-2.5">
+                  <div className="relative rounded-xl border border-cyan-900/40 bg-gradient-to-br from-slate-950 via-cyan-950/40 to-gray-900 p-1 overflow-hidden">
                     <div className="pointer-events-none absolute inset-0 fleet-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40">
+                    <svg viewBox="0 0 200 200" className="mx-auto h-32 w-32">
                       <defs>
                         <linearGradient id="fleetDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
                           <stop offset="0%" stopColor="#22d3ee" />
@@ -478,68 +481,82 @@ export default function FleetUtilizationPage() {
                       />
                       <circle cx="100" cy="100" r="7" fill="#e2e8f0" />
                     </svg>
-                    <div className="absolute left-0 right-0 top-2 text-center">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">Throttle</div>
+                    <div className="absolute left-0 right-0 top-1.5 text-center">
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-cyan-200/70 font-medium">Throttle</div>
                     </div>
-                    <div className="absolute left-0 right-0 bottom-2 text-center">
-                      <div className="text-2xl font-semibold text-cyan-200">{fmtPct(fleetSpeedPct)}</div>
+                    <div className="absolute left-0 right-0 bottom-1.5 text-center">
+                      <div className="text-xl font-semibold text-cyan-200 tabular-nums">{fmtPct(fleetSpeedPct)}</div>
                     </div>
                   </div>
 
-                  <div className="mt-3 space-y-2">
+                  <div className="mt-2.5 space-y-1.5">
                     {machineSpeed.map((row) => {
                       const statusRow = statusByMachine.get(row.machine);
                       const gpu = statusRow?.gpu;
                       return (
                         <div key={`spd-${row.machine}`}>
                           <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-300">{row.machine}</span>
-                            <span className="text-cyan-200">
+                            <span className="text-gray-300 font-medium">{row.machine}</span>
+                            <span className="text-cyan-300 tabular-nums">
                               {fmtPct(row.utilPct)}
                               {row.powerW !== null && (
-                                <span className="text-gray-400 ml-1">({Math.round(row.powerW)}W)</span>
+                                <span className="text-gray-500 ml-1 font-normal">({Math.round(row.powerW)}W)</span>
                               )}
                               {gpu?.temp != null && (
-                                <span className={`ml-1 ${tempColor(gpu.temp)}`}>{gpu.temp}°C</span>
+                                <span className={`ml-1 font-normal ${tempColor(gpu.temp)}`}>{gpu.temp}°</span>
                               )}
-                              {" · "}
-                              {row.state}
                             </span>
                           </div>
-                          <div className="mt-1 h-2 rounded-full bg-gray-800 overflow-hidden border border-gray-700/70">
+                          <div className="mt-0.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
                             <div
                               className="h-full rounded-full fleet-speed-bar"
                               style={{
-                                width: `${Math.max(3, row.utilPct)}%`,
+                                width: `${Math.max(2, row.utilPct)}%`,
                                 animationDuration: `${Math.max(0.45, 2.6 - row.utilPct / 55)}s`,
                               }}
                             />
                           </div>
+                          <div className="text-[10px] text-gray-600 mt-0.5 truncate">{row.state}</div>
                         </div>
                       );
                     })}
                   </div>
                   {/* GPU attainment summary */}
-                  <div className="mt-3 pt-2 border-t border-gray-800/60 flex items-center gap-4 text-xs text-gray-500">
-                    <span>24h: {fmtHours(util.trailing.day.achieved_gpu_hours)} / {fmtHours(util.trailing.day.possible_gpu_hours)}</span>
-                    <span>7d: {fmtHours(util.trailing.week.achieved_gpu_hours)} / {fmtHours(util.trailing.week.possible_gpu_hours)}</span>
-                    <span>Cov {fmtPct(util.trailing.day.fleet_coverage_pct)}</span>
+                  <div className="mt-2 pt-1.5 border-t border-gray-800/60 grid grid-cols-3 gap-2 text-[10px] text-gray-500 tabular-nums">
+                    <div>
+                      <span className="text-gray-600">24h</span>{" "}
+                      {fmtHours(util.trailing.day.achieved_gpu_hours)}<span className="text-gray-700">/{fmtHours(util.trailing.day.possible_gpu_hours)}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">7d</span>{" "}
+                      {fmtHours(util.trailing.week.achieved_gpu_hours)}<span className="text-gray-700">/{fmtHours(util.trailing.week.possible_gpu_hours)}</span>
+                    </div>
+                    <div className="text-right">
+                      Cov {fmtPct(util.trailing.day.fleet_coverage_pct)}
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* CPU Warp Speed Gauge */}
               <div className="rounded border border-gray-800 bg-gray-900">
-                <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                <div className="px-3 py-1.5 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
                   <span>CPU Warp Speed</span>
-                  <span className="text-xs font-normal text-gray-500">
-                    {cpuUtil?.trailing ? `24h avg ${(cpuUtil.trailing.day?.avg_cores ?? 0).toFixed(1)} cores · 7d ${(cpuUtil.trailing.week?.avg_cores ?? 0).toFixed(1)} cores` : "loading..."}
+                  <span className="text-xs font-normal tabular-nums">
+                    {cpuUtil?.trailing ? (
+                      <>
+                        <span className="text-cyan-400">{(cpuUtil.trailing.day?.avg_cores ?? 0).toFixed(1)}</span>
+                        <span className="text-gray-600 mx-1">cores 24h</span>
+                        <span className="text-emerald-400">{(cpuUtil.trailing.week?.avg_cores ?? 0).toFixed(1)}</span>
+                        <span className="text-gray-600 ml-1">7d</span>
+                      </>
+                    ) : <span className="text-gray-600">loading...</span>}
                   </span>
                 </div>
-                <div className="p-3">
-                  <div className="relative rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-gray-900 p-2 overflow-hidden">
+                <div className="px-3 pt-2 pb-2.5">
+                  <div className="relative rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-gray-900 p-1 overflow-hidden">
                     <div className="pointer-events-none absolute inset-0 cpu-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40">
+                    <svg viewBox="0 0 200 200" className="mx-auto h-32 w-32">
                       <defs>
                         <linearGradient id="cpuDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
                           <stop offset="0%" stopColor="#34d399" />
@@ -574,18 +591,18 @@ export default function FleetUtilizationPage() {
                       />
                       <circle cx="100" cy="100" r="7" fill="#e2e8f0" />
                     </svg>
-                    <div className="absolute left-0 right-0 top-2 text-center">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-emerald-200/80">Throttle</div>
+                    <div className="absolute left-0 right-0 top-1.5 text-center">
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-emerald-200/70 font-medium">Throttle</div>
                     </div>
-                    <div className="absolute left-0 right-0 bottom-2 text-center">
-                      <div className="text-2xl font-semibold text-emerald-200">
-                        {cpuSpeedPct > 0 ? `${(cpuSpeedPct / 10).toFixed(1)} cores` : "idle"}
+                    <div className="absolute left-0 right-0 bottom-1.5 text-center">
+                      <div className="text-xl font-semibold text-emerald-200 tabular-nums">
+                        {cpuSpeedPct > 0 ? `${(cpuSpeedPct / 10).toFixed(1)} cores` : "0.0 cores"}
                       </div>
                     </div>
                   </div>
 
-                  {/* Mac machine bar */}
-                  <div className="mt-3 space-y-2">
+                  {/* Machine bars */}
+                  <div className="mt-2.5 space-y-1.5">
                     {(() => {
                       const rpTotalCpu = (() => {
                         for (const row of status?.machines || []) {
@@ -605,47 +622,68 @@ export default function FleetUtilizationPage() {
                       })();
                       const coresPct = Math.min(100, rpTotalCpu / 10);
                       return (
-                        <div>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-300">mac <span className="text-gray-600">M4 Pro · 10 cores</span></span>
-                            <span className="text-emerald-200">
-                              {(rpTotalCpu / 100).toFixed(1)}/10 cores
-                              {rpJobs.length > 0 && (
-                                <span className="text-gray-400 ml-1">· {rpJobs.length} job{rpJobs.length !== 1 ? "s" : ""}</span>
-                              )}
-                            </span>
-                          </div>
-                          <div className="mt-1 h-2 rounded-full bg-gray-800 overflow-hidden border border-gray-700/70">
-                            <div
-                              className="h-full rounded-full cpu-speed-bar"
-                              style={{
-                                width: `${Math.max(3, coresPct)}%`,
-                                animationDuration: `${Math.max(0.45, 2.6 - coresPct / 55)}s`,
-                              }}
-                            />
-                          </div>
-                          {rpJobs.length > 0 && (
-                            <div className="mt-1.5 space-y-0.5">
-                              {rpJobs.map((job, i) => (
-                                <div key={i} className="flex items-center gap-2 text-xs">
-                                  <span className="text-emerald-400 font-mono truncate max-w-[160px]">{job.script || "unknown"}</span>
-                                  {(job.workers ?? 0) > 0 && <span className="text-gray-500">{job.workers}w</span>}
-                                  <span className="tabular-nums text-gray-400">{(job.cpu_pct ?? 0).toFixed(0)}%</span>
-                                  {job.elapsed && <span className="text-gray-600">{job.elapsed}</span>}
-                                </div>
-                              ))}
+                        <>
+                          {/* Mac */}
+                          <div>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-gray-300 font-medium">mac <span className="text-gray-600 font-normal">M4 Pro</span></span>
+                              <span className="text-emerald-300 tabular-nums">
+                                {(rpTotalCpu / 100).toFixed(1)}/10 cores
+                              </span>
                             </div>
-                          )}
-                        </div>
+                            <div className="mt-0.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                              <div
+                                className="h-full rounded-full cpu-speed-bar"
+                                style={{
+                                  width: `${Math.max(2, coresPct)}%`,
+                                  animationDuration: `${Math.max(0.45, 2.6 - coresPct / 55)}s`,
+                                }}
+                              />
+                            </div>
+                            {rpJobs.length > 0 ? (
+                              <div className="mt-0.5 space-y-0">
+                                {rpJobs.map((job, i) => (
+                                  <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                                    <span className="text-emerald-400 font-mono truncate max-w-[140px]">{job.script || "unknown"}</span>
+                                    {(job.workers ?? 0) > 0 && <span className="text-gray-600">{job.workers}w</span>}
+                                    <span className="tabular-nums text-gray-500">{(job.cpu_pct ?? 0).toFixed(0)}%</span>
+                                    {job.elapsed && <span className="text-gray-700">{job.elapsed}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-gray-600 mt-0.5">idle</div>
+                            )}
+                          </div>
+                          {/* Droplet */}
+                          <div>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-gray-300 font-medium">droplet <span className="text-gray-600 font-normal">8 vCPU</span></span>
+                              <span className="text-gray-600 tabular-nums">weekend only</span>
+                            </div>
+                            <div className="mt-0.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                              <div className="h-full rounded-full bg-gray-700" style={{ width: "2%" }} />
+                            </div>
+                            <div className="text-[10px] text-gray-600 mt-0.5">6 cores available · cron TBD</div>
+                          </div>
+                        </>
                       );
                     })()}
                   </div>
                   {/* CPU attainment summary */}
                   {cpuUtil?.trailing && (
-                    <div className="mt-3 pt-2 border-t border-gray-800/60 flex items-center gap-4 text-xs text-gray-500">
-                      <span>24h: {(cpuUtil.trailing.day?.total_core_hours ?? 0).toFixed(1)} core·h (peak {(cpuUtil.trailing.day?.peak_cores ?? 0).toFixed(1)})</span>
-                      <span>7d: {(cpuUtil.trailing.week?.total_core_hours ?? 0).toFixed(1)} core·h</span>
-                      <span>Cov {fmtPct(cpuUtil.trailing.day?.coverage_pct)}</span>
+                    <div className="mt-2 pt-1.5 border-t border-gray-800/60 grid grid-cols-3 gap-2 text-[10px] text-gray-500 tabular-nums">
+                      <div>
+                        <span className="text-gray-600">24h</span>{" "}
+                        {(cpuUtil.trailing.day?.total_core_hours ?? 0).toFixed(1)} core·h
+                      </div>
+                      <div>
+                        <span className="text-gray-600">7d</span>{" "}
+                        {(cpuUtil.trailing.week?.total_core_hours ?? 0).toFixed(1)} core·h
+                      </div>
+                      <div className="text-right">
+                        peak {(cpuUtil.trailing.day?.peak_cores ?? 0).toFixed(1)} cores
+                      </div>
                     </div>
                   )}
                 </div>
@@ -856,89 +894,33 @@ export default function FleetUtilizationPage() {
                     </section>
                   )}
 
-                  {/* ========== CPU Compute ========== */}
-                  <section className="rounded border border-gray-800 bg-gray-900">
-                    <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                      <span className="flex items-center gap-2">
-                        CPU Compute
-                        <span className="text-xs font-normal text-gray-500">research workers</span>
-                      </span>
-                      <span className={`text-xs ${ageClass(orchestratorMachine.age_seconds)}`}>
-                        checkin {fmtAge(orchestratorMachine.age_seconds)} ago
-                      </span>
-                    </div>
-
-                    {/* Machine status cards */}
-                    <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-2 gap-3 border-b border-gray-800/60">
-                      {/* Mac card */}
-                      <div className="rounded border border-gray-800 bg-gray-950/50 px-3 py-2">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="flex items-center gap-1.5 text-xs font-medium text-gray-200">
-                            <span className={`inline-block w-1.5 h-1.5 rounded-full ${macCpuBusy ? "bg-emerald-400 animate-pulse" : "bg-gray-500"}`} />
-                            mac <span className="text-gray-600 font-normal">M4 Pro · 10 cores</span>
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            {macCpuBusy ? "working" : cpuReason || "idle"}
-                          </span>
-                        </div>
-                        {rpTotalCpu > 0 ? (
-                          <>
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                                <div
-                                  className="h-full rounded-full bg-emerald-600"
-                                  style={{ width: `${Math.min(100, rpTotalCpu / 10)}%` }}
-                                />
-                              </div>
-                              <span className="text-xs text-gray-500 tabular-nums whitespace-nowrap">
-                                {(rpTotalCpu / 100).toFixed(1)}/10 cores
-                              </span>
-                            </div>
-                            <div className="space-y-0.5">
-                              {rpJobs.map((job, i) => (
-                                <div key={i} className="flex items-center gap-2 text-xs">
-                                  <span className="text-cyan-400 font-mono truncate max-w-[160px]">{job.script || "unknown"}</span>
-                                  {(job.workers ?? 0) > 0 && (
-                                    <span className="text-gray-500">{job.workers}w</span>
-                                  )}
-                                  <span className={`tabular-nums ${(job.cpu_pct ?? 0) > 200 ? "text-amber-300" : "text-gray-400"}`}>
-                                    {(job.cpu_pct ?? 0).toFixed(0)}%
-                                  </span>
-                                  {job.elapsed && <span className="text-gray-600">{job.elapsed}</span>}
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        ) : cpuActive ? (
-                          <div className="text-xs text-emerald-300">{cpuWorkers}w · {cpuTask || "working"}</div>
-                        ) : (
-                          <div className="text-xs text-gray-500">No active research processes</div>
-                        )}
-                      </div>
-                      {/* Droplet card */}
-                      <div className="rounded border border-gray-800 bg-gray-950/50 px-3 py-2">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="flex items-center gap-1.5 text-xs font-medium text-gray-200">
-                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-gray-500" />
-                            droplet <span className="text-gray-600 font-normal">8 vCPU · 6 avail</span>
-                          </span>
-                          <span className="text-xs text-gray-500">weekend only</span>
-                        </div>
-                        <div className="text-xs text-gray-500">py_proj deployed · CPU-only venv · weekend cron TBD</div>
-                      </div>
-                    </div>
-
-                    {/* Orchestrator status footer */}
-                    <div className="px-3 py-1.5 border-t border-gray-800 text-xs flex items-center gap-3 flex-wrap text-gray-500">
-                      <span>Orchestrator: <span className={
+                  {/* ========== Orchestrator Status (compact bar) ========== */}
+                  <div className="rounded border border-gray-800 bg-gray-900 px-3 py-1.5 flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+                    <span className="flex items-center gap-1.5">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                        orchState === "collecting" ? "bg-cyan-400 animate-pulse" :
+                        orchState === "cpu_job" ? "bg-emerald-400 animate-pulse" :
+                        "bg-gray-600"
+                      }`} />
+                      Orchestrator: <span className={
                         orchState === "collecting" ? "text-cyan-300" :
                         orchState === "cpu_job" ? "text-emerald-300" :
                         orchState === "idle" ? "text-gray-400" : "text-gray-500"
-                      }>{orchState}</span></span>
-                      <span className="text-gray-700">·</span>
-                      <span>PID {orch.pid}</span>
-                    </div>
-                  </section>
+                      }>{orchState}</span>
+                    </span>
+                    <span className="text-gray-700">·</span>
+                    <span>PID {orch.pid}</span>
+                    <span className="text-gray-700">·</span>
+                    <span className={ageClass(orchestratorMachine.age_seconds)}>
+                      checkin {fmtAge(orchestratorMachine.age_seconds)} ago
+                    </span>
+                    {(health?.retry_queue_size ?? orch.retry_queue_size ?? 0) > 0 && (
+                      <>
+                        <span className="text-gray-700">·</span>
+                        <span className="text-amber-300">{health?.retry_queue_size ?? orch.retry_queue_size} retries</span>
+                      </>
+                    )}
+                  </div>
 
                   {/* ========== Experiment Results ========== */}
                   {results && results.length > 0 && (
