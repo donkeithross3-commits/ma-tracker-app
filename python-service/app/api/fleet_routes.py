@@ -52,6 +52,7 @@ class FleetCheckinPayload(BaseModel):
     heartbeats: dict[str, dict[str, Any]] = Field(default_factory=dict)
     queues: dict[str, dict[str, Any]] = Field(default_factory=dict)
     datasets: list[str] = Field(default_factory=list)
+    orchestrator: dict[str, Any] | None = None  # CPU orchestrator status (Mac only)
 
 
 # ---------------------------------------------------------------------------
