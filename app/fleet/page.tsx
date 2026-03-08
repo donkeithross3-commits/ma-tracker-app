@@ -46,9 +46,40 @@ type UtilizationResponse = {
   weekly: WindowBucket[];
 };
 
+type GpuPipelineEntry = {
+  job?: string | null;
+  job_state?: string;   // "running" | "idle" | "unreachable"
+  queue_depth?: number;
+  queue_total?: number;
+};
+
+type RecentResult = {
+  name?: string;
+  machine?: string;
+  collected_at?: string;
+  configs?: number;
+  profitable?: number;
+  profitable_pct?: number;
+  best_pf?: number;
+  beats_production?: boolean;
+};
+
+type FleetHealth = {
+  retry_queue_size?: number;
+  idle_gpu_alert?: string | null;
+  last_collect_at?: string | null;
+};
+
 type OrchestratorStatus = {
   state?: string;
   current_task?: string | null;
+  started_at?: string | null;
+  last_collect_at?: string | null;
+  pid?: number;
+  gpu_pipeline?: Record<string, GpuPipelineEntry>;
+  recent_results?: RecentResult[];
+  fleet_health?: FleetHealth;
+  // Legacy fields (kept for backward compat with old telemetry)
   idle_seconds?: number;
   cpu_budget?: {
     max_workers?: number;
@@ -60,9 +91,6 @@ type OrchestratorStatus = {
   best_pf?: number;
   retry_queue_size?: number;
   cpu_jobs_completed?: number;
-  started_at?: string | null;
-  last_collect_at?: string | null;
-  pid?: number;
 };
 
 type StatusMachine = {
@@ -488,7 +516,7 @@ export default function FleetUtilizationPage() {
               </div>
             </section>
 
-            {/* --- CPU Orchestrator Status (Mac) --- */}
+            {/* --- Research Pipeline (CPU Orchestrator) --- */}
             {orchestratorMachine && orchestratorMachine.orchestrator && (() => {
               const orch = orchestratorMachine.orchestrator!;
               const orchState = orch.state || "unknown";
@@ -497,75 +525,176 @@ export default function FleetUtilizationPage() {
                 orchState === "cpu_job" ? "text-emerald-300" :
                 orchState === "idle" ? "text-gray-400" :
                 orchState === "stopped" ? "text-red-400" : "text-gray-500";
-              const budgetReason = orch.cpu_budget?.reason || "unknown";
-              const workers = orch.cpu_budget?.max_workers ?? 0;
-              const idleSec = orch.idle_seconds ?? 0;
-              const idleLabel = idleSec < 60 ? `${Math.round(idleSec)}s` :
-                idleSec < 3600 ? `${Math.round(idleSec / 60)}m` :
-                `${(idleSec / 3600).toFixed(1)}h`;
-              const uptime = orch.started_at ? (() => {
-                const start = Date.parse(orch.started_at!);
-                if (!Number.isFinite(start)) return "--";
-                const hrs = (Date.now() - start) / 3600000;
-                return hrs < 1 ? `${Math.round(hrs * 60)}m` : `${hrs.toFixed(1)}h`;
+
+              const pipeline = orch.gpu_pipeline;
+              const results = orch.recent_results;
+              const health = orch.fleet_health;
+              const hasPipeline = pipeline && Object.keys(pipeline).length > 0;
+
+              // Health bar text
+              const lastCollect = health?.last_collect_at || orch.last_collect_at;
+              const collectAgo = lastCollect ? (() => {
+                const ms = Date.now() - Date.parse(lastCollect);
+                if (!Number.isFinite(ms) || ms < 0) return "--";
+                const sec = ms / 1000;
+                if (sec < 60) return `${Math.round(sec)}s`;
+                if (sec < 3600) return `${Math.round(sec / 60)}m`;
+                return `${(sec / 3600).toFixed(1)}h`;
               })() : "--";
+              const retries = health?.retry_queue_size ?? orch.retry_queue_size ?? 0;
+              const idleAlert = health?.idle_gpu_alert;
 
               return (
                 <section className="rounded border border-gray-800 bg-gray-900">
+                  {/* Header */}
                   <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
                     <span className="flex items-center gap-2">
                       <span className="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                      CPU Orchestrator
-                      <span className="text-xs font-normal text-gray-500">mac</span>
+                      Research Pipeline
+                      <span className={`text-xs font-normal ${stateColor}`}>{orchState}</span>
                     </span>
                     <span className={`text-xs ${ageClass(orchestratorMachine.age_seconds)}`}>
                       checkin {fmtAge(orchestratorMachine.age_seconds)} ago
                     </span>
                   </div>
-                  <div className="px-3 py-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-x-4 gap-y-1 text-xs">
-                    <div>
-                      <span className="text-gray-500">State</span>
-                      <div className={`font-medium ${stateColor}`}>{orchState}</div>
+
+                  {/* Section A: GPU Pipeline */}
+                  {hasPipeline ? (
+                    <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-2 gap-3 border-b border-gray-800/60">
+                      {Object.entries(pipeline!).map(([machine, info]) => {
+                        const jState = info.job_state || "unknown";
+                        const dotColor =
+                          jState === "running" ? "bg-emerald-400" :
+                          jState === "idle" ? "bg-gray-500" :
+                          "bg-red-400";
+                        const depth = info.queue_depth ?? 0;
+                        const total = info.queue_total ?? 0;
+                        const done = Math.max(0, total - depth);
+                        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+                        return (
+                          <div key={machine} className="rounded border border-gray-800 bg-gray-950/50 px-3 py-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="flex items-center gap-1.5 text-xs font-medium text-gray-200">
+                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${dotColor}`} />
+                                {machine}
+                              </span>
+                              <span className="text-xs text-gray-500">{jState}</span>
+                            </div>
+                            <div className="text-xs text-cyan-300 truncate mb-1.5" title={info.job || undefined}>
+                              {info.job || "—"}
+                            </div>
+                            {total > 0 && (
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full bg-cyan-600"
+                                    style={{ width: `${Math.max(2, pct)}%` }}
+                                  />
+                                </div>
+                                <span className="text-xs text-gray-500 tabular-nums whitespace-nowrap">
+                                  {done}/{total}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div>
-                      <span className="text-gray-500">Task</span>
-                      <div className="text-gray-200 truncate max-w-[140px]">{orch.current_task || "—"}</div>
+                  ) : (
+                    /* Legacy fallback: show basic state when gpu_pipeline is missing */
+                    <div className="px-3 py-2 border-b border-gray-800/60 text-xs text-gray-500">
+                      GPU pipeline data unavailable (orchestrator may need update)
                     </div>
-                    <div>
-                      <span className="text-gray-500">CPU Budget</span>
-                      <div className="text-gray-200">{workers} workers · {budgetReason}</div>
+                  )}
+
+                  {/* Section B: Latest Results */}
+                  {results && results.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="text-gray-500">
+                          <tr className="border-b border-gray-800">
+                            <th className="text-left px-3 py-1.5">Job</th>
+                            <th className="text-left px-3 py-1.5">Machine</th>
+                            <th className="text-right px-3 py-1.5">Configs</th>
+                            <th className="text-right px-3 py-1.5">Profitable</th>
+                            <th className="text-right px-3 py-1.5">Best PF</th>
+                            <th className="text-right px-3 py-1.5">vs Prod</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {results.map((r, i) => (
+                            <tr key={`res-${i}`} className="border-b border-gray-800/50">
+                              <td className="px-3 py-1.5 text-gray-300 max-w-[180px] truncate" title={r.name}>
+                                {r.name || "—"}
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <span className="text-gray-400">{(r.machine || "").replace("-pc", "")}</span>
+                              </td>
+                              <td className="px-3 py-1.5 text-right text-gray-300 tabular-nums">
+                                {r.configs ?? 0}
+                              </td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">
+                                <span className={(r.profitable ?? 0) > 0 ? "text-emerald-300" : "text-gray-500"}>
+                                  {r.profitable ?? 0}
+                                </span>
+                                {(r.configs ?? 0) > 0 && (
+                                  <span className="text-gray-500 ml-1">
+                                    ({(r.profitable_pct ?? 0).toFixed(0)}%)
+                                  </span>
+                                )}
+                              </td>
+                              <td className={`px-3 py-1.5 text-right tabular-nums font-medium ${
+                                (r.best_pf ?? 0) >= 3.01 ? "text-emerald-300" :
+                                (r.best_pf ?? 0) > 1.0 ? "text-gray-200" : "text-gray-500"
+                              }`}>
+                                {(r.best_pf ?? 0) > 0 ? (r.best_pf ?? 0).toFixed(2) : "—"}
+                              </td>
+                              <td className="px-3 py-1.5 text-right">
+                                {(r.best_pf ?? 0) > 0 ? (
+                                  r.beats_production ? (
+                                    <span className="text-emerald-400">&#9650;</span>
+                                  ) : (
+                                    <span className="text-red-400">&#9660;</span>
+                                  )
+                                ) : (
+                                  <span className="text-gray-600">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <div>
-                      <span className="text-gray-500">User Idle</span>
-                      <div className={idleSec >= 1800 ? "text-emerald-300" : idleSec >= 300 ? "text-cyan-300" : "text-amber-300"}>
-                        {idleLabel}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Collected</span>
-                      <div className="text-gray-200">{orch.collected_jobs_count ?? 0} jobs</div>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Profitable</span>
-                      <div className={`${(orch.collected_profitable ?? 0) > 0 ? "text-emerald-300" : "text-gray-400"}`}>
-                        {orch.collected_profitable ?? 0}
-                        {(orch.collected_jobs_count ?? 0) > 0 && (
-                          <span className="text-gray-500 ml-1">
-                            ({((orch.collected_profitable ?? 0) / (orch.collected_jobs_count || 1) * 100).toFixed(0)}%)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Best PF</span>
-                      <div className={(orch.best_pf ?? 0) >= 3.01 ? "text-emerald-300 font-medium" : "text-gray-200"}>
-                        {(orch.best_pf ?? 0) > 0 ? (orch.best_pf ?? 0).toFixed(2) : "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Uptime</span>
-                      <div className="text-gray-200">{uptime}</div>
-                    </div>
+                  ) : (
+                    <div className="px-3 py-2 text-xs text-gray-500">No results yet</div>
+                  )}
+
+                  {/* Section C: Health bar */}
+                  <div className="px-3 py-1.5 border-t border-gray-800 text-xs flex items-center gap-3 flex-wrap">
+                    <span className={collectAgo === "--" ? "text-gray-500" : "text-gray-400"}>
+                      {collectAgo !== "--" ? (
+                        <><span className="text-emerald-400">&#10003;</span> Last collect {collectAgo} ago</>
+                      ) : (
+                        "No collections yet"
+                      )}
+                    </span>
+                    <span className="text-gray-600">·</span>
+                    <span className={retries > 0 ? "text-amber-300" : "text-gray-400"}>
+                      {retries} {retries === 1 ? "retry" : "retries"}
+                    </span>
+                    {idleAlert && (
+                      <>
+                        <span className="text-gray-600">·</span>
+                        <span className="text-amber-300">{idleAlert} idle</span>
+                      </>
+                    )}
+                    {!idleAlert && retries === 0 && (
+                      <>
+                        <span className="text-gray-600">·</span>
+                        <span className="text-gray-400">No alerts</span>
+                      </>
+                    )}
                   </div>
                 </section>
               );
