@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import { UserMenu } from "@/components/UserMenu";
+import { TICKER_DETAILS } from "./ticker-details";
+import { TickerDetailPanel } from "./TickerDetailPanel";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -325,6 +327,12 @@ function OpportunitiesTab({ tickers, longs, shorts, sortKey, sortAsc, filterSign
   tickers: Ticker[]; longs: Ticker[]; shorts: Ticker[]; sortKey: SortKey; sortAsc: boolean;
   filterSignal: "all" | "Long" | "Short"; onSort: (k: SortKey) => void; onFilterChange: (v: "all" | "Long" | "Short") => void;
 }) {
+  const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
+
+  const toggleExpand = useCallback((ticker: string) => {
+    setExpandedTicker((prev) => (prev === ticker ? null : ticker));
+  }, []);
+
   return (
     <div className="space-y-3">
       {/* Thesis */}
@@ -375,52 +383,67 @@ function OpportunitiesTab({ tickers, longs, shorts, sortKey, sortAsc, filterSign
             </tr>
           </thead>
           <tbody>
-            {tickers.map((t) => (
-              <tr key={t.ticker} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                <td className="px-2 py-1.5 text-right text-xs text-gray-600">{t.rank}</td>
-                <td className="px-2 py-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs px-1.5 py-0.5 rounded font-mono font-bold ${
-                      t.signal === "Long" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                    }`}>
-                      {t.ticker}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-2 py-1.5 text-xs text-gray-400">{t.industry_label}</td>
-                <td className="px-2 py-1.5">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                    t.role === "incumbent" ? "bg-blue-500/15 text-blue-400" :
-                    t.role === "challenger" ? "bg-purple-500/15 text-purple-400" :
-                    "bg-amber-500/15 text-amber-400"
-                  }`}>
-                    {t.role}
-                  </span>
-                </td>
-                <td className="px-2 py-1.5 text-right">
-                  <span className={`font-mono font-bold text-sm ${scoreColor(t.opportunity_score)} ${scoreBg(t.opportunity_score)} px-1.5 py-0.5 rounded`}>
-                    {t.opportunity_score > 0 ? "+" : ""}{fmt(t.opportunity_score)}
-                  </span>
-                </td>
-                <td className={`px-2 py-1.5 text-right font-mono text-xs ${t.valuation_gap_pct !== null && t.valuation_gap_pct > 0 ? "text-green-400" : "text-red-400"}`}>
-                  {pctRaw(t.valuation_gap_pct, 0)}
-                </td>
-                <td className={`px-2 py-1.5 text-right font-mono text-xs ${scoreColor(t.dislocation_score)}`}>
-                  {fmt(t.dislocation_score)}
-                </td>
-                <td className={`px-2 py-1.5 text-right font-mono text-xs ${scoreColor(t.management_ai_execution_score)}`}>
-                  {fmt(t.management_ai_execution_score)}
-                </td>
-                <td className={`px-2 py-1.5 text-right font-mono text-xs ${scoreColor(t.fundamental_score)}`}>
-                  {fmt(t.fundamental_score)}
-                </td>
-                <td className={`px-2 py-1.5 text-right font-mono text-xs ${t.drawdown_252d !== null && t.drawdown_252d < -0.3 ? "text-red-400" : t.drawdown_252d !== null && t.drawdown_252d < -0.1 ? "text-orange-400" : "text-gray-400"}`}>
-                  {pct(t.drawdown_252d, 0)}
-                </td>
-                <td className="px-2 py-1.5 text-right text-xs text-gray-500">{mcap(t.market_cap_b)}</td>
-                <td className="px-2 py-1.5 text-right text-xs text-gray-400 font-mono">${t.price?.toFixed(2) ?? "--"}</td>
-              </tr>
-            ))}
+            {tickers.map((t) => {
+              const isExpanded = expandedTicker === t.ticker;
+              const detail = TICKER_DETAILS[t.ticker];
+              return (
+                <Fragment key={t.ticker}>
+                  <tr
+                    className={`border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer select-none ${
+                      isExpanded ? "bg-gray-800/50" : ""
+                    }`}
+                    onClick={() => toggleExpand(t.ticker)}
+                  >
+                    <td className="px-2 py-1.5 text-right text-xs text-gray-600">{t.rank}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-gray-500 w-2.5">{isExpanded ? "\u25BE" : "\u25B8"}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-mono font-bold ${
+                          t.signal === "Long" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                        }`}>
+                          {t.ticker}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-1.5 text-xs text-gray-400">{t.industry_label}</td>
+                    <td className="px-2 py-1.5">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        t.role === "incumbent" ? "bg-blue-500/15 text-blue-400" :
+                        t.role === "challenger" ? "bg-purple-500/15 text-purple-400" :
+                        "bg-amber-500/15 text-amber-400"
+                      }`}>
+                        {t.role}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <span className={`font-mono font-bold text-sm ${scoreColor(t.opportunity_score)} ${scoreBg(t.opportunity_score)} px-1.5 py-0.5 rounded`}>
+                        {t.opportunity_score > 0 ? "+" : ""}{fmt(t.opportunity_score)}
+                      </span>
+                    </td>
+                    <td className={`px-2 py-1.5 text-right font-mono text-xs ${t.valuation_gap_pct !== null && t.valuation_gap_pct > 0 ? "text-green-400" : "text-red-400"}`}>
+                      {pctRaw(t.valuation_gap_pct, 0)}
+                    </td>
+                    <td className={`px-2 py-1.5 text-right font-mono text-xs ${scoreColor(t.dislocation_score)}`}>
+                      {fmt(t.dislocation_score)}
+                    </td>
+                    <td className={`px-2 py-1.5 text-right font-mono text-xs ${scoreColor(t.management_ai_execution_score)}`}>
+                      {fmt(t.management_ai_execution_score)}
+                    </td>
+                    <td className={`px-2 py-1.5 text-right font-mono text-xs ${scoreColor(t.fundamental_score)}`}>
+                      {fmt(t.fundamental_score)}
+                    </td>
+                    <td className={`px-2 py-1.5 text-right font-mono text-xs ${t.drawdown_252d !== null && t.drawdown_252d < -0.3 ? "text-red-400" : t.drawdown_252d !== null && t.drawdown_252d < -0.1 ? "text-orange-400" : "text-gray-400"}`}>
+                      {pct(t.drawdown_252d, 0)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right text-xs text-gray-500">{mcap(t.market_cap_b)}</td>
+                    <td className="px-2 py-1.5 text-right text-xs text-gray-400 font-mono">${t.price?.toFixed(2) ?? "--"}</td>
+                  </tr>
+                  {isExpanded && detail && (
+                    <TickerDetailPanel ticker={t.ticker} detail={detail} colSpan={12} />
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
