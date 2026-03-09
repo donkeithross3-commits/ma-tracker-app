@@ -109,6 +109,9 @@ interface PositionLedgerEntry {
   lineage?: {
     model_version?: string;
     model_type?: string;
+    target_column?: string;
+    signal_inverted?: boolean;
+    recipe_label?: string;
     signal?: { probability?: number; direction?: string; strength?: number };
     option_selection?: { strike?: number; limit_price?: number; opt_bid?: number; opt_ask?: number };
   };
@@ -1165,6 +1168,7 @@ export default function SignalsTab() {
       strategyId: string | null;
       recentErrors: string[];
       isOrphan: boolean;
+      lineage?: PositionLedgerEntry["lineage"];
     };
 
     const baseDetails: Detail[] = [];
@@ -1259,7 +1263,7 @@ export default function SignalsTab() {
           const recentErrors = matchedStrategy?.recent_errors ?? [];
           const isOrphan = ledger.is_orphan === true;
           const rmConfig = matchedStrategy?.config ?? null;
-          baseDetails.push({ pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan });
+          baseDetails.push({ pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan, lineage: ledger.lineage });
         }
       }
     } else {
@@ -1334,7 +1338,7 @@ export default function SignalsTab() {
         const optionContract = pos.signal?.option_contract ?? null;
         const recentErrors = matchedStrategy?.recent_errors ?? [];
         const rmConfig = matchedStrategy?.config ?? null;
-        baseDetails.push({ pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan: false });
+        baseDetails.push({ pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan: false, lineage: undefined });
       }
     }
 
@@ -1426,7 +1430,7 @@ export default function SignalsTab() {
         const recentErrors = s.recent_errors ?? [];
         const isOrphan = ledger?.is_orphan === true;
         const rmConfig = s.config ?? null;
-        return { pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan };
+        return { pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan, lineage: ledger?.lineage };
       });
 
     return [...baseDetails, ...orphanDetails];
@@ -1748,6 +1752,29 @@ export default function SignalsTab() {
       unrealizedPnl,
     };
   }, [executionStatus?.position_ledger, positionDetails, signal?.active_positions]);
+
+  // ── Model attribution badge — shows which model (UP/DOWN) spawned this position ──
+  const renderModelBadge = (lineage?: PositionLedgerEntry["lineage"]) => {
+    if (!lineage) return null;
+    const tc = lineage.target_column || "";
+    const isUp = tc.includes("_UP_") || tc.includes("_UP") || tc.toUpperCase().endsWith("UP");
+    const isDown = tc.includes("_DOWN_") || tc.includes("_DOWN") || tc.toUpperCase().endsWith("DOWN");
+    if (!isUp && !isDown) return null; // symmetric model — no badge needed
+    const dir = isDown ? "DOWN" : "UP";
+    const colorCls = isDown
+      ? "bg-red-900/40 text-red-400 border-red-800/50"
+      : "bg-green-900/40 text-green-400 border-green-800/50";
+    const arrow = isDown ? "▼" : "▲";
+    const version = lineage.model_version ? lineage.model_version.replace(/^v_/, "") : "";
+    return (
+      <span
+        className={`px-1 py-0.5 rounded text-[9px] font-bold border ${colorCls}`}
+        title={`Model: ${dir} (${lineage.model_type || "?"}) ${version ? `v${version}` : ""}${lineage.recipe_label ? ` — ${lineage.recipe_label}` : ""}`}
+      >
+        {arrow} {dir}
+      </span>
+    );
+  };
 
   // ── Risk level badge renderer — shows categorized risk status ──
   // Groups levels by category (stop/profit/trailing/eod) with meaningful labels
@@ -2256,6 +2283,7 @@ export default function SignalsTab() {
                                 {group.hasOrphan && (
                                   <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-amber-900/50 text-amber-300 border border-amber-700/50" title="Recovered from IB reconciliation — no model signal lineage">ORPHAN</span>
                                 )}
+                                {renderModelBadge(pd.lineage)}
                                 <span className="text-gray-400">x{pos.quantity}</span>
                                 <span className="text-gray-500">Entry <span className="text-gray-300 font-mono">${pos.entry_price.toFixed(2)}</span></span>
                                 {isCompleted && rm?.fill_log ? (() => {
@@ -2400,6 +2428,7 @@ export default function SignalsTab() {
                                 {group.hasOrphan && (
                                   <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-amber-900/50 text-amber-300 border border-amber-700/50" title="Recovered from IB reconciliation — no model signal lineage">ORPHAN</span>
                                 )}
+                                {renderModelBadge(group.items[0]?.lineage)}
                                 <span className="text-gray-400">x{group.totalInitial}</span>
                                 <span className="text-gray-500">
                                   ({group.activeCount} active{group.closedCount > 0 ? `, ${group.closedCount} closed` : ""})
