@@ -2523,16 +2523,23 @@ class IBDataAgent:
             return None
 
     def _resolve_strategy_ids(self, strategy_id: str) -> List[str]:
-        """Resolve strategy_id to actual loaded IDs (handles directional expansion).
+        """Resolve strategy_id to ALL loaded IDs for a ticker.
 
-        E.g., 'bmc_spy' resolves to ['bmc_spy_up', 'bmc_spy_down'] if expanded,
-        or ['bmc_spy'] if loaded as single strategy.
+        E.g., 'bmc_spy' resolves to ['bmc_spy_up', 'bmc_spy_down', 'bmc_spy_sym']
+        if all three variants are loaded, or ['bmc_spy'] if loaded as single strategy.
+
+        Uses prefix matching so ANY variant (up, down, sym, or future suffixes)
+        is automatically included.  This is critical for config propagation —
+        if a variant is missed, config changes like direction_mode won't reach
+        it.  That caused the 2026-03-09 bug where bmc_spy_sym ran with
+        direction_mode=both while the user had set long_only for SPY.
         """
         if strategy_id in self.execution_engine._strategies:
             return [strategy_id]
-        # Check for directional variants
-        variants = [f"{strategy_id}_up", f"{strategy_id}_down"]
-        found = [v for v in variants if v in self.execution_engine._strategies]
+        # Prefix match: find ALL strategies whose ID starts with base_id + "_"
+        # This catches _up, _down, _sym, and any future variants automatically.
+        prefix = strategy_id + "_"
+        found = [sid for sid in self.execution_engine._strategies if sid.startswith(prefix)]
         return found if found else [strategy_id]  # return original if no variants found
 
     def _spawn_risk_manager_for_bmc(self, risk_config: dict, record_fill: bool = True) -> bool:
