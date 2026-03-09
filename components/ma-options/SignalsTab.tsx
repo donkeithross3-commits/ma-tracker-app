@@ -1382,11 +1382,18 @@ export default function SignalsTab() {
     // Include orphan risk managers for this ticker that are active in the engine
     // but not represented in the derived base details (can happen after hot
     // strategy replace / directional expansion while positions stay open).
-    // Skip completed risk managers — they are closed positions whose risk strategy
-    // hasn't been unloaded from the engine yet (e.g. reconciliation close).
+    // Skip risk managers that are closed — check BOTH the RM's internal state
+    // AND the position ledger (reconciliation closes positions in the store
+    // without telling the risk manager, so completed may be false while the
+    // position is actually closed).
+    const closedLedgerIds = new Set(
+      (executionStatus?.position_ledger || [])
+        .filter(p => p.status === "closed")
+        .map(p => p.id)
+    );
     const orphanDetails = riskStrategies
       .filter(s => !matchedRiskIds.has(s.strategy_id))
-      .filter(s => !s.strategy_state.completed)
+      .filter(s => !s.strategy_state.completed && !closedLedgerIds.has(s.strategy_id))
       .filter(s => {
         const inst = s.config?.instrument;
         return inst?.symbol?.toUpperCase?.() === activeTicker.toUpperCase();
