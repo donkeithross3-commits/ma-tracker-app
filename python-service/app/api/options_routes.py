@@ -2576,6 +2576,18 @@ async def relay_bmc_config(request: BMCConfigRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _sanitize_nan(obj):
+    """Recursively replace NaN/Inf floats with None for JSON compliance."""
+    import math
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_nan(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_nan(v) for v in obj]
+    return obj
+
+
 def _extract_bmc_strategies(strategies_list: list) -> list:
     """Extract all BMC strategy states from a strategies list.
 
@@ -2589,7 +2601,7 @@ def _extract_bmc_strategies(strategies_list: list) -> list:
             results.append({
                 "ticker": state.get("ticker", sid.replace("bmc_", "").upper()),
                 "strategy_id": sid,
-                "signal": state,
+                "signal": _sanitize_nan(state),
                 "config": strat.get("config"),
             })
     return results
