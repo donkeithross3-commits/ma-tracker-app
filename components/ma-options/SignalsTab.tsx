@@ -13,12 +13,18 @@ function TrailRiskEditor({
   strategyId,
   onApply,
   stopPropagation,
+  lotIdx,
+  label,
 }: {
   trailPct: number | undefined;
   activationPct: number | undefined;
   strategyId: string;
   onApply: (strategyId: string, config: Record<string, any>) => Promise<void>;
   stopPropagation?: boolean;
+  /** When set, sends per_lot_overrides instead of base trail config */
+  lotIdx?: number;
+  /** Optional label prefix (e.g. "Lot 2") */
+  label?: string;
 }) {
   const [localTrail, setLocalTrail] = useState(trailPct != null ? String(trailPct) : "");
   const [localAct, setLocalAct] = useState(activationPct != null ? String(activationPct) : "");
@@ -49,7 +55,14 @@ function TrailRiskEditor({
     }
     if (Object.keys(update).length === 0) return;
     setSaving(true);
-    await onApply(strategyId, { profit_taking: { trailing_stop: update } });
+    if (lotIdx != null) {
+      // Per-lot override: send via per_lot_overrides
+      await onApply(strategyId, {
+        profit_taking: { trailing_stop: { per_lot_overrides: { [String(lotIdx)]: update } } },
+      });
+    } else {
+      await onApply(strategyId, { profit_taking: { trailing_stop: update } });
+    }
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
@@ -66,6 +79,7 @@ function TrailRiskEditor({
 
   return (
     <>
+      {label && <span className="text-gray-600">{label}</span>}
       <span className="text-gray-500">trail%</span>
       <input
         type="text"
@@ -153,6 +167,18 @@ interface RiskManagerState {
   completed: boolean;
   trailing_stop_price: number;
   trailing_active: boolean;
+  trailing_mode?: string;
+  per_lot_trailing?: Record<string, {
+    lot_idx: number;
+    entry_price: number;
+    remaining_qty: number;
+    high_water_mark: number;
+    trailing_stop_price: number;
+    trailing_active: boolean;
+    trailing_tranche_idx: number;
+    trail_pct: number;
+    activation_pct: number;
+  }> | null;
   level_states: Record<string, string>;
   pending_orders: Record<string, { level: string; expected_qty: number; filled_so_far: number; placed_at: number }>;
   fill_log: FillLogEntry[];
@@ -2616,11 +2642,36 @@ export default function SignalsTab() {
                               const sid = firstActivePd.strategyId;
                               const grpTrailPct = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop?.trail_pct as number | undefined;
                               const grpActivationPct = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop?.activation_pct as number | undefined;
-                              const grpHasTrail = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop != null || firstActivePd.rm?.level_states?.trailing != null;
+                              const grpHasTrail = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop != null
+                                || firstActivePd.rm?.level_states?.trailing != null
+                                || Object.keys(firstActivePd.rm?.level_states || {}).some(k => k.startsWith("trailing_lot_"));
+                              const trailingMode = firstActivePd.rm?.trailing_mode as string | undefined;
+                              const isPerLot = trailingMode === "per_lot";
+                              const isMultiLot = group.items.length > 1;
                               return (
-                                <div className="flex items-center gap-2 px-2 py-1 text-[10px] border-t border-gray-700/30">
-                                  {/* Trail % control (group level — applies to all lots via shared risk manager) */}
-                                  {grpHasTrail && (
+                                <div className="flex items-center gap-2 px-2 py-1 text-[10px] border-t border-gray-700/30 flex-wrap">
+                                  {/* Mode toggle (only for multi-lot positions with trailing) */}
+                                  {grpHasTrail && isMultiLot && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const newMode = isPerLot ? "uniform" : "per_lot";
+                                        handlePositionRiskUpdate(sid, {
+                                          profit_taking: { trailing_stop: { mode: newMode } },
+                                        });
+                                      }}
+                                      className={`inline-edit px-1.5 py-0.5 rounded font-bold transition-colors ${
+                                        isPerLot
+                                          ? "bg-purple-900/60 text-purple-300 hover:bg-purple-900/80"
+                                          : "bg-gray-700/50 text-gray-500 hover:bg-gray-700/80 hover:text-gray-300"
+                                      }`}
+                                      title={isPerLot ? "Per-lot trailing: each lot has independent trail params. Click for uniform." : "Uniform trailing: one set of params for all lots. Click for per-lot."}
+                                    >
+                                      {isPerLot ? "Per Lot" : "All Lots"}
+                                    </button>
+                                  )}
+                                  {/* Trail % control (group level — only in uniform mode) */}
+                                  {grpHasTrail && !isPerLot && (
                                     <TrailRiskEditor
                                       trailPct={grpTrailPct}
                                       activationPct={grpActivationPct}
@@ -2628,6 +2679,10 @@ export default function SignalsTab() {
                                       onApply={handlePositionRiskUpdate}
                                       stopPropagation
                                     />
+                                  )}
+                                  {/* Per-lot hint when in per-lot mode */}
+                                  {grpHasTrail && isPerLot && (
+                                    <span className="text-purple-400/70 italic">expand to edit per-lot trail params ▼</span>
                                   )}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handlePositionEodUpdate(sid, !eodEnabled, eodTime || "15:30", eodMinBid ?? 0.05); }}
@@ -2682,13 +2737,26 @@ export default function SignalsTab() {
                             })()}
 
                             {/* Expanded: compact 1-line per lot with per-position risk controls */}
-                            {isExpanded && (
+                            {isExpanded && (() => {
+                              // Read trailing mode from first active RM
+                              const firstActiveRmForMode = group.items.find(pd => pd.rm && !pd.rm.completed);
+                              const expandedTrailingMode = firstActiveRmForMode?.rm?.trailing_mode as string | undefined;
+                              const expandedIsPerLot = expandedTrailingMode === "per_lot";
+                              const perLotTrailing = firstActiveRmForMode?.rm?.per_lot_trailing as Record<string, any> | null | undefined;
+                              const expandedSid = firstActiveRmForMode?.strategyId;
+                              return (
                               <div className="border-t border-gray-700/50 px-2 py-1 space-y-0.5">
                                 {group.items.map((pd, i) => {
                                   const { pos, rm, rmConfig: lotRmConfig, pnlPct, pnlDollar, strategyId, recentErrors } = pd;
                                   const isCompleted = rm?.completed;
                                   const posLabel = oc ? `${oc.strike} ${isCall ? "C" : "P"}` : "position";
-                                  // Trail controls are at group level only — all lots share one risk manager
+                                  // Per-lot trailing state for this lot
+                                  const lotTrailState = expandedIsPerLot && perLotTrailing ? perLotTrailing[String(i)] : null;
+                                  const lotTrailPct = lotTrailState?.trail_pct as number | undefined;
+                                  const lotActPct = lotTrailState?.activation_pct as number | undefined;
+                                  const lotHwm = lotTrailState?.high_water_mark as number | undefined;
+                                  const lotTrailActive = lotTrailState?.trailing_active as boolean | undefined;
+                                  const lotTrailPrice = lotTrailState?.trailing_stop_price as number | undefined;
                                   return (
                                     <div key={i}>
                                       <div className={`flex items-center gap-2 text-[10px] py-0.5 ${isCompleted ? "opacity-50" : ""}`}>
@@ -2701,7 +2769,23 @@ export default function SignalsTab() {
                                           </span>
                                         )}
                                         {renderRiskBadges(rm)}
-                                        {/* Trail controls removed from per-lot rows — edit at group level above */}
+                                        {/* Per-lot trail controls (only in per_lot mode) */}
+                                        {expandedIsPerLot && !isCompleted && expandedSid && (
+                                          <TrailRiskEditor
+                                            trailPct={lotTrailPct || undefined}
+                                            activationPct={lotActPct || undefined}
+                                            strategyId={expandedSid}
+                                            onApply={handlePositionRiskUpdate}
+                                            stopPropagation
+                                            lotIdx={i}
+                                          />
+                                        )}
+                                        {/* Per-lot trail status badges */}
+                                        {expandedIsPerLot && lotTrailActive && lotTrailPrice != null && (
+                                          <span className="text-yellow-500/70 font-mono" title={`HWM: ${lotHwm?.toFixed(2)} Trail: ${lotTrailPrice?.toFixed(2)}`}>
+                                            ↕{lotTrailPrice.toFixed(2)}
+                                          </span>
+                                        )}
                                         {isCompleted ? (
                                           <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-600 text-gray-200">CLOSED</span>
                                         ) : strategyId ? (
@@ -2723,7 +2807,8 @@ export default function SignalsTab() {
                                   );
                                 })}
                               </div>
-                            )}
+                              );
+                            })()}
                           </div>
                           </React.Fragment>
                         );

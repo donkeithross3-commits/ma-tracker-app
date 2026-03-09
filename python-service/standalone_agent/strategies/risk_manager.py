@@ -118,6 +118,42 @@ class PendingOrder:
         self.placed_at = placed_at
 
 
+class LotTrailingState:
+    """Per-lot trailing stop state."""
+    __slots__ = ("lot_idx", "entry_price", "remaining_qty",
+                 "high_water_mark", "trailing_stop_price",
+                 "trailing_active", "trailing_tranche_idx",
+                 "trailing_tranche_pending", "trail_pct", "activation_pct")
+
+    def __init__(self, lot_idx: int, entry_price: float, quantity: int,
+                 trail_pct: float = 0.0, activation_pct: float = 0.0):
+        self.lot_idx = lot_idx
+        self.entry_price = entry_price
+        self.remaining_qty = quantity
+        self.high_water_mark = entry_price
+        self.trailing_stop_price = 0.0
+        self.trailing_active = False
+        self.trailing_tranche_idx = 0
+        self.trailing_tranche_pending = False
+        # Per-lot overrides (0 = use base config)
+        self.trail_pct = trail_pct
+        self.activation_pct = activation_pct
+
+    def to_dict(self) -> dict:
+        return {k: getattr(self, k) for k in self.__slots__}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "LotTrailingState":
+        obj = cls(d["lot_idx"], d["entry_price"], d["remaining_qty"],
+                  d.get("trail_pct", 0.0), d.get("activation_pct", 0.0))
+        obj.high_water_mark = d.get("high_water_mark", obj.entry_price)
+        obj.trailing_stop_price = d.get("trailing_stop_price", 0.0)
+        obj.trailing_active = d.get("trailing_active", False)
+        obj.trailing_tranche_idx = d.get("trailing_tranche_idx", 0)
+        obj.trailing_tranche_pending = d.get("trailing_tranche_pending", False)
+        return obj
+
+
 # ── Presets ──
 
 PRESETS = {
@@ -305,6 +341,11 @@ class RiskManagerStrategy(ExecutionStrategy):
         self._trailing_tranche_idx: int = 0         # which tranche we're on
         self._trailing_tranche_pending: bool = False  # True while waiting for tranche fill
 
+        # Per-lot trailing stop mode ("uniform" or "per_lot")
+        self._trailing_mode: str = "uniform"
+        # Per-lot trailing state: lot_idx -> LotTrailingState
+        self._per_lot_trailing: Dict[int, LotTrailingState] = {}
+
         # Snapshot of risk-related config for hot-modify comparison
         self._risk_config: dict = {}
 
@@ -427,6 +468,19 @@ class RiskManagerStrategy(ExecutionStrategy):
             if trail.get("enabled"):
                 self._level_states["trailing"] = LevelState.ARMED
 
+        # Per-lot trailing mode
+        trail_cfg = profit_cfg.get("trailing_stop", {})
+        self._trailing_mode = trail_cfg.get("mode", "uniform")
+        if self._trailing_mode == "per_lot" and trail_cfg.get("enabled"):
+            overrides = trail_cfg.get("per_lot_overrides", {})
+            lot_override = overrides.get("0", overrides.get(0, {}))
+            self._per_lot_trailing[0] = LotTrailingState(
+                0, pos.get("entry_price", 0), pos.get("quantity", 1),
+                lot_override.get("trail_pct", 0.0),
+                lot_override.get("activation_pct", 0.0),
+            )
+            self._level_states["trailing_lot_0"] = LevelState.ARMED
+
         # EOD close-out level (armed from start if eod_exit_time is configured)
         if config.get("eod_exit_time"):
             self._level_states["eod_closeout"] = LevelState.ARMED
@@ -501,6 +555,18 @@ class RiskManagerStrategy(ExecutionStrategy):
             "fill_time": fill_time or time.time(),
             "perm_id": perm_id,
         })
+
+        # Per-lot trailing: create state for new lot
+        if self._trailing_mode == "per_lot":
+            lot_idx = len(self._lot_entries) - 1
+            self._per_lot_trailing[lot_idx] = LotTrailingState(
+                lot_idx, entry_price, quantity,
+            )
+            level_key = f"trailing_lot_{lot_idx}"
+            if level_key not in self._level_states:
+                self._level_states[level_key] = LevelState.ARMED
+            logger.info("Per-lot trailing: created state for lot %d (entry=%.4f, qty=%d)",
+                        lot_idx, entry_price, quantity)
 
         logger.info(
             "RiskManager add_lot: %s now %d lots (%d qty) @ avg %.4f "
@@ -613,7 +679,13 @@ class RiskManagerStrategy(ExecutionStrategy):
         }
         # Tag trailing fills with tranche index for audit
         if pending.level_type == "trailing":
-            fill_entry["tranche_idx"] = self._trailing_tranche_idx
+            if self._trailing_mode == "per_lot" and pending.level_key.startswith("trailing_lot_"):
+                lot_idx_str = pending.level_key.rsplit("_", 1)[-1]
+                lot_st = self._per_lot_trailing.get(int(lot_idx_str) if lot_idx_str.isdigit() else -1)
+                fill_entry["tranche_idx"] = lot_st.trailing_tranche_idx if lot_st else 0
+                fill_entry["lot_idx"] = int(lot_idx_str) if lot_idx_str.isdigit() else -1
+            else:
+                fill_entry["tranche_idx"] = self._trailing_tranche_idx
         self._fill_log.append(fill_entry)
 
         status = fill_data.get("status", "")
@@ -624,47 +696,93 @@ class RiskManagerStrategy(ExecutionStrategy):
             self._rejection_counts.pop(level_key, None)  # reset on success
 
             # ── Trailing tranche advancement ──
-            if pending.level_type == "trailing" and self._trailing_tranche_pending:
-                self._trailing_tranche_pending = False
+            if pending.level_type == "trailing":
+                # Determine if this is a per-lot or uniform trailing fill
+                is_per_lot_fill = (
+                    self._trailing_mode == "per_lot"
+                    and pending.level_key.startswith("trailing_lot_")
+                )
 
-                if self.remaining_qty <= 0:
-                    # Position fully exited
-                    self._level_states[level_key] = LevelState.FILLED
-                    self._completed = True
-                    logger.info("RiskManager: position fully exited for %s (trailing tranche %d)",
-                                self.cache_key, self._trailing_tranche_idx)
-                    return
+                if is_per_lot_fill:
+                    # Per-lot: route to the specific lot's state
+                    lot_idx_str = pending.level_key.rsplit("_", 1)[-1]
+                    lot_idx = int(lot_idx_str) if lot_idx_str.isdigit() else -1
+                    lot_state = self._per_lot_trailing.get(lot_idx)
+                    if lot_state:
+                        lot_state.remaining_qty = max(0, lot_state.remaining_qty - filled_delta)
+                        lot_state.trailing_tranche_pending = False
 
-                # Check if more tranches remain
-                config_trail = config.get("profit_taking", {}).get("trailing_stop", {})
-                tranches = config_trail.get("exit_tranches")
-                next_idx = self._trailing_tranche_idx + 1
+                        if lot_state.remaining_qty <= 0:
+                            self._level_states[pending.level_key] = LevelState.FILLED
+                            logger.info("Per-lot trailing: lot %d fully exited for %s",
+                                        lot_idx, self.cache_key)
+                        else:
+                            config_trail = config.get("profit_taking", {}).get("trailing_stop", {})
+                            tranches = config_trail.get("exit_tranches")
+                            next_idx = lot_state.trailing_tranche_idx + 1
+                            if tranches and next_idx < len(tranches):
+                                lot_state.trailing_tranche_idx = next_idx
+                                next_tranche = tranches[next_idx]
+                                next_trail_pct = next_tranche.get("trail_pct",
+                                    lot_state.trail_pct or config_trail.get("trail_pct", 10.0))
+                                if self.is_long:
+                                    lot_state.trailing_stop_price = lot_state.high_water_mark * (1.0 - next_trail_pct / 100.0)
+                                else:
+                                    lot_state.trailing_stop_price = lot_state.high_water_mark * (1.0 + next_trail_pct / 100.0)
+                                self._level_states[pending.level_key] = LevelState.ARMED
+                                logger.info(
+                                    "Per-lot trailing: lot %d tranche %d->%d (trail=%.1f%%, stop=%.4f, remaining=%d)",
+                                    lot_idx, lot_state.trailing_tranche_idx - 1, lot_state.trailing_tranche_idx,
+                                    next_trail_pct, lot_state.trailing_stop_price, lot_state.remaining_qty,
+                                )
+                            else:
+                                self._level_states[pending.level_key] = LevelState.FILLED
+                                logger.info("Per-lot trailing: lot %d final tranche filled", lot_idx)
+                elif self._trailing_tranche_pending:
+                    # Uniform mode: existing tranche handling
+                    self._trailing_tranche_pending = False
 
-                if tranches and next_idx < len(tranches):
-                    # Advance to next tranche: tighter trail, re-arm
-                    self._trailing_tranche_idx = next_idx
-                    next_tranche = tranches[next_idx]
-                    next_trail_pct = next_tranche.get("trail_pct", config_trail.get("trail_pct", 10.0))
+                    if self.remaining_qty <= 0:
+                        # Position fully exited
+                        self._level_states[level_key] = LevelState.FILLED
+                        self._completed = True
+                        logger.info("RiskManager: position fully exited for %s (trailing tranche %d)",
+                                    self.cache_key, self._trailing_tranche_idx)
+                        return
 
-                    # Recompute trail price from HWM with tighter percentage
-                    if self.is_long:
-                        self._trailing_stop_price = self.high_water_mark * (1.0 - next_trail_pct / 100.0)
+                    # Check if more tranches remain
+                    config_trail = config.get("profit_taking", {}).get("trailing_stop", {})
+                    tranches = config_trail.get("exit_tranches")
+                    next_idx = self._trailing_tranche_idx + 1
+
+                    if tranches and next_idx < len(tranches):
+                        # Advance to next tranche: tighter trail, re-arm
+                        self._trailing_tranche_idx = next_idx
+                        next_tranche = tranches[next_idx]
+                        next_trail_pct = next_tranche.get("trail_pct", config_trail.get("trail_pct", 10.0))
+
+                        # Recompute trail price from HWM with tighter percentage
+                        if self.is_long:
+                            self._trailing_stop_price = self.high_water_mark * (1.0 - next_trail_pct / 100.0)
+                        else:
+                            self._trailing_stop_price = self.high_water_mark * (1.0 + next_trail_pct / 100.0)
+
+                        self._level_states[level_key] = LevelState.ARMED
+                        logger.info(
+                            "RiskManager trailing tranche %d/%d filled, advancing to tranche %d "
+                            "(trail_pct=%.1f%%, new trail=%.4f, remaining=%d)",
+                            self._trailing_tranche_idx - 1, len(tranches),
+                            self._trailing_tranche_idx, next_trail_pct,
+                            self._trailing_stop_price, self.remaining_qty,
+                        )
                     else:
-                        self._trailing_stop_price = self.high_water_mark * (1.0 + next_trail_pct / 100.0)
-
-                    self._level_states[level_key] = LevelState.ARMED
-                    logger.info(
-                        "RiskManager trailing tranche %d/%d filled, advancing to tranche %d "
-                        "(trail_pct=%.1f%%, new trail=%.4f, remaining=%d)",
-                        self._trailing_tranche_idx - 1, len(tranches),
-                        self._trailing_tranche_idx, next_trail_pct,
-                        self._trailing_stop_price, self.remaining_qty,
-                    )
+                        # Last tranche (or no tranches) — done
+                        self._level_states[level_key] = LevelState.FILLED
+                        logger.info("RiskManager level %s FILLED (final tranche, remaining_qty=%d)",
+                                    level_key, self.remaining_qty)
                 else:
-                    # Last tranche (or no tranches) — done
                     self._level_states[level_key] = LevelState.FILLED
-                    logger.info("RiskManager level %s FILLED (final tranche, remaining_qty=%d)",
-                                level_key, self.remaining_qty)
+                    logger.info("RiskManager level %s FILLED (remaining_qty=%d)", level_key, self.remaining_qty)
             else:
                 self._level_states[level_key] = LevelState.FILLED
                 logger.info("RiskManager level %s FILLED (remaining_qty=%d)", level_key, self.remaining_qty)
@@ -709,9 +827,14 @@ class RiskManagerStrategy(ExecutionStrategy):
 
     @staticmethod
     def _parse_level_key(key: str):
-        """Parse 'stop_0' -> ('stop', 0), 'trailing' -> ('trailing', 0)."""
+        """Parse 'stop_0' -> ('stop', 0), 'trailing' -> ('trailing', 0),
+        'trailing_lot_3' -> ('trailing', 3)."""
         if key == "trailing":
             return ("trailing", 0)
+        # Per-lot trailing keys: "trailing_lot_N" -> ("trailing", N)
+        if key.startswith("trailing_lot_"):
+            lot_str = key.rsplit("_", 1)[-1]
+            return ("trailing", int(lot_str) if lot_str.isdigit() else 0)
         parts = key.rsplit("_", 1)
         if len(parts) == 2 and parts[1].isdigit():
             return (parts[0], int(parts[1]))
@@ -749,7 +872,14 @@ class RiskManagerStrategy(ExecutionStrategy):
 
         # Clear tranche pending flag on trailing order death (retry same tranche)
         if pending.level_type == "trailing":
-            self._trailing_tranche_pending = False
+            if self._trailing_mode == "per_lot" and pending.level_key.startswith("trailing_lot_"):
+                lot_idx_str = pending.level_key.rsplit("_", 1)[-1]
+                lot_idx = int(lot_idx_str) if lot_idx_str.isdigit() else -1
+                lot_st = self._per_lot_trailing.get(lot_idx)
+                if lot_st:
+                    lot_st.trailing_tranche_pending = False
+            else:
+                self._trailing_tranche_pending = False
 
         if count >= self.MAX_REJECTIONS_PER_LEVEL:
             self._level_states[level_key] = LevelState.FAILED
@@ -788,6 +918,10 @@ class RiskManagerStrategy(ExecutionStrategy):
             "total_lots": len(self._lot_entries),
             "trailing_tranche_idx": self._trailing_tranche_idx,
             "trailing_tranche_pending": self._trailing_tranche_pending,
+            "trailing_mode": self._trailing_mode,
+            "per_lot_trailing": {
+                str(k): v.to_dict() for k, v in self._per_lot_trailing.items()
+            } if self._per_lot_trailing else None,
             "entry_timestamp": self._entry_timestamp,
         }
 
@@ -808,6 +942,10 @@ class RiskManagerStrategy(ExecutionStrategy):
             "lot_entries": self._lot_entries,
             "trailing_tranche_idx": self._trailing_tranche_idx,
             "trailing_tranche_pending": self._trailing_tranche_pending,
+            "trailing_mode": self._trailing_mode,
+            "per_lot_trailing": {
+                str(k): v.to_dict() for k, v in self._per_lot_trailing.items()
+            } if self._per_lot_trailing else None,
             "entry_timestamp": self._entry_timestamp,
         }
 
@@ -831,6 +969,21 @@ class RiskManagerStrategy(ExecutionStrategy):
         # Restore trailing tranche state
         self._trailing_tranche_idx = int(state.get("trailing_tranche_idx", 0))
         self._trailing_tranche_pending = False  # pending orders are dead after restart
+
+        # Restore per-lot trailing mode
+        self._trailing_mode = state.get("trailing_mode", "uniform")
+        persisted_per_lot = state.get("per_lot_trailing")
+        if persisted_per_lot:
+            self._per_lot_trailing = {
+                int(k): LotTrailingState.from_dict(v)
+                for k, v in persisted_per_lot.items()
+            }
+            # Re-arm per-lot level states and reset pending on restart
+            for lot_idx in self._per_lot_trailing:
+                level_key = f"trailing_lot_{lot_idx}"
+                if level_key not in self._level_states:
+                    self._level_states[level_key] = LevelState.ARMED
+                self._per_lot_trailing[lot_idx].trailing_tranche_pending = False
 
         # Restore entry timestamp (for EOD close-out same-day detection)
         if state.get("entry_timestamp"):
@@ -998,6 +1151,70 @@ class RiskManagerStrategy(ExecutionStrategy):
                 else:
                     self._trailing_stop_price = self.high_water_mark * (1 + new_trail_pct / 100)
                 changes["updated_fields"].append("trailing_stop_price_recalc")
+
+            # Mode switching: uniform <-> per_lot
+            new_mode = new_ts.get("mode", old_ts.get("mode", "uniform"))
+            old_mode = self._trailing_mode
+            if new_mode != old_mode:
+                self._trailing_mode = new_mode
+                changes["updated_fields"].append(f"trailing_mode_{old_mode}_to_{new_mode}")
+                if new_mode == "per_lot" and not self._per_lot_trailing:
+                    # Initialize per-lot state from existing lots
+                    overrides = new_ts.get("per_lot_overrides", {})
+                    for i, lot in enumerate(self._lot_entries):
+                        lot_override = overrides.get(str(i), overrides.get(i, {}))
+                        self._per_lot_trailing[i] = LotTrailingState(
+                            i, lot["entry_price"], lot["quantity"],
+                            lot_override.get("trail_pct", 0.0),
+                            lot_override.get("activation_pct", 0.0),
+                        )
+                        # Seed HWM from current aggregate HWM
+                        self._per_lot_trailing[i].high_water_mark = self.high_water_mark
+                        level_key = f"trailing_lot_{i}"
+                        if level_key not in self._level_states:
+                            self._level_states[level_key] = LevelState.ARMED
+                    # Remove uniform trailing level
+                    if "trailing" in self._level_states and self._level_states["trailing"] == LevelState.ARMED:
+                        del self._level_states["trailing"]
+                    logger.info("Switched to per-lot trailing: %d lots initialized", len(self._per_lot_trailing))
+                elif new_mode == "uniform" and self._per_lot_trailing:
+                    # Collapse back: use max HWM from all lots
+                    if self._per_lot_trailing:
+                        self.high_water_mark = max(s.high_water_mark for s in self._per_lot_trailing.values())
+                        # Check if any lot was activated
+                        self._trailing_active = any(s.trailing_active for s in self._per_lot_trailing.values())
+                    # Remove per-lot level states
+                    for lot_idx in list(self._per_lot_trailing.keys()):
+                        level_key = f"trailing_lot_{lot_idx}"
+                        self._level_states.pop(level_key, None)
+                    self._per_lot_trailing.clear()
+                    # Ensure uniform trailing level exists
+                    if "trailing" not in self._level_states:
+                        self._level_states["trailing"] = LevelState.ARMED
+                    logger.info("Switched to uniform trailing: hwm=%.4f, active=%s",
+                                self.high_water_mark, self._trailing_active)
+
+            # Per-lot override updates (when already in per_lot mode)
+            if self._trailing_mode == "per_lot":
+                base_trail_pct = new_ts.get("trail_pct", 10.0)
+                new_overrides = new_ts.get("per_lot_overrides", {})
+                for lot_key, override in new_overrides.items():
+                    lot_idx = int(lot_key) if str(lot_key).isdigit() else -1
+                    lot_state = self._per_lot_trailing.get(lot_idx)
+                    if lot_state:
+                        if "trail_pct" in override:
+                            old_trail = lot_state.trail_pct
+                            lot_state.trail_pct = override["trail_pct"]
+                            # Recalc trail price if active
+                            if lot_state.trailing_active and old_trail != lot_state.trail_pct:
+                                effective_pct = lot_state.trail_pct or base_trail_pct
+                                if self.is_long:
+                                    lot_state.trailing_stop_price = lot_state.high_water_mark * (1 - effective_pct / 100)
+                                else:
+                                    lot_state.trailing_stop_price = lot_state.high_water_mark * (1 + effective_pct / 100)
+                        if "activation_pct" in override:
+                            lot_state.activation_pct = override["activation_pct"]
+                        changes["updated_fields"].append(f"per_lot_override_{lot_idx}")
 
         # --- Merge new config into _risk_config ---
         for key in ("stop_loss", "profit_taking"):
@@ -1192,6 +1409,10 @@ class RiskManagerStrategy(ExecutionStrategy):
         if not trail_cfg.get("enabled"):
             return None
 
+        # Per-lot mode delegates to separate method
+        if self._trailing_mode == "per_lot":
+            return self._check_trailing_stop_per_lot(config, current_price, quote)
+
         key = "trailing"
         if self._level_states.get(key) != LevelState.ARMED:
             return None
@@ -1298,6 +1519,114 @@ class RiskManagerStrategy(ExecutionStrategy):
                 logger.info("RiskManager TRAILING STOP (short) triggered (tranche %d): price=%.4f trail=%.4f qty=%d",
                             self._trailing_tranche_idx, current_price, self._trailing_stop_price, qty)
                 return action
+
+        return None
+
+    def _check_trailing_stop_per_lot(self, config: dict,
+                                      current_price: float, quote) -> Optional[OrderAction]:
+        """Per-lot trailing stop evaluation. Each lot tracked independently."""
+        profit_cfg = config.get("profit_taking", {})
+        trail_cfg = profit_cfg.get("trailing_stop", {})
+        if not trail_cfg.get("enabled"):
+            return None
+
+        base_activation_pct = trail_cfg.get("activation_pct", 0)
+        base_trail_pct = trail_cfg.get("trail_pct", 10.0)
+        base_tranches = trail_cfg.get("exit_tranches")
+
+        for lot_idx, lot_state in sorted(self._per_lot_trailing.items()):
+            if lot_state.remaining_qty <= 0:
+                continue
+            if lot_state.trailing_tranche_pending:
+                continue
+
+            level_key = f"trailing_lot_{lot_idx}"
+            if self._level_states.get(level_key) != LevelState.ARMED:
+                continue
+
+            # Per-lot overrides or base config
+            activation_pct = lot_state.activation_pct or base_activation_pct
+            trail_pct = lot_state.trail_pct or base_trail_pct
+
+            # Resolve effective trail_pct from current tranche
+            if base_tranches and lot_state.trailing_tranche_idx < len(base_tranches):
+                tranche = base_tranches[lot_state.trailing_tranche_idx]
+                trail_pct = tranche.get("trail_pct", trail_pct)
+            else:
+                tranche = None
+
+            # Per-lot P&L%
+            if lot_state.entry_price <= 0:
+                continue
+            if self.is_long:
+                lot_pnl_pct = (current_price - lot_state.entry_price) / lot_state.entry_price * 100.0
+            else:
+                lot_pnl_pct = (lot_state.entry_price - current_price) / lot_state.entry_price * 100.0
+
+            # Update per-lot HWM
+            if self.is_long:
+                lot_state.high_water_mark = max(lot_state.high_water_mark, current_price)
+            else:
+                if lot_state.high_water_mark == 0 or current_price < lot_state.high_water_mark:
+                    lot_state.high_water_mark = current_price
+
+            # Check activation
+            if not lot_state.trailing_active:
+                if lot_pnl_pct >= activation_pct:
+                    lot_state.trailing_active = True
+                    logger.info("Per-lot trailing ACTIVATED: lot %d at pnl=%.1f%% (entry=%.4f)",
+                                lot_idx, lot_pnl_pct, lot_state.entry_price)
+                else:
+                    continue
+
+            # Update trailing stop price
+            if self.is_long:
+                new_trail = lot_state.high_water_mark * (1.0 - trail_pct / 100.0)
+                if new_trail > lot_state.trailing_stop_price:
+                    lot_state.trailing_stop_price = new_trail
+                triggered = current_price <= lot_state.trailing_stop_price
+            else:
+                new_trail = lot_state.high_water_mark * (1.0 + trail_pct / 100.0)
+                if lot_state.trailing_stop_price == 0 or new_trail < lot_state.trailing_stop_price:
+                    lot_state.trailing_stop_price = new_trail
+                triggered = current_price >= lot_state.trailing_stop_price
+
+            if triggered:
+                # Determine qty from tranche or full lot
+                if tranche is not None:
+                    exit_pct = tranche.get("exit_pct", 100)
+                    is_last = (lot_state.trailing_tranche_idx >= len(base_tranches) - 1)
+                    if is_last or exit_pct >= 100:
+                        qty = lot_state.remaining_qty
+                    else:
+                        qty = max(1, round(lot_state.remaining_qty * exit_pct / 100.0))
+                        if qty >= lot_state.remaining_qty:
+                            qty = lot_state.remaining_qty
+                    total_tranches = len(base_tranches)
+                else:
+                    qty = lot_state.remaining_qty
+                    total_tranches = 0
+
+                exec_cfg = config.get("execution", {})
+                direction = "below" if self.is_long else "above"
+                reason = (
+                    f"Per-lot trailing stop (lot {lot_idx}): "
+                    f"price={current_price:.4f} {direction} trail={lot_state.trailing_stop_price:.4f} "
+                    f"(hwm={lot_state.high_water_mark:.4f}, entry={lot_state.entry_price:.4f}, "
+                    f"trail_pct={trail_pct}%)"
+                )
+
+                action = self._make_order_action(
+                    qty, exec_cfg.get("stop_order_type", "MKT"),
+                    current_price, quote, config, reason,
+                )
+                if action is None:
+                    continue  # min premium gate — try next lot or retry next tick
+                self._level_states[level_key] = LevelState.TRIGGERED
+                lot_state.trailing_tranche_pending = True
+                logger.info("Per-lot TRAILING STOP triggered: lot %d, price=%.4f trail=%.4f qty=%d",
+                            lot_idx, current_price, lot_state.trailing_stop_price, qty)
+                return action  # One lot per tick
 
         return None
 
