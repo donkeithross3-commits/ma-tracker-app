@@ -8,6 +8,7 @@ import IBPositionsTab from "./IBPositionsTab";
 import SignalsTab from "./SignalsTab";
 import ManualTradingV2Tab from "./manual-v2/ManualTradingV2Tab";
 import PnlHistoryTab from "./PnlHistoryTab";
+import BookTab from "./BookTab";
 
 // lightweight-charts requires `window` — SSR-safe dynamic import
 const ChartsTab = dynamic(() => import("./charts/ChartsTab"), { ssr: false });
@@ -50,6 +51,12 @@ export default function OptionsScannerTabs({
           Charts
         </Tabs.Trigger>
         <Tabs.Trigger
+          value="book"
+          className="px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
+        >
+          Book
+        </Tabs.Trigger>
+        <Tabs.Trigger
           value="pnl-history"
           className="px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-gray-100 data-[state=active]:text-gray-100 data-[state=active]:border-b-2 data-[state=active]:border-blue-500"
         >
@@ -85,6 +92,10 @@ export default function OptionsScannerTabs({
 
       <Tabs.Content value="charts">
         <ChartsTab />
+      </Tabs.Content>
+
+      <Tabs.Content value="book">
+        <BookTab />
       </Tabs.Content>
 
       <Tabs.Content value="pnl-history">
