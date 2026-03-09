@@ -2367,7 +2367,7 @@ export default function SignalsTab() {
                                 const eodEnabled = !!eodTime;
                                 const trailPct = (rmConfig?.profit_taking as any)?.trailing_stop?.trail_pct as number | undefined;
                                 const activationPct = (rmConfig?.profit_taking as any)?.trailing_stop?.activation_pct as number | undefined;
-                                const hasTrail = rm?.level_states?.trailing != null;
+                                const hasTrail = (rmConfig?.profit_taking as any)?.trailing_stop != null || rm?.level_states?.trailing != null;
                                 return (
                                   <div className="flex items-center gap-2 mt-1 text-[10px]">
                                     {/* Trail % control */}
@@ -2390,27 +2390,23 @@ export default function SignalsTab() {
                                             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                                           }}
                                         />
-                                        {activationPct != null && (
-                                          <>
-                                            <span className="text-gray-600">act%</span>
-                                            <input
-                                              key={`trail-act-${strategyId}-${activationPct}`}
-                                              type="text"
-                                              defaultValue={String(activationPct)}
-                                              className="inline-edit w-[32px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
-                                              title={`Trailing stop activation threshold — trail starts after +${activationPct}% gain`}
-                                              onBlur={(e) => {
-                                                const val = parseFloat(e.target.value);
-                                                if (!isNaN(val) && val >= 0 && val <= 500 && val !== activationPct) {
-                                                  handlePositionRiskUpdate(strategyId, { profit_taking: { trailing_stop: { activation_pct: val } } });
-                                                }
-                                              }}
-                                              onKeyDown={(e) => {
-                                                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                                              }}
-                                            />
-                                          </>
-                                        )}
+                                        <span className="text-gray-600">act%</span>
+                                        <input
+                                          key={`trail-act-${strategyId}-${activationPct}`}
+                                          type="text"
+                                          defaultValue={activationPct != null ? String(activationPct) : ""}
+                                          className="inline-edit w-[32px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
+                                          title={`Trailing stop activation threshold — trail starts after +${activationPct ?? "?"}% gain`}
+                                          onBlur={(e) => {
+                                            const val = parseFloat(e.target.value);
+                                            if (!isNaN(val) && val >= 0 && val <= 500 && val !== activationPct) {
+                                              handlePositionRiskUpdate(strategyId, { profit_taking: { trailing_stop: { activation_pct: val } } });
+                                            }
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                          }}
+                                        />
                                         <span className="text-gray-700">│</span>
                                       </>
                                     )}
@@ -2552,7 +2548,7 @@ export default function SignalsTab() {
                               const sid = firstActivePd.strategyId;
                               const grpTrailPct = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop?.trail_pct as number | undefined;
                               const grpActivationPct = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop?.activation_pct as number | undefined;
-                              const grpHasTrail = firstActivePd.rm?.level_states?.trailing != null;
+                              const grpHasTrail = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop != null || firstActivePd.rm?.level_states?.trailing != null;
                               return (
                                 <div className="flex items-center gap-2 px-2 py-1 text-[10px] border-t border-gray-700/30">
                                   {/* Trail % control (group level — applies to first active position) */}
@@ -2574,26 +2570,22 @@ export default function SignalsTab() {
                                         }}
                                         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                       />
-                                      {grpActivationPct != null && (
-                                        <>
-                                          <span className="text-gray-600">act%</span>
-                                          <input
-                                            key={`trail-act-${sid}-${grpActivationPct}`}
-                                            type="text"
-                                            defaultValue={String(grpActivationPct)}
-                                            className="inline-edit w-[32px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
-                                            title={`Trail activation threshold — starts after +${grpActivationPct}% gain`}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onBlur={(e) => {
-                                              const val = parseFloat(e.target.value);
-                                              if (!isNaN(val) && val >= 0 && val <= 500 && val !== grpActivationPct) {
-                                                handlePositionRiskUpdate(sid, { profit_taking: { trailing_stop: { activation_pct: val } } });
-                                              }
-                                            }}
-                                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                                          />
-                                        </>
-                                      )}
+                                      <span className="text-gray-600">act%</span>
+                                      <input
+                                        key={`trail-act-${sid}-${grpActivationPct}`}
+                                        type="text"
+                                        defaultValue={grpActivationPct != null ? String(grpActivationPct) : ""}
+                                        className="inline-edit w-[32px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
+                                        title={`Trail activation threshold — starts after +${grpActivationPct ?? "?"}% gain`}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onBlur={(e) => {
+                                          const val = parseFloat(e.target.value);
+                                          if (!isNaN(val) && val >= 0 && val <= 500 && val !== grpActivationPct) {
+                                            handlePositionRiskUpdate(sid, { profit_taking: { trailing_stop: { activation_pct: val } } });
+                                          }
+                                        }}
+                                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                      />
                                       <span className="text-gray-700">│</span>
                                     </>
                                   )}
@@ -2656,9 +2648,7 @@ export default function SignalsTab() {
                                   const { pos, rm, rmConfig: lotRmConfig, pnlPct, pnlDollar, strategyId, recentErrors } = pd;
                                   const isCompleted = rm?.completed;
                                   const posLabel = oc ? `${oc.strike} ${isCall ? "C" : "P"}` : "position";
-                                  const lotTrailPct = (lotRmConfig?.profit_taking as any)?.trailing_stop?.trail_pct as number | undefined;
-                                  const lotActivationPct = (lotRmConfig?.profit_taking as any)?.trailing_stop?.activation_pct as number | undefined;
-                                  const lotHasTrail = rm?.level_states?.trailing != null;
+                                  // Trail controls are at group level only — all lots share one risk manager
                                   return (
                                     <div key={i}>
                                       <div className={`flex items-center gap-2 text-[10px] py-0.5 ${isCompleted ? "opacity-50" : ""}`}>
@@ -2671,43 +2661,7 @@ export default function SignalsTab() {
                                           </span>
                                         )}
                                         {renderRiskBadges(rm)}
-                                        {/* Per-lot trail % inline edit */}
-                                        {!isCompleted && strategyId && lotHasTrail && (
-                                          <>
-                                            <span className="text-gray-600">trail%</span>
-                                            <input
-                                              key={`lot-trail-${strategyId}-${lotTrailPct}`}
-                                              type="text"
-                                              defaultValue={lotTrailPct != null ? String(lotTrailPct) : ""}
-                                              className="inline-edit w-[32px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
-                                              title={`Trail stop % for this lot (current: ${lotTrailPct ?? "?"}%)`}
-                                              onClick={(e) => e.stopPropagation()}
-                                              onBlur={(e) => {
-                                                const val = parseFloat(e.target.value);
-                                                if (!isNaN(val) && val > 0 && val <= 100 && val !== lotTrailPct) {
-                                                  handlePositionRiskUpdate(strategyId, { profit_taking: { trailing_stop: { trail_pct: val } } });
-                                                }
-                                              }}
-                                              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                                            />
-                                            <span className="text-gray-600">act%</span>
-                                            <input
-                                              key={`lot-act-${strategyId}-${lotActivationPct}`}
-                                              type="text"
-                                              defaultValue={lotActivationPct != null ? String(lotActivationPct) : ""}
-                                              className="inline-edit w-[32px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-gray-200 text-center font-mono"
-                                              title={`Trail activation threshold for this lot (current: ${lotActivationPct ?? "?"}%)`}
-                                              onClick={(e) => e.stopPropagation()}
-                                              onBlur={(e) => {
-                                                const val = parseFloat(e.target.value);
-                                                if (!isNaN(val) && val >= 0 && val <= 500 && val !== lotActivationPct) {
-                                                  handlePositionRiskUpdate(strategyId, { profit_taking: { trailing_stop: { activation_pct: val } } });
-                                                }
-                                              }}
-                                              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                                            />
-                                          </>
-                                        )}
+                                        {/* Trail controls removed from per-lot rows — edit at group level above */}
                                         {isCompleted ? (
                                           <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-600 text-gray-200">CLOSED</span>
                                         ) : strategyId ? (
