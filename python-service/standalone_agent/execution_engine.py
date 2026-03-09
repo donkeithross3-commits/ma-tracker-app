@@ -1756,6 +1756,17 @@ class ExecutionEngine:
             })
         return results
 
+    def _get_trade_attribution_summary(self) -> list:
+        """Compute model-level P&L attribution from position store."""
+        if not self._position_store:
+            return []
+        try:
+            from trade_attribution import TradeAttribution
+            ta = TradeAttribution(self._position_store)
+            return ta.model_summary()
+        except Exception:
+            return []
+
     def get_status(self) -> dict:
         """Return current engine status for telemetry/dashboard."""
         strategies = []
@@ -1794,16 +1805,6 @@ class ExecutionEngine:
                 for ao in self._active_orders.values()
             ]
 
-        # Trade attribution summary (WS8)
-        attribution_summary = []
-        if self._position_store:
-            try:
-                from trade_attribution import TradeAttribution
-                ta = TradeAttribution(self._position_store)
-                attribution_summary = ta.model_summary()
-            except Exception:
-                pass
-
         return {
             "running": self._running,
             "eval_interval": self._eval_interval,
@@ -1821,7 +1822,7 @@ class ExecutionEngine:
             # New budget structure
             "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
-            "trade_attribution_summary": attribution_summary,
+            "trade_attribution_summary": self._get_trade_attribution_summary(),
             # Connection health
             "reconnect_hold": self._reconnect_hold,
             # Engine mode: "paused" after auto-restart, "running" normally
@@ -1866,6 +1867,8 @@ class ExecutionEngine:
             # New budget structure
             "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
+            # Trade attribution (realized P&L from closed positions)
+            "trade_attribution_summary": self._get_trade_attribution_summary(),
             # Engine mode: "paused" after auto-restart, "running" normally
             "engine_mode": "paused" if self._auto_restart_paused else "running",
         }

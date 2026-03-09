@@ -88,6 +88,16 @@ interface PositionLedgerEntry {
   };
 }
 
+interface TradeAttributionEntry {
+  version: string;
+  trades: number;
+  wins: number;
+  gross_pnl: number;
+  commission: number;
+  net_pnl: number;
+  win_rate: number;
+}
+
 interface FullExecutionStatus {
   running: boolean;
   eval_interval: number;
@@ -100,6 +110,7 @@ interface FullExecutionStatus {
   }>;
   quote_snapshot: Record<string, QuoteSnapshot>;
   position_ledger?: PositionLedgerEntry[];
+  trade_attribution_summary?: TradeAttributionEntry[];
   engine_mode?: "running" | "paused";
   budget_status?: {
     ticker_modes?: Record<string, string>;
@@ -553,13 +564,26 @@ export default function BookTab() {
       }
     }
 
-    // Add realized P&L from closed-today positions
+    // Realized P&L: use trade_attribution_summary (backend-computed from ALL
+    // closed positions in the store — not limited to today's fills).
+    // This is the authoritative source: handles positions closed on prior days,
+    // partial exits, lot aggregation, etc.
+    const attribution = execStatus?.trade_attribution_summary || [];
     let realizedPnl = 0;
     let totalCommission = 0;
+    for (const entry of attribution) {
+      realizedPnl += entry.gross_pnl || 0;
+      totalCommission += entry.commission || 0;
+    }
+
+    // Add commissions from active positions' fills (not in attribution yet)
+    const closedIds = new Set(
+      ledger.filter(p => p.status === "closed").map(p => p.id)
+    );
     for (const fill of blotter) {
-      totalCommission += Math.abs(fill.commission);
-      if (fill.pnl != null && fill.side === "SELL") {
-        realizedPnl += fill.pnl;
+      // Only count commissions from active positions (closed ones are in attribution)
+      if (!closedIds.has(fill.positionId)) {
+        totalCommission += Math.abs(fill.commission);
       }
     }
 
