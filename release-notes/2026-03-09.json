@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-09",
+  "title": "Book Tab — Real-Time Trading Desk View",
+  "summary": "New Book tab with live position book, portfolio summary, and intraday blotter for real-time P&L tracking across models, tickers, and sessions.",
+  "features": [
+    {
+      "id": "book-tab",
+      "title": "Book Tab — Trading Desk View",
+      "summary": "New Book tab with portfolio summary bar, position book grouped by underlying, and intraday blotter with exit-reason badges.",
+      "description": "A new Book tab on the M&A Options page provides a unified trading desk view with three sections:\n\n**Portfolio Summary Bar** — Open P&L, realized P&L, commissions, total contracts, cash at risk, and a carried/today split showing how much P&L comes from prior-session positions vs today's entries. Engine status indicator and strategy filter pills.\n\n**Position Book** — All open positions grouped by underlying ticker, with one row per unique contract (aggregated across risk managers). Shows entry price, last price, unrealized P&L, model/strategy attribution, risk manager status, and a †carried marker for positions entered before today's 09:30 ET open. Click to expand/collapse groups.\n\n**Intraday Blotter** — Today's fills in reverse chronological order with time, contract, side, quantity, price, commission, exit reason (color-coded badges: trailing, stop, EOD closeout, expired, manual), realized P&L, model attribution, and session markers. Polls execution telemetry every 3 seconds.\n\nBoth tables have column choosers for user-customizable column visibility.",
+      "category": "positions",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
