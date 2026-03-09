@@ -162,10 +162,19 @@ function contractLabel(inst: PositionLedgerEntry["instrument"]): string {
   return `${inst.strike}${inst.right || "?"} ${fmtExpiry(inst.expiry)}`;
 }
 
+/**
+ * Build the cache key that matches Python's f-string format.
+ * Python: f"{symbol}:{instrument.get('strike', 0)}:{expiry}:{right}"
+ * When strike is a float like 570.0, Python produces "570.0" but JS Number
+ * toString() produces "570". We must match Python's output.
+ */
 function cacheKeyFromInstrument(inst: PositionLedgerEntry["instrument"]): string {
   const sym = inst.symbol || "";
   if (inst.secType === "OPT" || inst.strike) {
-    return `${sym}:${inst.strike || 0}:${inst.expiry || ""}:${inst.right || ""}`;
+    // Match Python's float formatting: 570.0 → "570.0", 570.5 → "570.5"
+    const strike = inst.strike ?? 0;
+    const strikeStr = Number.isInteger(strike) ? `${strike}.0` : `${strike}`;
+    return `${sym}:${strikeStr}:${inst.expiry || ""}:${inst.right || ""}`;
   }
   return sym;
 }
@@ -345,6 +354,16 @@ export default function BookTab() {
   const { bookRows, groupedRows, blotterRows, totals } = useMemo(() => {
     const ledger = execStatus?.position_ledger || [];
     const quotes = execStatus?.quote_snapshot || {};
+    const strategies = execStatus?.strategies || [];
+
+    // Build a map from strategy_id → cache_key from strategy_state
+    // This is the authoritative cache key that matches quote_snapshot keys
+    const strategyCacheKeys = new Map<string, string>();
+    for (const s of strategies) {
+      if (s.strategy_state?.cache_key) {
+        strategyCacheKeys.set(s.strategy_id, s.strategy_state.cache_key);
+      }
+    }
 
     // Only show active positions (or closed today for blotter)
     const todayStart = todayOpen;
@@ -354,10 +373,19 @@ export default function BookTab() {
     );
     const allRelevant = [...activePositions, ...closedToday];
 
+    // Resolve the quote_snapshot cache key for a position:
+    // 1. Use the strategy's cache_key if available (authoritative, matches Python f-string)
+    // 2. Fall back to reconstructing from instrument (with float-safe formatting)
+    const resolveCacheKey = (pos: PositionLedgerEntry): string => {
+      const fromStrategy = strategyCacheKeys.get(pos.id);
+      if (fromStrategy) return fromStrategy;
+      return cacheKeyFromInstrument(pos.instrument);
+    };
+
     // Group active positions by contract key
     const contractMap = new Map<string, PositionLedgerEntry[]>();
     for (const pos of activePositions) {
-      const ck = cacheKeyFromInstrument(pos.instrument);
+      const ck = resolveCacheKey(pos);
       if (!contractMap.has(ck)) contractMap.set(ck, []);
       contractMap.get(ck)!.push(pos);
     }
@@ -630,14 +658,21 @@ export default function BookTab() {
           {/* Left: main P&L */}
           <div className="flex items-center gap-4 text-sm">
             <div>
-              <span className="text-gray-500 mr-1">Open P&L:</span>
-              <span className={`font-mono font-bold ${pnlColor(totals.unrealPnl)}`}>
+              <span className="text-gray-500 mr-1">Session:</span>
+              <span className={`font-mono font-bold text-base ${pnlColor(totals.unrealPnl + totals.realizedPnl - totals.commission)}`}>
+                {fmt$(totals.unrealPnl + totals.realizedPnl - totals.commission)}
+              </span>
+            </div>
+            <span className="text-gray-700">│</span>
+            <div>
+              <span className="text-gray-500 mr-1">Open:</span>
+              <span className={`font-mono ${pnlColor(totals.unrealPnl)}`}>
                 {fmt$(totals.unrealPnl)}
               </span>
             </div>
             <div>
               <span className="text-gray-500 mr-1">Realized:</span>
-              <span className={`font-mono font-bold ${pnlColor(totals.realizedPnl)}`}>
+              <span className={`font-mono ${pnlColor(totals.realizedPnl)}`}>
                 {fmt$(totals.realizedPnl)}
               </span>
             </div>
