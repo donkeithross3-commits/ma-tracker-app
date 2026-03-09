@@ -1399,8 +1399,53 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 self._last_signal["suppressed"] = "direction_mode_short_only"
             return []
 
-        # Determine direction
+        # Determine option type from signal direction.
+        # long signal → CALL (bullish bet), short signal → PUT (bearish bet).
         right = "C" if signal.direction == "long" else "P"
+
+        # ─── DEFINITIVE OPTION-TYPE GATE ───────────────────────────────
+        # This is the LAST LINE OF DEFENSE ensuring direction_mode is
+        # honored at the option-type level, not just the signal-direction
+        # level.  The signal-direction gate above (lines ~1381-1400)
+        # should already block mismatches, but edge cases can slip
+        # through:
+        #   • DOWN-model inversion producing "short" that somehow
+        #     bypasses the direction gate
+        #   • Symmetric model running with direction_mode resolved to
+        #     "both" instead of the user's intended "long_only"
+        #   • Config propagation lag across directional strategy pairs
+        #
+        # Semantic contract:
+        #   long_only  → CALLS ONLY  (bullish positions only)
+        #   short_only → PUTS ONLY   (bearish positions only)
+        #   both       → either
+        #
+        # If this gate ever fires, it means there's a bug upstream.
+        # The warning log makes it easy to trace.
+        if direction_mode == "long_only" and right == "P":
+            logger.warning(
+                "OPTION-TYPE GATE blocked PUT in long_only mode: "
+                "signal.direction=%s ticker=%s target=%s model=%s "
+                "(this indicates an upstream signal-direction bug)",
+                signal.direction, self._ticker,
+                self._target_column or "?",
+                self._model_version or "?",
+            )
+            if self._last_signal is not None:
+                self._last_signal["suppressed"] = "option_type_gate_long_only"
+            return []
+        if direction_mode == "short_only" and right == "C":
+            logger.warning(
+                "OPTION-TYPE GATE blocked CALL in short_only mode: "
+                "signal.direction=%s ticker=%s target=%s model=%s "
+                "(this indicates an upstream signal-direction bug)",
+                signal.direction, self._ticker,
+                self._target_column or "?",
+                self._model_version or "?",
+            )
+            if self._last_signal is not None:
+                self._last_signal["suppressed"] = "option_type_gate_short_only"
+            return []
 
         # Calculate OTM strike
         otm_pct = cfg.get("otm_target_pct", 1.0) / 100.0  # 1.0% = 0.010
