@@ -146,15 +146,24 @@ interface TickerDetailPanelProps {
   ticker: string;
   detail: TickerDetail;
   colSpan: number;
+  narrative?: string;
 }
 
-export function TickerDetailPanel({ ticker, detail, colSpan }: TickerDetailPanelProps) {
+export function TickerDetailPanel({ ticker, detail, colSpan, narrative }: TickerDetailPanelProps) {
   const d = detail;
 
   return (
     <tr>
       <td colSpan={colSpan} className="p-0">
         <div className="bg-gray-900/80 border border-gray-800 rounded-lg mx-1 mb-1 p-3">
+          {/* AI Narrative — model explanation */}
+          {narrative && (
+            <div className="mb-3 px-1">
+              <p className="text-[13px] leading-relaxed text-gray-300">
+                {narrative}
+              </p>
+            </div>
+          )}
           {/* 4-column grid */}
           <div className="grid grid-cols-4 gap-4">
 
