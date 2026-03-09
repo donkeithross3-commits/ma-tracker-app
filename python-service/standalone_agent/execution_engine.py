@@ -1700,6 +1700,15 @@ class ExecutionEngine:
                     "auto_note": "Position closed outside agent (IB reconciliation)",
                 }
                 self._position_store.mark_closed(agent_pos["id"], exit_reason="reconciliation")
+                # Unload the risk manager strategy so it doesn't linger in the
+                # engine and appear as an orphan on the dashboard.
+                position_id = agent_pos["id"]
+                if position_id in self._strategies:
+                    self.unload_strategy(position_id)
+                    logger.info(
+                        "Reconciliation: unloaded stale risk manager %s",
+                        position_id,
+                    )
 
         return report
 

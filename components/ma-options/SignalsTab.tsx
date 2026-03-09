@@ -1382,8 +1382,11 @@ export default function SignalsTab() {
     // Include orphan risk managers for this ticker that are active in the engine
     // but not represented in the derived base details (can happen after hot
     // strategy replace / directional expansion while positions stay open).
+    // Skip completed risk managers — they are closed positions whose risk strategy
+    // hasn't been unloaded from the engine yet (e.g. reconciliation close).
     const orphanDetails = riskStrategies
       .filter(s => !matchedRiskIds.has(s.strategy_id))
+      .filter(s => !s.strategy_state.completed)
       .filter(s => {
         const inst = s.config?.instrument;
         return inst?.symbol?.toUpperCase?.() === activeTicker.toUpperCase();
