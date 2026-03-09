@@ -1038,9 +1038,32 @@ class RiskManagerStrategy(ExecutionStrategy):
             return self.remaining_qty
         return qty
 
+    # Hard floor: never algorithmically sell options at or below this price.
+    # At $0.01-$0.05 premiums, commissions exceed or match proceeds — you're
+    # literally paying to give away free optionality.  Let them expire worthless.
+    MIN_SELL_PREMIUM = 0.06
+
     def _make_order_action(self, qty: int, order_type_str: str, current_price: float,
-                           quote, config: dict, reason: str) -> OrderAction:
-        """Build an OrderAction with the right order type and limit offset."""
+                           quote, config: dict, reason: str) -> Optional[OrderAction]:
+        """Build an OrderAction with the right order type and limit offset.
+
+        Returns None if the exit would sell premium at or below MIN_SELL_PREMIUM
+        (commissions would exceed proceeds — better to let expire).
+        """
+        # ── Minimum premium gate (all exit types) ──
+        if self.is_long and quote:
+            bid = getattr(quote, "bid", 0) or 0
+            if 0 < bid <= self.MIN_SELL_PREMIUM:
+                now_ts = time.time()
+                if now_ts - getattr(self, "_min_premium_log_ts", 0) >= 60:
+                    logger.info(
+                        "Exit blocked: bid $%.2f <= min sell premium $%.2f — "
+                        "letting expire. reason=%s, remaining=%d",
+                        bid, self.MIN_SELL_PREMIUM, reason, self.remaining_qty,
+                    )
+                    self._min_premium_log_ts = now_ts
+                return None
+
         exec_cfg = config.get("execution", {})
         symbol = config.get("instrument", {}).get("symbol", "")
         tick_size = TICK_SIZES.get(symbol, 0.01)
@@ -1097,6 +1120,8 @@ class RiskManagerStrategy(ExecutionStrategy):
                     qty, stop_order_type, current_price, quote, config,
                     f"Simple stop: pnl={pnl_pct:.1f}% <= {trigger}%"
                 )
+                if action is None:
+                    return None  # min premium gate — don't mark triggered, retry next tick
                 self._level_states[key] = LevelState.TRIGGERED
                 logger.info("RiskManager STOP SIMPLE triggered: pnl=%.1f%% qty=%d", pnl_pct, qty)
                 return action
@@ -1115,6 +1140,8 @@ class RiskManagerStrategy(ExecutionStrategy):
                         qty, stop_order_type, current_price, quote, config,
                         f"Ladder stop #{i}: pnl={pnl_pct:.1f}% <= {trigger}%, exit {ladder.get('exit_pct')}%"
                     )
+                    if action is None:
+                        return None  # min premium gate — retry next tick
                     self._level_states[key] = LevelState.TRIGGERED
                     logger.info("RiskManager STOP LADDER %d triggered: pnl=%.1f%% qty=%d", i, pnl_pct, qty)
                     return action  # Only one level per tick
@@ -1144,6 +1171,8 @@ class RiskManagerStrategy(ExecutionStrategy):
                     qty, profit_order_type, current_price, quote, config,
                     f"Profit target #{i}: pnl={pnl_pct:.1f}% >= {trigger}%, exit {target.get('exit_pct')}%"
                 )
+                if action is None:
+                    return None  # min premium gate — retry next tick
                 self._level_states[key] = LevelState.TRIGGERED
                 logger.info("RiskManager PROFIT %d triggered: pnl=%.1f%% qty=%d", i, pnl_pct, qty)
                 return action  # Only one level per tick
@@ -1222,6 +1251,8 @@ class RiskManagerStrategy(ExecutionStrategy):
                     qty, exec_cfg.get("stop_order_type", "MKT"),
                     current_price, quote, config, reason,
                 )
+                if action is None:
+                    return None  # min premium gate — retry next tick
                 self._level_states[key] = LevelState.TRIGGERED
                 self._trailing_tranche_pending = True
                 logger.info("RiskManager TRAILING STOP triggered (tranche %d): price=%.4f trail=%.4f qty=%d",
@@ -1260,6 +1291,8 @@ class RiskManagerStrategy(ExecutionStrategy):
                     qty, exec_cfg.get("stop_order_type", "MKT"),
                     current_price, quote, config, reason,
                 )
+                if action is None:
+                    return None  # min premium gate — retry next tick
                 self._level_states[key] = LevelState.TRIGGERED
                 self._trailing_tranche_pending = True
                 logger.info("RiskManager TRAILING STOP (short) triggered (tranche %d): price=%.4f trail=%.4f qty=%d",
@@ -1341,6 +1374,8 @@ class RiskManagerStrategy(ExecutionStrategy):
             qty, exec_cfg.get("stop_order_type", "MKT"),
             current_price, quote, config, reason,
         )
+        if action is None:
+            return None  # min premium gate — letting expire
         self._level_states[key] = LevelState.TRIGGERED
         logger.info("RiskManager EOD CLOSEOUT triggered: %s", reason)
         return action
