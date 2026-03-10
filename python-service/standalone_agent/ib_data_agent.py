@@ -1516,6 +1516,103 @@ class IBDataAgent:
 
     # ── Execution engine request handlers ──
 
+    async def _shared_bootstrap_all_tickers(self, to_load: list[dict]) -> dict | None:
+        """Run ONE Polygon bootstrap + backfill for all unique tickers.
+
+        Returns a dict with daily_features, regime, and intraday_bars that
+        each strategy can inject into its own LiveDataStore, skipping
+        redundant Polygon REST calls.
+        """
+        try:
+            from big_move_convexity.live.data_store import LiveDataStore
+            from big_move_convexity.live.daily_bootstrap import DailyBootstrap
+            from strategies.big_move_convexity import _CROSS_ASSET_TICKERS
+        except ImportError as e:
+            logger.warning("Shared bootstrap: import failed (%s), falling back to per-strategy", e)
+            return None
+
+        # Collect all unique tickers across all strategies
+        all_tickers: list[str] = []
+        for cfg in to_load:
+            config = cfg.get("config", {})
+            ticker = config.get("ticker", cfg.get("strategy_id", "").replace("bmc_", "").upper())
+            # Remove directional suffixes
+            for suffix in ("_UP", "_DOWN"):
+                if ticker.endswith(suffix):
+                    ticker = ticker[:-len(suffix)]
+            all_tickers.append(ticker)
+
+        # Build the full ticker list: all strategy tickers + SPY + cross-asset + TIP
+        bootstrap_tickers = list(dict.fromkeys(
+            all_tickers + ["SPY"] + list(_CROSS_ASSET_TICKERS) + ["TIP"]
+        ))
+        backfill_tickers = list(dict.fromkeys(
+            all_tickers + list(_CROSS_ASSET_TICKERS) + ["SPY"]
+        ))
+
+        logger.info(
+            "Shared bootstrap: %d strategies, %d bootstrap tickers, %d backfill tickers",
+            len(to_load), len(bootstrap_tickers), len(backfill_tickers),
+        )
+        await self._send_boot_phase(
+            "strategy_loading",
+            f"Bootstrapping {len(bootstrap_tickers)} tickers...",
+            progress=0.3,
+        )
+
+        # Run bootstrap into a temporary data store
+        shared_store = LiveDataStore(max_bars_per_type=10000)
+        bootstrap = DailyBootstrap()
+
+        try:
+            bootstrap_result = await self._run_in_thread(
+                lambda: asyncio.run(
+                    bootstrap.bootstrap(shared_store, tickers=bootstrap_tickers)
+                )
+            )
+            logger.info("Shared bootstrap complete: %s", bootstrap_result)
+        except Exception:
+            logger.warning("Shared bootstrap failed, falling back to per-strategy", exc_info=True)
+            return None
+
+        await self._send_boot_phase(
+            "strategy_loading",
+            f"Backfilling intraday bars for {len(backfill_tickers)} tickers...",
+            progress=0.4,
+        )
+
+        try:
+            backfill_result = await self._run_in_thread(
+                lambda: asyncio.run(
+                    bootstrap.backfill_intraday_bars(shared_store, backfill_tickers)
+                )
+            )
+            logger.info("Shared backfill complete: %s", backfill_result)
+        except Exception:
+            logger.warning("Shared backfill failed — strategies will rely on WS bars", exc_info=True)
+
+        # Extract data from the shared store
+        from datetime import date
+        today_str = date.today().isoformat()
+        daily_features = shared_store._daily_features.get(today_str, {})
+        regime = shared_store._regime or {}
+
+        # Extract intraday bars — format: {store_key: [bar_dicts]}
+        intraday_bars: dict[str, list] = {}
+        for store_key, bar_list in shared_store._bars.items():
+            if bar_list:
+                intraday_bars[store_key] = list(bar_list)
+
+        logger.info(
+            "Shared bootstrap extracted: %d daily features, %d regime keys, %d bar store keys",
+            len(daily_features), len(regime), len(intraday_bars),
+        )
+        return {
+            "daily_features": daily_features,
+            "regime": regime,
+            "intraday_bars": intraday_bars,
+        }
+
     async def _load_single_strategy(self, strat_cfg: dict) -> dict:
         """Create, load, and register a single strategy from config.
 
@@ -1578,38 +1675,61 @@ class IBDataAgent:
         if not strategies_config and not already_running:
             return {"error": "No strategies specified in payload"}
 
+        # ── Pass 1: expand directional strategies, collect all configs to load ──
+        to_load: list[dict] = []  # final strategy configs (after expansion)
         results = []
         for strat_cfg in strategies_config:
             strategy_id = strat_cfg.get("strategy_id", "")
             strategy_type = strat_cfg.get("strategy_type", "")
             config = strat_cfg.get("config", {})
-            config["_strategy_type"] = strategy_type  # stash for config persistence
+            config["_strategy_type"] = strategy_type
             ticker_budget = strat_cfg.get("ticker_budget", -1)
 
             if not strategy_id:
                 results.append({"error": "strategy_id is required"})
                 continue
 
-            # Skip if strategy already loaded (idempotent on running engine)
-            # Also check directional variants (bmc_spy -> bmc_spy_up/bmc_spy_down)
             resolved = self._resolve_strategy_ids(strategy_id)
             if resolved and resolved[0] in self.execution_engine._strategies:
                 results.append({"strategy_id": strategy_id, "status": "already_loaded",
                                 "resolved_ids": resolved})
                 continue
 
-            # ── Directional expansion: split into UP/DOWN if both models exist ──
             if config.get("ticker") and not config.get("model_version"):
                 expanded = self._expand_directional_strategies(strat_cfg)
                 if expanded:
-                    for exp_cfg in expanded:
-                        exp_result = await self._load_single_strategy(exp_cfg)
-                        results.append(exp_result)
-                    continue  # Skip original strat_cfg -- it was expanded
+                    to_load.extend(expanded)
+                    continue
 
-            # ── Single strategy creation ──
-            result = await self._load_single_strategy(strat_cfg)
-            results.append(result)
+            to_load.append(strat_cfg)
+
+        # ── Shared bootstrap: fetch Polygon data ONCE for all tickers ──
+        shared_bootstrap = None
+        if to_load and len(to_load) > 1:
+            shared_bootstrap = await self._shared_bootstrap_all_tickers(to_load)
+
+        # ── Pass 2: load strategies in parallel ──
+        if to_load:
+            # Inject shared bootstrap data into each strategy's config
+            if shared_bootstrap:
+                for cfg in to_load:
+                    cfg.setdefault("config", {})["_shared_bootstrap"] = shared_bootstrap
+
+            await self._send_boot_phase(
+                "strategies_loading",
+                f"Loading {len(to_load)} strategies in parallel...",
+                progress=0.5,
+            )
+
+            # Load all strategies concurrently
+            load_tasks = [self._load_single_strategy(cfg) for cfg in to_load]
+            load_results = await asyncio.gather(*load_tasks, return_exceptions=True)
+            for i, lr in enumerate(load_results):
+                if isinstance(lr, Exception):
+                    logger.error("Strategy load failed: %s", lr)
+                    results.append({"error": str(lr), "strategy_id": to_load[i].get("strategy_id", "?")})
+                else:
+                    results.append(lr)
 
         if not already_running:
             # ── Recover persisted risk manager positions ──

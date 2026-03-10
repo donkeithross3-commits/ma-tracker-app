@@ -109,6 +109,9 @@ _DEFAULTS: dict[str, Any] = {
     "straddle_richness_min": None,    # require richness above this to trade (None = disabled)
     "straddle_richness_max": None,    # suppress signal above this richness (None = disabled)
     "options_gate_enabled": False,    # enable straddle richness gate
+    # Richness source: "feature_vector" (extract e_straddle_richness from model features)
+    # or "strangle_pct" (use daily bootstrap strangle_pct:{ticker} from Polygon options).
+    "richness_source": "feature_vector",
 }
 
 # Cross-asset tickers for correlation features (Group C) and backfill.
@@ -181,12 +184,17 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "max_spread": 0.15,
         "premium_min": 0.05,
         "premium_max": 2.00,
-        "scan_start": "09:45",            # standardized: 15 min after open
-        "scan_end": "15:45",              # standardized: last entry time
-        "signal_threshold": 0.67,         # model optimal (UP=0.68, DOWN=0.66)
+        "scan_start": "09:35",            # COMEX session start (GLD active early)
+        "scan_end": "13:30",              # COMEX session close (zero overlap with SPY 13:30-15:55)
+        "signal_threshold": 0.30,         # low threshold — gate does the work, not model
+        "direction_mode": "long_only",    # calls only (puts dead for GLD)
         "otm_target_pct": 1.0,            # ~$2.60 OTM on ~$263 → $0.30-$0.60 premium (1DTE)
-        # GLD richness gate not yet validated — keep disabled (no options_gate_enabled override)
-        "straddle_richness_min": None,
+        "contract_budget_usd": 100.0,
+        # Richness gate: strangle_pct >= 0.004 (research 2026-03-10: ALL 5 folds profitable)
+        # Uses strangle_pct from daily bootstrap (NOT e_straddle_richness from feature vector).
+        "options_gate_enabled": True,
+        "straddle_richness_min": 0.004,   # strangle_pct threshold (1% OTM strangle / underlying)
+        "richness_source": "strangle_pct",  # use daily bootstrap strangle_pct instead of fv
     },
 }
 
@@ -934,35 +942,44 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         else:
             self._top_feature_names = self._model.feature_names[:20]
 
-        # Run daily bootstrap — use a helper thread because on_start is called
-        # from within the agent's running asyncio event loop (Python 3.12+
-        # forbids nested run_until_complete on the same thread).
-        bootstrap = DailyBootstrap()
-        # Bootstrap the target ticker + SPY + all cross-asset tickers + TIP
-        # (TIP is bootstrap-only — needed for real yield proxy, not for WS bars)
-        bootstrap_tickers = list(dict.fromkeys(
-            [self._ticker, "SPY"] + _CROSS_ASSET_TICKERS + ["TIP"]
-        ))
-        try:
-            bootstrap_result = _run_async_in_thread(
-                bootstrap.bootstrap(self._data_store, tickers=bootstrap_tickers)
-            )
-            logger.info("Daily bootstrap complete: %s", bootstrap_result)
-        except Exception:
-            logger.warning("Daily bootstrap failed — features may be incomplete", exc_info=True)
+        # -- Daily bootstrap + intraday backfill --
+        # If the agent pre-bootstrapped all tickers (parallel loading mode),
+        # inject the cached data directly. Otherwise fall back to per-strategy
+        # Polygon REST calls (sequential mode / add_ticker at runtime).
+        shared = cfg.get("_shared_bootstrap")
+        if shared:
+            from datetime import date as _date_mod
+            today_str = _date_mod.today().isoformat()
+            self._data_store.set_daily_features(today_str, shared["daily_features"])
+            self._data_store.set_regime(shared["regime"])
+            # Inject pre-fetched intraday bars
+            for store_key, bars in shared.get("intraday_bars", {}).items():
+                self._data_store.inject_bars(store_key, bars)
+            logger.info("BigMoveConvexityStrategy[%s] using shared bootstrap data", self._ticker)
+        else:
+            # Fallback: per-strategy bootstrap (used for add_ticker at runtime)
+            bootstrap = DailyBootstrap()
+            bootstrap_tickers = list(dict.fromkeys(
+                [self._ticker, "SPY"] + _CROSS_ASSET_TICKERS + ["TIP"]
+            ))
+            try:
+                bootstrap_result = _run_async_in_thread(
+                    bootstrap.bootstrap(self._data_store, tickers=bootstrap_tickers)
+                )
+                logger.info("Daily bootstrap complete: %s", bootstrap_result)
+            except Exception:
+                logger.warning("Daily bootstrap failed — features may be incomplete", exc_info=True)
 
-        # Backfill today's intraday 1m bars for all tickers so features have
-        # full session data from 09:30, not just from WS connect time.
-        backfill_tickers = list(dict.fromkeys(
-            [self._ticker] + [t for t in _CROSS_ASSET_TICKERS if t != self._ticker] + ["SPY"]
-        ))
-        try:
-            backfill_result = _run_async_in_thread(
-                bootstrap.backfill_intraday_bars(self._data_store, backfill_tickers)
-            )
-            logger.info("Intraday backfill complete: %s", backfill_result)
-        except Exception:
-            logger.warning("Intraday backfill failed — will rely on WS bars only", exc_info=True)
+            backfill_tickers = list(dict.fromkeys(
+                [self._ticker] + [t for t in _CROSS_ASSET_TICKERS if t != self._ticker] + ["SPY"]
+            ))
+            try:
+                backfill_result = _run_async_in_thread(
+                    bootstrap.backfill_intraday_bars(self._data_store, backfill_tickers)
+                )
+                logger.info("Intraday backfill complete: %s", backfill_result)
+            except Exception:
+                logger.warning("Intraday backfill failed — will rely on WS bars only", exc_info=True)
 
     def _start_polygon_ws(self, cfg: dict) -> None:
         """Start Polygon WS in a background thread."""
@@ -1224,16 +1241,31 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 except (TypeError, ValueError):
                     pass
 
-        # Extract straddle richness from feature vector for options gate.
-        # e_straddle_richness is the IV/RV proxy — high richness = market expects
-        # vol = good for option buyers (research 2026-03-09: richness>=1.5 → PF=6.36).
+        # Extract richness metric for options gate.
+        # Two sources depending on ticker config:
+        # - "feature_vector" (default, SPY): e_straddle_richness from feature vector
+        #   (ATM 0DTE straddle / S*σ*√T). Threshold ~1.5 for SPY.
+        # - "strangle_pct" (GLD): from daily bootstrap (1% OTM strangle / underlying).
+        #   Threshold ~0.004 for GLD. Computed once at session start.
         _straddle_richness: float | None = None
-        _richness_raw = fv.features.get("e_straddle_richness")
-        if _richness_raw is not None:
-            try:
-                _straddle_richness = float(_richness_raw)
-            except (TypeError, ValueError):
-                pass
+        _richness_source = cfg.get("richness_source", "feature_vector")
+        if _richness_source == "strangle_pct":
+            # Use strangle_pct from daily bootstrap (computed from Polygon options snapshot)
+            if daily_features:
+                _richness_raw = daily_features.get(f"strangle_pct:{self._ticker}")
+                if _richness_raw is not None:
+                    try:
+                        _straddle_richness = float(_richness_raw)
+                    except (TypeError, ValueError):
+                        pass
+        else:
+            # Default: use e_straddle_richness from feature vector
+            _richness_raw = fv.features.get("e_straddle_richness")
+            if _richness_raw is not None:
+                try:
+                    _straddle_richness = float(_richness_raw)
+                except (TypeError, ValueError):
+                    pass
 
         # Generate signal (with straddle richness + regime gating if configured)
         signal_config = SignalConfig(
