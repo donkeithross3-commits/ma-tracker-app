@@ -1545,6 +1545,18 @@ async def relay_ib_status(user_id: Optional[str] = Query(None)):
         }
         if user_agent_version:
             resp["agent_version"] = user_agent_version
+
+        # Include boot phase and stale telemetry state if available
+        provider = await registry.get_active_provider(
+            user_id=target_user_id, allow_fallback_to_any=False,
+        ) if target_user_id else None
+        if provider and provider.boot_phase:
+            resp["boot_phase"] = provider.boot_phase
+        if provider and provider.execution_telemetry:
+            if provider.execution_telemetry.get("stale"):
+                resp["telemetry_stale"] = True
+                resp["telemetry_stale_since"] = provider.execution_telemetry.get("stale_since")
+
         return resp
 
     except Exception as e:
@@ -2646,6 +2658,13 @@ async def relay_bmc_signal(user_id: str = "", fresh: int = 0):
                 "strategies": bmc_strategies,
                 "budget_status": telemetry.get("budget_status", {}),
             }
+            # Pass through stale flag if telemetry was restored from previous provider
+            if telemetry.get("stale"):
+                result["stale"] = True
+                result["stale_since"] = telemetry.get("stale_since")
+            # Include boot phase if agent is still booting
+            if provider.boot_phase:
+                result["boot_phase"] = provider.boot_phase
             # Legacy compat: populate top-level signal/config from first strategy
             if bmc_strategies:
                 result["signal"] = bmc_strategies[0]["signal"]
@@ -2673,6 +2692,9 @@ async def relay_bmc_signal(user_id: str = "", fresh: int = 0):
             "strategies": bmc_strategies,
             "budget_status": response_data.get("budget_status", {}),
         }
+        # Include boot phase if agent is still booting
+        if provider and provider.boot_phase:
+            result["boot_phase"] = provider.boot_phase
         if bmc_strategies:
             result["signal"] = bmc_strategies[0]["signal"]
             result["config"] = bmc_strategies[0]["config"]

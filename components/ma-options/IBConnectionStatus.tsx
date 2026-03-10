@@ -18,12 +18,25 @@ interface FuturesQuote {
   error?: string;
 }
 
+const bootPhaseLabel = (phase: string): string => {
+  switch (phase) {
+    case "relay_connected": return "Reconnected";
+    case "auto_restart_loading": return "Loading config...";
+    case "strategies_loading": return "Starting strategies...";
+    case "strategy_loading": return "Loading models...";
+    case "engine_started": return "Engine started";
+    case "boot_complete": return "Ready";
+    default: return "Restarting...";
+  }
+};
+
 export default function IBConnectionStatus() {
   const {
     isConnected, isChecking, lastMessage, checkConnection, reconnectIB, isReconnecting,
     agentOnline, agentVersion,
     gatewayRunning, isGatewayLoading, stopGateway, startGateway,
     restartAgent, isAgentRestarting,
+    agentBootPhase, agentBootDetail,
   } = useIBConnection();
   const [futuresQuote, setFuturesQuote] = useState<FuturesQuote | null>(null);
   const [isFetchingFutures, setIsFetchingFutures] = useState(false);
@@ -340,7 +353,9 @@ export default function IBConnectionStatus() {
                   : "text-red-400"
               }
             >
-              Agent: {isAgentRestarting ? "Restarting..." : agentOnline === null ? "..." : agentOnline ? `Online${agentVersion ? ` v${agentVersion}` : ""}` : "Offline"}
+              Agent: {isAgentRestarting
+                ? (agentBootDetail || (agentBootPhase ? bootPhaseLabel(agentBootPhase) : "Restarting..."))
+                : agentOnline === null ? "..." : agentOnline ? `Online${agentVersion ? ` v${agentVersion}` : ""}` : "Offline"}
             </span>
           </div>
 

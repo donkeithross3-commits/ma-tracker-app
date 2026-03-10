@@ -103,7 +103,7 @@ class PendingRequest:
     created_at: float = field(default_factory=time.time)
 
 
-@dataclass  
+@dataclass
 class DataProvider:
     """A connected data provider (local agent)"""
     provider_id: str
@@ -124,6 +124,8 @@ class DataProvider:
     accept_external_scans: bool = True
     # Latest execution telemetry snapshot from the agent (updated periodically)
     execution_telemetry: Optional[dict] = field(default=None, repr=False)
+    # Boot phase progress (set during agent startup, cleared on boot_complete or fresh telemetry)
+    boot_phase: Optional[dict] = field(default=None, repr=False)
     # Per-provider semaphore: limits concurrent external scan requests to 1
     # when execution is active. Initialized post-creation (dataclass can't hold asyncio objects).
     _external_scan_semaphore: Optional[asyncio.Semaphore] = field(default=None, repr=False)
@@ -139,6 +141,9 @@ class ProviderRegistry:
         self.providers: Dict[str, DataProvider] = {}
         self.pending_requests: Dict[str, PendingRequest] = {}
         self._lock = asyncio.Lock()
+        # Stashed state from disconnected providers, keyed by user_id.
+        # Restored to new providers within 120s to reduce restart darkness.
+        self._last_known_state: Dict[str, dict] = {}
         # Per-user account event queues for near-real-time UI updates
         # Events are pushed by agents on order fills, cancels, etc.
         from collections import deque
@@ -171,6 +176,17 @@ class ProviderRegistry:
                 user_id=user_id,
                 agent_version=agent_version
             )
+            # Restore stashed telemetry from previous provider (reduces restart darkness)
+            stash = self._last_known_state.pop(user_id, None)
+            if stash and (time.time() - stash.get("disconnected_at", 0)) < 120:
+                provider.execution_telemetry = stash.get("execution_telemetry")
+                if provider.execution_telemetry:
+                    provider.execution_telemetry["stale"] = True
+                    provider.execution_telemetry["stale_since"] = stash["disconnected_at"]
+                logger.info(
+                    "Provider %s: restored stashed state from %.1fs ago",
+                    provider_id, time.time() - stash["disconnected_at"],
+                )
             self.providers[provider_id] = provider
             logger.info(f"Provider registered: {provider_id} for user {user_id}")
             return provider
@@ -179,8 +195,17 @@ class ProviderRegistry:
         """Unregister a data provider"""
         async with self._lock:
             if provider_id in self.providers:
+                provider = self.providers[provider_id]
+                # Stash key state so a reconnecting agent can restore it
+                if provider.user_id:
+                    self._last_known_state[provider.user_id] = {
+                        "execution_telemetry": provider.execution_telemetry,
+                        "ib_connected": provider.ib_connected,
+                        "agent_version": provider.agent_version,
+                        "disconnected_at": time.time(),
+                    }
                 del self.providers[provider_id]
-                logger.info(f"Provider unregistered: {provider_id}")
+                logger.info(f"Provider unregistered: {provider_id} (state stashed)")
                 
                 # Cancel any pending requests that were routed to this provider
                 for req_id, req in list(self.pending_requests.items()):
@@ -441,12 +466,32 @@ async def data_provider_websocket(websocket: WebSocket):
                         f"ib_connected={provider.ib_connected}"
                     )
                 
+                elif msg_type == "boot_phase":
+                    # Agent reports boot progress for dashboard display
+                    provider.boot_phase = {
+                        "phase": msg.get("phase"),
+                        "detail": msg.get("detail", ""),
+                        "progress": msg.get("progress", 0),
+                        "timestamp": msg.get("timestamp", time.time()),
+                    }
+                    # Clear boot phase when agent reports it's complete
+                    if msg.get("phase") == "boot_complete":
+                        provider.boot_phase = None
+                    logger.debug(
+                        f"Provider {provider_id} boot_phase: "
+                        f"{msg.get('phase')} - {msg.get('detail', '')}"
+                    )
+
                 elif msg_type == "execution_telemetry":
                     # Store latest execution telemetry for dashboard queries
                     provider.execution_telemetry = {
                         k: v for k, v in msg.items() if k != "type"
                     }
                     provider.execution_telemetry["received_at"] = time.time()
+                    # Fresh telemetry clears stale flag and boot phase
+                    provider.execution_telemetry.pop("stale", None)
+                    provider.execution_telemetry.pop("stale_since", None)
+                    provider.boot_phase = None
                     logger.debug(
                         f"Provider {provider_id} execution telemetry: "
                         f"strategies={msg.get('strategy_count', 0)}, "

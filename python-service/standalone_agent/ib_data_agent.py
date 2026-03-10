@@ -1542,6 +1542,10 @@ class IBDataAgent:
         # For expanded variants like bmc_spy_up, parent is still this strategy_id
         strategy._parent_strategy_id = strategy_id
 
+        # Report loading progress to relay
+        ticker = config.get("ticker", strategy_id.replace("bmc_", "").upper())
+        await self._send_boot_phase("strategy_loading", f"Loading {ticker}...")
+
         # Run load_strategy in a thread pool so strategy.on_start()
         # (which performs blocking REST calls for bootstrap + backfill)
         # doesn't freeze the asyncio event loop and cause relay timeouts.
@@ -1744,6 +1748,18 @@ class IBDataAgent:
             self.execution_engine._auto_restart_paused = False
             # Start the evaluation loop
             self.execution_engine.start()
+
+            # Immediately send execution telemetry so dashboard updates
+            # without waiting for the next heartbeat cycle (~20s)
+            if self.websocket and self.execution_engine.is_running:
+                try:
+                    telemetry = self.execution_engine.get_telemetry()
+                    await self.websocket.send(json.dumps({
+                        "type": "execution_telemetry",
+                        **telemetry
+                    }))
+                except Exception:
+                    pass  # best-effort, heartbeat will catch up
         else:
             recovered = 0
             logger.info("Execution engine already running — added %d new strategies", len(results))
@@ -2979,6 +2995,12 @@ class IBDataAgent:
             len(strategies), saved.get("saved_reason", "?"), saved.get("saved_at", 0),
         )
 
+        await self._send_boot_phase(
+            "auto_restart_loading",
+            f"Found {len(strategies)} strategies",
+            progress=0.1,
+        )
+
         # Reconstruct execution_start payload
         payload_strategies = []
         for strat in strategies:
@@ -2991,6 +3013,9 @@ class IBDataAgent:
 
         payload = {"strategies": payload_strategies}
         try:
+            await self._send_boot_phase(
+                "strategies_loading", "Starting strategies...", progress=0.3,
+            )
             result = await self._handle_execution_start(payload)
             if "error" in result:
                 logger.error("Auto-restart: execution_start failed: %s", result["error"])
@@ -3036,11 +3061,28 @@ class IBDataAgent:
             self.execution_engine._auto_restart_paused = True
             self._persist_engine_config("auto_restart_paused")
 
+            await self._send_boot_phase(
+                "engine_started", "Engine running (PAUSED)", progress=0.9,
+            )
+
             logger.info(
                 "Auto-restart: engine PAUSED — %d strategies loaded, entries blocked. "
                 "Send execution_resume to re-enable entries.",
                 len(payload_strategies),
             )
+
+            # Immediately send execution telemetry so dashboard updates
+            # without waiting for the next heartbeat cycle (~20s)
+            if self.websocket and self.execution_engine and self.execution_engine.is_running:
+                try:
+                    telemetry = self.execution_engine.get_telemetry()
+                    await self.websocket.send(json.dumps({
+                        "type": "execution_telemetry",
+                        **telemetry
+                    }))
+                    logger.info("Auto-restart: sent immediate execution telemetry")
+                except Exception as e:
+                    logger.warning("Auto-restart: failed to send immediate telemetry: %s", e)
         except Exception as e:
             logger.error("Auto-restart: unexpected error: %s", e)
 
@@ -3394,6 +3436,20 @@ class IBDataAgent:
         for task in pending_tasks:
             task.cancel()
     
+    async def _send_boot_phase(self, phase: str, detail: str = "", progress: float = 0.0):
+        """Send boot progress to relay for dashboard display."""
+        if self.websocket:
+            try:
+                await self.websocket.send(json.dumps({
+                    "type": "boot_phase",
+                    "phase": phase,
+                    "detail": detail,
+                    "progress": progress,
+                    "timestamp": time.time(),
+                }))
+            except Exception:
+                pass  # WS may not be ready during early boot
+
     async def connect_to_relay(self) -> bool:
         """Connect to the WebSocket relay"""
         if not IB_PROVIDER_KEY:
@@ -3495,6 +3551,8 @@ class IBDataAgent:
                     await asyncio.sleep(RECONNECT_DELAY)
                     continue
                 
+                await self._send_boot_phase("relay_connected", "Connected to relay")
+
                 # Report IB managed accounts to relay for diagnostics / routing
                 ib_accounts = getattr(self.scanner, "_managed_accounts", [])
                 if ib_accounts and self.websocket:
@@ -3508,7 +3566,9 @@ class IBDataAgent:
                 self.position_store.mark_all_dirty()
 
                 # Auto-restart engine from saved config (once per lifecycle)
+                await self._send_boot_phase("auto_restart_loading", "Checking saved config...")
                 await self._maybe_auto_restart()
+                await self._send_boot_phase("boot_complete", "Ready")
 
                 heartbeat_task = asyncio.create_task(self.send_heartbeat())
                 handler_task = asyncio.create_task(self.message_handler())

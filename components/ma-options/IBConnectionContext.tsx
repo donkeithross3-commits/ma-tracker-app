@@ -21,6 +21,9 @@ interface IBConnectionContextType {
   // Agent restart
   restartAgent: () => Promise<{ success: boolean; message: string }>;
   isAgentRestarting: boolean;
+  // Boot phase telemetry (during restart)
+  agentBootPhase: string | null;
+  agentBootDetail: string | null;
 }
 
 const IBConnectionContext = createContext<IBConnectionContextType | undefined>(undefined);
@@ -43,7 +46,12 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
 
   // Agent restart state
   const [isAgentRestarting, setIsAgentRestarting] = useState(false);
+  const isAgentRestartingRef = useRef(false);
   const agentRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Boot phase telemetry (during restart)
+  const [agentBootPhase, setAgentBootPhase] = useState<string | null>(null);
+  const [agentBootDetail, setAgentBootDetail] = useState<string | null>(null);
 
   const checkGatewayStatus = useCallback(async () => {
     try {
@@ -96,6 +104,27 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
         setAgentVersion(data.agentVersion ?? null);
         setLastMessage(data.message ?? data.relayError);
         setLastChecked(new Date());
+
+        // Boot phase telemetry (sent by backend during restart)
+        if (data.boot_phase) {
+          setAgentBootPhase(data.boot_phase.phase);
+          setAgentBootDetail(data.boot_phase.detail || null);
+        } else {
+          setAgentBootPhase(null);
+          setAgentBootDetail(null);
+        }
+
+        // Auto-clear restart state when boot completes
+        if (isAgentRestartingRef.current && data.agentConnected && !data.boot_phase) {
+          setIsAgentRestarting(false);
+          isAgentRestartingRef.current = false;
+          setAgentBootPhase(null);
+          setAgentBootDetail(null);
+          if (agentRestartTimerRef.current) {
+            clearTimeout(agentRestartTimerRef.current);
+            agentRestartTimerRef.current = null;
+          }
+        }
       } else {
         setIsConnected(false);
         setAgentOnline(null);
@@ -184,26 +213,42 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
 
   const restartAgent = useCallback(async (): Promise<{ success: boolean; message: string }> => {
     setIsAgentRestarting(true);
+    isAgentRestartingRef.current = true;
     try {
       const response = await fetch("/api/ib-connection/agent-restart", {
         method: "POST",
         credentials: "include",
       });
       const data = await response.json();
-      // Agent takes ~10s to come back via systemd. Keep restarting state for 15s.
+      // Safety timeout: 90s max (boot phase auto-clears earlier via checkConnection)
       if (agentRestartTimerRef.current) clearTimeout(agentRestartTimerRef.current);
       agentRestartTimerRef.current = setTimeout(() => {
         setIsAgentRestarting(false);
-        // Refresh connection status after agent should be back
+        isAgentRestartingRef.current = false;
+        setAgentBootPhase(null);
+        setAgentBootDetail(null);
+        // Refresh connection status after safety timeout
         checkConnection();
         checkGatewayStatus();
-      }, 15_000);
+      }, 90_000);
       return { success: data.success ?? false, message: data.message ?? "Unknown result" };
     } catch (error) {
       setIsAgentRestarting(false);
+      isAgentRestartingRef.current = false;
       return { success: false, message: error instanceof Error ? error.message : "Failed to restart agent" };
     }
   }, [checkConnection, checkGatewayStatus]);
+
+  // Fast polling during restart: 2s intervals for boot phase updates
+  useEffect(() => {
+    if (!isAgentRestarting) return;
+    const fastInterval = setInterval(() => {
+      if (!document.hidden) {
+        checkConnection(false);
+      }
+    }, 2000);
+    return () => clearInterval(fastInterval);
+  }, [isAgentRestarting, checkConnection]);
 
   useEffect(() => {
     checkConnection();
@@ -230,6 +275,7 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
       agentOnline, agentVersion,
       gatewayRunning, isGatewayLoading, stopGateway, startGateway,
       restartAgent, isAgentRestarting,
+      agentBootPhase, agentBootDetail,
     }}>
       {children}
     </IBConnectionContext.Provider>

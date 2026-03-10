@@ -5,6 +5,21 @@ import { useOrderSounds } from "@/hooks/useOrderSounds";
 import { OrderBudgetControl } from "./OrderBudgetControl";
 
 // ---------------------------------------------------------------------------
+// Boot phase label mapping (shared with IBConnectionStatus)
+// ---------------------------------------------------------------------------
+const signalsBootPhaseLabel = (phase: string): string => {
+  switch (phase) {
+    case "relay_connected": return "Reconnected";
+    case "auto_restart_loading": return "Loading config...";
+    case "strategies_loading": return "Starting strategies...";
+    case "strategy_loading": return "Loading models...";
+    case "engine_started": return "Engine started";
+    case "boot_complete": return "Ready";
+    default: return "Starting engine...";
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Inline trail/activation editor with explicit Apply button + saved confirmation
 // ---------------------------------------------------------------------------
 function TrailRiskEditor({
@@ -588,9 +603,13 @@ export default function SignalsTab() {
   const [resuming, setResuming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Grace period: after clicking Start, suppress poll overrides for up to 15s
+  // Grace period: after clicking Start, suppress poll overrides for up to 90s
   // so the UI doesn't flicker back to "Start" while the engine is booting.
+  // Auto-clears early when non-stale running state arrives.
   const startingUntilRef = useRef<number>(0);
+
+  // Boot phase telemetry from bmc-signal response
+  const [bootPhase, setBootPhase] = useState<{ phase: string; detail: string } | null>(null);
 
   // Model availability per ticker (fetched from registry on mount)
   const [modelAvailability, setModelAvailability] = useState<Record<string, ModelAvailability>>({});
@@ -686,17 +705,30 @@ export default function SignalsTab() {
       if (!res.ok) return;
       const data = await res.json();
       const polledRunning = data.running ?? false;
+      const isStale = data.stale === true; // pre-restart cached state
       // If we're in the start grace period and the poll says not running yet,
       // keep showing "Starting..." — the engine is still booting up.
       const inStartGrace = startingUntilRef.current > Date.now();
-      if (polledRunning) {
-        // Engine confirmed running — clear any grace period
+
+      if (polledRunning && !isStale) {
+        // Fresh running state confirmed — clear any grace period
         startingUntilRef.current = 0;
+        setRunning(true);
+      } else if (isStale) {
+        // During restart: stale telemetry preserved from before restart
+        // Keep showing running state but don't clear grace
         setRunning(true);
       } else if (!inStartGrace) {
         setRunning(false);
       }
       // else: in grace period + not running yet → keep optimistic running=true
+
+      // Store boot phase from bmc-signal response
+      if (data.boot_phase) {
+        setBootPhase(data.boot_phase);
+      } else if (polledRunning && !isStale) {
+        setBootPhase(null);
+      }
       setEngineMode(data.engine_mode ?? "running");
 
       // Multi-ticker: use strategies array if available
@@ -885,8 +917,9 @@ export default function SignalsTab() {
     setError(null);
     // Optimistic: show running immediately, revert on error
     setRunning(true);
-    // Grace period: suppress poll overrides for 15s while engine boots
-    startingUntilRef.current = Date.now() + 15_000;
+    // Grace period: suppress poll overrides for 90s while engine boots
+    // (auto-clears early when fresh running state arrives)
+    startingUntilRef.current = Date.now() + 90_000;
     try {
       const tickers = enabledTickers.map(t => ({
         ticker: t,
@@ -3062,7 +3095,9 @@ export default function SignalsTab() {
               ) : (
                 <div className="flex items-center gap-1.5">
                   {runningTickers.length === 0 && (
-                    <span className="text-xs text-amber-400 animate-pulse">Starting engine...</span>
+                    <span className="text-xs text-amber-400 animate-pulse">
+                      {bootPhase?.detail || (bootPhase?.phase ? signalsBootPhaseLabel(bootPhase.phase) : "Starting engine...")}
+                    </span>
                   )}
                   {activeConfigDirty && runningTickers.includes(activeTicker) && (
                     <button

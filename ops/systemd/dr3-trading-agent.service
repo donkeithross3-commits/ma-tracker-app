@@ -10,8 +10,12 @@ Group=don
 WorkingDirectory=/home/don/apps/ma-tracker-app/python-service/standalone_agent
 ExecStart=/home/don/apps/ma-tracker-app/python-service/.venv/bin/python ib_data_agent.py
 Restart=always
-RestartSec=10
+RestartSec=2
 Nice=-10
+# Reserve droplet cores 0-5 for production plane workloads.
+CPUAffinity=0 1 2 3 4 5
+# Hard cap to avoid unbounded contention; still allows multi-core bursts.
+CPUQuota=500%
 StandardOutput=append:/home/don/apps/logs/trading-agent.log
 StandardError=append:/home/don/apps/logs/trading-agent.log
 EnvironmentFile=-/home/don/apps/ma-tracker-app/python-service/.env

@@ -20,6 +20,7 @@ async function checkRelayProviderStatus(userId?: string): Promise<{
   connected: boolean;
   agentConnected: boolean; // Agent WS registered in relay (regardless of IB)
   agentVersion?: string;  // Agent version from relay provider
+  boot_phase?: { phase: string; detail?: string }; // Boot phase telemetry during restart
   providers?: any[];
   message?: string;
   relayError?: string; // Set when relay returned an error or fetch failed (for debugging)
@@ -49,7 +50,7 @@ async function checkRelayProviderStatus(userId?: string): Promise<{
       };
     }
 
-    let data: { connected?: boolean; agent_connected?: boolean; agent_version?: string; providers?: any[]; message?: string };
+    let data: { connected?: boolean; agent_connected?: boolean; agent_version?: string; providers?: any[]; message?: string; boot_phase?: { phase: string; detail?: string } };
     try {
       data = JSON.parse(text);
     } catch {
@@ -60,6 +61,7 @@ async function checkRelayProviderStatus(userId?: string): Promise<{
       connected: Boolean(data.connected),
       agentConnected: Boolean(data.agent_connected),
       agentVersion: data.agent_version,
+      boot_phase: data.boot_phase,
       providers: data.providers,
       message: data.message,
     };
@@ -136,6 +138,7 @@ export async function GET(request: NextRequest) {
         connected: true,
         agentConnected: true,
         agentVersion: relayStatus.agentVersion,
+        boot_phase: relayStatus.boot_phase,
         source: "ws-relay",
         providers: relayStatus.providers,
         message: relayStatus.message || "IB connected via WebSocket relay",
@@ -155,6 +158,7 @@ export async function GET(request: NextRequest) {
         connected: false,
         agentConnected: relayStatus.agentConnected,
         agentVersion: relayStatus.agentVersion,
+        boot_phase: relayStatus.boot_phase,
         source: "relay",
         message: relayMessage,
       });
