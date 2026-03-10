@@ -29,29 +29,26 @@ interface SpreadPoint {
   spreadPct: number;
 }
 
-interface SpreadHistoryData {
-  ticker: string;
-  dealPrice: number;
-  announcedDate: string;
-  acquirorTicker: string | null;
-  hasStockComponent: boolean;
-  history: SpreadPoint[];
-}
-
 type ChartMode = "spread" | "price";
 
 interface Props {
-  dealId: string;
+  /** For the legacy /deals/[id] page — fetches from the Prisma API route */
+  dealId?: string;
+  /** For the sheet-portfolio page — pass data directly */
+  ticker?: string;
+  dealPrice?: number;
+  announcedDate?: string | null; // YYYY-MM-DD or ISO string
 }
 
-export function SpreadHistoryChart({ dealId }: Props) {
+export function SpreadHistoryChart({ dealId, ticker, dealPrice, announcedDate }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | ISeriesApi<"Line"> | null>(null);
   const priceSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const dealPriceSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
 
-  const [data, setData] = useState<SpreadHistoryData | null>(null);
+  const [history, setHistory] = useState<SpreadPoint[] | null>(null);
+  const [resolvedTicker, setResolvedTicker] = useState<string>(ticker || "");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>("spread");
@@ -64,43 +61,97 @@ export function SpreadHistoryChart({ dealId }: Props) {
 
   // O(1) lookup map for crosshair handler (avoids O(n) find on every mouse move)
   const pointsByDate = useMemo(() => {
-    if (!data) return new Map<string, SpreadPoint>();
-    return new Map(data.history.map((p) => [p.date, p]));
-  }, [data]);
+    if (!history) return new Map<string, SpreadPoint>();
+    return new Map(history.map((p) => [p.date, p]));
+  }, [history]);
 
-  // Fetch data
+  // Fetch data — two paths: legacy Prisma route or direct Polygon call
   useEffect(() => {
     let cancelled = false;
 
-    async function fetchSpreadHistory() {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/deals/${dealId}/spread-history`);
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || `HTTP ${res.status}`);
-        }
-        const json: SpreadHistoryData = await res.json();
-        if (!cancelled) setData(json);
-      } catch (err: unknown) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+    async function fetchViaLegacyRoute() {
+      const res = await fetch(`/api/deals/${dealId}/spread-history`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      if (!cancelled) {
+        setHistory(json.history);
+        setResolvedTicker(json.ticker);
       }
     }
 
-    fetchSpreadHistory();
+    async function fetchViaPolygon() {
+      if (!ticker || !dealPrice || dealPrice <= 0) {
+        throw new Error("Deal price not available");
+      }
+
+      // Compute date range: from announcement (or 1 year ago) to today
+      const today = new Date();
+      const fromDate = new Date(announcedDate || today);
+      if (!announcedDate) {
+        fromDate.setFullYear(fromDate.getFullYear() - 1);
+      }
+      // Go back 7 calendar days before announcement for pre-deal context
+      fromDate.setDate(fromDate.getDate() - 7);
+
+      const fromStr = fromDate.toISOString().split("T")[0];
+      const toStr = today.toISOString().split("T")[0];
+
+      const url = `/api/ma-options/polygon/bars?ticker=${ticker}&timespan=day&multiplier=1&from=${fromStr}&to=${toStr}&limit=5000`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      const bars: { time: number; close: number }[] = json.bars || [];
+
+      if (bars.length === 0) {
+        throw new Error("No price history available");
+      }
+
+      // Compute spread for each bar
+      const points: SpreadPoint[] = bars.map((bar) => {
+        const dateStr = new Date(bar.time * 1000).toISOString().split("T")[0];
+        const spreadPct = ((dealPrice - bar.close) / bar.close) * 100;
+        return {
+          date: dateStr,
+          close: bar.close,
+          dealPrice: dealPrice,
+          spreadPct: Math.round(spreadPct * 100) / 100,
+        };
+      });
+
+      if (!cancelled) {
+        setHistory(points);
+        setResolvedTicker(ticker);
+      }
+    }
+
+    setLoading(true);
+    setError(null);
+
+    const promise = dealId ? fetchViaLegacyRoute() : fetchViaPolygon();
+    promise
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
     return () => {
       cancelled = true;
     };
-  }, [dealId]);
+  }, [dealId, ticker, dealPrice, announcedDate]);
 
   // Build and render chart
   useEffect(() => {
-    if (!containerRef.current || !data || data.history.length === 0) return;
+    if (!containerRef.current || !history || history.length === 0) return;
 
     // Clean up previous chart
     if (chartRef.current) {
@@ -150,7 +201,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
       });
 
       series.setData(
-        data.history.map((p) => ({
+        history.map((p) => ({
           time: p.date as Time,
           value: p.spreadPct,
         }))
@@ -170,7 +221,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
       const closeSeries = chart.addSeries(LineSeries, {
         color: CLOSE_PRICE_COLOR,
         lineWidth: 2,
-        title: data.ticker,
+        title: resolvedTicker,
         priceFormat: {
           type: "price",
           precision: 2,
@@ -179,7 +230,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
       });
 
       closeSeries.setData(
-        data.history.map((p) => ({
+        history.map((p) => ({
           time: p.date as Time,
           value: p.close,
         }))
@@ -199,7 +250,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
       });
 
       dealSeries.setData(
-        data.history.map((p) => ({
+        history.map((p) => ({
           time: p.date as Time,
           value: p.dealPrice,
         }))
@@ -244,7 +295,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
       priceSeriesRef.current = null;
       dealPriceSeriesRef.current = null;
     };
-  }, [data, chartMode, pointsByDate]);
+  }, [history, chartMode, pointsByDate, resolvedTicker]);
 
   // Loading state
   if (loading) {
@@ -265,7 +316,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
   }
 
   // No data
-  if (!data || data.history.length === 0) {
+  if (!history || history.length === 0) {
     return (
       <div className="flex items-center justify-center h-[300px] bg-gray-950 rounded-lg border border-gray-800">
         <div className="text-gray-500 text-sm">No price history available</div>
@@ -274,9 +325,9 @@ export function SpreadHistoryChart({ dealId }: Props) {
   }
 
   // Current spread stats
-  const latest = data.history[data.history.length - 1];
-  const maxSpread = Math.max(...data.history.map((p) => p.spreadPct));
-  const minSpread = Math.min(...data.history.map((p) => p.spreadPct));
+  const latest = history[history.length - 1];
+  const maxSpread = Math.max(...history.map((p) => p.spreadPct));
+  const minSpread = Math.min(...history.map((p) => p.spreadPct));
 
   return (
     <div className="space-y-2">
@@ -343,7 +394,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
               <span>
                 Range: {minSpread.toFixed(1)}% – {maxSpread.toFixed(1)}%
               </span>
-              <span>{data.history.length} days</span>
+              <span>{history.length} days</span>
             </div>
           )}
         </div>
@@ -356,7 +407,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
                 className="inline-block w-3 h-0.5"
                 style={{ backgroundColor: CLOSE_PRICE_COLOR }}
               />
-              <span className="text-gray-400">{data.ticker}</span>
+              <span className="text-gray-400">{resolvedTicker}</span>
             </span>
             <span className="flex items-center gap-1">
               <span

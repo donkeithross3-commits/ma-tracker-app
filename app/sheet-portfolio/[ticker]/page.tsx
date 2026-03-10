@@ -13,6 +13,7 @@ import {
   AccuracyScoreboard,
   EstimateDivergenceChart,
 } from "@/components/sheet-portfolio";
+import { SpreadHistoryChart } from "@/components/deals/SpreadHistoryChart";
 
 interface DashboardData {
   ticker: string;
@@ -671,6 +672,18 @@ export default function DealDetailPage() {
             📄 View Filings &amp; News Sources →
           </Link>
         </div>
+
+        {/* Spread History Chart */}
+        {ticker && dealPrice != null && dealPrice > 0 && (
+          <div className="mb-3 bg-gray-900 border border-gray-800 rounded-lg p-3">
+            <h3 className="text-sm font-semibold text-gray-300 mb-2">Spread History</h3>
+            <SpreadHistoryChart
+              ticker={ticker}
+              dealPrice={dealPrice}
+              announcedDate={d?.announce_date ?? dash?.announced_date}
+            />
+          </div>
+        )}
 
         {/* Main content: 3-column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
