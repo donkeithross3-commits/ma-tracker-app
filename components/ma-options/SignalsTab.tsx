@@ -662,6 +662,11 @@ export default function SignalsTab() {
   pendingModesRef.current = pendingModes;
   const pendingModeTimestamps = useRef<Record<string, number>>({});
 
+  // ── Budget optimistic guard ──
+  // Prevents stale poll from snapping budget back to old value after user sets it
+  const pendingBudgetRef = useRef<number | null>(null);
+  const pendingBudgetSinceRef = useRef<number>(0);
+
   // ── Model chooser state ──
   const [modelModalOpen, setModelModalOpen] = useState(false);
   const [modelList, setModelList] = useState<Array<{
@@ -852,6 +857,21 @@ export default function SignalsTab() {
       const res = await fetch("/api/ma-options/execution/status", { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
+        // Guard budget against stale poll overwriting optimistic update
+        if (pendingBudgetRef.current !== null) {
+          const serverBudget = data.order_budget;
+          const age = Date.now() - pendingBudgetSinceRef.current;
+          if (serverBudget === pendingBudgetRef.current) {
+            // Server confirmed — clear guard, accept server value
+            pendingBudgetRef.current = null;
+          } else if (age > 15_000) {
+            // Timeout — accept server state, clear guard
+            pendingBudgetRef.current = null;
+          } else {
+            // Server hasn't caught up — keep optimistic budget value
+            data.order_budget = pendingBudgetRef.current;
+          }
+        }
         setExecutionStatus(data);
         // Sync ticker modes from telemetry (guard against pending optimistic updates)
         const polledModes: Record<string, TickerMode> =
@@ -901,8 +921,12 @@ export default function SignalsTab() {
       prevBudget = es.order_budget;
       return { ...es, order_budget: budget };
     });
+    // Set pending guard — suppresses stale poll until server confirms or timeout
+    pendingBudgetRef.current = budget;
+    pendingBudgetSinceRef.current = Date.now();
 
     const rollback = () => {
+      pendingBudgetRef.current = null;
       if (prevBudget !== undefined) {
         const restore = prevBudget;
         setExecutionStatus(es => es ? { ...es, order_budget: restore } : es);
