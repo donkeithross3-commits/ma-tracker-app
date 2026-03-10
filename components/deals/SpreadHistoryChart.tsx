@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createChart,
   LineSeries,
@@ -21,7 +21,6 @@ const GRID_COLOR = "#1F2937"; // border-gray-800
 const SPREAD_COLOR = "#3B82F6"; // blue-500
 const DEAL_PRICE_COLOR = "#22C55E"; // green-500
 const CLOSE_PRICE_COLOR = "#9CA3AF"; // gray-400
-const ANNOUNCEMENT_COLOR = "#F59E0B"; // amber-500
 
 interface SpreadPoint {
   date: string;
@@ -62,6 +61,12 @@ export function SpreadHistoryChart({ dealId }: Props) {
     close?: number;
     dealPrice?: number;
   } | null>(null);
+
+  // O(1) lookup map for crosshair handler (avoids O(n) find on every mouse move)
+  const pointsByDate = useMemo(() => {
+    if (!data) return new Map<string, SpreadPoint>();
+    return new Map(data.history.map((p) => [p.date, p]));
+  }, [data]);
 
   // Fetch data
   useEffect(() => {
@@ -144,12 +149,12 @@ export function SpreadHistoryChart({ dealId }: Props) {
         },
       });
 
-      const lineData: LineData<Time>[] = data.history.map((p) => ({
-        time: p.date as Time,
-        value: p.spreadPct,
-      }));
-
-      series.setData(lineData);
+      series.setData(
+        data.history.map((p) => ({
+          time: p.date as Time,
+          value: p.spreadPct,
+        }))
+      );
       seriesRef.current = series;
 
       // Add zero line visual reference
@@ -210,7 +215,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
       }
 
       const dateStr = param.time as string;
-      const point = data.history.find((p) => p.date === dateStr);
+      const point = pointsByDate.get(dateStr);
       if (point) {
         setHoveredPoint({
           date: dateStr,
@@ -239,7 +244,7 @@ export function SpreadHistoryChart({ dealId }: Props) {
       priceSeriesRef.current = null;
       dealPriceSeriesRef.current = null;
     };
-  }, [data, chartMode]);
+  }, [data, chartMode, pointsByDate]);
 
   // Loading state
   if (loading) {
@@ -270,7 +275,6 @@ export function SpreadHistoryChart({ dealId }: Props) {
 
   // Current spread stats
   const latest = data.history[data.history.length - 1];
-  const earliest = data.history[0];
   const maxSpread = Math.max(...data.history.map((p) => p.spreadPct));
   const minSpread = Math.min(...data.history.map((p) => p.spreadPct));
 

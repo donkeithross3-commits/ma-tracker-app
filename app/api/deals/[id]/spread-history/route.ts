@@ -65,11 +65,19 @@ export async function GET(
     );
   }
 
+  // Validate ticker before using in Polygon URL
+  if (!/^[A-Z]{1,10}$/.test(deal.ticker)) {
+    return NextResponse.json(
+      { error: "Invalid ticker format" },
+      { status: 400 }
+    );
+  }
+
   // Determine date range: from announcement date (or deal creation) to today
   const announcedDate = version.announcedDate || deal.createdAt;
   const fromDate = new Date(announcedDate);
-  // Go back 5 days before announcement to show the pre-deal price
-  fromDate.setDate(fromDate.getDate() - 5);
+  // Go back 5 trading days before announcement to show the pre-deal price
+  fromDate.setDate(fromDate.getDate() - 7);
   const fromStr = fromDate.toISOString().split("T")[0];
   const toStr = new Date().toISOString().split("T")[0];
 
@@ -88,8 +96,15 @@ export async function GET(
       next: { revalidate: 3600 }, // Cache for 1 hour
     });
 
+    if (response.status === 429) {
+      return NextResponse.json(
+        { error: "Polygon rate limit exceeded. Try again shortly." },
+        { status: 429 }
+      );
+    }
+
     if (!response.ok) {
-      const text = await response.text();
+      const text = await response.text().catch(() => "Unknown error");
       console.error(`Polygon API error: ${response.status} ${text}`);
       return NextResponse.json(
         { error: "Failed to fetch price history" },
@@ -111,7 +126,7 @@ export async function GET(
     // For now, compute spread using the fixed deal price.
     // If the deal has a stock component, fetch acquiror bars and compute dynamic deal price.
     let acquirorBars: Map<string, number> | null = null;
-    if (version.stockRatio && deal.acquirorTicker) {
+    if (version.stockRatio && deal.acquirorTicker && /^[A-Z]{1,10}$/.test(deal.acquirorTicker)) {
       const acqUrl = `${POLYGON_BASE}/v2/aggs/ticker/${deal.acquirorTicker}/range/1/day/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=5000&apiKey=${POLYGON_API_KEY}`;
       try {
         const acqResp = await fetch(acqUrl, {
