@@ -76,8 +76,6 @@ export async function GET(
   // Determine date range: from announcement date (or deal creation) to today
   const announcedDate = version.announcedDate || deal.createdAt;
   const fromDate = new Date(announcedDate);
-  // Go back 5 trading days before announcement to show the pre-deal price
-  fromDate.setDate(fromDate.getDate() - 7);
   const fromStr = fromDate.toISOString().split("T")[0];
   const toStr = new Date().toISOString().split("T")[0];
 

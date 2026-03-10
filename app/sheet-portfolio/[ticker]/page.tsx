@@ -674,20 +674,16 @@ export default function DealDetailPage() {
         </div>
 
         {/* Spread History Chart */}
-        <div className="mb-3 bg-gray-900 border border-gray-800 rounded-lg p-3">
-          <h3 className="text-sm font-semibold text-gray-300 mb-2">Spread History</h3>
-          {ticker && dealPrice != null && dealPrice > 0 ? (
+        {ticker && dealPrice != null && dealPrice > 0 && (
+          <div className="mb-3 bg-gray-900 border border-gray-800 rounded-lg p-3">
+            <h3 className="text-sm font-semibold text-gray-300 mb-2">Spread History</h3>
             <SpreadHistoryChart
               ticker={ticker}
               dealPrice={dealPrice}
               announcedDate={d?.announce_date ?? dash?.announced_date}
             />
-          ) : (
-            <div className="text-xs text-gray-500 py-2">
-              No spread chart: ticker={ticker || "missing"}, dealPrice={String(dealPrice ?? "null")}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Main content: 3-column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">

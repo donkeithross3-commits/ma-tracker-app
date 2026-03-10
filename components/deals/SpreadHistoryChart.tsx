@@ -93,8 +93,6 @@ export function SpreadHistoryChart({ dealId, ticker, dealPrice, announcedDate }:
       if (!announcedDate) {
         fromDate.setFullYear(fromDate.getFullYear() - 1);
       }
-      // Go back 7 calendar days before announcement for pre-deal context
-      fromDate.setDate(fromDate.getDate() - 7);
 
       const fromStr = fromDate.toISOString().split("T")[0];
       const toStr = today.toISOString().split("T")[0];
