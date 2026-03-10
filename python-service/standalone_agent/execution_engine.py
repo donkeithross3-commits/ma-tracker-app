@@ -1043,19 +1043,29 @@ class ExecutionEngine:
                 exec_id = data.get("execId", "")
                 if exec_id and strategy_id:
                     self._order_exec_ids[order_id] = exec_id
-                    self._exec_id_to_position[exec_id] = strategy_id
+                    # For entry orders on parent strategies (bmc_spy_up), the
+                    # position_store position_id is the RM (bmc_risk_*), not the
+                    # parent.  Prefer the RM mapping if the agent already set it
+                    # (via _spawn_risk_manager_for_bmc); otherwise use strategy_id.
+                    position_id = self._exec_id_to_position.get(exec_id) or strategy_id
+                    self._exec_id_to_position[exec_id] = position_id
                     # Update the fill in position_store with the real exec_id
                     # (the fill was likely already persisted with exec_id="" from orderStatus)
                     if self._position_store:
+                        # Try RM position first, fall back to strategy_id
                         updated = self._position_store.update_fill_exec_id(
-                            strategy_id, order_id, exec_id
+                            position_id, order_id, exec_id
                         )
+                        if not updated and position_id != strategy_id:
+                            updated = self._position_store.update_fill_exec_id(
+                                strategy_id, order_id, exec_id
+                            )
                         if updated:
                             logger.info("Backfilled exec_id=%s on fill for order %d (%s)",
-                                        exec_id, order_id, strategy_id)
+                                        exec_id, order_id, position_id)
                             # Now try deferred commission pickup with the real exec_id
                             self._order_executor.submit(
-                                self._deferred_commission_update, strategy_id, exec_id,
+                                self._deferred_commission_update, position_id, exec_id,
                             )
                 logger.info("Strategy %s execDetails for order %d: execId=%s",
                             strategy_id, order_id, data.get("execId", ""))

@@ -2798,15 +2798,39 @@ class IBDataAgent:
             # Skipped for reconciliation spawns (record_fill=False) to avoid
             # creating phantom Trade Log rows for non-real entries.
             if record_fill:
+                entry_order_id = pos_info.get("order_id", 0)
+                # Look up exec_id from the engine's order→exec mapping
+                entry_exec_id = ""
+                if self.execution_engine and entry_order_id:
+                    entry_exec_id = self.execution_engine._order_exec_ids.get(
+                        entry_order_id, ""
+                    )
                 self.position_store.add_fill(strategy_id, {
                     "time": time.time(),
-                    "order_id": pos_info.get("order_id", 0),
+                    "order_id": entry_order_id,
+                    "exec_id": entry_exec_id,
                     "level": "entry",
                     "qty_filled": pos_info.get("quantity", 0),
                     "avg_price": pos_info.get("entry_price", 0),
                     "remaining_qty": pos_info.get("quantity", 0),
                     "pnl_pct": 0.0,
+                    "execution_analytics": {
+                        "commission": None,
+                        "realized_pnl_ib": None,
+                        "slippage": None,
+                    },
                 })
+                # Remap exec_id → RM position_id so commission reports route
+                # correctly.  The parent BMC strategy owns the order, but the
+                # RM position_id is what position_store uses.
+                if entry_exec_id and self.execution_engine:
+                    self.execution_engine._exec_id_to_position[entry_exec_id] = strategy_id
+                    # Fire deferred commission pickup — commission may already
+                    # be in the scanner's cache from the IB callback.
+                    self.execution_engine._order_executor.submit(
+                        self.execution_engine._deferred_commission_update,
+                        strategy_id, entry_exec_id,
+                    )
             # Persist initial runtime state (ARMED) so it survives restarts
             if hasattr(strategy, "get_runtime_snapshot"):
                 self.position_store.update_runtime_state(
