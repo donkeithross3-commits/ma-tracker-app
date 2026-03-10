@@ -111,10 +111,12 @@ interface FullExecutionStatus {
   quote_snapshot: Record<string, QuoteSnapshot>;
   position_ledger?: PositionLedgerEntry[];
   trade_attribution_summary?: TradeAttributionEntry[];
+  trade_attribution_session?: TradeAttributionEntry[];
   engine_mode?: "running" | "paused";
   budget_status?: {
     ticker_modes?: Record<string, string>;
   };
+  quotes_age_ms?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +225,13 @@ interface BookRow {
   qty: number;
   /** Weighted avg entry price */
   entryPrice: number;
-  /** Current mid or last */
+  /** Current bid */
+  bid: number;
+  /** Current ask */
+  ask: number;
+  /** Current mid */
+  mid: number;
+  /** Current mid or last (best available) */
   lastPrice: number;
   /** Unrealized P&L $ */
   unrealPnl: number;
@@ -277,7 +285,9 @@ const BOOK_COLUMNS: ColumnDef[] = [
   { key: "contract", label: "Contract" },
   { key: "qty", label: "Qty" },
   { key: "entry", label: "Entry" },
-  { key: "last", label: "Last" },
+  { key: "bid", label: "Bid" },
+  { key: "ask", label: "Ask" },
+  { key: "mid", label: "Mid" },
   { key: "pnl", label: "P&L $" },
   { key: "pnlPct", label: "P&L %" },
   { key: "model", label: "Model" },
@@ -285,7 +295,7 @@ const BOOK_COLUMNS: ColumnDef[] = [
   { key: "rm", label: "RM Status" },
   { key: "carried", label: "Session" },
 ];
-const BOOK_DEFAULTS = ["contract", "qty", "entry", "last", "pnl", "pnlPct", "model", "rm", "carried"];
+const BOOK_DEFAULTS = ["contract", "qty", "entry", "bid", "ask", "mid", "pnl", "pnlPct", "model", "rm"];
 const BOOK_LOCKED = ["contract"];
 
 const BLOTTER_COLUMNS: ColumnDef[] = [
@@ -355,7 +365,7 @@ export default function BookTab() {
 
   useEffect(() => {
     fetchStatus();
-    pollRef.current = setInterval(fetchStatus, 3000); // 3s polls for Book view
+    pollRef.current = setInterval(fetchStatus, 2000); // 2s polls for live Book view
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchStatus]);
 
@@ -449,11 +459,12 @@ export default function BookTab() {
 
       const avgEntry = totalQty > 0 ? totalCost / totalQty : 0;
 
-      // Get live price
+      // Get live price from streaming quote snapshot
       const quote = quotes[ck];
-      const lastPrice = quote
-        ? (quote.bid > 0 && quote.ask > 0 ? quote.mid : quote.last)
-        : 0;
+      const bid = quote?.bid ?? 0;
+      const ask = quote?.ask ?? 0;
+      const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : 0;
+      const lastPrice = mid > 0 ? mid : (quote?.last ?? 0);
 
       const unrealPnl = lastPrice > 0 ? (lastPrice - avgEntry) * totalQty * multiplier : 0;
       const unrealPnlPct = avgEntry > 0 && lastPrice > 0 ? ((lastPrice - avgEntry) / avgEntry) * 100 : 0;
@@ -467,6 +478,9 @@ export default function BookTab() {
         label: contractLabel(first.instrument),
         qty: totalQty,
         entryPrice: avgEntry,
+        bid,
+        ask,
+        mid,
         lastPrice,
         unrealPnl,
         unrealPnlPct,
@@ -801,7 +815,9 @@ export default function BookTab() {
                 {bookVisibleSet.has("contract") && <th className="text-left px-2 py-1">Contract</th>}
                 {bookVisibleSet.has("qty") && <th className="text-right px-2 py-1">Qty</th>}
                 {bookVisibleSet.has("entry") && <th className="text-right px-2 py-1">Entry</th>}
-                {bookVisibleSet.has("last") && <th className="text-right px-2 py-1">Last</th>}
+                {bookVisibleSet.has("bid") && <th className="text-right px-2 py-1">Bid</th>}
+                {bookVisibleSet.has("ask") && <th className="text-right px-2 py-1">Ask</th>}
+                {bookVisibleSet.has("mid") && <th className="text-right px-2 py-1">Mid</th>}
                 {bookVisibleSet.has("pnl") && <th className="text-right px-2 py-1">P&L $</th>}
                 {bookVisibleSet.has("pnlPct") && <th className="text-right px-2 py-1">P&L %</th>}
                 {bookVisibleSet.has("model") && <th className="text-left px-2 py-1">Model</th>}
@@ -856,9 +872,19 @@ export default function BookTab() {
                         {bookVisibleSet.has("entry") && (
                           <td className="text-right px-2 py-1 font-mono text-gray-300">{row.entryPrice.toFixed(2)}</td>
                         )}
-                        {bookVisibleSet.has("last") && (
+                        {bookVisibleSet.has("bid") && (
+                          <td className="text-right px-2 py-1 font-mono text-blue-400/80">
+                            {row.bid > 0 ? row.bid.toFixed(2) : "—"}
+                          </td>
+                        )}
+                        {bookVisibleSet.has("ask") && (
+                          <td className="text-right px-2 py-1 font-mono text-orange-400/80">
+                            {row.ask > 0 ? row.ask.toFixed(2) : "—"}
+                          </td>
+                        )}
+                        {bookVisibleSet.has("mid") && (
                           <td className="text-right px-2 py-1 font-mono text-gray-200">
-                            {row.lastPrice > 0 ? row.lastPrice.toFixed(2) : "—"}
+                            {row.mid > 0 ? row.mid.toFixed(2) : "—"}
                           </td>
                         )}
                         {bookVisibleSet.has("pnl") && (
@@ -1063,7 +1089,13 @@ export default function BookTab() {
 
       {/* Last updated */}
       <div className="text-[10px] text-gray-600 text-right">
-        Last updated: {lastUpdate > 0 ? new Date(lastUpdate).toLocaleTimeString() : "—"} (3s poll)
+        Last updated: {lastUpdate > 0 ? new Date(lastUpdate).toLocaleTimeString() : "—"}
+        {execStatus?.quotes_age_ms != null && (
+          <span className={execStatus.quotes_age_ms < 5000 ? "text-green-600" : "text-yellow-600"}>
+            {" "}· quotes {execStatus.quotes_age_ms < 1000 ? "<1s" : `${Math.round(execStatus.quotes_age_ms / 1000)}s`} ago
+          </span>
+        )}
+        {" "}(2s poll)
       </div>
     </div>
   );

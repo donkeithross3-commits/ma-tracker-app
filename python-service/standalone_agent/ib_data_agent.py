@@ -3482,6 +3482,31 @@ class IBDataAgent:
                 logger.error(f"Heartbeat error: {e}")
                 break
 
+    async def _quote_push_loop(self):
+        """Push live quote snapshots every ~2s for real-time Book tab updates.
+
+        Separate from the full telemetry push (~20s) to keep quote data fresh
+        without sending the entire position_ledger/attribution payload.
+        """
+        QUOTE_PUSH_INTERVAL = 2  # seconds
+        while self.running and self.websocket:
+            try:
+                if (
+                    self.execution_engine is not None
+                    and self.execution_engine.is_running
+                ):
+                    snapshot = self.execution_engine._cache.get_all_serialized()
+                    if snapshot:
+                        await self.websocket.send(json.dumps({
+                            "type": "execution_quotes",
+                            "quote_snapshot": snapshot,
+                            "timestamp": time.time(),
+                        }))
+                await asyncio.sleep(QUOTE_PUSH_INTERVAL)
+            except Exception as e:
+                logger.debug("Quote push error: %s", e)
+                break
+
     async def _account_event_push_loop(self):
         """Fallback: drain any events that the instant callback may have missed.
 
@@ -3738,12 +3763,13 @@ class IBDataAgent:
                 heartbeat_task = asyncio.create_task(self.send_heartbeat())
                 handler_task = asyncio.create_task(self.message_handler())
                 event_push_task = asyncio.create_task(self._account_event_push_loop())
+                quote_push_task = asyncio.create_task(self._quote_push_loop())
 
                 logger.info("Agent running - ready to handle requests")
                 logger.info("Press Ctrl+C to stop")
-                
+
                 done, pending = await asyncio.wait(
-                    [heartbeat_task, handler_task, event_push_task],
+                    [heartbeat_task, handler_task, event_push_task, quote_push_task],
                     return_when=asyncio.FIRST_COMPLETED
                 )
                 

@@ -498,6 +498,12 @@ async def data_provider_websocket(websocket: WebSocket):
                         f"lines={msg.get('lines_held', 0)}"
                     )
                 
+                elif msg_type == "execution_quotes":
+                    # Fast-path: agent pushes live quote snapshots every ~2s
+                    # Merge into cached telemetry for fresh Book tab data
+                    provider._live_quotes = msg.get("quote_snapshot", {})
+                    provider._live_quotes_at = msg.get("timestamp", time.time())
+
                 elif msg_type == "account_event":
                     # Agent pushes order fill/status events for near-real-time UI
                     event = msg.get("event", {})

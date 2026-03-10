@@ -2173,10 +2173,20 @@ async def relay_execution_status(user_id: str = ""):
             allow_fallback_to_any=False,
         )
         if provider and provider.execution_telemetry:
-            return _sanitize_for_json({
+            result = {
                 "source": "cached_telemetry",
                 **provider.execution_telemetry,
-            })
+            }
+            # Merge fresh live quotes if available (pushed every ~2s)
+            live_quotes = getattr(provider, "_live_quotes", None)
+            live_quotes_at = getattr(provider, "_live_quotes_at", 0)
+            telemetry_at = provider.execution_telemetry.get("received_at", 0)
+            if live_quotes and live_quotes_at > telemetry_at:
+                result["quote_snapshot"] = live_quotes
+                result["quotes_age_ms"] = int((time.time() - live_quotes_at) * 1000)
+            else:
+                result["quotes_age_ms"] = int((time.time() - telemetry_at) * 1000)
+            return _sanitize_for_json(result)
         response_data = await send_request_to_provider(
             request_type="execution_status",
             payload={},
