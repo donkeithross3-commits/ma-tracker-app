@@ -2111,10 +2111,21 @@ export default function SignalsTab() {
           // Pre-start model availability from registry
           const avail = modelAvailability[t];
           const hasAnyModel = avail ? (avail.has_up || avail.has_down || avail.has_symmetric) : false;
-          // Direction badges: show from registry (pre-start) or from running strategies
-          const showUp = running ? hasUp : (avail?.has_up ?? false);
-          const showDown = running ? hasDown : (avail?.has_down ?? false);
-          const showSymmetric = !running && !showUp && !showDown && (avail?.has_symmetric ?? false);
+          // Direction badges: show from registry (pre-start) or from running strategies.
+          // Override with strategy direction_mode: a symmetric model configured as
+          // long_only should show ▲, not ●, since it only trades calls.
+          const cfgDirection = (configs[t] || makeDefaultConfig(t)).direction_mode;
+          let showUp = running ? hasUp : (avail?.has_up ?? false);
+          let showDown = running ? hasDown : (avail?.has_down ?? false);
+          let showSymmetric = !running && !showUp && !showDown && (avail?.has_symmetric ?? false);
+          // Strategy direction_mode overrides symmetric model badge
+          if (showSymmetric && cfgDirection === "long_only") {
+            showSymmetric = false;
+            showUp = true;
+          } else if (showSymmetric && cfgDirection === "short_only") {
+            showSymmetric = false;
+            showDown = true;
+          }
           // Build tooltip
           const tooltip = hasModel
             ? `Model: ${strat?.signal?.model_version} (${strat?.signal?.model_type})`
@@ -3617,8 +3628,12 @@ export default function SignalsTab() {
                             <span className="text-green-400" title="UP (calls)">▲</span>
                           ) : m.target_column?.includes("_DOWN_") ? (
                             <span className="text-red-400" title="DOWN (puts)">▼</span>
+                          ) : activeConfig.direction_mode === "long_only" ? (
+                            <span className="text-green-400" title="Symmetric model → long_only config (calls)">▲</span>
+                          ) : activeConfig.direction_mode === "short_only" ? (
+                            <span className="text-red-400" title="Symmetric model → short_only config (puts)">▼</span>
                           ) : (
-                            <span className="text-gray-500" title="Symmetric">●</span>
+                            <span className="text-gray-500" title="Symmetric (both directions)">●</span>
                           )}
                         </td>
                         <td className="py-1.5 px-1 text-gray-400">{m.model_type}</td>
