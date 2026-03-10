@@ -2125,17 +2125,30 @@ export default function SignalsTab() {
         })}
       </div>
 
+      {/* ── Boot Phase Banner (prominent during restart) ── */}
+      {(isStale || bootPhase) && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/40 border border-amber-700/50 rounded text-sm">
+          <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+          <span className="text-amber-300 font-medium">
+            {bootPhase?.detail || (bootPhase?.phase ? signalsBootPhaseLabel(bootPhase.phase) : "Restarting agent...")}
+          </span>
+          <span className="text-amber-500/60 text-xs ml-auto">Loading models & market data</span>
+        </div>
+      )}
+
       {/* ── Status Bar ── */}
       <div className="flex items-center gap-3 text-sm">
         <div className="flex items-center gap-1.5">
           <div className={`w-2 h-2 rounded-full ${
-            (running && runningTickers.length === 0) || isStale || bootPhase
+            (running && runningTickers.length === 0) && !isStale && !bootPhase
               ? "bg-amber-500 animate-pulse"
-              : running
+              : running && !isStale && !bootPhase
               ? "bg-green-500"
+              : isStale || bootPhase
+              ? "bg-amber-500 animate-pulse"
               : "bg-gray-600"
           }`} />
-          <span className={(running && runningTickers.length === 0) || isStale || bootPhase ? "text-amber-400" : "text-gray-400"}>
+          <span className={isStale || bootPhase ? "text-amber-400" : running ? "text-gray-400" : "text-gray-400"}>
             {isStale || bootPhase
               ? (bootPhase?.detail || (bootPhase?.phase ? signalsBootPhaseLabel(bootPhase.phase) : "Restarting..."))
               : running

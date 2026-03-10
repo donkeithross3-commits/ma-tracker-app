@@ -114,8 +114,12 @@ export function IBConnectionProvider({ children }: { children: ReactNode }) {
           setAgentBootDetail(null);
         }
 
-        // Auto-clear restart state when boot completes
-        if (isAgentRestartingRef.current && data.agentConnected && !data.boot_phase) {
+        // Auto-clear restart state when boot truly completes.
+        // Require data.connected (IB up) to avoid false positive:
+        // when agent first reconnects to relay, boot_phase is null for a
+        // brief window before the first boot_phase message arrives.
+        // IB connected = strategies loaded = boot is genuinely done.
+        if (isAgentRestartingRef.current && data.agentConnected && data.connected && !data.boot_phase) {
           setIsAgentRestarting(false);
           isAgentRestartingRef.current = false;
           setAgentBootPhase(null);

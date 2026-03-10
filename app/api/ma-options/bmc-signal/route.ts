@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth-api";
 
+export const dynamic = "force-dynamic";
+
 const PYTHON_SERVICE_URL =
   process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
 
@@ -15,7 +17,7 @@ export async function GET(request: NextRequest) {
     const freshParam = fresh ? `&fresh=${fresh}` : "";
     const response = await fetch(
       `${PYTHON_SERVICE_URL}/options/relay/bmc-signal?user_id=${encodeURIComponent(user.id)}${freshParam}`,
-      { method: "GET", headers: { "Content-Type": "application/json" } }
+      { method: "GET", headers: { "Content-Type": "application/json" }, cache: "no-store" }
     );
 
     if (!response.ok) {
