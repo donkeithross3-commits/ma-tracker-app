@@ -104,8 +104,10 @@ _DEFAULTS: dict[str, Any] = {
     "premium_min": 0.10,              # min option premium ($) to consider
     "premium_max": 3.00,              # max option premium ($) to consider
     # Signal gating — straddle richness thresholds (passed to SignalConfig)
-    "straddle_richness_max": 1.5,     # suppress signal above this richness
-    "straddle_richness_ideal": 0.9,   # ideal richness for full signal strength
+    # Research (2026-03-09): high richness = market expects vol = GOOD for buyers.
+    # richness >= 1.5 → PF=6.36 (best regime).  Use richness_min as primary gate.
+    "straddle_richness_min": None,    # require richness above this to trade (None = disabled)
+    "straddle_richness_max": None,    # suppress signal above this richness (None = disabled)
     "options_gate_enabled": False,    # enable straddle richness gate
 }
 
@@ -129,8 +131,12 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "signal_threshold": 0.40,         # model optimal (UP=0.40, DOWN=0.35)
         "contract_budget_usd": 150.0,
         "otm_target_pct": 1.5,            # ~$10 OTM on ~$680 → $0.30-$0.80 premium (1DTE)
-        "straddle_richness_max": 1.5,
-        "straddle_richness_ideal": 0.9,
+        # Richness gate: require richness >= 1.5 (research: PF=6.36, all folds profitable)
+        "straddle_richness_min": 1.5,
+        # VIX band: 14-25 optimal (below 14 = no vol; above 25 = 0% WR historically)
+        "vix_gate_min": 14,
+        "vix_gate_max": 25,
+        "options_gate_enabled": True,     # enable for SPY (validated 2026-03-09)
     },
     "SLV": {
         "strike_increment": 1.00,         # IB lists $1 increments for SLV options
@@ -144,8 +150,8 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "direction_mode": "long_only",    # symmetric model (is_big_move) — no edge on puts
         "contract_budget_usd": 50.0,
         "otm_target_pct": 3.0,            # ~$1 OTM on ~$33 → $0.30-$0.60 premium (1DTE)
-        "straddle_richness_max": 2.5,     # SLV IV ~2x SPY, higher richness normal
-        "straddle_richness_ideal": 1.5,
+        # SLV richness gate not yet validated — keep disabled (no options_gate_enabled override)
+        "straddle_richness_min": None,
     },
     "QQQ": {
         "strike_increment": 1.00,         # IB lists $1 increments near ATM for daily opts
@@ -179,8 +185,8 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "scan_end": "15:45",              # standardized: last entry time
         "signal_threshold": 0.67,         # model optimal (UP=0.68, DOWN=0.66)
         "otm_target_pct": 1.0,            # ~$2.60 OTM on ~$263 → $0.30-$0.60 premium (1DTE)
-        "straddle_richness_max": 2.0,
-        "straddle_richness_ideal": 1.2,
+        # GLD richness gate not yet validated — keep disabled (no options_gate_enabled override)
+        "straddle_richness_min": None,
     },
 }
 
@@ -1218,18 +1224,31 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 except (TypeError, ValueError):
                     pass
 
+        # Extract straddle richness from feature vector for options gate.
+        # e_straddle_richness is the IV/RV proxy — high richness = market expects
+        # vol = good for option buyers (research 2026-03-09: richness>=1.5 → PF=6.36).
+        _straddle_richness: float | None = None
+        _richness_raw = fv.features.get("e_straddle_richness")
+        if _richness_raw is not None:
+            try:
+                _straddle_richness = float(_richness_raw)
+            except (TypeError, ValueError):
+                pass
+
         # Generate signal (with straddle richness + regime gating if configured)
         signal_config = SignalConfig(
             probability_threshold=_effective_threshold,
             min_strength=cfg.get("min_signal_strength", 0.3),
             direction_mode=effective_direction,
             cooldown_minutes=cfg.get("cooldown_minutes", 15),
-            straddle_richness_max=cfg.get("straddle_richness_max", 1.5),
-            straddle_richness_ideal=cfg.get("straddle_richness_ideal", 0.9),
+            straddle_richness_min=cfg.get("straddle_richness_min"),
+            straddle_richness_max=cfg.get("straddle_richness_max"),
             options_gate_enabled=cfg.get("options_gate_enabled", False),
             vix_gate_min=cfg.get("vix_gate_min"),
+            vix_gate_max=cfg.get("vix_gate_max"),
         )
         signal = generate_signal(prediction, self._ticker, t, signal_config,
+                                 straddle_richness=_straddle_richness,
                                  vix_level=_vix_level)
 
         # Invert signal direction for DOWN models (flip long<->short)
@@ -1807,7 +1826,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                         "signal_threshold", "min_signal_strength", "direction_mode",
                         "cooldown_minutes", "decision_interval_seconds", "otm_target_pct",
                         "contract_budget_usd", "max_contracts", "auto_entry",
-                        "options_gate_enabled", "straddle_richness_max",
+                        "options_gate_enabled", "straddle_richness_min",
+                        "straddle_richness_max", "vix_gate_min", "vix_gate_max",
                     )
                 },
             }
