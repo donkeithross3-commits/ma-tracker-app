@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency, formatPercent, formatDate } from "@/lib/utils";
 import { OptionsScanner } from "@/components/options-scanner";
 import { ResearchReport } from "@/components/research-report";
+import { SpreadHistoryChart } from "@/components/deals/SpreadHistoryChart";
 
 async function getDealWithLatestData(id: string) {
   const deal = await prisma.deal.findUnique({
@@ -261,6 +262,19 @@ export default async function DealDetailPage({
                 </CardContent>
               </Card>
             </div>
+
+            {/* Spread History Chart */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>Deal Spread History</CardTitle>
+                <CardDescription>
+                  Daily spread since announcement
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <SpreadHistoryChart dealId={deal.id} />
+              </CardContent>
+            </Card>
 
             {/* Price Information */}
             <div className="grid gap-4 md:grid-cols-2">
