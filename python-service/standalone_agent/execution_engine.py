@@ -1488,14 +1488,16 @@ class ExecutionEngine:
                     except Exception as e2:
                         logger.error("Strategy %s on_order_placed error: %s", strategy_id, e2)
 
-                # If the order filled immediately (MKT orders), notify strategy now
+                # If the order filled immediately (MKT orders), notify strategy now.
+                # NOTE: Do NOT call _persist_fill here — _drain_order_events will
+                # persist the fill with the real order data (order_id, exec_id).
+                # Persisting from both paths caused double-counted fills/P&L.
                 if status == "Filled" or (filled and filled > 0):
                     if state:
                         try:
                             state.strategy.on_fill(order_id, result, state.config)
                         except Exception as e2:
                             logger.error("Strategy %s on_fill error: %s", strategy_id, e2)
-                        self._persist_fill(strategy_id, state, result)
                     # If fully filled, clean up
                     if status == "Filled":
                         with self._active_orders_lock:
