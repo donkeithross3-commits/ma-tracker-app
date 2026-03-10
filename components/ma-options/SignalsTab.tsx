@@ -2125,17 +2125,6 @@ export default function SignalsTab() {
         })}
       </div>
 
-      {/* ── Boot Phase Banner (prominent during restart) ── */}
-      {(isStale || bootPhase) && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/40 border border-amber-700/50 rounded text-sm">
-          <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
-          <span className="text-amber-300 font-medium">
-            {bootPhase?.detail || (bootPhase?.phase ? signalsBootPhaseLabel(bootPhase.phase) : "Restarting agent...")}
-          </span>
-          <span className="text-amber-500/60 text-xs ml-auto">Loading models & market data</span>
-        </div>
-      )}
-
       {/* ── Status Bar ── */}
       <div className="flex items-center gap-3 text-sm">
         <div className="flex items-center gap-1.5">
@@ -2252,6 +2241,22 @@ export default function SignalsTab() {
       {!running && signal?.startup_error && (
         <div className="bg-red-900/30 border border-red-800 text-red-300 text-sm px-3 py-1.5 rounded">
           Startup error: {signal.startup_error}
+        </div>
+      )}
+
+      {/* ── Boot Progress (large, centered — during restart/boot) ── */}
+      {(isStale || bootPhase) && (
+        <div className="flex flex-col items-center justify-center py-6 gap-3">
+          <div className="flex items-center gap-3">
+            <svg className="animate-spin h-6 w-6 text-amber-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <span className="text-amber-300 text-lg font-medium">
+              {bootPhase?.detail || (bootPhase?.phase ? signalsBootPhaseLabel(bootPhase.phase) : "Restarting agent...")}
+            </span>
+          </div>
+          <span className="text-gray-500 text-sm">Loading models and bootstrapping market data for each ticker</span>
         </div>
       )}
 
