@@ -1204,6 +1204,15 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             session_realized_vol=session_realized_vol,
         )
 
+        # Inject strangle_pct as e_strangle_richness for GLD model compatibility.
+        # The GLD model was trained with e_strangle_richness (from enriched dataset),
+        # but the live feature stack only produces e_straddle_richness (ATM 0DTE metric).
+        # Inject the daily bootstrap strangle_pct so the model has the feature.
+        if cfg.get("richness_source") == "strangle_pct" and daily_features:
+            _spct = daily_features.get(f"strangle_pct:{self._ticker}")
+            if _spct is not None:
+                fv.features["e_strangle_richness"] = float(_spct)
+
         # Predict — use snapshot model, not self._model (hot-swap safe)
         prediction = predict_single(_snap_model, fv.features)
         probability = prediction["probability"]
