@@ -12,7 +12,10 @@ Usage:
 """
 
 import logging
+import time
+from datetime import date
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +95,51 @@ class TradeAttribution:
         for m in by_model.values():
             closed = sum(
                 1 for t in trades
+                if t["model_version"] == m["version"] and t["status"] == "closed"
+            )
+            m["win_rate"] = m["wins"] / closed if closed else 0
+        return list(by_model.values())
+
+    def session_summary(self) -> List[dict]:
+        """Aggregate P&L for today's session only.
+
+        Includes positions that were created today OR closed today
+        (covers carried positions closed during this session).
+        """
+        # Today's date boundary in ET (trading day)
+        et = ZoneInfo("America/New_York")
+        from datetime import datetime
+        today_start = datetime.now(et).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).timestamp()
+
+        trades = self.by_model_version()
+        session_trades = []
+        for t in trades:
+            created = t.get("created_at") or 0
+            # Include if created today or if it's a closed position with a P&L
+            # (closed_at is not in the trade dict, so use created_at as primary filter)
+            if created >= today_start:
+                session_trades.append(t)
+
+        by_model: dict = {}
+        for t in session_trades:
+            mv = t["model_version"]
+            if mv not in by_model:
+                by_model[mv] = {
+                    "version": mv, "trades": 0, "wins": 0,
+                    "gross_pnl": 0, "commission": 0, "net_pnl": 0,
+                }
+            by_model[mv]["trades"] += 1
+            if t["net_pnl"] is not None:
+                by_model[mv]["gross_pnl"] += t["gross_pnl"] or 0
+                by_model[mv]["commission"] += t["total_commission"]
+                by_model[mv]["net_pnl"] += t["net_pnl"]
+                if (t["net_pnl"] or 0) > 0:
+                    by_model[mv]["wins"] += 1
+        for m in by_model.values():
+            closed = sum(
+                1 for t in session_trades
                 if t["model_version"] == m["version"] and t["status"] == "closed"
             )
             m["win_rate"] = m["wins"] / closed if closed else 0

@@ -1767,6 +1767,17 @@ class ExecutionEngine:
         except Exception:
             return []
 
+    def _get_trade_attribution_session(self) -> list:
+        """Compute model-level P&L attribution for today's session only."""
+        if not self._position_store:
+            return []
+        try:
+            from trade_attribution import TradeAttribution
+            ta = TradeAttribution(self._position_store)
+            return ta.session_summary()
+        except Exception:
+            return []
+
     def get_status(self) -> dict:
         """Return current engine status for telemetry/dashboard."""
         strategies = []
@@ -1823,6 +1834,7 @@ class ExecutionEngine:
             "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
             "trade_attribution_summary": self._get_trade_attribution_summary(),
+            "trade_attribution_session": self._get_trade_attribution_session(),
             # Connection health
             "reconnect_hold": self._reconnect_hold,
             # Engine mode: "paused" after auto-restart, "running" normally
@@ -1869,6 +1881,7 @@ class ExecutionEngine:
             "position_ledger": self._get_position_ledger(),
             # Trade attribution (realized P&L from closed positions)
             "trade_attribution_summary": self._get_trade_attribution_summary(),
+            "trade_attribution_session": self._get_trade_attribution_session(),
             # Engine mode: "paused" after auto-restart, "running" normally
             "engine_mode": "paused" if self._auto_restart_paused else "running",
         }

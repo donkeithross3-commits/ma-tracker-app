@@ -564,16 +564,21 @@ export default function BookTab() {
       }
     }
 
-    // Realized P&L: use trade_attribution_summary (backend-computed from ALL
-    // closed positions in the store — not limited to today's fills).
-    // This is the authoritative source: handles positions closed on prior days,
-    // partial exits, lot aggregation, etc.
-    const attribution = execStatus?.trade_attribution_summary || [];
+    // Session P&L: use trade_attribution_session (today's positions only).
+    // All-time P&L uses trade_attribution_summary (all closed positions ever).
+    const sessionAttribution = execStatus?.trade_attribution_session || [];
+    const allTimeAttribution = execStatus?.trade_attribution_summary || [];
     let realizedPnl = 0;
     let totalCommission = 0;
-    for (const entry of attribution) {
+    for (const entry of sessionAttribution) {
       realizedPnl += entry.gross_pnl || 0;
       totalCommission += entry.commission || 0;
+    }
+    let allTimeRealizedPnl = 0;
+    let allTimeCommission = 0;
+    for (const entry of allTimeAttribution) {
+      allTimeRealizedPnl += entry.gross_pnl || 0;
+      allTimeCommission += entry.commission || 0;
     }
 
     // Add commissions from active positions' fills (not in attribution yet)
@@ -601,6 +606,8 @@ export default function BookTab() {
         cashAtRisk: totalCashAtRisk,
         realizedPnl,
         commission: totalCommission,
+        allTimeRealizedPnl,
+        allTimeCommission,
       },
     };
   }, [execStatus, todayOpen]);
