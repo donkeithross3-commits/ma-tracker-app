@@ -2013,6 +2013,20 @@ class IBDataAgent:
                 result["risk_managers_updated"] = rm_updated
 
         self._persist_engine_config("config_change")
+
+        # Push telemetry immediately so the relay cache has the new config
+        # and the next dashboard poll sees updated values (reduces stale window
+        # from ~20s to ~2s).
+        try:
+            if self.execution_engine.is_running and self.websocket:
+                telemetry = self.execution_engine.get_telemetry()
+                await self.websocket.send(json.dumps({
+                    "type": "execution_telemetry",
+                    **telemetry
+                }))
+        except Exception:
+            logger.debug("Failed to push immediate telemetry after config change", exc_info=True)
+
         return result
 
     async def _handle_execution_budget(self, payload: dict) -> dict:

@@ -632,6 +632,11 @@ export default function SignalsTab() {
   });
   const [configDirty, setConfigDirty] = useState<Record<string, boolean>>({});
   const configDirtyRef = useRef<Record<string, boolean>>({});
+  // Timestamp-based guard: after Apply succeeds, keep dirty flag active until
+  // poll confirms the change (server config matches local) or 25s timeout.
+  const configPendingSinceRef = useRef<Record<string, number>>({});
+  // Snapshot of config values at Apply time (for comparison in stale-closure poll)
+  const pendingConfigSnapshotRef = useRef<Record<string, BMCConfig>>({});
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Currently selected ticker tab for viewing signal details
@@ -740,10 +745,48 @@ export default function SignalsTab() {
       // Multi-ticker: use strategies array if available
       if (data.strategies && Array.isArray(data.strategies)) {
         setStrategies(data.strategies);
-        // Update configs from agent for tickers not being edited
+        // Update configs from agent for tickers not being edited.
+        // After Apply, a pending guard stays active until server echoes
+        // matching config or 25s timeout — prevents stale cached telemetry
+        // from snapping the UI back to old values.
         for (const strat of data.strategies) {
           const t = strat.ticker;
-          if (strat.config && !configDirtyRef.current[t]) {
+          if (!strat.config) continue;
+
+          // Check pending config guard (set after Apply success)
+          const pendingSince = configPendingSinceRef.current[t];
+          if (pendingSince) {
+            const agentConfig = configFromAgent(strat.config, t);
+            const snapshot = pendingConfigSnapshotRef.current[t];
+            // Compare key numeric/string fields to detect server catch-up
+            const serverMatches = snapshot &&
+              agentConfig.contract_budget_usd === snapshot.contract_budget_usd &&
+              agentConfig.signal_threshold === snapshot.signal_threshold &&
+              agentConfig.scan_start === snapshot.scan_start &&
+              agentConfig.scan_end === snapshot.scan_end &&
+              agentConfig.max_contracts === snapshot.max_contracts &&
+              agentConfig.cooldown_minutes === snapshot.cooldown_minutes &&
+              agentConfig.auto_entry === snapshot.auto_entry;
+
+            if (serverMatches) {
+              // Server confirmed our change — clear guards, accept
+              delete configPendingSinceRef.current[t];
+              delete pendingConfigSnapshotRef.current[t];
+              configDirtyRef.current[t] = false;
+              setConfigDirty(prev => ({ ...prev, [t]: false }));
+            } else if (Date.now() - pendingSince > 25_000) {
+              // Timeout — accept server state, clear guards
+              delete configPendingSinceRef.current[t];
+              delete pendingConfigSnapshotRef.current[t];
+              configDirtyRef.current[t] = false;
+              setConfigDirty(prev => ({ ...prev, [t]: false }));
+            } else {
+              // Still pending — skip this poll's config, keep local values
+              continue;
+            }
+          }
+
+          if (!configDirtyRef.current[t]) {
             setConfigs(prev => {
               const updated = {
                 ...prev,
@@ -1062,8 +1105,11 @@ export default function SignalsTab() {
       const data = await res.json();
       if (data.error) setError(data.error);
       else {
-        setConfigDirty(prev => ({ ...prev, [ticker]: false }));
-        configDirtyRef.current[ticker] = false;
+        // Don't clear dirty flag yet — keep it active so stale poll data
+        // can't overwrite our optimistic values. The poll handler will
+        // clear it once the server echoes back matching config, or after 25s.
+        configPendingSinceRef.current[ticker] = Date.now();
+        pendingConfigSnapshotRef.current[ticker] = { ...configs[ticker] };
         setError(null);
       }
     } catch (e: any) {
