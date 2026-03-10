@@ -529,15 +529,18 @@ const TICKER_DEFAULTS: Record<string, Partial<BMCConfig>> = {
     contract_budget_usd: 100,
   },
   GLD: {
-    preferred_dte: [0, 1, 2, 3, 4, 5],
+    preferred_dte: [1, 2, 3, 4, 5],
     max_spread: 0.15,
     premium_min: 0.05,
     premium_max: 2.00,
     scan_start: "09:35",
-    scan_end: "13:30",
-    contract_budget_usd: 50,
-    straddle_richness_max: 2.0,
-    straddle_richness_ideal: 1.2,
+    scan_end: "13:30",              // COMEX session (zero overlap with SPY 13:30-15:55)
+    contract_budget_usd: 100,
+    signal_threshold: 0.30,         // low threshold — strangle_pct gate does the work
+    direction_mode: "long_only",    // calls only (puts dead for GLD)
+    options_gate_enabled: true,     // enable strangle_pct richness gate
+    straddle_richness_max: 999,     // effectively disabled (strangle_pct never this high)
+    straddle_richness_ideal: 0.9,   // legacy field, not used for GLD
   },
 };
 
