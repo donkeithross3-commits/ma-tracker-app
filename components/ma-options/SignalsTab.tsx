@@ -610,6 +610,8 @@ export default function SignalsTab() {
 
   // Boot phase telemetry from bmc-signal response
   const [bootPhase, setBootPhase] = useState<{ phase: string; detail: string } | null>(null);
+  // Stale telemetry flag — true when showing pre-restart cached state
+  const [isStale, setIsStale] = useState(false);
 
   // Model availability per ticker (fetched from registry on mount)
   const [modelAvailability, setModelAvailability] = useState<Record<string, ModelAvailability>>({});
@@ -705,29 +707,33 @@ export default function SignalsTab() {
       if (!res.ok) return;
       const data = await res.json();
       const polledRunning = data.running ?? false;
-      const isStale = data.stale === true; // pre-restart cached state
+      const isStaleData = data.stale === true; // pre-restart cached state
       // If we're in the start grace period and the poll says not running yet,
       // keep showing "Starting..." — the engine is still booting up.
       const inStartGrace = startingUntilRef.current > Date.now();
 
-      if (polledRunning && !isStale) {
+      if (polledRunning && !isStaleData) {
         // Fresh running state confirmed — clear any grace period
         startingUntilRef.current = 0;
         setRunning(true);
-      } else if (isStale) {
+        setIsStale(false);
+      } else if (isStaleData) {
         // During restart: stale telemetry preserved from before restart
         // Keep showing running state but don't clear grace
         setRunning(true);
+        setIsStale(true);
       } else if (!inStartGrace) {
         setRunning(false);
+        setIsStale(false);
       }
       // else: in grace period + not running yet → keep optimistic running=true
 
       // Store boot phase from bmc-signal response
       if (data.boot_phase) {
         setBootPhase(data.boot_phase);
-      } else if (polledRunning && !isStale) {
+      } else if (polledRunning && !isStaleData) {
         setBootPhase(null);
+        setIsStale(false);
       }
       setEngineMode(data.engine_mode ?? "running");
 
@@ -2123,20 +2129,22 @@ export default function SignalsTab() {
       <div className="flex items-center gap-3 text-sm">
         <div className="flex items-center gap-1.5">
           <div className={`w-2 h-2 rounded-full ${
-            running && runningTickers.length === 0
+            (running && runningTickers.length === 0) || isStale || bootPhase
               ? "bg-amber-500 animate-pulse"
               : running
               ? "bg-green-500"
               : "bg-gray-600"
           }`} />
-          <span className={running && runningTickers.length === 0 ? "text-amber-400" : "text-gray-400"}>
-            {running
+          <span className={(running && runningTickers.length === 0) || isStale || bootPhase ? "text-amber-400" : "text-gray-400"}>
+            {isStale || bootPhase
+              ? (bootPhase?.detail || (bootPhase?.phase ? signalsBootPhaseLabel(bootPhase.phase) : "Restarting..."))
+              : running
               ? runningTickers.length === 0
                 ? "Starting..."
                 : "Running"
               : "Stopped"}
           </span>
-          {running && runningTickers.length > 0 && (
+          {running && runningTickers.length > 0 && !isStale && !bootPhase && (
             <span className="text-gray-600 text-xs">
               ({runningTickers.length} ticker{runningTickers.length !== 1 ? "s" : ""})
             </span>
@@ -3094,9 +3102,9 @@ export default function SignalsTab() {
                 </button>
               ) : (
                 <div className="flex items-center gap-1.5">
-                  {runningTickers.length === 0 && (
+                  {(runningTickers.length === 0 || isStale || bootPhase) && (
                     <span className="text-xs text-amber-400 animate-pulse">
-                      {bootPhase?.detail || (bootPhase?.phase ? signalsBootPhaseLabel(bootPhase.phase) : "Starting engine...")}
+                      {bootPhase?.detail || (bootPhase?.phase ? signalsBootPhaseLabel(bootPhase.phase) : isStale ? "Restarting..." : "Starting engine...")}
                     </span>
                   )}
                   {activeConfigDirty && runningTickers.includes(activeTicker) && (
