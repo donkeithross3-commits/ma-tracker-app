@@ -2379,7 +2379,38 @@ class IBDataAgent:
             return {"error": f"Strategy {strategy_id} does not support model swapping"}
 
         result = await self._run_in_thread(state.strategy.swap_model, version_id)
+
+        # Apply ticker profile defaults to engine config so scan window,
+        # threshold, budget, etc. match the ticker's tuned settings.
+        config_defaults = result.get("config_defaults")
+        if result.get("success") and config_defaults:
+            self.execution_engine.update_strategy_config(strategy_id, config_defaults)
+            logger.info(
+                "Applied ticker profile defaults after model swap on %s: %s",
+                strategy_id, list(config_defaults.keys()),
+            )
+            # If this is a directional pair, apply to the sibling too
+            resolved = self._resolve_strategy_ids(
+                strategy_id.replace("_up", "").replace("_down", "")
+            )
+            for sid in resolved:
+                if sid != strategy_id and sid in self.execution_engine._strategies:
+                    self.execution_engine.update_strategy_config(sid, config_defaults)
+                    logger.info("Applied ticker profile defaults to sibling %s", sid)
+
         self._persist_engine_config("model_swap")
+
+        # Push telemetry immediately so dashboard sees new config
+        try:
+            if self.execution_engine.is_running and self.websocket:
+                telemetry = self.execution_engine.get_telemetry()
+                await self.websocket.send(json.dumps({
+                    "type": "execution_telemetry",
+                    **telemetry
+                }))
+        except Exception:
+            logger.debug("Failed to push telemetry after model swap", exc_info=True)
+
         return result
 
     async def _handle_execution_resume(self, payload: dict) -> dict:

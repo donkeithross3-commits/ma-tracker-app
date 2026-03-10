@@ -838,6 +838,24 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             len(new_model.feature_names), swap_ms,
         )
 
+        # Build default config from ticker profile so the agent handler
+        # can apply it to state.config (ensures scan window, threshold, etc.
+        # match the ticker's tuned defaults after a model swap).
+        profile = _get_ticker_profile(self._ticker)
+        default_config = {**_DEFAULTS, **profile}
+        # Only include user-facing config keys (exclude internal plumbing)
+        config_defaults = {
+            k: default_config[k] for k in (
+                "signal_threshold", "signal_threshold_auto", "direction_mode",
+                "scan_start", "scan_end", "contract_budget_usd", "max_contracts",
+                "cooldown_minutes", "decision_interval_seconds",
+                "otm_target_pct", "max_spread", "premium_min", "premium_max",
+                "preferred_dte", "options_gate_enabled",
+                "straddle_richness_min", "straddle_richness_max",
+                "richness_source",
+            ) if k in default_config
+        }
+
         return {
             "success": True,
             "previous_version": previous_version,
@@ -845,6 +863,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "model_type": new_model.model_type,
             "n_features": len(new_model.feature_names),
             "swap_time_ms": round(swap_ms, 1),
+            "config_defaults": config_defaults,
         }
 
     # ------------------------------------------------------------------
