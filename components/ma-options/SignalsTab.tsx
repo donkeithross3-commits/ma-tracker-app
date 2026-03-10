@@ -625,7 +625,17 @@ export default function SignalsTab() {
   // Initialize from localStorage cache to survive page refreshes
   const [configs, setConfigs] = useState<Record<string, BMCConfig>>(() => {
     const cached = loadCachedConfigs();
-    if (cached) return cached;
+    if (cached) {
+      // Re-apply TICKER_DEFAULTS on top of cached configs so critical per-ticker
+      // fields (direction_mode, options_gate_enabled, scan times, richness) are
+      // never stale from an old localStorage snapshot.
+      const merged: Record<string, BMCConfig> = {};
+      for (const ticker of ["SPY", "QQQ", "GLD", "SLV"]) {
+        const base = cached[ticker] || makeDefaultConfig(ticker);
+        merged[ticker] = { ...base, ...TICKER_DEFAULTS[ticker], ticker };
+      }
+      return merged;
+    }
     return {
       SPY: makeDefaultConfig("SPY"),
       QQQ: makeDefaultConfig("QQQ"),
