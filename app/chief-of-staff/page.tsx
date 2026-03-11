@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Send, Bot, Zap, Clock, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowLeft, Send, Bot, Zap, Clock, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
@@ -79,6 +79,7 @@ export default function ChiefOfStaffPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -179,6 +180,30 @@ export default function ChiefOfStaffPage() {
     }
   };
 
+  const loadFromActivity = useCallback((entry: ActivityEntry) => {
+    setSelectedActivityId(entry.message_id);
+    setMessages([
+      { role: "user", content: entry.user_message },
+      {
+        role: "assistant",
+        content: entry.response,
+        specialist: entry.specialist,
+        escalated: entry.escalated,
+        thinking: entry.thinking,
+        latency_ms: entry.latency_ms,
+        model: entry.model,
+      },
+    ]);
+    inputRef.current?.focus();
+  }, []);
+
+  const clearChat = useCallback(() => {
+    setMessages([]);
+    setSelectedActivityId(null);
+    setInput("");
+    inputRef.current?.focus();
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* Header */}
@@ -193,6 +218,15 @@ export default function ChiefOfStaffPage() {
           </div>
           <span className="text-xs text-gray-500">DeepSeek-R1-32B · Opus escalation</span>
         </div>
+        {messages.length > 0 && (
+          <button
+            onClick={clearChat}
+            className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+          >
+            <RotateCcw className="w-3 h-3" />
+            New chat
+          </button>
+        )}
       </div>
 
       {/* Two-panel layout */}
@@ -275,30 +309,38 @@ export default function ChiefOfStaffPage() {
             {activity.length === 0 && (
               <div className="text-center text-gray-700 mt-10 text-sm">No activity yet</div>
             )}
-            {activity.map((entry) => (
-              <div
-                key={entry.message_id}
-                className="px-3 py-2 border-b border-gray-800/50 hover:bg-gray-900/50"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <SpecialistBadge specialist={entry.specialist} escalated={entry.escalated} />
-                  <div className="flex items-center gap-2 text-xs text-gray-600">
-                    <span className="flex items-center gap-0.5">
-                      <Clock className="w-3 h-3" />
-                      {entry.latency_ms}ms
-                    </span>
-                    <span>
-                      {new Date(entry.timestamp).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
+            {activity.map((entry) => {
+              const isSelected = selectedActivityId === entry.message_id;
+              return (
+                <button
+                  key={entry.message_id}
+                  onClick={() => loadFromActivity(entry)}
+                  className={`w-full text-left px-3 py-2 border-b border-gray-800/50 transition-colors ${
+                    isSelected
+                      ? "bg-cyan-900/20 border-l-2 border-l-cyan-500"
+                      : "hover:bg-gray-900/50 border-l-2 border-l-transparent"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <SpecialistBadge specialist={entry.specialist} escalated={entry.escalated} />
+                    <div className="flex items-center gap-2 text-xs text-gray-600">
+                      <span className="flex items-center gap-0.5">
+                        <Clock className="w-3 h-3" />
+                        {entry.latency_ms}ms
+                      </span>
+                      <span>
+                        {new Date(entry.timestamp).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <p className="text-xs text-gray-400 truncate">{entry.user_message}</p>
-                <p className="text-xs text-gray-500 truncate mt-0.5">{entry.response}</p>
-              </div>
-            ))}
+                  <p className="text-xs text-gray-400 truncate">{entry.user_message}</p>
+                  <p className="text-xs text-gray-500 truncate mt-0.5">{entry.response}</p>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
