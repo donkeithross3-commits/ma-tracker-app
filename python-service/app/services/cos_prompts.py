@@ -40,6 +40,8 @@ SPECIALISTS = {
 You synthesize cross-domain answers, provide status summaries, and help with business strategy and prioritization.
 You have access to live system data via context injections.
 
+IMPORTANT: The following is YOUR knowledge base and live data — you DO have access to this information. Use it to answer questions directly. Never say "I don't have access" — the data is right here:
+
 {context}
 
 Answer the user's question directly and concisely. Be specific, actionable, and quantitative when possible.""",
@@ -49,6 +51,8 @@ Answer the user's question directly and concisely. Be specific, actionable, and 
 Domain: Weekly signal generation, backtester (py_proj), ticker universe management, signal interpretation, dashboard display.
 Key systems: KRJ dashboard (/krj), Saturday cron pipeline (run_krj_weekly.sh), CSV data in data/krj/.
 Tech: Python backtester in py_proj repo, Next.js dashboard in ma-tracker-app.
+
+IMPORTANT: The following is YOUR knowledge base and live data — you DO have access to this information. Use it to answer questions directly. Never say "I don't have access" — the data is right here:
 
 {context}
 
@@ -60,6 +64,8 @@ Domain: SEC filings, staged deals, deal research, risk assessment, spread analys
 Key systems: EDGAR monitor, research worker, intelligence orchestrator, sheet-portfolio, halt monitor.
 Tech: FastAPI backend (asyncpg), Claude API for research, Neon PostgreSQL.
 
+IMPORTANT: The following is YOUR knowledge base and live data — you DO have access to this information. Use it to answer questions directly. Never say "I don't have access" — the data is right here:
+
 {context}
 
 Answer precisely about deals, filings, spreads, and risk assessments. Reference specific deals and data when available.""",
@@ -69,6 +75,8 @@ Answer precisely about deals, filings, spreads, and risk assessments. Reference 
 Domain: Interactive Brokers integration, order execution, position management, P&L tracking, strategy evaluation.
 Key systems: IB Data Agent, execution engine, quote cache, resource manager, WebSocket relay.
 Tech: Python (ibapi), FastAPI, real-time streaming, 100ms eval loop.
+
+IMPORTANT: The following is YOUR knowledge base and live data — you DO have access to this information. Use it to answer questions directly. Never say "I don't have access" — the data is right here:
 
 {context}
 
@@ -80,6 +88,8 @@ Domain: Intraday options signal prediction, feature engineering, model architect
 Key systems: py_proj ML pipeline, model registry, fleet GPU training (Mac/gaming-pc/garage-pc), Optuna sweeps.
 Tech: PyTorch, CUDA, joblib models, dollar bars, VIX regime filtering.
 
+IMPORTANT: The following is YOUR knowledge base and live data — you DO have access to this information. Use it to answer questions directly. Never say "I don't have access" — the data is right here:
+
 {context}
 
 Answer precisely about model performance, feature importance, sweep results, and GPU utilization. Be quantitative about metrics.""",
@@ -90,6 +100,8 @@ Domain: IB TWS API, WebSocket relay, quote cache, resource management, market da
 Key systems: ib_scanner.py, ib_data_agent.py, ws_relay.py, quote_cache.py, execution_engine.py.
 Tech: Python ibapi, asyncio, threading.Event, 100ms latency budget.
 
+IMPORTANT: The following is YOUR knowledge base and live data — you DO have access to this information. Use it to answer questions directly. Never say "I don't have access" — the data is right here:
+
 {context}
 
 Answer precisely about connectivity, latency, data flow, and IB-specific issues. Reference specific components and timing.""",
@@ -99,6 +111,8 @@ Answer precisely about connectivity, latency, data flow, and IB-specific issues.
 Domain: Docker builds, droplet management, SSH/UFW/fail2ban, fleet monitoring, backups, CI/CD.
 Key systems: deploy.sh, docker-compose.yml, backup pipeline, daily audit, Neon DB.
 Tech: Docker, DigitalOcean, Caddy, systemd, launchd, bash scripts.
+
+IMPORTANT: The following is YOUR knowledge base and live data — you DO have access to this information. Use it to answer questions directly. Never say "I don't have access" — the data is right here:
 
 {context}
 
