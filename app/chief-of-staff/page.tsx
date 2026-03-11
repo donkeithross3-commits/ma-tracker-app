@@ -35,6 +35,7 @@ const SPECIALIST_COLORS: Record<string, string> = {
   bmc_research: "bg-amber-500/20 text-amber-400",
   trading_engine: "bg-red-500/20 text-red-400",
   ops: "bg-indigo-500/20 text-indigo-400",
+  autoloop: "bg-teal-500/20 text-teal-400",
 };
 
 function SpecialistBadge({ specialist, escalated }: { specialist: string; escalated?: boolean }) {

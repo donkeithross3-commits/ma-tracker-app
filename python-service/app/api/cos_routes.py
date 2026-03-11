@@ -57,6 +57,31 @@ async def cos_chat_stream(req: ChatRequest):
     )
 
 
+class ActivityPostRequest(BaseModel):
+    """Direct activity log entry — no LLM call, just log it."""
+    user_message: str = Field(..., min_length=1, max_length=5000)
+    response: str = Field(..., min_length=1, max_length=10000)
+    specialist: str = "autoloop"
+    model: str = "system"
+    confidence: float = 1.0
+
+
+@router.post("/activity")
+async def cos_post_activity(req: ActivityPostRequest):
+    """Append a direct activity entry (for automated systems like autoloop)."""
+    from ..services.cos_activity import ActivityEntry, append_activity
+
+    entry = ActivityEntry(
+        user_message=req.user_message,
+        response=req.response,
+        specialist=req.specialist,
+        model=req.model,
+        confidence=req.confidence,
+    )
+    append_activity(entry)
+    return {"ok": True, "message_id": entry.message_id}
+
+
 @router.get("/activity")
 async def cos_activity(
     limit: int = Query(50, ge=1, le=500),
