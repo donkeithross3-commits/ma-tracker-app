@@ -134,9 +134,9 @@ class ChiefOfStaffService:
 
     async def _route(self, message: str, history: list) -> dict:
         """Send message to DeepSeek with CoS routing prompt to get JSON routing decision."""
-        from .cos_prompts import SPECIALISTS
+        from .cos_prompts import COS_ROUTING_PROMPT
 
-        routing_prompt = SPECIALISTS["cos"]
+        routing_prompt = COS_ROUTING_PROMPT
         messages = []
         for msg in history[-5:]:  # Only last 5 for routing context
             messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
@@ -223,12 +223,27 @@ class ChiefOfStaffService:
 
     @staticmethod
     def _parse_think_blocks(raw: str) -> tuple[str, str]:
-        """Extract <think>...</think> blocks, return (thinking, clean_response)."""
+        """Extract <think>...</think> blocks, return (thinking, clean_response).
+
+        DeepSeek-R1 sometimes emits thinking without <think> tags — just a
+        block of text followed by </think>. Handle both formats.
+        """
+        # Standard format: <think>...</think>
         think_pattern = re.compile(r"<think>(.*?)</think>", re.DOTALL)
         thinks = think_pattern.findall(raw)
-        thinking = "\n".join(t.strip() for t in thinks)
-        clean = think_pattern.sub("", raw).strip()
-        return thinking, clean
+        if thinks:
+            thinking = "\n".join(t.strip() for t in thinks)
+            clean = think_pattern.sub("", raw).strip()
+            return thinking, clean
+
+        # DeepSeek format: text</think>\nactual response (no opening tag)
+        if "</think>" in raw:
+            parts = raw.split("</think>", 1)
+            thinking = parts[0].strip()
+            clean = parts[1].strip() if len(parts) > 1 else ""
+            return thinking, clean
+
+        return "", raw.strip()
 
     async def check_vllm_health(self) -> dict:
         """Check if vLLM endpoint is reachable."""
