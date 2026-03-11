@@ -364,7 +364,7 @@ export default function ChiefOfStaffPage() {
                   </div>
                   {/* Live thinking stream */}
                   {streamThinking && (
-                    <pre className="text-xs text-gray-500 bg-gray-950 rounded p-2 whitespace-pre-wrap max-h-32 overflow-y-auto mb-1">
+                    <pre className="text-xs text-gray-500 bg-gray-950 rounded p-2 whitespace-pre-wrap max-h-48 overflow-y-auto mb-1">
                       {streamThinking}
                     </pre>
                   )}

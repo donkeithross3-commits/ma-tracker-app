@@ -304,56 +304,43 @@ class ChiefOfStaffService:
             # Stream from vLLM
             yield self._sse("phase", {"phase": "executing", "model": "deepseek", "escalated": False})
             full_text = ""
-            in_think = False
-            think_buf = ""
-            response_started = False
+            # DeepSeek-R1-Distill always thinks first, often WITHOUT <think> tag.
+            # Default to thinking mode, stream as thinking_delta until </think>.
+            in_think = True
+            think_sent = 0  # chars of thinking already sent as deltas
+            think_done = False
 
             async for token in self._stream_vllm(specialist_prompt, exec_messages):
                 full_text += token
 
-                # Track <think> state for real-time streaming
-                if not in_think and "<think>" in full_text and "</think>" not in full_text:
-                    in_think = True
-                    # Extract what's after <think>
-                    after = full_text.split("<think>", 1)[1]
-                    think_buf = after
-                    yield self._sse("thinking_delta", {"content": after})
-                    continue
-
                 if in_think:
-                    if "</think>" in full_text:
-                        # Thinking complete — extract final thinking and start response
+                    # Strip <think> tag if present (it's just a marker, not content)
+                    think_text = full_text.replace("<think>", "")
+
+                    if "</think>" in think_text:
+                        # Thinking complete
                         in_think = False
-                        parts = full_text.split("</think>", 1)
-                        think_content = parts[0].replace("<think>", "").strip()
+                        think_done = True
+                        parts = think_text.split("</think>", 1)
+                        think_content = parts[0]
                         remainder = parts[1] if len(parts) > 1 else ""
-                        # Send any remaining think content
-                        new_think = think_content[len(think_buf):]
-                        if new_think:
-                            yield self._sse("thinking_delta", {"content": new_think})
+                        # Send any unsent thinking
+                        unsent = think_content[think_sent:]
+                        if unsent:
+                            yield self._sse("thinking_delta", {"content": unsent})
                         yield self._sse("thinking_done", {})
                         if remainder.strip():
-                            response_started = True
                             yield self._sse("text_delta", {"content": remainder.strip()})
                     else:
                         # Still thinking — stream delta
-                        after_think = full_text.split("<think>", 1)[1]
-                        new_think = after_think[len(think_buf):]
-                        if new_think:
-                            think_buf = after_think
-                            yield self._sse("thinking_delta", {"content": new_think})
+                        unsent = think_text[think_sent:]
+                        if unsent:
+                            think_sent = len(think_text)
+                            yield self._sse("thinking_delta", {"content": unsent})
                     continue
 
-                # No think block (or already past it) — stream response tokens
-                if not response_started and "</think>" in full_text:
-                    # We missed the transition; extract response portion
-                    after_close = full_text.split("</think>", 1)[1].strip()
-                    if after_close:
-                        response_started = True
-                        yield self._sse("text_delta", {"content": after_close})
-                elif not in_think:
-                    # Direct response (no think blocks at all, or past them)
-                    yield self._sse("text_delta", {"content": token})
+                # Past thinking — stream response tokens
+                yield self._sse("text_delta", {"content": token})
 
             model_used = self.vllm_model
             thinking, clean_response = self._parse_think_blocks(full_text)
