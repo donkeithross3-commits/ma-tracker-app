@@ -9,16 +9,25 @@ Product lines:
 3. Algo Trading — IB execution engine, BMC intraday options strategy, fleet GPU training
 
 Output ONLY a JSON routing decision, nothing else:
-{{"specialist": "cos|krj_signals|deal_intel|algo_trading|ops|bmc_research|trading_engine", "confidence": 0.0-1.0, "needs_context": ["fleet", "deals", "positions", "signals"], "escalate": false, "reason": "brief reason"}}
+{{"specialist": "cos|krj_signals|deal_intel|algo_trading|ops|bmc_research|trading_engine", "confidence": 0.0-1.0, "needs_context": [...], "escalate": false, "reason": "brief reason"}}
+
+Available context sources (use these keys in needs_context):
+  Fleet & Ops: fleet, fleet_alerts, fleet_utilization, fleet_cpu
+  Trading & Execution: ib_status, positions, open_orders, execution_status, ib_pnl, pnl_summary, agent_state
+  EDGAR & Intelligence: deals, edgar_status, staged_deals, halts, halt_recent, watchlist
+  KRJ Signals: signals
+  Portfolio (container): portfolio, portfolio_health, risk_summary, risk_changes, scheduler
 
 Routing rules:
-- krj_signals: KRJ dashboard, weekly signals, backtester, ticker lists
-- deal_intel: M&A deals, EDGAR filings, staged deals, risk assessment, event-driven portfolio
-- algo_trading: IB execution engine, order flow, strategies, positions, P&L
-- bmc_research: ML models, feature engineering, GPU training, sweep orchestration
-- trading_engine: IB agent, WebSocket relay, quote cache, low-latency execution
-- ops: Deployment, Docker, droplet, security, monitoring, backups, fleet infra
-- cos: Cross-domain questions, business strategy, prioritization, status summaries
+- krj_signals: KRJ dashboard, weekly signals, backtester, ticker lists. Context: signals
+- deal_intel: M&A deals, EDGAR filings, staged deals, risk assessment, event-driven portfolio. Context: deals, edgar_status, staged_deals, halts, halt_recent, watchlist, portfolio, risk_summary, risk_changes
+- algo_trading: IB execution engine, order flow, strategies, positions, P&L. Context: ib_status, positions, open_orders, execution_status, ib_pnl, pnl_summary, agent_state
+- bmc_research: ML models, feature engineering, GPU training, sweep orchestration. Context: fleet, fleet_utilization, fleet_cpu
+- trading_engine: IB agent, WebSocket relay, quote cache, low-latency execution. Context: ib_status, positions, open_orders, execution_status, agent_state
+- ops: Deployment, Docker, droplet, security, monitoring, backups, fleet infra. Context: fleet, fleet_alerts, fleet_utilization, fleet_cpu, scheduler
+- cos: Cross-domain questions, business strategy, prioritization, status summaries. Context: any combination relevant to the question
+
+Only request context sources that are relevant to answering the question. Do not request all sources.
 
 Escalate when: real-money decisions, ambiguous situations, complex multi-domain tradeoffs, confidence < 0.5."""
 

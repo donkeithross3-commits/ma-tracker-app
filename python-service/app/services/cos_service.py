@@ -72,14 +72,22 @@ class ChiefOfStaffService:
         escalate = routing.get("escalate", False)
         context_sources = routing.get("needs_context", [])
 
-        # Phase 2: Fetch context
+        # Phase 2: Fetch context (live API data + static knowledge)
         context_text = await self._fetch_context(context_sources)
+
+        from .cos_knowledge import get_knowledge_for_specialist
+
+        knowledge_text = get_knowledge_for_specialist(specialist)
+        if knowledge_text:
+            combined_context = f"# Static Knowledge\n\n{knowledge_text}\n\n# Live Context\n\n{context_text}"
+        else:
+            combined_context = context_text
 
         # Phase 3: Execute
         from .cos_prompts import SPECIALISTS
 
         specialist_prompt = SPECIALISTS.get(specialist, SPECIALISTS["cos"])
-        specialist_prompt = specialist_prompt.replace("{context}", context_text)
+        specialist_prompt = specialist_prompt.replace("{context}", combined_context)
 
         # Build messages for execution
         exec_messages = []
@@ -155,16 +163,42 @@ class ChiefOfStaffService:
         return {"specialist": "cos", "confidence": 0.5, "needs_context": [], "escalate": False}
 
     async def _fetch_context(self, sources: list) -> str:
-        """Fetch context from internal FastAPI endpoints."""
+        """Fetch context from internal FastAPI endpoints and portfolio container."""
         if not sources:
             return "No additional context requested."
 
         base = "http://localhost:8000"
+        portfolio_base = "http://localhost:8001"
+
         source_map = {
+            # Fleet & Ops
             "fleet": f"{base}/fleet/status",
+            "fleet_alerts": f"{base}/fleet/alerts",
+            "fleet_utilization": f"{base}/fleet/utilization",
+            "fleet_cpu": f"{base}/fleet/cpu-utilization",
+            # Trading & Execution
+            "ib_status": f"{base}/options/relay/ib-status",
+            "positions": f"{base}/options/relay/positions",
+            "open_orders": f"{base}/options/relay/open-orders",
+            "execution_status": f"{base}/options/relay/execution/status",
+            "ib_pnl": f"{base}/options/relay/execution/ib-pnl",
+            "pnl_summary": f"{base}/options/relay/pnl-history/summary",
+            "agent_state": f"{base}/options/relay/agent-state",
+            # EDGAR & Intelligence
             "deals": f"{base}/intelligence/deals",
-            "positions": f"{base}/options/relay/ib-status",
-            "signals": f"{base}/krj/signals/latest",
+            "edgar_status": f"{base}/edgar/monitoring/status",
+            "staged_deals": f"{base}/edgar/staged-deals",
+            "halts": f"{base}/halts/stats",
+            "halt_recent": f"{base}/halts/recent",
+            "watchlist": f"{base}/intelligence/watch-list",
+            # KRJ Signals
+            "signals": f"{base}/krj/signals/single?ticker=SPY",
+            # Portfolio (port 8001)
+            "portfolio": f"{portfolio_base}/portfolio/deals",
+            "portfolio_health": f"{portfolio_base}/portfolio/health",
+            "risk_summary": f"{portfolio_base}/risk/summary",
+            "risk_changes": f"{portfolio_base}/risk/changes",
+            "scheduler": f"{portfolio_base}/scheduler/health",
         }
 
         parts = []
