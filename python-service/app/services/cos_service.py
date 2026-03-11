@@ -6,7 +6,7 @@ import os
 import re
 import time
 import uuid
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 import httpx
 
@@ -254,6 +254,177 @@ class ChiefOfStaffService:
         )
         content = response.content[0].text
         return content, model
+
+    async def chat_stream(self, message: str, conversation_history: Optional[list] = None) -> AsyncGenerator[str, None]:
+        """Streaming version of chat() — yields SSE events as they arrive."""
+        from .cos_activity import ActivityEntry, append_activity
+        from .cos_knowledge import get_knowledge_for_specialist
+
+        start = time.monotonic()
+        history = (conversation_history or [])[-20:]
+
+        # Phase 1: Route (non-streaming, fast)
+        yield self._sse("phase", {"phase": "routing"})
+        routing = await self._route(message, history)
+        specialist = routing.get("specialist", "cos")
+        confidence = routing.get("confidence", 0.5)
+        escalate = routing.get("escalate", False)
+        context_sources = routing.get("needs_context", [])
+        yield self._sse("routed", {"specialist": specialist, "confidence": confidence, "escalate": escalate})
+
+        # Phase 2: Fetch context
+        yield self._sse("phase", {"phase": "context", "sources": context_sources})
+        context_text = await self._fetch_context(context_sources)
+        knowledge_text = get_knowledge_for_specialist(specialist)
+        if knowledge_text:
+            combined_context = f"# Static Knowledge\n\n{knowledge_text}\n\n# Live Context\n\n{context_text}"
+        else:
+            combined_context = context_text
+
+        # Phase 3: Build execution prompt
+        from .cos_prompts import SPECIALISTS
+        specialist_prompt = SPECIALISTS.get(specialist, SPECIALISTS["cos"])
+        specialist_prompt = specialist_prompt.replace("{context}", combined_context)
+
+        exec_messages = []
+        for msg in history:
+            exec_messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+        exec_messages.append({"role": "user", "content": message})
+
+        escalated = escalate or confidence < self.escalation_threshold
+
+        if escalated:
+            # Opus doesn't stream in our current setup — fall back to non-streaming
+            yield self._sse("phase", {"phase": "executing", "model": "opus", "escalated": True})
+            raw_response, model_used = await self._call_opus(specialist_prompt, exec_messages)
+            thinking, clean_response = self._parse_think_blocks(raw_response)
+            yield self._sse("thinking", {"content": thinking}) if thinking else None
+            yield self._sse("text", {"content": clean_response})
+        else:
+            # Stream from vLLM
+            yield self._sse("phase", {"phase": "executing", "model": "deepseek", "escalated": False})
+            full_text = ""
+            in_think = False
+            think_buf = ""
+            response_started = False
+
+            async for token in self._stream_vllm(specialist_prompt, exec_messages):
+                full_text += token
+
+                # Track <think> state for real-time streaming
+                if not in_think and "<think>" in full_text and "</think>" not in full_text:
+                    in_think = True
+                    # Extract what's after <think>
+                    after = full_text.split("<think>", 1)[1]
+                    think_buf = after
+                    yield self._sse("thinking_delta", {"content": after})
+                    continue
+
+                if in_think:
+                    if "</think>" in full_text:
+                        # Thinking complete — extract final thinking and start response
+                        in_think = False
+                        parts = full_text.split("</think>", 1)
+                        think_content = parts[0].replace("<think>", "").strip()
+                        remainder = parts[1] if len(parts) > 1 else ""
+                        # Send any remaining think content
+                        new_think = think_content[len(think_buf):]
+                        if new_think:
+                            yield self._sse("thinking_delta", {"content": new_think})
+                        yield self._sse("thinking_done", {})
+                        if remainder.strip():
+                            response_started = True
+                            yield self._sse("text_delta", {"content": remainder.strip()})
+                    else:
+                        # Still thinking — stream delta
+                        after_think = full_text.split("<think>", 1)[1]
+                        new_think = after_think[len(think_buf):]
+                        if new_think:
+                            think_buf = after_think
+                            yield self._sse("thinking_delta", {"content": new_think})
+                    continue
+
+                # No think block (or already past it) — stream response tokens
+                if not response_started and "</think>" in full_text:
+                    # We missed the transition; extract response portion
+                    after_close = full_text.split("</think>", 1)[1].strip()
+                    if after_close:
+                        response_started = True
+                        yield self._sse("text_delta", {"content": after_close})
+                elif not in_think:
+                    # Direct response (no think blocks at all, or past them)
+                    yield self._sse("text_delta", {"content": token})
+
+            model_used = self.vllm_model
+            thinking, clean_response = self._parse_think_blocks(full_text)
+
+        latency_ms = int((time.monotonic() - start) * 1000)
+        message_id = str(uuid.uuid4())
+
+        # Final metadata event
+        yield self._sse("done", {
+            "message_id": message_id,
+            "specialist": specialist,
+            "escalated": escalated,
+            "latency_ms": latency_ms,
+            "model": model_used,
+            "confidence": confidence,
+        })
+
+        # Log activity
+        entry = ActivityEntry(
+            message_id=message_id,
+            user_message=message,
+            specialist=specialist,
+            escalated=escalated,
+            thinking=thinking,
+            response=clean_response,
+            confidence=confidence,
+            latency_ms=latency_ms,
+            model=model_used,
+            context_sources=context_sources,
+        )
+        try:
+            append_activity(entry)
+        except Exception as e:
+            logger.warning(f"Failed to log activity: {e}")
+
+    async def _stream_vllm(self, system_prompt: str, messages: list) -> AsyncGenerator[str, None]:
+        """Stream tokens from vLLM OpenAI-compatible API."""
+        api_messages = [{"role": "system", "content": system_prompt}] + messages
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "POST",
+                f"{self.vllm_url}/v1/chat/completions",
+                json={
+                    "model": self.vllm_model,
+                    "messages": api_messages,
+                    "max_tokens": 4096,
+                    "temperature": 0.6,
+                    "stream": True,
+                },
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk["choices"][0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+
+    @staticmethod
+    def _sse(event: str, data: dict) -> str:
+        """Format a Server-Sent Event."""
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
     @staticmethod
     def _parse_think_blocks(raw: str) -> tuple[str, str]:

@@ -6,9 +6,10 @@ const PYTHON_SERVICE_URL =
 /**
  * Proxy CoS API requests to the FastAPI backend.
  *
- * POST /api/cos/chat    → POST {PYTHON_SERVICE_URL}/cos/chat
- * GET  /api/cos/activity → GET  {PYTHON_SERVICE_URL}/cos/activity
- * GET  /api/cos/health  → GET  {PYTHON_SERVICE_URL}/cos/health
+ * POST /api/cos/chat         → POST {PYTHON_SERVICE_URL}/cos/chat (JSON)
+ * POST /api/cos/chat/stream  → POST {PYTHON_SERVICE_URL}/cos/chat/stream (SSE passthrough)
+ * GET  /api/cos/activity     → GET  {PYTHON_SERVICE_URL}/cos/activity
+ * GET  /api/cos/health       → GET  {PYTHON_SERVICE_URL}/cos/health
  */
 async function proxyCos(request: NextRequest) {
   try {
@@ -27,6 +28,27 @@ async function proxyCos(request: NextRequest) {
 
     if (request.method === "POST" || request.method === "PUT") {
       fetchOptions.body = await request.text();
+    }
+
+    // SSE streaming passthrough for /chat/stream
+    if (subPath === "/chat/stream") {
+      const response = await fetch(targetUrl, fetchOptions);
+      if (!response.ok || !response.body) {
+        const text = await response.text();
+        return NextResponse.json(
+          { error: text || "Stream failed" },
+          { status: response.status },
+        );
+      }
+      return new Response(response.body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
     }
 
     const response = await fetch(targetUrl, fetchOptions);

@@ -78,15 +78,19 @@ export default function ChiefOfStaffPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [streamPhase, setStreamPhase] = useState("");
+  const [streamThinking, setStreamThinking] = useState("");
+  const [streamText, setStreamText] = useState("");
+  const [streamMeta, setStreamMeta] = useState<{specialist?: string; escalated?: boolean} | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll on stream updates and new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, streamThinking, streamText]);
 
   // Poll activity feed
   useEffect(() => {
@@ -113,6 +117,10 @@ export default function ChiefOfStaffPage() {
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: msg }]);
     setLoading(true);
+    setStreamPhase("routing");
+    setStreamThinking("");
+    setStreamText("");
+    setStreamMeta(null);
 
     try {
       const history = messages.map((m) => ({
@@ -120,45 +128,114 @@ export default function ChiefOfStaffPage() {
         content: m.content,
       }));
 
-      const res = await fetch("/api/cos/chat", {
+      const res = await fetch("/api/cos/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg, conversation_history: history }),
       });
 
-      const data = await res.json();
+      if (!res.ok || !res.body) {
+        const errData = await res.json().catch(() => ({ error: "Stream failed" }));
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `Error: ${errData.error || errData.detail || "Unknown error"}` },
+        ]);
+        setLoading(false);
+        return;
+      }
 
-      if (res.ok) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: data.response,
-            specialist: data.specialist,
-            escalated: data.escalated,
-            thinking: data.thinking,
-            latency_ms: data.latency_ms,
-            model: data.model,
-          },
-        ]);
-        // Refresh activity after a response
-        try {
-          const actRes = await fetch("/api/cos/activity?limit=20");
-          if (actRes.ok) {
-            const actData = await actRes.json();
-            setActivity(actData.entries || []);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let thinkingAcc = "";
+      let textAcc = "";
+      let finalMeta: Record<string, unknown> = {};
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from buffer
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || ""; // keep incomplete line
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith("data: ") && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              switch (currentEvent) {
+                case "phase":
+                  setStreamPhase(data.phase);
+                  break;
+                case "routed":
+                  setStreamMeta({ specialist: data.specialist, escalated: data.escalate });
+                  break;
+                case "thinking_delta":
+                  thinkingAcc += data.content;
+                  setStreamThinking(thinkingAcc);
+                  setStreamPhase("thinking");
+                  break;
+                case "thinking_done":
+                  setStreamPhase("responding");
+                  break;
+                case "thinking":
+                  // Non-streaming thinking (Opus fallback)
+                  thinkingAcc = data.content;
+                  setStreamThinking(thinkingAcc);
+                  break;
+                case "text_delta":
+                  textAcc += data.content;
+                  setStreamText(textAcc);
+                  setStreamPhase("responding");
+                  break;
+                case "text":
+                  // Non-streaming text (Opus fallback)
+                  textAcc = data.content;
+                  setStreamText(textAcc);
+                  break;
+                case "done":
+                  finalMeta = data;
+                  break;
+              }
+            } catch {
+              // skip malformed
+            }
+            currentEvent = "";
           }
-        } catch {
-          // silent
         }
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: `Error: ${data.error || data.detail || "Unknown error"}`,
-          },
-        ]);
+      }
+
+      // Finalize — add completed message
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: textAcc,
+          specialist: (finalMeta.specialist as string) || streamMeta?.specialist || "",
+          escalated: (finalMeta.escalated as boolean) || false,
+          thinking: thinkingAcc,
+          latency_ms: (finalMeta.latency_ms as number) || 0,
+          model: (finalMeta.model as string) || "",
+        },
+      ]);
+      setStreamPhase("");
+      setStreamThinking("");
+      setStreamText("");
+      setStreamMeta(null);
+
+      // Refresh activity
+      try {
+        const actRes = await fetch("/api/cos/activity?limit=20");
+        if (actRes.ok) {
+          const actData = await actRes.json();
+          setActivity(actData.entries || []);
+        }
+      } catch {
+        // silent
       }
     } catch (err) {
       setMessages((prev) => [
@@ -168,10 +245,14 @@ export default function ChiefOfStaffPage() {
           content: `Connection error: ${err instanceof Error ? err.message : "Failed to reach CoS API"}`,
         },
       ]);
+      setStreamPhase("");
+      setStreamThinking("");
+      setStreamText("");
+      setStreamMeta(null);
     } finally {
       setLoading(false);
     }
-  }, [input, loading, messages]);
+  }, [input, loading, messages, streamMeta]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -266,10 +347,31 @@ export default function ChiefOfStaffPage() {
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-gray-900 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 text-sm text-gray-400">
-                    <div className="animate-pulse">Thinking...</div>
+                <div className="bg-gray-900 rounded-lg px-3 py-2 max-w-[85%]">
+                  {/* Phase indicator */}
+                  <div className="flex items-center gap-2 mb-1">
+                    {streamMeta?.specialist && (
+                      <SpecialistBadge specialist={streamMeta.specialist} escalated={streamMeta.escalated} />
+                    )}
+                    <span className="text-xs text-gray-500 animate-pulse">
+                      {streamPhase === "routing" && "Routing..."}
+                      {streamPhase === "context" && "Fetching context..."}
+                      {streamPhase === "executing" && "Connecting to model..."}
+                      {streamPhase === "thinking" && "Reasoning..."}
+                      {streamPhase === "responding" && "Writing..."}
+                      {!streamPhase && "Starting..."}
+                    </span>
                   </div>
+                  {/* Live thinking stream */}
+                  {streamThinking && (
+                    <pre className="text-xs text-gray-500 bg-gray-950 rounded p-2 whitespace-pre-wrap max-h-32 overflow-y-auto mb-1">
+                      {streamThinking}
+                    </pre>
+                  )}
+                  {/* Live response stream */}
+                  {streamText && (
+                    <div className="text-sm text-gray-200 whitespace-pre-wrap">{streamText}</div>
+                  )}
                 </div>
               </div>
             )}
