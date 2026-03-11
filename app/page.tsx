@@ -67,6 +67,15 @@ export default async function Home() {
     },
     {
       key: "ma-options",
+      href: "/chief-of-staff",
+      title: "Chief of Staff",
+      description: "AI orchestrator — routes questions to specialist agents, escalates to Opus",
+      badge: "New",
+      badgeClasses: "bg-cyan-500/20 text-cyan-400",
+      hoverBorder: "hover:border-cyan-500",
+    },
+    {
+      key: "ma-options",
       href: "/ai-research",
       title: "AI Disruption Research",
       description: "Saaspocalypse rotation scan — winners the market thinks are losers",

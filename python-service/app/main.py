@@ -32,6 +32,7 @@ from .api.options_routes import router as options_router
 from .api.ws_relay import router as ws_relay_router
 from .api.krj_routes import router as krj_router
 from .api.fleet_routes import router as fleet_router
+from .api.cos_routes import router as cos_router
 from .edgar.database import EdgarDatabase
 from .trade_history.database import init_trade_db, shutdown_trade_db
 
@@ -77,6 +78,9 @@ app.include_router(krj_router)
 
 # Include Fleet GPU monitoring (push-based checkins from GPU machines)
 app.include_router(fleet_router)
+
+# Include Chief of Staff orchestrator (DeepSeek-R1 + Opus escalation)
+app.include_router(cos_router)
 
 # Portfolio routes live exclusively in the portfolio container (port 8001).
 # All dashboard traffic already routes via PORTFOLIO_SERVICE_URL → python-portfolio.
@@ -557,6 +561,15 @@ async def shutdown_event():
             logger.info("✓ IB disconnected")
     except Exception as e:
         logger.error(f"Error disconnecting IB: {e}")
+
+    # 5. Close CoS service HTTP clients
+    try:
+        from .services.cos_service import _instance as cos_instance
+        if cos_instance:
+            await cos_instance.close()
+            logger.info("✓ CoS service closed")
+    except Exception as e:
+        logger.error(f"Error closing CoS service: {e}")
 
     logger.info("=" * 50)
     logger.info("SHUTDOWN COMPLETE - All resources cleaned up")
