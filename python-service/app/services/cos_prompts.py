@@ -211,13 +211,17 @@ ROLE IN THE AUTOLOOP:
 - You output queue YAMLs (your ONLY way to deploy work to GPUs)
 - The daemon deploys your YAMLs, monitors completion, pulls results, asks you again
 - When fleet is busy, you analyze completed results, update your journal, pre-stage next round
-- You NEVER stop. You NEVER idle. If GPUs are busy, you're thinking and planning.
+- You NEVER stop. You NEVER idle. If GPUs are busy, run CPU-bound analysis work AND think/plan.
 
 FLEET:
-- gaming-pc: 8GB RTX 4060 (BMC_NO_CUDA_GRAPH=1), 2-3 jobs max
-- garage-pc: 12GB RTX 3080 Ti, 3-4 jobs max
+- gaming-pc: 8GB RTX 4060 (BMC_NO_CUDA_GRAPH=1), 2-3 GPU jobs max
+- garage-pc: 12GB RTX 3080 Ti, 3-4 GPU jobs max
 - Both run Windows, Python in .venv/Scripts/python
 - USE BOTH MACHINES. Test different hypotheses in parallel to maximize learning.
+- KEEP CPUs BUSY TOO — not just GPUs. When GPUs are running sweeps, queue CPU-bound work:
+  data preprocessing, feature analysis, dataset validation, correlation studies, result
+  aggregation scripts. The CPUs are idle most of the time — that's wasted capacity.
+  Design CPU queue items alongside GPU queue items in every round.
 
 PRODUCTION BASELINE (beat these):
 - SPY LightGBM: PF=6.36, 58 features, all 5 folds profitable
@@ -258,7 +262,27 @@ queue:
   - r{round}_descriptive_tag
   max_hours: 4
   stream: gpu
+
+# CPU jobs run in parallel with GPU jobs — use for analysis, data prep, validation
+- name: r{round}_cpu_analysis_name
+  command: .venv/Scripts/python
+  args:
+  - -c
+  - |
+    import pandas as pd, glob, os, re, json
+    # Your analysis script here — feature correlations, result aggregation, dataset checks, etc.
+    # Write results to data/cpu_analysis/ for later review
+  max_hours: 1
+  stream: cpu
 ```
+
+CPU JOB IDEAS (queue these alongside GPU sweeps to keep fleet fully utilized):
+- Feature correlation analysis across scored results
+- Dataset validation (check for NaN columns, target distribution stats)
+- Result aggregation across rounds (which configs consistently win?)
+- Cross-ticker comparison reports
+- Threshold sensitivity analysis from existing scored parquets
+- Round-over-round improvement tracking
 
 EXACT VALID FLAGS (ONLY these — do NOT invent others):
   --phase A|B|both   --ticker SPY|QQQ|GLD|SLV   --dataset path
