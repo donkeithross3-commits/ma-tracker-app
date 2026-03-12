@@ -217,6 +217,22 @@ class ChiefOfStaffService:
             except Exception as e:
                 parts.append(f"[{source}]: Error -- {e}")
 
+        # Always inject recent activity so Sancho knows what he's been doing
+        try:
+            from .cos_activity import read_activity
+            recent = read_activity(limit=10)
+            if recent:
+                activity_lines = []
+                for entry in recent:
+                    ts = entry.get("timestamp", "")[:16]
+                    spec = entry.get("specialist", "?")
+                    msg = entry.get("user_message", "")[:80]
+                    resp = entry.get("response", "")[:120]
+                    activity_lines.append(f"  {ts} [{spec}] {msg} → {resp}")
+                parts.append(f"[your_recent_activity — this is what YOU have been doing]:\n" + "\n".join(activity_lines))
+        except Exception:
+            pass
+
         return "\n\n".join(parts) if parts else "Context fetch returned no data."
 
     async def _call_vllm(self, system_prompt: str, messages: list) -> tuple[str, str]:
