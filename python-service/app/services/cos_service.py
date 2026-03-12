@@ -302,8 +302,8 @@ class ChiefOfStaffService:
                 "messages": api_messages,
                 "max_tokens": 4096,
                 "temperature": 0.6,
-                "repetition_penalty": 1.1,
-                "frequency_penalty": 0.3,
+                "repetition_penalty": 1.15,
+                "frequency_penalty": 0.5,
             },
         )
         resp.raise_for_status()
@@ -472,12 +472,15 @@ class ChiefOfStaffService:
                     "messages": api_messages,
                     "max_tokens": 4096,
                     "temperature": 0.6,
-                    "repetition_penalty": 1.1,
-                    "frequency_penalty": 0.3,
+                    "repetition_penalty": 1.15,
+                    "frequency_penalty": 0.5,
                     "stream": True,
                 },
             ) as resp:
                 resp.raise_for_status()
+                # Repetition detector: if the same char repeats 20+ times, abort
+                repeat_char = ""
+                repeat_count = 0
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -489,6 +492,16 @@ class ChiefOfStaffService:
                         delta = chunk["choices"][0].get("delta", {})
                         content = delta.get("content", "")
                         if content:
+                            # Check for degenerate repetition
+                            for ch in content:
+                                if ch == repeat_char:
+                                    repeat_count += 1
+                                    if repeat_count >= 20:
+                                        logger.warning(f"Repetition loop detected ('{repeat_char}' x{repeat_count}), aborting stream")
+                                        return
+                                else:
+                                    repeat_char = ch
+                                    repeat_count = 1
                             yield content
                     except (json.JSONDecodeError, KeyError, IndexError):
                         continue
