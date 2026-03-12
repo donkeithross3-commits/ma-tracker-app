@@ -42,6 +42,43 @@ class ChiefOfStaffService:
         self.anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
         self._http: Optional[httpx.AsyncClient] = None
         self._internal_http: Optional[httpx.AsyncClient] = None
+        self._corrections_file = os.environ.get(
+            "COS_CORRECTIONS_FILE",
+            os.path.join(os.environ.get("COS_DATA_DIR", "/home/don/apps/data/cos"), "corrections.txt"),
+        )
+
+    def _load_corrections(self) -> str:
+        """Load persistent corrections from file."""
+        try:
+            if os.path.isfile(self._corrections_file):
+                with open(self._corrections_file, encoding="utf-8") as f:
+                    text = f.read().strip()
+                if text:
+                    return text
+        except Exception as e:
+            logger.warning(f"Failed to load corrections: {e}")
+        return "(No corrections yet — you're doing great. Keep it that way.)"
+
+    def _save_correction(self, correction: str) -> None:
+        """Append a correction to the persistent file."""
+        try:
+            os.makedirs(os.path.dirname(self._corrections_file), exist_ok=True)
+            with open(self._corrections_file, "a", encoding="utf-8") as f:
+                f.write(f"- {correction.strip()}\n")
+            logger.info(f"Saved correction: {correction.strip()[:80]}")
+        except Exception as e:
+            logger.warning(f"Failed to save correction: {e}")
+
+    def _extract_and_save_corrections(self, response: str) -> str:
+        """Extract ===CORRECTION=== blocks from response, save them, return cleaned response."""
+        import re as _re
+        pattern = r"===CORRECTION===\s*(.*?)\s*===END_CORRECTION==="
+        matches = _re.findall(pattern, response, _re.DOTALL)
+        for match in matches:
+            self._save_correction(match)
+        # Remove the correction blocks from the visible response
+        cleaned = _re.sub(r"\s*===CORRECTION===.*?===END_CORRECTION===\s*", "", response, flags=_re.DOTALL)
+        return cleaned.strip()
 
     def _get_http(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
@@ -96,6 +133,10 @@ class ChiefOfStaffService:
         specialist_prompt = SPECIALISTS.get(specialist, SPECIALISTS["cos"])
         specialist_prompt = specialist_prompt.replace("{context}", combined_context)
 
+        # Inject persistent corrections into the prompt
+        corrections = self._load_corrections()
+        specialist_prompt = specialist_prompt.replace("{corrections}", corrections)
+
         # Build messages for execution
         exec_messages = []
         for msg in history:
@@ -110,6 +151,9 @@ class ChiefOfStaffService:
             escalated = False
 
         thinking, clean_response = self._parse_think_blocks(raw_response)
+
+        # Extract and persist any corrections from Sancho's response
+        clean_response = self._extract_and_save_corrections(clean_response)
 
         latency_ms = int((time.monotonic() - start) * 1000)
 
@@ -311,6 +355,8 @@ class ChiefOfStaffService:
         from .cos_prompts import SPECIALISTS
         specialist_prompt = SPECIALISTS.get(specialist, SPECIALISTS["cos"])
         specialist_prompt = specialist_prompt.replace("{context}", combined_context)
+        corrections = self._load_corrections()
+        specialist_prompt = specialist_prompt.replace("{corrections}", corrections)
 
         exec_messages = []
         for msg in history:
@@ -370,6 +416,9 @@ class ChiefOfStaffService:
 
             model_used = self.vllm_model
             thinking, clean_response = self._parse_think_blocks(full_text)
+
+        # Extract and persist any corrections from Sancho's response
+        clean_response = self._extract_and_save_corrections(clean_response)
 
         latency_ms = int((time.monotonic() - start) * 1000)
         message_id = str(uuid.uuid4())
