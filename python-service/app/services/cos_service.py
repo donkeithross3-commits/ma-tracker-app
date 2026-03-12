@@ -291,7 +291,7 @@ class ChiefOfStaffService:
         return "\n\n".join(parts) if parts else "Context fetch returned no data."
 
     async def _call_vllm(self, system_prompt: str, messages: list) -> tuple[str, str]:
-        """Call DeepSeek-R1 via vLLM OpenAI-compatible API."""
+        """Call vLLM via OpenAI-compatible API."""
         client = self._get_http()
         api_messages = [{"role": "system", "content": system_prompt}] + messages
 
@@ -302,6 +302,8 @@ class ChiefOfStaffService:
                 "messages": api_messages,
                 "max_tokens": 4096,
                 "temperature": 0.6,
+                "repetition_penalty": 1.1,
+                "frequency_penalty": 0.3,
             },
         )
         resp.raise_for_status()
@@ -470,6 +472,8 @@ class ChiefOfStaffService:
                     "messages": api_messages,
                     "max_tokens": 4096,
                     "temperature": 0.6,
+                    "repetition_penalty": 1.1,
+                    "frequency_penalty": 0.3,
                     "stream": True,
                 },
             ) as resp:
