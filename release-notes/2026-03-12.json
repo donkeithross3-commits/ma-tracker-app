@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-12",
+  "title": "Admin — Add User from Dashboard",
+  "summary": "Admins can now add new users directly from the Manage Users page without touching code or seed scripts.",
+  "features": [
+    {
+      "id": "add-user-admin",
+      "title": "Add User from Admin Panel",
+      "summary": "New 'Add User' button on the Manage Users page lets you create users with email and optional alias — they log in with the default password and are prompted to change it.",
+      "description": "The Manage Users admin page now has an inline 'Add User' form. Enter an email address and optional alias, click Create, and the user is provisioned with all project access enabled. The new user logs in with the default password and is immediately prompted to change it.\n\nBehind the scenes, the user is added to the email whitelist and created in the database in one step — no more editing whitelist-entries.ts or running seed scripts.",
+      "category": "general",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
