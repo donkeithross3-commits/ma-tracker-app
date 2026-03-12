@@ -20,6 +20,7 @@ _TTL_SECONDS = 3600  # 1 hour
 # --- Per-specialist memory files ---
 SPECIALIST_KNOWLEDGE: dict[str, list[str]] = {
     "cos": [
+        "trading-philosophy.md",
         "home-fleet.md",
         "active-session-state.md",
     ],
@@ -33,6 +34,7 @@ SPECIALIST_KNOWLEDGE: dict[str, list[str]] = {
         "trading-engine-state.md",
     ],
     "bmc_research": [
+        "trading-philosophy.md",
         "bmc-model-contracts.md",
         "bmc-quant-hardening.md",
         "bmc-production-testing.md",

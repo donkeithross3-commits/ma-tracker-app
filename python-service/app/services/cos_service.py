@@ -72,6 +72,13 @@ class ChiefOfStaffService:
         escalate = routing.get("escalate", False)
         context_sources = routing.get("needs_context", [])
 
+        # Ensure cos and bmc_research always get fleet context (prevents empty context)
+        if specialist in ("cos", "bmc_research"):
+            default_sources = ["fleet", "fleet_utilization"]
+            for src in default_sources:
+                if src not in context_sources:
+                    context_sources.append(src)
+
         # Phase 2: Fetch context (live API data + static knowledge)
         context_text = await self._fetch_context(context_sources)
 
@@ -164,9 +171,6 @@ class ChiefOfStaffService:
 
     async def _fetch_context(self, sources: list) -> str:
         """Fetch context from internal FastAPI endpoints and portfolio container."""
-        if not sources:
-            return "No additional context requested."
-
         base = "http://localhost:8000"
         portfolio_base = "http://localhost:8001"
 
@@ -218,18 +222,24 @@ class ChiefOfStaffService:
                 parts.append(f"[{source}]: Error -- {e}")
 
         # Always inject recent activity so Sancho knows what he's been doing
+        # Only include autoloop entries (from daemon) — skip chat entries to avoid
+        # circular self-reinforcement of bad response patterns
         try:
             from .cos_activity import read_activity
-            recent = read_activity(limit=10)
+            recent = read_activity(limit=20)
             if recent:
                 activity_lines = []
                 for entry in recent:
-                    ts = entry.get("timestamp", "")[:16]
+                    # Only show autoloop/system entries, not chat responses
                     spec = entry.get("specialist", "?")
-                    msg = entry.get("user_message", "")[:80]
-                    resp = entry.get("response", "")[:120]
-                    activity_lines.append(f"  {ts} [{spec}] {msg} → {resp}")
-                parts.append(f"[your_recent_activity — this is what YOU have been doing]:\n" + "\n".join(activity_lines))
+                    model = entry.get("model", "")
+                    if spec == "autoloop" or model == "system":
+                        ts = entry.get("timestamp", "")[:16]
+                        msg = entry.get("user_message", "")[:100]
+                        resp = entry.get("response", "")[:200]
+                        activity_lines.append(f"  {ts} {msg} → {resp}")
+                if activity_lines:
+                    parts.append(f"[your_recent_activity — actions taken by your autoloop daemon]:\n" + "\n".join(activity_lines[-10:]))
         except Exception:
             pass
 
