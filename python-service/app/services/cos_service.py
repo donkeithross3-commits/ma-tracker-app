@@ -1,4 +1,4 @@
-"""Chief of Staff — orchestration service (DeepSeek-R1 + Opus escalation)."""
+"""Chief of Staff — orchestration service (vLLM + Opus escalation)."""
 
 import json
 import logging
@@ -375,16 +375,21 @@ class ChiefOfStaffService:
             yield self._sse("text", {"content": clean_response})
         else:
             # Stream from vLLM
-            yield self._sse("phase", {"phase": "executing", "model": "deepseek", "escalated": False})
+            yield self._sse("phase", {"phase": "executing", "model": "vllm", "escalated": False})
             full_text = ""
-            # DeepSeek-R1-Distill always thinks first, often WITHOUT <think> tag.
-            # Default to thinking mode, stream as thinking_delta until </think>.
-            in_think = True
+            # DeepSeek-R1 models always think first (often without <think> tag).
+            # Other models (Qwen, etc.) don't use think blocks — stream as response directly.
+            is_reasoning_model = "deepseek" in self.vllm_model.lower() and "r1" in self.vllm_model.lower()
+            in_think = is_reasoning_model  # Only default to thinking for R1 models
             think_sent = 0  # chars of thinking already sent as deltas
             think_done = False
 
             async for token in self._stream_vllm(specialist_prompt, exec_messages):
                 full_text += token
+
+                # For non-reasoning models, check if they unexpectedly emit <think>
+                if not is_reasoning_model and not in_think and "<think>" in full_text and not think_done:
+                    in_think = True
 
                 if in_think:
                     # Strip <think> tag if present (it's just a marker, not content)
