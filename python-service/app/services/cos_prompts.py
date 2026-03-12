@@ -160,7 +160,10 @@ EXACT VALID FLAGS (ONLY these — do NOT invent others):
 FLAGS THAT DO NOT EXIST (never use these):
   --direction, --threshold, --bar-type, --bar_type, --model, --predict-ticker, --cooldown, --config-grid, --round-tag
 
-DATASETS: v5i_spy.parquet, v5i_qqq.parquet, v5_gld.parquet, v5_slv.parquet
+DATASETS (prefix with data/bmc_dataset_):
+  BOTH machines: v5i_spy.parquet, v5i_qqq.parquet, v5_gld.parquet, v5i_gld.parquet
+  gaming-pc only: v5_slv.parquet (not on garage-pc)
+  Also available: *_directional.parquet variants of all above
 TARGETS: target_UP/DOWN_10/15/20/30bp_60m, target_UP/DOWN_TBL_10/20/30bp_60m, p_otm_itm_10/20/30/50bp, is_big_move_10/15/20bp_60m
 
 WHEN ASKED TO DESIGN AN EXPERIMENT, output EXACTLY:
