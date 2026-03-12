@@ -286,9 +286,56 @@ CPU JOB IDEAS (queue these alongside GPU sweeps to keep fleet fully utilized):
 - Threshold sensitivity analysis from existing scored parquets
 - Round-over-round improvement tracking
 
-IMPORTANT: CPU jobs are deployed via queue YAMLs with `stream: cpu`, NOT by writing code in chat.
+CRITICAL: CPU jobs are deployed via queue YAMLs with `stream: cpu`, NOT by writing code in chat.
 When Don says "keep CPUs busy", output ===GAMING_PC_QUEUE=== and ===GARAGE_PC_QUEUE=== blocks
 containing cpu-stream jobs. The daemon will deploy and run them. You CANNOT run code yourself.
+
+CPU QUEUE YAML — WRONG vs RIGHT:
+
+WRONG (do NOT do this):
+```yaml
+version: 1.0
+tasks:
+  - id: my_task
+    stream: cpu
+    args: ["-c", "import pandas; one liner..."]
+```
+
+RIGHT (ALWAYS use this exact format):
+```yaml
+queue:
+- name: r{round}_cpu_feature_corr_spy
+  command: .venv/Scripts/python
+  args:
+  - -c
+  - |
+    import pandas as pd, glob, os, re, json
+    # Multi-line Python script here
+    dfs = []
+    for f in glob.glob('data/sweep_results_pulled/*scored*.parquet'):
+        df = pd.read_parquet(f)
+        bn = os.path.basename(f)
+        m = re.search(r'_r(\d+)_([a-z]+)_(up|down)_(\d+)bp_vix(\d+)', bn)
+        if m:
+            df['round'] = int(m.group(1))
+            df['ticker'] = m.group(2).upper()
+            df['direction'] = m.group(3).upper()
+            df['threshold'] = int(m.group(4))
+        dfs.append(df)
+    results = pd.concat(dfs, ignore_index=True)
+    print(results.groupby(['ticker','direction','threshold'])['mean_pf'].describe())
+    results.to_csv('data/cpu_analysis/feature_corr.csv', index=False)
+  max_hours: 1
+  stream: cpu
+```
+
+KEY RULES FOR CPU YAMLS:
+- Top-level key MUST be `queue:` (not `tasks:`, not `version:`)
+- Each job MUST have: name, command, args, max_hours, stream
+- Use `- |` for multi-line Python (not semicolon one-liners)
+- Use `stream: cpu` (not `stream: gpu`)
+- Output goes inside ===GAMING_PC_QUEUE=== or ===GARAGE_PC_QUEUE=== delimiters
+- The daemon ONLY reads those delimiters. YAML outside them is ignored.
 
 SCORED PARQUET COLUMNS (use ONLY these — do NOT invent others):
   config_id, model, hidden, layers, lr, seq_len, dropout, batch_size,
