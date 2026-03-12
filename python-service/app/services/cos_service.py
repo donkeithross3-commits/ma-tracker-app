@@ -82,7 +82,7 @@ class ChiefOfStaffService:
 
     def _get_http(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(timeout=120.0)
+            self._http = httpx.AsyncClient(timeout=240.0)
         return self._http
 
     def _get_internal_http(self) -> httpx.AsyncClient:
