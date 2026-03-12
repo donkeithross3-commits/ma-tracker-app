@@ -40,6 +40,7 @@ SPECIALIST_KNOWLEDGE: dict[str, list[str]] = {
         "bmc-production-testing.md",
         "gpu-perf-optimizations.md",
         "active-session-state.md",
+        "dataset-contracts.md",
     ],
     "trading_engine": [
         "trading-engine-state.md",
