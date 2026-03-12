@@ -11,6 +11,7 @@ router = APIRouter(prefix="/cos", tags=["chief-of-staff"])
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=50000)
     conversation_history: Optional[list] = None
+    silent: bool = False  # If True, skip activity log (for internal pipeline calls)
 
 
 class ChatResponse(BaseModel):
@@ -30,7 +31,7 @@ async def cos_chat(req: ChatRequest):
     from ..services.cos_service import get_cos_service
 
     svc = get_cos_service()
-    result = await svc.chat(req.message, req.conversation_history)
+    result = await svc.chat(req.message, req.conversation_history, silent=req.silent)
     return ChatResponse(**result.to_dict())
 
 

@@ -96,7 +96,7 @@ class ChiefOfStaffService:
         if self._internal_http and not self._internal_http.is_closed:
             await self._internal_http.aclose()
 
-    async def chat(self, message: str, conversation_history: Optional[list] = None) -> ChatResult:
+    async def chat(self, message: str, conversation_history: Optional[list] = None, silent: bool = False) -> ChatResult:
         from .cos_activity import ActivityEntry, append_activity
 
         start = time.monotonic()
@@ -171,23 +171,24 @@ class ChiefOfStaffService:
             context_sources=context_sources,
         )
 
-        # Log activity
-        entry = ActivityEntry(
-            message_id=message_id,
-            user_message=message,
-            specialist=specialist,
-            escalated=escalated,
-            thinking=thinking,
-            response=clean_response,
-            confidence=confidence,
-            latency_ms=latency_ms,
-            model=model_used,
-            context_sources=context_sources,
-        )
-        try:
-            append_activity(entry)
-        except Exception as e:
-            logger.warning(f"Failed to log activity: {e}")
+        # Log activity (skip if silent — internal pipeline calls)
+        if not silent:
+            entry = ActivityEntry(
+                message_id=message_id,
+                user_message=message,
+                specialist=specialist,
+                escalated=escalated,
+                thinking=thinking,
+                response=clean_response,
+                confidence=confidence,
+                latency_ms=latency_ms,
+                model=model_used,
+                context_sources=context_sources,
+            )
+            try:
+                append_activity(entry)
+            except Exception as e:
+                logger.warning(f"Failed to log activity: {e}")
 
         return result
 
