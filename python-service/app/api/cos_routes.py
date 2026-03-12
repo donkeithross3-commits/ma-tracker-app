@@ -9,7 +9,7 @@ router = APIRouter(prefix="/cos", tags=["chief-of-staff"])
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=10000)
+    message: str = Field(..., min_length=1, max_length=50000)
     conversation_history: Optional[list] = None
 
 
@@ -59,8 +59,8 @@ async def cos_chat_stream(req: ChatRequest):
 
 class ActivityPostRequest(BaseModel):
     """Direct activity log entry — no LLM call, just log it."""
-    user_message: str = Field(..., min_length=1, max_length=5000)
-    response: str = Field(..., min_length=1, max_length=10000)
+    user_message: str = Field(..., min_length=1, max_length=50000)
+    response: str = Field(..., min_length=1, max_length=50000)
     specialist: str = "autoloop"
     model: str = "system"
     confidence: float = 1.0
