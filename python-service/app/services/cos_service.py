@@ -24,7 +24,7 @@ def get_cos_service() -> "ChiefOfStaffService":
 
 
 class ChatResult:
-    __slots__ = ("response", "specialist", "escalated", "thinking", "message_id", "latency_ms", "model", "confidence", "context_sources")
+    __slots__ = ("response", "specialist", "escalated", "thinking", "message_id", "latency_ms", "model", "confidence", "context_sources", "token_usage")
 
     def __init__(self, **kwargs):
         for k in self.__slots__:
@@ -143,8 +143,9 @@ class ChiefOfStaffService:
             exec_messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
         exec_messages.append({"role": "user", "content": message})
 
+        token_usage = {}
         if escalate or confidence < self.escalation_threshold:
-            raw_response, model_used = await self._call_opus(specialist_prompt, exec_messages)
+            raw_response, model_used, token_usage = await self._call_opus(specialist_prompt, exec_messages)
             escalated = True
         else:
             raw_response, model_used = await self._call_vllm(specialist_prompt, exec_messages)
@@ -169,6 +170,7 @@ class ChiefOfStaffService:
             model=model_used,
             confidence=confidence,
             context_sources=context_sources,
+            token_usage=token_usage,
         )
 
         # Log activity (skip if silent — internal pipeline calls)
@@ -184,6 +186,7 @@ class ChiefOfStaffService:
                 latency_ms=latency_ms,
                 model=model_used,
                 context_sources=context_sources,
+                token_usage=token_usage,
             )
             try:
                 append_activity(entry)
@@ -193,10 +196,24 @@ class ChiefOfStaffService:
         return result
 
     async def _route(self, message: str, history: list) -> dict:
-        """Send message to DeepSeek with CoS routing prompt to get JSON routing decision."""
+        """Send message to vLLM with CoS routing prompt to get JSON routing decision."""
         from .cos_prompts import COS_ROUTING_PROMPT
+        from .cos_activity import get_escalation_stats
 
         routing_prompt = COS_ROUTING_PROMPT
+
+        # Inject escalation feedback so routing learns from Don's ratings
+        stats = get_escalation_stats()
+        if stats.get("feedback_count", 0) > 0:
+            routing_prompt += f"""
+
+ESCALATION FEEDBACK FROM DON (learn from this):
+- Total Opus escalations: {stats['total_escalations']} (${stats['total_cost_usd']:.2f} spent)
+- Don rated {stats['feedback_count']} escalations:
+  - Escalation was warranted: {stats['escalation_worthy_yes']} yes, {stats['escalation_worthy_no']} no
+  - Response quality was good: {stats['quality_good_yes']} yes, {stats['quality_good_no']} no
+- If many escalations are rated "not warranted", raise your confidence threshold — handle more locally.
+- If quality ratings are poor, escalate MORE for those specialist domains."""
         messages = []
         for msg in history[-5:]:  # Only last 5 for routing context
             messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
@@ -312,8 +329,8 @@ class ChiefOfStaffService:
         model_name = data.get("model", self.vllm_model)
         return content, model_name
 
-    async def _call_opus(self, system_prompt: str, messages: list) -> tuple[str, str]:
-        """Escalate to Claude Opus via Anthropic API."""
+    async def _call_opus(self, system_prompt: str, messages: list) -> tuple[str, str, dict]:
+        """Escalate to Claude Opus via Anthropic API. Returns (content, model, token_usage)."""
         from anthropic import Anthropic
 
         client = Anthropic(api_key=self.anthropic_key)
@@ -326,7 +343,16 @@ class ChiefOfStaffService:
             messages=messages,
         )
         content = response.content[0].text
-        return content, model
+        input_tokens = response.usage.input_tokens
+        output_tokens = response.usage.output_tokens
+        # Opus pricing: $15/M input, $75/M output
+        cost_usd = round(input_tokens * 15 / 1_000_000 + output_tokens * 75 / 1_000_000, 4)
+        token_usage = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd": cost_usd,
+        }
+        return content, model, token_usage
 
     async def chat_stream(self, message: str, conversation_history: Optional[list] = None) -> AsyncGenerator[str, None]:
         """Streaming version of chat() — yields SSE events as they arrive."""
@@ -368,10 +394,11 @@ class ChiefOfStaffService:
 
         escalated = escalate or confidence < self.escalation_threshold
 
+        token_usage = {}
         if escalated:
             # Opus doesn't stream in our current setup — fall back to non-streaming
             yield self._sse("phase", {"phase": "executing", "model": "opus", "escalated": True})
-            raw_response, model_used = await self._call_opus(specialist_prompt, exec_messages)
+            raw_response, model_used, token_usage = await self._call_opus(specialist_prompt, exec_messages)
             thinking, clean_response = self._parse_think_blocks(raw_response)
             yield self._sse("thinking", {"content": thinking}) if thinking else None
             yield self._sse("text", {"content": clean_response})
@@ -439,6 +466,7 @@ class ChiefOfStaffService:
             "latency_ms": latency_ms,
             "model": model_used,
             "confidence": confidence,
+            "token_usage": token_usage,
         })
 
         # Log activity
@@ -453,6 +481,7 @@ class ChiefOfStaffService:
             latency_ms=latency_ms,
             model=model_used,
             context_sources=context_sources,
+            token_usage=token_usage,
         )
         try:
             append_activity(entry)

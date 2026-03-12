@@ -23,6 +23,7 @@ class ChatResponse(BaseModel):
     latency_ms: int
     model: str
     confidence: float = 0.0
+    token_usage: Optional[dict] = None
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -94,6 +95,36 @@ async def cos_activity(
 
     entries = read_activity(limit=limit, offset=offset, specialist_filter=specialist)
     return {"entries": entries, "count": len(entries)}
+
+
+class FeedbackRequest(BaseModel):
+    """Quick feedback on an Opus escalation."""
+    message_id: str
+    escalation_worthy: Optional[bool] = None
+    quality_good: Optional[bool] = None
+
+
+@router.post("/feedback")
+async def cos_feedback(req: FeedbackRequest):
+    """Submit feedback on an escalated response."""
+    from ..services.cos_activity import update_feedback
+
+    feedback = {}
+    if req.escalation_worthy is not None:
+        feedback["escalation_worthy"] = req.escalation_worthy
+    if req.quality_good is not None:
+        feedback["quality_good"] = req.quality_good
+
+    found = update_feedback(req.message_id, feedback)
+    return {"ok": found, "message_id": req.message_id}
+
+
+@router.get("/escalation-stats")
+async def cos_escalation_stats():
+    """Get aggregated escalation feedback stats."""
+    from ..services.cos_activity import get_escalation_stats
+
+    return get_escalation_stats()
 
 
 @router.get("/health")

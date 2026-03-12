@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Send, Bot, Zap, Clock, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
+import { ArrowLeft, Send, Bot, Zap, Clock, ChevronDown, ChevronRight, RotateCcw, ThumbsUp, ThumbsDown, DollarSign } from "lucide-react";
+
+interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+}
 
 interface Message {
   role: "user" | "assistant";
@@ -12,6 +18,8 @@ interface Message {
   thinking?: string;
   latency_ms?: number;
   model?: string;
+  message_id?: string;
+  token_usage?: TokenUsage;
 }
 
 interface ActivityEntry {
@@ -25,6 +33,8 @@ interface ActivityEntry {
   confidence: number;
   latency_ms: number;
   model: string;
+  token_usage?: TokenUsage;
+  feedback?: { escalation_worthy?: boolean; quality_good?: boolean };
 }
 
 const SPECIALIST_COLORS: Record<string, string> = {
@@ -51,6 +61,76 @@ function SpecialistBadge({ specialist, escalated }: { specialist: string; escala
         </span>
       )}
     </span>
+  );
+}
+
+function OpusFeedback({ messageId, tokenUsage }: { messageId: string; tokenUsage?: TokenUsage }) {
+  const [escalationWorthy, setEscalationWorthy] = useState<boolean | null>(null);
+  const [qualityGood, setQualityGood] = useState<boolean | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+
+  const submitFeedback = useCallback(async (field: "escalation_worthy" | "quality_good", value: boolean) => {
+    const newEscalation = field === "escalation_worthy" ? value : escalationWorthy;
+    const newQuality = field === "quality_good" ? value : qualityGood;
+    if (field === "escalation_worthy") setEscalationWorthy(value);
+    if (field === "quality_good") setQualityGood(value);
+
+    try {
+      await fetch("/api/cos/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message_id: messageId,
+          escalation_worthy: newEscalation,
+          quality_good: newQuality,
+        }),
+      });
+      if (newEscalation !== null && newQuality !== null) setSubmitted(true);
+    } catch { /* silent */ }
+  }, [messageId, escalationWorthy, qualityGood]);
+
+  return (
+    <div className="mt-2 pt-2 border-t border-gray-800 flex flex-wrap items-center gap-3">
+      {tokenUsage && tokenUsage.cost_usd > 0 && (
+        <span className="text-xs text-orange-400 flex items-center gap-1">
+          <DollarSign className="w-3 h-3" />
+          {tokenUsage.cost_usd.toFixed(4)} ({tokenUsage.input_tokens}in/{tokenUsage.output_tokens}out)
+        </span>
+      )}
+      {!submitted ? (
+        <>
+          <span className="text-xs text-gray-500">Worth escalating?</span>
+          <button
+            onClick={() => submitFeedback("escalation_worthy", true)}
+            className={`p-1 rounded transition-colors ${escalationWorthy === true ? "bg-green-800 text-green-300" : "text-gray-500 hover:text-green-400 hover:bg-green-900/30"}`}
+          >
+            <ThumbsUp className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => submitFeedback("escalation_worthy", false)}
+            className={`p-1 rounded transition-colors ${escalationWorthy === false ? "bg-red-800 text-red-300" : "text-gray-500 hover:text-red-400 hover:bg-red-900/30"}`}
+          >
+            <ThumbsDown className="w-3.5 h-3.5" />
+          </button>
+          <span className="text-xs text-gray-600">|</span>
+          <span className="text-xs text-gray-500">Good quality?</span>
+          <button
+            onClick={() => submitFeedback("quality_good", true)}
+            className={`p-1 rounded transition-colors ${qualityGood === true ? "bg-green-800 text-green-300" : "text-gray-500 hover:text-green-400 hover:bg-green-900/30"}`}
+          >
+            <ThumbsUp className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => submitFeedback("quality_good", false)}
+            className={`p-1 rounded transition-colors ${qualityGood === false ? "bg-red-800 text-red-300" : "text-gray-500 hover:text-red-400 hover:bg-red-900/30"}`}
+          >
+            <ThumbsDown className="w-3.5 h-3.5" />
+          </button>
+        </>
+      ) : (
+        <span className="text-xs text-gray-500">Feedback saved</span>
+      )}
+    </div>
   );
 }
 
@@ -221,6 +301,8 @@ export default function ChiefOfStaffPage() {
           thinking: thinkingAcc,
           latency_ms: (finalMeta.latency_ms as number) || 0,
           model: (finalMeta.model as string) || "",
+          message_id: (finalMeta.message_id as string) || "",
+          token_usage: (finalMeta.token_usage as TokenUsage) || undefined,
         },
       ]);
       setStreamPhase("");
@@ -274,6 +356,8 @@ export default function ChiefOfStaffPage() {
         thinking: entry.thinking,
         latency_ms: entry.latency_ms,
         model: entry.model,
+        message_id: entry.message_id,
+        token_usage: entry.token_usage,
       },
     ]);
     inputRef.current?.focus();
@@ -343,6 +427,9 @@ export default function ChiefOfStaffPage() {
                   )}
                   <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
                   {msg.thinking && <ThinkingBlock thinking={msg.thinking} />}
+                  {msg.escalated && msg.message_id && (
+                    <OpusFeedback messageId={msg.message_id} tokenUsage={msg.token_usage} />
+                  )}
                 </div>
               </div>
             ))}
@@ -441,6 +528,17 @@ export default function ChiefOfStaffPage() {
                   </div>
                   <p className="text-xs text-gray-400 truncate">{entry.user_message}</p>
                   <p className="text-xs text-gray-500 truncate mt-0.5">{entry.response}</p>
+                  {entry.token_usage?.cost_usd ? (
+                    <span className="text-xs text-orange-400/70 mt-0.5 flex items-center gap-0.5">
+                      <DollarSign className="w-2.5 h-2.5" />{entry.token_usage.cost_usd.toFixed(4)}
+                      {entry.feedback && (
+                        <span className="ml-1 text-gray-600">
+                          {entry.feedback.escalation_worthy === true ? "+" : entry.feedback.escalation_worthy === false ? "-" : "?"}
+                          {entry.feedback.quality_good === true ? "+" : entry.feedback.quality_good === false ? "-" : "?"}
+                        </span>
+                      )}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
