@@ -308,26 +308,60 @@ ESCALATION FEEDBACK FROM DON (learn from this):
         return "\n\n".join(parts) if parts else "Context fetch returned no data."
 
     async def _call_vllm(self, system_prompt: str, messages: list) -> tuple[str, str]:
-        """Call vLLM via OpenAI-compatible API."""
-        client = self._get_http()
-        api_messages = [{"role": "system", "content": system_prompt}] + messages
+        """Call vLLM via streaming API (avoids Cloudflare 100s proxy timeout)."""
+        import httpx
 
-        resp = await client.post(
-            f"{self.vllm_url}/v1/chat/completions",
-            json={
-                "model": self.vllm_model,
-                "messages": api_messages,
-                "max_tokens": 4096,
-                "temperature": 0.6,
-                "repetition_penalty": 1.05,
-                "frequency_penalty": 0.2,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-        model_name = data.get("model", self.vllm_model)
-        return content, model_name
+        api_messages = [{"role": "system", "content": system_prompt}] + messages
+        content_parts: list[str] = []
+        model_name = self.vllm_model
+        repeat_char = ""
+        repeat_count = 0
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(240.0, connect=10.0)) as client:
+            async with client.stream(
+                "POST",
+                f"{self.vllm_url}/v1/chat/completions",
+                json={
+                    "model": self.vllm_model,
+                    "messages": api_messages,
+                    "max_tokens": 4096,
+                    "temperature": 0.6,
+                    "repetition_penalty": 1.05,
+                    "frequency_penalty": 0.2,
+                    "stream": True,
+                },
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        import json as _json
+                        chunk = _json.loads(payload)
+                        delta = chunk["choices"][0].get("delta", {})
+                        token = delta.get("content", "")
+                        if not token:
+                            continue
+                        # Circuit breaker: abort on repetition loops
+                        for ch in token:
+                            if ch == repeat_char:
+                                repeat_count += 1
+                                if repeat_count >= 20:
+                                    logger.warning(f"Repetition loop in _call_vllm ('{repeat_char}' x{repeat_count}), truncating")
+                                    return "".join(content_parts), model_name
+                            else:
+                                repeat_char = ch
+                                repeat_count = 1
+                        content_parts.append(token)
+                        if "model" in chunk:
+                            model_name = chunk["model"]
+                    except (KeyError, ValueError):
+                        continue
+
+        return "".join(content_parts), model_name
 
     async def _call_opus(self, system_prompt: str, messages: list) -> tuple[str, str, dict]:
         """Escalate to Claude Opus via Anthropic API. Returns (content, model, token_usage)."""
