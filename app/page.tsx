@@ -83,6 +83,15 @@ export default async function Home() {
       badgeClasses: "bg-amber-500/20 text-amber-400",
       hoverBorder: "hover:border-amber-500",
     },
+    {
+      key: "ma-options",
+      href: "/town-wall",
+      title: "Town Wall",
+      description: "Unified activity timeline — all agent research in one append-only feed",
+      badge: "Ops",
+      badgeClasses: "bg-green-500/20 text-green-400",
+      hoverBorder: "hover:border-green-500",
+    },
   ] as const;
 
   return (
