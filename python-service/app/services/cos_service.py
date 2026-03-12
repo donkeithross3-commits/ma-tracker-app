@@ -319,8 +319,8 @@ ESCALATION FEEDBACK FROM DON (learn from this):
                 "messages": api_messages,
                 "max_tokens": 4096,
                 "temperature": 0.6,
-                "repetition_penalty": 1.15,
-                "frequency_penalty": 0.5,
+                "repetition_penalty": 1.05,
+                "frequency_penalty": 0.2,
             },
         )
         resp.raise_for_status()
