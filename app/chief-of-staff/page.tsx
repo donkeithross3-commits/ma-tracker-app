@@ -382,7 +382,7 @@ export default function ChiefOfStaffPage() {
             <Bot className="w-5 h-5 text-cyan-400" />
             <h1 className="text-lg font-semibold">Chief of Staff</h1>
           </div>
-          <span className="text-xs text-gray-500">Qwen2.5-72B · Opus escalation</span>
+          <span className="text-xs text-gray-500">Qwen3-Coder-30B · Opus escalation</span>
         </div>
         {messages.length > 0 && (
           <button

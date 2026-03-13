@@ -27,6 +27,7 @@ COPY app/edgar/alerts.py app/edgar/alerts.py
 COPY app/edgar/models.py app/edgar/models.py
 COPY app/risk/ app/risk/
 COPY app/api/risk_routes.py app/api/risk_routes.py
+COPY app/api/cos_routes.py app/api/cos_routes.py
 
 # Set ownership and switch to non-root user
 RUN chown -R appuser:appuser /service

@@ -226,6 +226,8 @@ async def health():
 from .api.portfolio_routes import router as portfolio_router  # noqa: E402
 from .api.scheduler_routes import router as scheduler_router  # noqa: E402
 from .api.risk_routes import router as risk_router  # noqa: E402
+from .api.cos_routes import router as cos_router  # noqa: E402
 app.include_router(portfolio_router)
 app.include_router(scheduler_router)
 app.include_router(risk_router)
+app.include_router(cos_router)
