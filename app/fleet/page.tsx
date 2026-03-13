@@ -64,6 +64,13 @@ type RecentResult = {
   beats_production?: boolean;
 };
 
+type RecentCpuJob = {
+  name?: string;
+  status?: string;       // "completed" | "failed"
+  elapsed_min?: number;
+  completed_at?: string;
+};
+
 type FleetHealth = {
   retry_queue_size?: number;
   idle_gpu_alert?: string | null;
@@ -100,6 +107,7 @@ type OrchestratorStatus = {
   cpu?: CpuStatus;
   gpu_pipeline?: Record<string, GpuPipelineEntry>;
   recent_results?: RecentResult[];
+  recent_cpu_jobs?: RecentCpuJob[];
   fleet_health?: FleetHealth;
   research_processes?: ResearchProcesses;
   // Legacy fields (kept for backward compat with old telemetry)
@@ -794,6 +802,7 @@ export default function FleetUtilizationPage() {
 
               const pipeline = orch.gpu_pipeline;
               const results = orch.recent_results;
+              const cpuJobs = orch.recent_cpu_jobs;
               const health = orch.fleet_health;
               const hasPipeline = pipeline && Object.keys(pipeline).length > 0;
 
@@ -914,12 +923,13 @@ export default function FleetUtilizationPage() {
                     )}
                   </div>
 
-                  {/* ========== Experiment Results ========== */}
+                  {/* ========== Experiment Results + CPU Jobs side by side ========== */}
+                  <div className={`grid gap-3 ${cpuJobs && cpuJobs.length > 0 && results && results.length > 0 ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"}`}>
                   {results && results.length > 0 && (
                     <section className="rounded border border-gray-800 bg-gray-900">
                       <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
                         <span>Recent Experiment Results</span>
-                        <span className="text-xs text-gray-500 font-normal">latest collected sweeps</span>
+                        <span className="text-xs text-gray-500 font-normal">GPU sweeps</span>
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
@@ -979,6 +989,61 @@ export default function FleetUtilizationPage() {
                       </div>
                     </section>
                   )}
+
+                  {/* ========== Recent CPU Jobs ========== */}
+                  {cpuJobs && cpuJobs.length > 0 && (
+                    <section className="rounded border border-gray-800 bg-gray-900">
+                      <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                        <span>Recent CPU Jobs</span>
+                        <span className="text-xs text-gray-500 font-normal">mac orchestrator</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead className="text-gray-500">
+                            <tr className="border-b border-gray-800">
+                              <th className="text-left px-3 py-1.5">Job</th>
+                              <th className="text-left px-3 py-1.5">Status</th>
+                              <th className="text-right px-3 py-1.5">Duration</th>
+                              <th className="text-right px-3 py-1.5">Completed</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...cpuJobs].reverse().map((j, i) => {
+                              const completedAt = j.completed_at ? new Date(j.completed_at) : null;
+                              const ago = completedAt
+                                ? (() => {
+                                    const mins = Math.floor((Date.now() - completedAt.getTime()) / 60000);
+                                    if (mins < 60) return `${mins}m ago`;
+                                    const hrs = Math.floor(mins / 60);
+                                    if (hrs < 24) return `${hrs}h ago`;
+                                    return `${Math.floor(hrs / 24)}d ago`;
+                                  })()
+                                : "—";
+                              return (
+                                <tr key={`cpu-${i}`} className="border-b border-gray-800/50">
+                                  <td className="px-3 py-1.5 text-gray-300 max-w-[200px] truncate" title={j.name}>
+                                    {j.name || "—"}
+                                  </td>
+                                  <td className="px-3 py-1.5">
+                                    <span className={j.status === "completed" ? "text-emerald-400" : "text-red-400"}>
+                                      {j.status || "—"}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-1.5 text-right text-gray-300 tabular-nums">
+                                    {j.elapsed_min != null ? `${j.elapsed_min.toFixed(1)}m` : "—"}
+                                  </td>
+                                  <td className="px-3 py-1.5 text-right text-gray-500 tabular-nums">
+                                    {ago}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  )}
+                  </div>
                 </>
               );
             })()}
