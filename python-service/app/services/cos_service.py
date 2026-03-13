@@ -324,10 +324,10 @@ ESCALATION FEEDBACK FROM DON (learn from this):
                 json={
                     "model": self.vllm_model,
                     "messages": api_messages,
-                    "max_tokens": 4096,
+                    "max_tokens": 8192,
                     "temperature": 0.6,
-                    "repetition_penalty": 1.05,
-                    "frequency_penalty": 0.2,
+                    "repetition_penalty": 1.3,
+                    "frequency_penalty": 0.5,
                     "stream": True,
                 },
             ) as resp:
