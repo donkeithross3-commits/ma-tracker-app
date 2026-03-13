@@ -326,8 +326,8 @@ ESCALATION FEEDBACK FROM DON (learn from this):
                     "messages": api_messages,
                     "max_tokens": 8192,
                     "temperature": 0.6,
-                    "repetition_penalty": 1.3,
-                    "frequency_penalty": 0.5,
+                    "repetition_penalty": 1.1,
+                    "frequency_penalty": 0.2,
                     "stream": True,
                 },
             ) as resp:
@@ -535,8 +535,8 @@ ESCALATION FEEDBACK FROM DON (learn from this):
                     "messages": api_messages,
                     "max_tokens": 4096,
                     "temperature": 0.6,
-                    "repetition_penalty": 1.15,
-                    "frequency_penalty": 0.5,
+                    "repetition_penalty": 1.1,
+                    "frequency_penalty": 0.2,
                     "stream": True,
                 },
             ) as resp:
