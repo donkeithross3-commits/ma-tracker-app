@@ -54,7 +54,13 @@ async function proxyCos(request: NextRequest) {
     }
 
     const response = await fetch(targetUrl, fetchOptions);
-    const data = await response.json();
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { error: text || "Backend error", status: response.status };
+    }
 
     return NextResponse.json(data, {
       status: response.status,
