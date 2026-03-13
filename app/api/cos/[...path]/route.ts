@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PYTHON_SERVICE_URL =
-  process.env.PYTHON_SERVICE_URL || "http://localhost:8000";
+const PORTFOLIO_SERVICE_URL =
+  process.env.PORTFOLIO_SERVICE_URL ||
+  process.env.PYTHON_SERVICE_URL ||
+  "http://localhost:8000";
 
 /**
  * Proxy CoS API requests to the FastAPI backend.
@@ -15,7 +17,7 @@ async function proxyCos(request: NextRequest) {
   try {
     const url = new URL(request.url);
     const subPath = url.pathname.replace(/^\/api\/cos/, "");
-    const targetUrl = `${PYTHON_SERVICE_URL}/cos${subPath}${url.search}`;
+    const targetUrl = `${PORTFOLIO_SERVICE_URL}/cos${subPath}${url.search}`;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
