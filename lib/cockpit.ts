@@ -181,7 +181,7 @@ export async function fetchFredSeries(
   const fmt = (d: Date) => d.toISOString().split("T")[0];
   const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}&cosd=${fmt(start)}&coed=${fmt(end)}`;
 
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!res.ok) {
     console.error(`FRED fetch failed for ${seriesId}: ${res.status}`);
     return [];
@@ -231,7 +231,7 @@ export async function fetchPolygonBars(
   const fmt = (d: Date) => d.toISOString().split("T")[0];
   const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${fmt(start)}/${fmt(end)}?adjusted=true&sort=asc&apiKey=${POLYGON_API_KEY}`;
 
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!res.ok) {
     console.error(`Polygon fetch failed for ${ticker}: ${res.status}`);
     return [];

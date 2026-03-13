@@ -111,8 +111,10 @@ interface Props {
 export function CrossAssetHeatmap({ market, oscillators, loading }: Props) {
   if (loading && !market) {
     return (
-      <section className="rounded border border-gray-800 bg-gray-900 p-3 animate-pulse">
-        <div className="h-48 bg-gray-800 rounded" />
+      <section className="rounded border border-gray-800 bg-gray-900 p-3">
+        <div className="h-48 bg-gray-800 rounded animate-pulse flex items-center justify-center">
+          <span className="text-xs text-gray-500">Loading market data…</span>
+        </div>
       </section>
     );
   }

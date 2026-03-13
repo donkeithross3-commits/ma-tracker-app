@@ -67,10 +67,12 @@ interface Props {
 }
 
 export function MacroRegimeStrip({ macro, market, regime, loading }: Props) {
-  if (loading && !macro) {
+  if (loading && !macro && !regime) {
     return (
-      <section className="rounded border border-gray-800 bg-gray-900 p-3 animate-pulse">
-        <div className="h-24 bg-gray-800 rounded" />
+      <section className="rounded border border-gray-800 bg-gray-900 p-3">
+        <div className="h-24 bg-gray-800 rounded animate-pulse flex items-center justify-center">
+          <span className="text-xs text-gray-500">Loading macro data…</span>
+        </div>
       </section>
     );
   }

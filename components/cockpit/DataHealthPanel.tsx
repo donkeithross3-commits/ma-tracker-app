@@ -35,8 +35,10 @@ interface Props {
 export function DataHealthPanel({ health, loading }: Props) {
   if (loading && !health) {
     return (
-      <section className="rounded border border-gray-800 bg-gray-900 p-3 animate-pulse">
-        <div className="h-32 bg-gray-800 rounded" />
+      <section className="rounded border border-gray-800 bg-gray-900 p-3">
+        <div className="h-32 bg-gray-800 rounded animate-pulse flex items-center justify-center">
+          <span className="text-xs text-gray-500">Loading health checks…</span>
+        </div>
       </section>
     );
   }

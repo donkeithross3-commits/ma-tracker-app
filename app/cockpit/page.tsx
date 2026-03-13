@@ -41,7 +41,10 @@ const OSC_INTERVAL = 10 * 60 * 1000; // 10 min (pre-computed, changes infrequent
 
 async function safeFetch<T>(url: string): Promise<T | null> {
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(15000),
+    });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -61,20 +64,27 @@ export default function CockpitPage() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [m, mkt, r, h, osc] = await Promise.all([
+      const results = await Promise.allSettled([
         safeFetch<MacroResponse>("/api/cockpit/macro"),
         safeFetch<MarketResponse>("/api/cockpit/market"),
         safeFetch<RegimeResponse>("/api/cockpit/regime"),
         safeFetch<DataHealthResponse>("/api/cockpit/data-health"),
         safeFetch<OscillatorData>("/api/cockpit/oscillators"),
       ]);
-      setMacro(m);
-      setMarket(mkt);
-      setRegime(r);
-      setHealth(h);
-      setOscillators(osc);
+      const val = <T,>(r: PromiseSettledResult<T | null>) =>
+        r.status === "fulfilled" ? r.value : null;
+      setMacro(val(results[0]));
+      setMarket(val(results[1]));
+      setRegime(val(results[2]));
+      setHealth(val(results[3]));
+      setOscillators(val(results[4]));
       setLastRefresh(new Date().toLocaleTimeString());
-      setError(null);
+      const failures = results.filter((r) => r.status === "rejected");
+      setError(
+        failures.length > 0
+          ? `${failures.length} data source(s) unavailable`
+          : null
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load cockpit data");
     } finally {
