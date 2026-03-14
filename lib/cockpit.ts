@@ -1,60 +1,10 @@
 // Cockpit shared types, fetchers, caching, and regime classification
-import tls from "tls";
 
-// FRED's Apache server advertises HTTP/2 via ALPN but its H2 implementation
-// is broken (NGHTTP2_INTERNAL_ERROR). Node 22's https module and fetch() both
-// auto-negotiate H2 via ALPN and then hang/error. Even forcing ALPNProtocols
-// to ["http/1.1"] on the Agent doesn't reliably prevent this in Node 22.
-//
-// The only reliable approach: use a raw TLS socket (which skips ALPN entirely)
-// and write the HTTP/1.1 request manually. Proven to work in <50ms from the
-// Docker container where fetch() hangs indefinitely.
-function fredFetch(
-  url: string,
-  timeoutMs = 10000
-): Promise<{ ok: boolean; status: number; text: () => Promise<string> }> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const sock = tls.connect(
-      443,
-      parsed.hostname,
-      { servername: parsed.hostname },
-      () => {
-        sock.write(
-          `GET ${parsed.pathname}${parsed.search} HTTP/1.1\r\n` +
-            `Host: ${parsed.hostname}\r\n` +
-            `User-Agent: DR3-Dashboard/1.0\r\n` +
-            `Accept: */*\r\n` +
-            `Connection: close\r\n\r\n`
-        );
-      }
-    );
-
-    let buf = "";
-    sock.on("data", (d: Buffer) => (buf += d.toString()));
-    sock.on("end", () => {
-      const headerEnd = buf.indexOf("\r\n\r\n");
-      if (headerEnd === -1) {
-        reject(new Error("FRED: malformed response (no header terminator)"));
-        return;
-      }
-      const statusLine = buf.substring(0, buf.indexOf("\r\n"));
-      const statusMatch = statusLine.match(/HTTP\/[\d.]+ (\d+)/);
-      const status = statusMatch ? parseInt(statusMatch[1], 10) : 500;
-      const body = buf.substring(headerEnd + 4);
-      resolve({
-        ok: status >= 200 && status < 300,
-        status,
-        text: async () => body,
-      });
-    });
-    sock.setTimeout(timeoutMs, () => {
-      sock.destroy();
-      reject(new Error(`FRED request timed out after ${timeoutMs}ms`));
-    });
-    sock.on("error", reject);
-  });
-}
+// FRED API key — register free at https://fredaccount.stlouisfed.org/apikeys
+// The CSV endpoint (fred.stlouisfed.org) is behind Akamai CDN which blocks
+// Node.js connections via TLS fingerprinting. The official JSON API
+// (api.stlouisfed.org) works reliably from Docker containers.
+const FRED_API_KEY = process.env.FRED_API_KEY || "";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -233,24 +183,37 @@ export async function fetchFredSeries(
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - lookbackDays);
-
   const fmt = (d: Date) => d.toISOString().split("T")[0];
-  const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}&cosd=${fmt(start)}&coed=${fmt(end)}`;
 
-  const res = await fredFetch(url, 10000);
-  if (!res.ok) {
-    console.error(`FRED fetch failed for ${seriesId}: ${res.status}`);
+  // Use official FRED JSON API (api.stlouisfed.org) — works reliably from Docker.
+  // The CSV endpoint (fred.stlouisfed.org) is behind Akamai CDN which blocks
+  // Node.js via TLS fingerprinting / HTTP/2 negotiation failures.
+  if (!FRED_API_KEY) {
+    console.error("FRED_API_KEY not set — cannot fetch FRED data. Register free at https://fredaccount.stlouisfed.org/apikeys");
     return [];
   }
 
-  const text = await res.text();
-  const lines = text.trim().split("\n").slice(1); // skip header
+  const url =
+    `https://api.stlouisfed.org/fred/series/observations` +
+    `?series_id=${seriesId}` +
+    `&observation_start=${fmt(start)}` +
+    `&observation_end=${fmt(end)}` +
+    `&api_key=${FRED_API_KEY}` +
+    `&file_type=json`;
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) {
+    console.error(`FRED API failed for ${seriesId}: ${res.status}`);
+    return [];
+  }
+
+  const json = await res.json();
+  const observations = json.observations || [];
   const rows: FredRow[] = [];
-  for (const line of lines) {
-    const [date, val] = line.split(",");
-    const num = parseFloat(val);
+  for (const obs of observations as { date: string; value: string }[]) {
+    const num = parseFloat(obs.value);
     if (!isNaN(num)) {
-      rows.push({ date, value: num });
+      rows.push({ date: obs.date, value: num });
     }
   }
 
