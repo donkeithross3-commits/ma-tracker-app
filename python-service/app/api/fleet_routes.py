@@ -116,6 +116,10 @@ async def fleet_status() -> dict[str, Any]:
             except (ValueError, TypeError):
                 pass
 
+        # Mark checkins as stale if too old (prevents phantom "busy" state)
+        STALE_THRESHOLD_SECONDS = 300  # 5 minutes — checkins should come every 60s
+        is_stale = age_seconds is not None and age_seconds > STALE_THRESHOLD_SECONDS
+
         entry: dict[str, Any] = {
             "machine": machine,
             "gpu": data.get("gpu", {}),
@@ -126,10 +130,20 @@ async def fleet_status() -> dict[str, Any]:
             "timestamp": data.get("timestamp"),
             "received_at": data.get("received_at"),
             "age_seconds": age_seconds,
+            "stale": is_stale,
         }
-        # Include orchestrator status if present (Mac CPU orchestrator)
+        # Include orchestrator status if present — but mark state as
+        # stale/dead if the checkin itself is stale.  This prevents
+        # phantom "running" jobs from appearing on the dashboard when
+        # a machine has stopped reporting.
         if data.get("orchestrator"):
-            entry["orchestrator"] = data["orchestrator"]
+            orch = dict(data["orchestrator"])
+            if is_stale and orch.get("state") not in (None, "idle", "offline"):
+                orch["_live_state"] = orch.get("state")  # preserve original
+                orch["state"] = "stale"
+                # Don't clear current_task — show it with stale indicator
+                # so the user can see WHAT was running when it went silent
+            entry["orchestrator"] = orch
         machines.append(entry)
 
     return {"machines": machines}

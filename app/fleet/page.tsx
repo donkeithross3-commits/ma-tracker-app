@@ -164,6 +164,7 @@ type CpuUtilizationResponse = {
 type StatusMachine = {
   machine: string;
   age_seconds?: number | null;
+  stale?: boolean;
   gpu?: {
     util?: number;
     temp?: number;
@@ -664,14 +665,15 @@ export default function FleetUtilizationPage() {
                         .filter(m => m.orchestrator)
                         .map(m => {
                           const o = m.orchestrator!;
-                          const rpCores = (o.research_processes?.total_cpu_pct ?? 0) / 100;
-                          const orchWorkers = o.cpu?.workers ?? 0;
+                          const machineStale = m.stale === true || (m.age_seconds != null && m.age_seconds > 300);
+                          const rpCores = machineStale ? 0 : (o.research_processes?.total_cpu_pct ?? 0) / 100;
+                          const orchWorkers = machineStale ? 0 : (o.cpu?.workers ?? 0);
                           const totalCores = rpCores + orchWorkers;
-                          const rpJobs = o.research_processes?.jobs ?? [];
+                          const rpJobs = machineStale ? [] : (o.research_processes?.jobs ?? []);
                           const task = o.current_task;
                           const maxCores = m.machine === "mac" ? 10 : m.machine === "droplet" ? 8 : 4;
                           const label = m.machine === "mac" ? "M4 Pro" : m.machine === "droplet" ? "8 vCPU" : "";
-                          return { machine: m.machine, totalCores, maxCores, rpJobs, task, label, orchWorkers };
+                          return { machine: m.machine, totalCores, maxCores, rpJobs, task, label, orchWorkers, machineStale };
                         });
                       return cpuMachines.map(cm => {
                         const pct = Math.min(100, (cm.totalCores / cm.maxCores) * 100);
@@ -703,8 +705,12 @@ export default function FleetUtilizationPage() {
                                   </div>
                                 ))}
                               </div>
+                            ) : cm.machineStale && cm.task ? (
+                              <div className="text-[10px] text-red-400/70 mt-0.5 truncate line-through" title={`STALE — checkin lost. Job likely dead: ${cm.task}`}>{cm.task} ⚠</div>
                             ) : cm.task ? (
                               <div className="text-[10px] text-emerald-400/70 mt-0.5 truncate">{cm.task}</div>
+                            ) : cm.machineStale ? (
+                              <div className="text-[10px] text-red-400/70 mt-0.5">stale — no checkin</div>
                             ) : (
                               <div className="text-[10px] text-gray-600 mt-0.5">idle</div>
                             )}
@@ -891,8 +897,12 @@ export default function FleetUtilizationPage() {
                           const isGpuWithCpuWork = hasGpu && gpuMachineExps.length > 0;
 
                           // CPU state: native orchestrator state, or derived from running experiments
-                          const cpuState = o?.state || hb?.state
+                          // If the machine's checkin is stale (>5 min), override state to "stale"
+                          const isStale = m.stale === true || (m.age_seconds != null && m.age_seconds > 300);
+                          const rawCpuState = o?.state || hb?.state
                             || (isGpuWithCpuWork ? "cpu_job" : (hasGpu ? "idle" : "offline"));
+                          const cpuState = (isStale && rawCpuState !== "idle" && rawCpuState !== "offline" && rawCpuState !== "stale")
+                            ? "stale" : rawCpuState;
 
                           // Workers: native count, or count of running experiments on this GPU machine
                           const workers = o?.cpu?.workers ?? (hasGpu ? gpuMachineExps.length : 0);
@@ -922,18 +932,26 @@ export default function FleetUtilizationPage() {
                                   {workers}
                                 </span>
                               </td>
-                              <td className="px-3 py-2 text-cyan-300 text-xs max-w-[200px] truncate" title={task || undefined}>
-                                {task || "—"}
+                              <td className={`px-3 py-2 text-xs max-w-[200px] truncate ${
+                                cpuState === "stale" ? "text-gray-600 line-through" : "text-cyan-300"
+                              }`} title={
+                                cpuState === "stale"
+                                  ? `STALE — last checkin ${fmtAge(m.age_seconds)} ago. Job may be dead.${task ? ` (was: ${task})` : ""}`
+                                  : task || undefined
+                              }>
+                                {cpuState === "stale" ? (task ? `${task} ⚠` : "—") : (task || "—")}
                               </td>
                               <td className="px-3 py-2">
                                 <span className="flex items-center gap-1.5 text-xs">
                                   <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                                    cpuState === "stale" ? "bg-red-500" :
                                     cpuState === "cpu_job" ? "bg-emerald-400 animate-pulse" :
                                     cpuState === "collecting" ? "bg-cyan-400 animate-pulse" :
                                     cpuState === "idle" ? "bg-gray-500" :
                                     "bg-gray-600"
                                   }`} />
                                   <span className={
+                                    cpuState === "stale" ? "text-red-400" :
                                     cpuState === "cpu_job" ? "text-emerald-300" :
                                     cpuState === "collecting" ? "text-cyan-300" :
                                     cpuState === "idle" ? "text-gray-400" : "text-gray-500"
