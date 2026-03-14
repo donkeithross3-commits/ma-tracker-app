@@ -66,7 +66,8 @@ type RecentResult = {
 
 type RecentCpuJob = {
   name?: string;
-  status?: string;       // "completed" | "failed"
+  machine?: string;      // "droplet" | "gaming-pc" | "garage-pc" | "mac"
+  status?: string;       // "completed" | "failed" | "timeout"
   elapsed_min?: number;
   completed_at?: string;
 };
@@ -320,12 +321,34 @@ export default function FleetUtilizationPage() {
     return map;
   }, [status]);
 
-  // Extract CPU orchestrator data (Mac node)
+  // Extract CPU orchestrator data — merge from all machines with orchestrator field
+  // Mac posts recent_results (GPU sweeps), droplet posts recent_cpu_jobs
   const orchestratorMachine = useMemo(() => {
     for (const row of status?.machines || []) {
       if (row.orchestrator) return row;
     }
     return null;
+  }, [status]);
+
+  // Merge orchestrator data from all machines
+  const mergedOrchestrator = useMemo(() => {
+    const allOrch = (status?.machines || []).filter(m => m.orchestrator);
+    if (allOrch.length === 0) return null;
+    // Start with the first orchestrator (typically Mac — has GPU pipeline, results, health)
+    const primary = allOrch[0].orchestrator!;
+    // Merge recent_cpu_jobs and recent_results from all orchestrator machines
+    const allResults: RecentResult[] = [];
+    const allCpuJobs: RecentCpuJob[] = [];
+    for (const m of allOrch) {
+      const o = m.orchestrator!;
+      if (o.recent_results?.length) allResults.push(...o.recent_results);
+      if (o.recent_cpu_jobs?.length) allCpuJobs.push(...o.recent_cpu_jobs);
+    }
+    return {
+      ...primary,
+      recent_results: allResults.length > 0 ? allResults : primary.recent_results,
+      recent_cpu_jobs: allCpuJobs.length > 0 ? allCpuJobs : primary.recent_cpu_jobs,
+    };
   }, [status]);
 
   const dailyRows = useMemo(() => {
@@ -795,9 +818,84 @@ export default function FleetUtilizationPage() {
               </div>
             </section>
 
+            {/* --- Live CPU Machine Snapshot --- */}
+            {(() => {
+              const cpuMachines = (status?.machines || []).filter(m => {
+                // CPU machines: those without GPU data, or those with orchestrator
+                const hasGpu = m.gpu && Object.values(m.gpu).some(v => v != null && v !== 0);
+                return !hasGpu && m.machine !== "watchdog_state";
+              });
+              if (cpuMachines.length === 0) return null;
+              return (
+                <section className="rounded border border-gray-800 bg-gray-900">
+                  <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300">
+                    Live CPU Machine Snapshot
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="text-xs text-gray-500">
+                        <tr className="border-b border-gray-800">
+                          <th className="text-left px-3 py-2">Machine</th>
+                          <th className="text-left px-3 py-2">Role</th>
+                          <th className="text-right px-3 py-2">CPU Workers</th>
+                          <th className="text-left px-3 py-2">Current Task</th>
+                          <th className="text-left px-3 py-2">State</th>
+                          <th className="text-right px-3 py-2">Status Age</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cpuMachines.map((m) => {
+                          const o = m.orchestrator;
+                          const hb = m.heartbeats?.cpu_orchestrator;
+                          const cpuState = o?.state || hb?.state || "offline";
+                          const workers = o?.cpu?.workers ?? 0;
+                          const task = o?.current_task || hb?.current_job || null;
+                          const role = m.machine === "mac" ? "compute + GPU collection"
+                            : m.machine === "droplet" ? "fleet brain + compute"
+                            : "compute";
+                          return (
+                            <tr key={m.machine} className="border-b border-gray-800/50">
+                              <td className="px-3 py-2 text-gray-200 font-medium">{m.machine}</td>
+                              <td className="px-3 py-2 text-gray-500 text-xs">{role}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                <span className={workers > 0 ? "text-emerald-300" : "text-gray-500"}>
+                                  {workers}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-cyan-300 text-xs max-w-[200px] truncate" title={task || undefined}>
+                                {task || "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className="flex items-center gap-1.5 text-xs">
+                                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                                    cpuState === "cpu_job" ? "bg-emerald-400 animate-pulse" :
+                                    cpuState === "collecting" ? "bg-cyan-400 animate-pulse" :
+                                    cpuState === "idle" ? "bg-gray-500" :
+                                    "bg-gray-600"
+                                  }`} />
+                                  <span className={
+                                    cpuState === "cpu_job" ? "text-emerald-300" :
+                                    cpuState === "collecting" ? "text-cyan-300" :
+                                    cpuState === "idle" ? "text-gray-400" : "text-gray-500"
+                                  }>{cpuState}</span>
+                                </span>
+                              </td>
+                              <td className={`px-3 py-2 text-right tabular-nums ${ageClass(m.age_seconds)}`}>
+                                {fmtAge(m.age_seconds)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              );
+            })()}
+
             {/* --- GPU Pipeline + CPU Compute + Results (from orchestrator) --- */}
-            {orchestratorMachine && orchestratorMachine.orchestrator && (() => {
-              const orch = orchestratorMachine.orchestrator!;
+            {orchestratorMachine && mergedOrchestrator && (() => {
+              const orch = mergedOrchestrator;
               const orchState = orch.state || "unknown";
 
               const pipeline = orch.gpu_pipeline;
@@ -995,13 +1093,14 @@ export default function FleetUtilizationPage() {
                     <section className="rounded border border-gray-800 bg-gray-900">
                       <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
                         <span>Recent CPU Jobs</span>
-                        <span className="text-xs text-gray-500 font-normal">mac orchestrator</span>
+                        <span className="text-xs text-gray-500 font-normal">fleet orchestrator</span>
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead className="text-gray-500">
                             <tr className="border-b border-gray-800">
                               <th className="text-left px-3 py-1.5">Job</th>
+                              <th className="text-left px-3 py-1.5">Machine</th>
                               <th className="text-left px-3 py-1.5">Status</th>
                               <th className="text-right px-3 py-1.5">Duration</th>
                               <th className="text-right px-3 py-1.5">Completed</th>
@@ -1024,8 +1123,11 @@ export default function FleetUtilizationPage() {
                                   <td className="px-3 py-1.5 text-gray-300 max-w-[200px] truncate" title={j.name}>
                                     {j.name || "—"}
                                   </td>
+                                  <td className="px-3 py-1.5 text-gray-400">
+                                    {(j.machine || "—").replace("-pc", "")}
+                                  </td>
                                   <td className="px-3 py-1.5">
-                                    <span className={j.status === "completed" ? "text-emerald-400" : "text-red-400"}>
+                                    <span className={j.status === "completed" ? "text-emerald-400" : j.status === "timeout" ? "text-amber-400" : "text-red-400"}>
                                       {j.status || "—"}
                                     </span>
                                   </td>
