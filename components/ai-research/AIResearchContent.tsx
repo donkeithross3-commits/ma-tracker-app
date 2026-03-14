@@ -449,28 +449,7 @@ function OpportunitiesTab({ tickers, longs, shorts, sortKey, sortAsc, filterSign
         </table>
       </div>
 
-      {/* Rationale cards */}
-      <div className="mt-4">
-        <h3 className="text-sm font-semibold text-gray-300 mb-2">Signal Rationale</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          {tickers.slice(0, 10).map((t) => (
-            <div key={t.ticker} className={`border rounded-lg p-3 ${
-              t.signal === "Long" ? "border-green-800/50 bg-green-950/20" : "border-red-800/50 bg-red-950/20"
-            }`}>
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`font-mono font-bold text-sm ${t.signal === "Long" ? "text-green-400" : "text-red-400"}`}>
-                  {t.ticker}
-                </span>
-                <span className="text-[10px] text-gray-500">{t.industry_label}</span>
-                <span className={`text-[10px] ml-auto font-mono ${scoreColor(t.opportunity_score)}`}>
-                  {t.opportunity_score > 0 ? "+" : ""}{fmt(t.opportunity_score)}
-                </span>
-              </div>
-              <p className="text-xs text-gray-400 leading-relaxed">{t.ai_rationale}</p>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Signal Rationale cards removed — redundant with expandable table rows + AI thesis */}
     </div>
   );
 }
