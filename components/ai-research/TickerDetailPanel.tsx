@@ -156,10 +156,21 @@ export function TickerDetailPanel({ ticker, detail, colSpan, narrative }: Ticker
     <tr>
       <td colSpan={colSpan} className="p-0">
         <div className="bg-gray-900/80 border border-gray-800 rounded-lg mx-1 mb-1 p-3">
+          {/* AI Impact Thesis — specific view on how AI changes this company */}
+          {d.aiThesis && (
+            <div className="mb-3 px-2 py-2 bg-blue-950/40 border border-blue-900/50 rounded-md">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider">AI Impact Thesis</span>
+              </div>
+              <p className="text-[12px] leading-relaxed text-gray-300">
+                {d.aiThesis}
+              </p>
+            </div>
+          )}
           {/* AI Narrative — model explanation */}
           {narrative && (
             <div className="mb-3 px-1">
-              <p className="text-[13px] leading-relaxed text-gray-300">
+              <p className="text-[11px] leading-relaxed text-gray-500 italic">
                 {narrative}
               </p>
             </div>
