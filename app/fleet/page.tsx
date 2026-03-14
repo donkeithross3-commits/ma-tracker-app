@@ -99,6 +99,20 @@ type ResearchProcesses = {
   total_cpu_pct?: number;
 };
 
+type RunningExperiment = {
+  name?: string;
+  machine?: string;
+  elapsed_min?: number;
+  max_hours?: number;
+};
+
+type PendingExperiment = {
+  name?: string;
+  priority?: number;
+  target_machine?: string;
+  hypothesis?: string;
+};
+
 type OrchestratorStatus = {
   state?: string;
   current_task?: string | null;
@@ -109,6 +123,9 @@ type OrchestratorStatus = {
   gpu_pipeline?: Record<string, GpuPipelineEntry>;
   recent_results?: RecentResult[];
   recent_cpu_jobs?: RecentCpuJob[];
+  running_experiments?: RunningExperiment[];
+  pending_queue?: PendingExperiment[];
+  completed_count?: number;
   fleet_health?: FleetHealth;
   research_processes?: ResearchProcesses;
   // Legacy fields (kept for backward compat with old telemetry)
@@ -339,15 +356,24 @@ export default function FleetUtilizationPage() {
     // Merge recent_cpu_jobs and recent_results from all orchestrator machines
     const allResults: RecentResult[] = [];
     const allCpuJobs: RecentCpuJob[] = [];
+    const allRunning: RunningExperiment[] = [];
+    const allPending: PendingExperiment[] = [];
+    let totalCompleted = 0;
     for (const m of allOrch) {
       const o = m.orchestrator!;
       if (o.recent_results?.length) allResults.push(...o.recent_results);
       if (o.recent_cpu_jobs?.length) allCpuJobs.push(...o.recent_cpu_jobs);
+      if (o.running_experiments?.length) allRunning.push(...o.running_experiments);
+      if (o.pending_queue?.length) allPending.push(...o.pending_queue);
+      totalCompleted += o.completed_count ?? 0;
     }
     return {
       ...primary,
       recent_results: allResults.length > 0 ? allResults : primary.recent_results,
       recent_cpu_jobs: allCpuJobs.length > 0 ? allCpuJobs : primary.recent_cpu_jobs,
+      running_experiments: allRunning.length > 0 ? allRunning : primary.running_experiments,
+      pending_queue: allPending.length > 0 ? allPending : primary.pending_queue,
+      completed_count: totalCompleted || primary.completed_count,
     };
   }, [status]);
 
@@ -1014,6 +1040,105 @@ export default function FleetUtilizationPage() {
                       </>
                     )}
                   </div>
+
+                  {/* ========== CPU Research Pipeline (running + pending) ========== */}
+                  {(() => {
+                    const running = orch.running_experiments ?? [];
+                    const pending = orch.pending_queue ?? [];
+                    if (running.length === 0 && pending.length === 0) return null;
+
+                    // Group running by machine
+                    const byMachine: Record<string, RunningExperiment[]> = {};
+                    running.forEach(e => {
+                      const m = e.machine || "unknown";
+                      (byMachine[m] ??= []).push(e);
+                    });
+                    const machines = Object.keys(byMachine).sort();
+
+                    return (
+                      <section className="rounded border border-gray-800 bg-gray-900">
+                        <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            CPU Research Pipeline
+                            <span className="text-xs font-normal text-gray-500">
+                              {running.length} running · {pending.length} queued
+                            </span>
+                          </span>
+                          <span className="text-xs text-gray-500 font-normal">
+                            {(orch.completed_count ?? 0) > 0 && `${orch.completed_count} completed`}
+                          </span>
+                        </div>
+
+                        {/* Running experiments - grouped by machine */}
+                        {running.length > 0 && (
+                          <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            {machines.map(machine => (
+                              <div key={machine} className="rounded border border-gray-800 bg-gray-950/50 px-3 py-2">
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  <span className="text-xs font-medium text-gray-200">
+                                    {machine.replace("-pc", "")}
+                                  </span>
+                                  <span className="text-xs text-gray-600">
+                                    {byMachine[machine].length} job{byMachine[machine].length > 1 ? "s" : ""}
+                                  </span>
+                                </div>
+                                {byMachine[machine].map((e, i) => (
+                                  <div key={`run-${machine}-${i}`} className="flex items-center justify-between text-xs py-0.5">
+                                    <span className="text-cyan-300 truncate max-w-[200px]" title={e.name}>
+                                      {e.name || "—"}
+                                    </span>
+                                    <span className="text-gray-500 tabular-nums whitespace-nowrap ml-2">
+                                      {e.elapsed_min != null ? `${e.elapsed_min.toFixed(0)}m` : "—"}
+                                      {e.max_hours != null && (
+                                        <span className="text-gray-700">/{(e.max_hours * 60).toFixed(0)}m</span>
+                                      )}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Pending queue */}
+                        {pending.length > 0 && (
+                          <div className="border-t border-gray-800">
+                            <div className="overflow-x-auto max-h-[200px] overflow-y-auto">
+                              <table className="w-full text-xs">
+                                <thead className="text-gray-500 sticky top-0 bg-gray-900">
+                                  <tr className="border-b border-gray-800">
+                                    <th className="text-left px-3 py-1">Queue</th>
+                                    <th className="text-left px-3 py-1">Target</th>
+                                    <th className="text-left px-3 py-1">P</th>
+                                    <th className="text-left px-3 py-1">Hypothesis</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {pending.map((p, i) => (
+                                    <tr key={`pend-${i}`} className="border-b border-gray-800/30">
+                                      <td className="px-3 py-1 text-gray-400 max-w-[180px] truncate" title={p.name}>
+                                        {p.name || "—"}
+                                      </td>
+                                      <td className="px-3 py-1 text-gray-500">
+                                        {(p.target_machine || "—").replace("-pc", "")}
+                                      </td>
+                                      <td className="px-3 py-1 text-gray-600">
+                                        P{p.priority ?? "?"}
+                                      </td>
+                                      <td className="px-3 py-1 text-gray-600 max-w-[300px] truncate" title={p.hypothesis || undefined}>
+                                        {p.hypothesis || "—"}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })()}
 
                   {/* ========== Experiment Results + CPU Jobs side by side ========== */}
                   <div className={`grid gap-3 ${cpuJobs && cpuJobs.length > 0 && results && results.length > 0 ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"}`}>
