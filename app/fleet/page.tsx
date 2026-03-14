@@ -432,8 +432,9 @@ export default function FleetUtilizationPage() {
   const smallRingCirc = 2 * Math.PI * 60;
   const ringOffset = ringCircumference * (1 - fleetSpeedPct / 100);
 
-  // CPU gauge: sum ALL active CPU cores across all machines (% of 18 total: 10 mac + 8 droplet)
-  const CPU_TOTAL_CORES = 18;
+  // CPU gauge: sum ALL active CPU cores across all machines
+  // mac=10, droplet=8, gaming-pc=16, garage-pc=24 → 58 total
+  const CPU_TOTAL_CORES = 58;
   const cpuSpeedPct = useMemo(() => {
     if (!status) return 0;
     let totalCores = 0;
@@ -671,8 +672,8 @@ export default function FleetUtilizationPage() {
                           const totalCores = rpCores + orchWorkers;
                           const rpJobs = machineStale ? [] : (o.research_processes?.jobs ?? []);
                           const task = o.current_task;
-                          const maxCores = m.machine === "mac" ? 10 : m.machine === "droplet" ? 8 : 4;
-                          const label = m.machine === "mac" ? "M4 Pro" : m.machine === "droplet" ? "8 vCPU" : "";
+                          const maxCores = m.machine === "mac" ? 10 : m.machine === "droplet" ? 8 : m.machine === "gaming-pc" ? 16 : m.machine === "garage-pc" ? 24 : 8;
+                          const label = m.machine === "mac" ? "M4 Pro" : m.machine === "droplet" ? "8 vCPU" : m.machine === "gaming-pc" ? "i7-12700F" : m.machine === "garage-pc" ? "i7-14700K" : "";
                           return { machine: m.machine, totalCores, maxCores, rpJobs, task, label, orchWorkers, machineStale };
                         });
                       return cpuMachines.map(cm => {

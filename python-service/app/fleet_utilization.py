@@ -439,7 +439,7 @@ def build_utilization_report(
 # CPU utilization rollups
 # ---------------------------------------------------------------------------
 
-CPU_MACHINES = ["mac"]  # Expandable when droplet comes online
+CPU_MACHINES = ["mac", "droplet", "gaming-pc", "garage-pc"]
 
 
 def _load_cpu_points(
