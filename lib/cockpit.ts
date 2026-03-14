@@ -1,41 +1,58 @@
 // Cockpit shared types, fetchers, caching, and regime classification
-import https from "https";
+import tls from "tls";
 
-// FRED's Apache server advertises HTTP/2 via ALPN but its upgrade handling
-// confuses Node 22's undici (used by global fetch()), causing requests to hang
-// indefinitely. Force HTTP/1.1 via a dedicated https.Agent.
-const fredAgent = new https.Agent({
-  ALPNProtocols: ["http/1.1"],
-  keepAlive: false,
-});
-
-function fredFetch(url: string, timeoutMs = 10000): Promise<{ ok: boolean; status: number; text: () => Promise<string> }> {
+// FRED's Apache server advertises HTTP/2 via ALPN but its H2 implementation
+// is broken (NGHTTP2_INTERNAL_ERROR). Node 22's https module and fetch() both
+// auto-negotiate H2 via ALPN and then hang/error. Even forcing ALPNProtocols
+// to ["http/1.1"] on the Agent doesn't reliably prevent this in Node 22.
+//
+// The only reliable approach: use a raw TLS socket (which skips ALPN entirely)
+// and write the HTTP/1.1 request manually. Proven to work in <50ms from the
+// Docker container where fetch() hangs indefinitely.
+function fredFetch(
+  url: string,
+  timeoutMs = 10000
+): Promise<{ ok: boolean; status: number; text: () => Promise<string> }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
-    const req = https.get(
-      {
-        hostname: parsed.hostname,
-        path: parsed.pathname + parsed.search,
-        agent: fredAgent,
-        headers: { "User-Agent": "DR3-Dashboard/1.0", Accept: "*/*" },
-      },
-      (res) => {
-        let data = "";
-        res.on("data", (c: Buffer) => (data += c.toString()));
-        res.on("end", () =>
-          resolve({
-            ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
-            status: res.statusCode ?? 500,
-            text: async () => data,
-          })
+    const sock = tls.connect(
+      443,
+      parsed.hostname,
+      { servername: parsed.hostname },
+      () => {
+        sock.write(
+          `GET ${parsed.pathname}${parsed.search} HTTP/1.1\r\n` +
+            `Host: ${parsed.hostname}\r\n` +
+            `User-Agent: DR3-Dashboard/1.0\r\n` +
+            `Accept: */*\r\n` +
+            `Connection: close\r\n\r\n`
         );
       }
     );
-    req.setTimeout(timeoutMs, () => {
-      req.destroy();
+
+    let buf = "";
+    sock.on("data", (d: Buffer) => (buf += d.toString()));
+    sock.on("end", () => {
+      const headerEnd = buf.indexOf("\r\n\r\n");
+      if (headerEnd === -1) {
+        reject(new Error("FRED: malformed response (no header terminator)"));
+        return;
+      }
+      const statusLine = buf.substring(0, buf.indexOf("\r\n"));
+      const statusMatch = statusLine.match(/HTTP\/[\d.]+ (\d+)/);
+      const status = statusMatch ? parseInt(statusMatch[1], 10) : 500;
+      const body = buf.substring(headerEnd + 4);
+      resolve({
+        ok: status >= 200 && status < 300,
+        status,
+        text: async () => body,
+      });
+    });
+    sock.setTimeout(timeoutMs, () => {
+      sock.destroy();
       reject(new Error(`FRED request timed out after ${timeoutMs}ms`));
     });
-    req.on("error", reject);
+    sock.on("error", reject);
   });
 }
 
