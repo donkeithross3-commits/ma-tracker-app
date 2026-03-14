@@ -838,14 +838,30 @@ export default function FleetUtilizationPage() {
               </div>
             </section>
 
-            {/* --- Live CPU Machine Snapshot --- */}
+            {/* --- Live CPU Machine Snapshot (all machines including GPU servers' CPU cores) --- */}
             {(() => {
-              const cpuMachines = (status?.machines || []).filter(m => {
-                // CPU machines: those without GPU data, or those with orchestrator
-                const hasGpu = m.gpu && Object.values(m.gpu).some(v => v != null && v !== 0);
-                return !hasGpu && m.machine !== "watchdog_state";
+              // Build running experiments lookup by machine from orchestrator data
+              const runningByMachine: Record<string, RunningExperiment[]> = {};
+              for (const exp of mergedOrchestrator?.running_experiments || []) {
+                const mach = exp.machine || "unknown";
+                if (!runningByMachine[mach]) runningByMachine[mach] = [];
+                runningByMachine[mach].push(exp);
+              }
+
+              // Include ALL machines (CPU-only and GPU servers doing CPU experiments)
+              const allMachines = (status?.machines || []).filter(m =>
+                m.machine !== "watchdog_state"
+              );
+              if (allMachines.length === 0) return null;
+
+              // Sort: machines with orchestrator first, then GPU machines, then others
+              const sortedMachines = [...allMachines].sort((a, b) => {
+                const aOrch = a.orchestrator ? 0 : 1;
+                const bOrch = b.orchestrator ? 0 : 1;
+                if (aOrch !== bOrch) return aOrch - bOrch;
+                return (a.machine || "").localeCompare(b.machine || "");
               });
-              if (cpuMachines.length === 0) return null;
+
               return (
                 <section className="rounded border border-gray-800 bg-gray-900">
                   <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300">
@@ -864,18 +880,42 @@ export default function FleetUtilizationPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {cpuMachines.map((m) => {
+                        {sortedMachines.map((m) => {
                           const o = m.orchestrator;
                           const hb = m.heartbeats?.cpu_orchestrator;
-                          const cpuState = o?.state || hb?.state || "offline";
-                          const workers = o?.cpu?.workers ?? 0;
-                          const task = o?.current_task || hb?.current_job || null;
-                          const role = m.machine === "mac" ? "compute + GPU collection"
-                            : m.machine === "droplet" ? "fleet brain + compute"
+                          const hasGpu = m.gpu && Object.values(m.gpu).some(v => v != null && v !== 0);
+                          const machineName = m.machine || "unknown";
+
+                          // For GPU machines, derive CPU experiment state from orchestrator running_experiments
+                          const gpuMachineExps = hasGpu ? (runningByMachine[machineName] || []) : [];
+                          const isGpuWithCpuWork = hasGpu && gpuMachineExps.length > 0;
+
+                          // CPU state: native orchestrator state, or derived from running experiments
+                          const cpuState = o?.state || hb?.state
+                            || (isGpuWithCpuWork ? "cpu_job" : (hasGpu ? "idle" : "offline"));
+
+                          // Workers: native count, or count of running experiments on this GPU machine
+                          const workers = o?.cpu?.workers ?? (hasGpu ? gpuMachineExps.length : 0);
+
+                          // Task: native task, or list of experiment names running on this GPU machine
+                          const task = o?.current_task || hb?.current_job
+                            || (gpuMachineExps.length > 0
+                              ? gpuMachineExps.map(e => e.name || "experiment").join(", ")
+                              : null);
+
+                          const role = machineName === "mac" ? "compute + GPU collection"
+                            : machineName === "droplet" ? "fleet brain + compute"
+                            : hasGpu ? "GPU + CPU compute"
                             : "compute";
+
                           return (
-                            <tr key={m.machine} className="border-b border-gray-800/50">
-                              <td className="px-3 py-2 text-gray-200 font-medium">{m.machine}</td>
+                            <tr key={machineName} className="border-b border-gray-800/50">
+                              <td className="px-3 py-2 text-gray-200 font-medium">
+                                {machineName}
+                                {hasGpu && (
+                                  <span className="ml-1.5 text-[10px] text-purple-400 font-normal">GPU</span>
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-gray-500 text-xs">{role}</td>
                               <td className="px-3 py-2 text-right tabular-nums">
                                 <span className={workers > 0 ? "text-emerald-300" : "text-gray-500"}>
