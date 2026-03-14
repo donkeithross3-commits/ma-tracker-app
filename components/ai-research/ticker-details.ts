@@ -51,6 +51,8 @@ export interface TickerDetail {
   disruptionSusceptibility: number | null;
   legacyCostPenalty: number | null;
   aiThesis: string | null;
+  /** Verified source links backing key claims in the AI thesis */
+  sources: { label: string; url: string }[];
 }
 
 export const TICKER_DETAILS: Record<string, TickerDetail> = {
@@ -103,7 +105,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.28,
     legacyCostPenalty: 0.565,
-    aiThesis: "AI could commoditize basic email/SMS marketing, but Klaviyo's customer data platform (CDP) becomes MORE valuable as AI agents need unified customer profiles to act on. Management's $500M buyback signals conviction the market overreacted. The question: does the data moat deepen or dissolve?"
+    aiThesis: "AI could commoditize basic email/SMS marketing, but Klaviyo's customer data platform (CDP) becomes MORE valuable as AI agents need unified customer profiles to act on. Management's $500M buyback signals conviction the market overreacted. The question: does the data moat deepen or dissolve?",
+    sources: [{"label": "$500M Buyback (8-K, Mar 2026)", "url": "https://www.businesswire.com/news/home/20260302341603/en/Klaviyo-Announces-500-Million-Share-Repurchase-Program"}, {"label": "Q4/FY2025 Earnings", "url": "https://investors.klaviyo.com/news/news-details/2026/Klaviyo-Delivers-Outstanding-2025-Results-32-Revenue-Growth-Record-Fourth-Quarter-and-Raised-Fiscal-Year-2026-Outlook/default.aspx"}, {"label": "SEC Filings", "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001835830&type=&dateb=&owner=include&count=20"}]
   },
   "FRSH": {
     name: "Freshworks Inc.",
@@ -154,7 +157,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.28,
     legacyCostPenalty: 0.5625,
-    aiThesis: "AI chatbots directly threaten tier-1 customer support \u2014 Freshworks' core market. But at P/E 13x and profitable, the stock is priced as if already dead. Freshdesk's workflow engine and ticket routing are deterministic systems AI enhances rather than replaces. The bull case: AI copilots increase agent productivity within Freshworks, not around it."
+    aiThesis: "AI chatbots directly threaten tier-1 customer support \u2014 Freshworks' core market. But at P/E 13x and profitable, the stock is priced as if already dead. Freshdesk's workflow engine and ticket routing are deterministic systems AI enhances rather than replaces. The bull case: AI copilots increase agent productivity within Freshworks, not around it.",
+    sources: [{"label": "FY2025 Earnings ($184M NI)", "url": "https://ir.freshworks.com/news/news-details/2026/Freshworks-Reports-Fourth-Quarter-and-Full-Year-2025-Results/"}, {"label": "SEC Filings", "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001544522&type=&dateb=&owner=include&count=20"}]
   },
   "HUBS": {
     name: "HUBSPOT, INC.",
@@ -205,7 +209,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.28,
     legacyCostPenalty: 0.574411,
-    aiThesis: "Mid-market CRM with deep integration across marketing, sales, and service. AI agents could reduce seat count, but HubSpot's system-of-record position means those agents need to READ and WRITE to HubSpot's data. The switching cost is the integration, not the UI. Down 61% from highs despite 19% growth."
+    aiThesis: "Mid-market CRM with deep integration across marketing, sales, and service. AI agents could reduce seat count, but HubSpot's system-of-record position means those agents need to READ and WRITE to HubSpot's data. The switching cost is the integration, not the UI. Down 61% from highs despite 19% growth.",
+    sources: [{"label": "FY2025 Earnings (19% growth)", "url": "https://ir.hubspot.com/news-releases/news-release-details/hubspot-reports-strong-q4-and-full-year-2025-results"}, {"label": "Quarterly Results", "url": "https://ir.hubspot.com/financials/quarterly-results"}, {"label": "SEC Filings", "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001404655&type=&dateb=&owner=include&count=20"}]
   },
   "GTLB": {
     name: "GitLab Inc. Class A Common Stock",
@@ -256,7 +261,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.9,
     disruptionSusceptibility: 0.65,
     legacyCostPenalty: 0.371992,
-    aiThesis: "AI coding tools (Copilot, Cursor, Claude Code) write more code faster \u2014 but that code still needs CI/CD pipelines, security scanning, and version control. GitLab's platform becomes MORE important as AI-generated code volume explodes. The threat is to manual coding, not to the infrastructure that tests and deploys it."
+    aiThesis: "AI coding tools (Copilot, Cursor, Claude Code) write more code faster \u2014 but that code still needs CI/CD pipelines, security scanning, and version control. GitLab's platform becomes MORE important as AI-generated code volume explodes. The threat is to manual coding, not to the infrastructure that tests and deploys it.",
+    sources: [{"label": "Q3 FY2026 Earnings", "url": "https://about.gitlab.com/press/releases/2025-12-02-gitlab-reports-third-quarter-fiscal-year-2026-financial-results/"}, {"label": "SEC Filings", "url": "https://ir.gitlab.com/financial-information/sec-filings"}]
   },
   "NTNX": {
     name: "Nutanix Inc.",
@@ -307,7 +313,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.9,
     disruptionSusceptibility: 0.22,
     legacyCostPenalty: 0.4025,
-    aiThesis: "Hybrid cloud infrastructure is where enterprise AI workloads actually run \u2014 not everything goes to the public cloud. Nutanix's -53% drawdown and partnership with AMD for AI infrastructure create a genuine dislocation. Profitable, growing 17%, at P/S 4.4x. The market is treating it as a legacy infra play when it's becoming AI infrastructure."
+    aiThesis: "Hybrid cloud infrastructure is where enterprise AI workloads actually run \u2014 not everything goes to the public cloud. Nutanix's -53% drawdown and partnership with AMD for AI infrastructure create a genuine dislocation. Profitable, growing 17%, at P/S 4.4x. The market is treating it as a legacy infra play when it's becoming AI infrastructure.",
+    sources: [{"label": "AMD Partnership ($250M, Feb 2026)", "url": "https://ir.nutanix.com/news-releases/news-release-details/amd-and-nutanix-announce-strategic-partnership-advance-open-and"}, {"label": "AMD Announcement", "url": "https://ir.amd.com/news-events/press-releases/detail/1280/amd-and-nutanix-announce-strategic-partnership-to-advance-an-open-and-scalable-platform-for-enterprise-ai"}]
   },
   "S": {
     name: "SentinelOne Inc.",
@@ -358,7 +365,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.52,
-    aiThesis: "SentinelOne's Purple AI agent is one of the most concrete AI product launches in cybersecurity \u2014 natural language threat hunting across endpoint telemetry. AI doesn't reduce the need for security; it expands the attack surface. Every AI agent deployed in an enterprise needs to be secured. Just crossed $1B ARR."
+    aiThesis: "SentinelOne's Purple AI agent is one of the most concrete AI product launches in cybersecurity \u2014 natural language threat hunting across endpoint telemetry. AI doesn't reduce the need for security; it expands the attack surface. Every AI agent deployed in an enterprise needs to be secured. Just crossed $1B ARR.",
+    sources: [{"label": "$1B ARR Milestone (Q2 FY2026)", "url": "https://investors.sentinelone.com/press-releases/news-details/2025/SentinelOne-Announces-Second-Quarter-Fiscal-Year-2026-Financial-Results/default.aspx"}, {"label": "Q4/FY2026 Earnings", "url": "https://www.businesswire.com/news/home/20260312383715/en/SentinelOne-Announces-Fourth-Quarter-and-Fiscal-Year-2026-Financial-Results"}]
   },
   "DOCU": {
     name: "DocuSign, Inc. Common Stock",
@@ -409,7 +417,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.85,
     disruptionSusceptibility: 0.55,
     legacyCostPenalty: 0.488209,
-    aiThesis: "E-signature is a deterministic workflow \u2014 legal validity requires exact compliance with e-sign laws. AI can't replace the signature, but AI contract analysis and intelligent agreement management add value ON TOP of DocuSign's existing workflow. Enhanced by AI, not disrupted by it. P/S 3.0x, FCF yield 10%."
+    aiThesis: "E-signature is a deterministic workflow \u2014 legal validity requires exact compliance with e-sign laws. AI can't replace the signature, but AI contract analysis and intelligent agreement management add value ON TOP of DocuSign's existing workflow. Enhanced by AI, not disrupted by it. P/S 3.0x, FCF yield 10%.",
+    sources: [{"label": "Q3 FY2026 Earnings", "url": "https://investor.docusign.com/investors/press-releases/press-release-details/2025/Docusign-Announces-Third-Quarter-Fiscal-2026-Financial-Results/default.aspx"}, {"label": "Q4 FY2026 (Mar 17, 2026)", "url": "https://investor.docusign.com/investors/press-releases/press-release-details/2026/Docusign-Announces-Timing-of-Fourth-Quarter-Fiscal-2026-Earnings-Conference-Call/default.aspx"}]
   },
   "WDAY": {
     name: "Workday Inc.",
@@ -460,7 +469,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.45,
     legacyCostPenalty: 0.641,
-    aiThesis: "Workday's HCM and financial management platform is a system of record with 97% revenue retention. AI transforms HR (automated recruiting, workforce planning) but these AI tools run WITHIN Workday, not instead of it. At -52% and P/S 4.1x, the stock is priced as if AI replaces the need for human capital management software entirely."
+    aiThesis: "Workday's HCM and financial management platform is a system of record with 97% revenue retention. AI transforms HR (automated recruiting, workforce planning) but these AI tools run WITHIN Workday, not instead of it. At -52% and P/S 4.1x, the stock is priced as if AI replaces the need for human capital management software entirely.",
+    sources: [{"label": "Q3 FY2026 Earnings (97% retention)", "url": "https://investor.workday.com/news-and-events/press-releases/news-details/2025/Workday-Announces-Fiscal-2026-Third-Quarter-Financial-Results-11-25-2025/default.aspx"}, {"label": "Prepared Remarks (PDF)", "url": "https://investor.workday.com/files/doc_financials/2026/q3/workday-fiscal-2026-third-quarter-prepared-remarks.pdf"}]
   },
   "SOFI": {
     name: "SoFi Technologies, Inc. Common Stock",
@@ -511,7 +521,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.67,
     disruptionSusceptibility: 0.62,
     legacyCostPenalty: 0.6,
-    aiThesis: "AI transforms every layer of banking \u2014 fraud detection, credit underwriting, personalization, customer service automation. SoFi's digital-native architecture means AI can be embedded faster than legacy banks. The lending model uses ML for credit decisions already. The risk: regulatory uncertainty as a bank holding company."
+    aiThesis: "AI transforms every layer of banking \u2014 fraud detection, credit underwriting, personalization, customer service automation. SoFi's digital-native architecture means AI can be embedded faster than legacy banks. The lending model uses ML for credit decisions already. The risk: regulatory uncertainty as a bank holding company.",
+    sources: [{"label": "Bank Charter Approval (Jan 2022)", "url": "https://investors.sofi.com/news/news-details/2022/SoFi-Receives-Regulatory-Approval-to-Become-a-National-Bank/default.aspx"}, {"label": "OCC Approval", "url": "https://www.occ.gov/news-issuances/news-releases/2022/nr-occ-2022-4.html"}]
   },
   "CRM": {
     name: "Salesforce, Inc.",
@@ -562,7 +573,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.28,
     legacyCostPenalty: 0.63,
-    aiThesis: "Salesforce is the canonical system of record. Agentforce is a real AI product shipping to enterprise customers. AI agents don't replace CRM \u2014 they live inside it. Every AI-powered sales workflow needs access to the customer graph that Salesforce owns. The risk: execution on AI pricing transition from seats to outcomes."
+    aiThesis: "Salesforce is the canonical system of record. Agentforce is a real AI product shipping to enterprise customers. AI agents don't replace CRM \u2014 they live inside it. Every AI-powered sales workflow needs access to the customer graph that Salesforce owns. The risk: execution on AI pricing transition from seats to outcomes.",
+    sources: [{"label": "Agentforce Launch (Sep 2024)", "url": "https://www.salesforce.com/news/press-releases/2024/09/12/agentforce-announcement/"}, {"label": "Agentforce 2.0 (Dec 2024)", "url": "https://www.salesforce.com/news/press-releases/2024/12/17/agentforce-2-0-announcement/"}, {"label": "Agentforce 360 (Oct 2025)", "url": "https://investor.salesforce.com/news/news-details/2025/Welcome-to-the-Agentic-Enterprise-With-Agentforce-360-Salesforce-Elevates-Human-Potential-in-the-Age-of-AI/default.aspx"}]
   },
   "TEAM": {
     name: "Atlassian Corporation Class A Common Stock",
@@ -613,7 +625,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.9,
     disruptionSusceptibility: 0.65,
     legacyCostPenalty: 0.41125,
-    aiThesis: "Atlassian's Jira and Confluence face genuine risk: AI project management tools could automate ticket creation, status updates, and documentation. But the 20+ years of accumulated workflow data and organizational knowledge create massive switching costs. The moat is the organizational graph, not the UI."
+    aiThesis: "Atlassian's Jira and Confluence face genuine risk: AI project management tools could automate ticket creation, status updates, and documentation. But the 20+ years of accumulated workflow data and organizational knowledge create massive switching costs. The moat is the organizational graph, not the UI.",
+    sources: [{"label": "Agents in Jira (Feb 2026)", "url": "https://www.businesswire.com/news/home/20260224033792/en/Atlassian-Introduces-Agents-in-Jira-to-Drive-Human-AI-Collaboration-at-Enterprise-Scale"}, {"label": "Atlassian Intelligence GA", "url": "https://www.atlassian.com/blog/announcements/atlassian-intelligence-ga"}]
   },
   "ESTC": {
     name: "Elastic N.V.",
@@ -664,7 +677,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.88,
     disruptionSusceptibility: 0.5,
     legacyCostPenalty: 0.464257,
-    aiThesis: "Elasticsearch is core infrastructure for AI-powered search and retrieval-augmented generation (RAG). As AI applications need to search enterprise data, Elastic's relevance engine becomes a foundational layer. The stock is down 50% despite being positioned as AI infrastructure."
+    aiThesis: "Elasticsearch is core infrastructure for AI-powered search and retrieval-augmented generation (RAG). As AI applications need to search enterprise data, Elastic's relevance engine becomes a foundational layer. The stock is down 50% despite being positioned as AI infrastructure.",
+    sources: [{"label": "RAG Product Page", "url": "https://www.elastic.co/enterprise-search/rag"}, {"label": "Red Hat RAG Partnership", "url": "https://www.elastic.co/about/press/red-hat-and-elastic-fuel-retrieval-augmented-generation-for-genai-use-cases"}]
   },
   "ADBE": {
     name: "Adobe Inc.",
@@ -715,7 +729,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.85,
     disruptionSusceptibility: 0.55,
     legacyCostPenalty: 0.48,
-    aiThesis: "Adobe sits at the epicenter of the AI creative revolution. Firefly and generative fill are real products driving adoption. The question isn't whether AI disrupts creative tools \u2014 it's whether Adobe captures the value or open-source alternatives do. The stock's -41% drawdown prices in significant disruption risk."
+    aiThesis: "Adobe sits at the epicenter of the AI creative revolution. Firefly and generative fill are real products driving adoption. The question isn't whether AI disrupts creative tools \u2014 it's whether Adobe captures the value or open-source alternatives do. The stock's -41% drawdown prices in significant disruption risk.",
+    sources: [{"label": "Firefly Launch (Mar 2023)", "url": "https://news.adobe.com/news/news-details/2023/adobe-unveils-firefly-a-family-of-new-creative-generative-ai"}, {"label": "Firefly Video Model (Oct 2024)", "url": "https://news.adobe.com/news/2024/10/101424-adobe-launches-firefly-video-model"}]
   },
   "OKTA": {
     name: "Okta, Inc. Class A Common Stock",
@@ -766,7 +781,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.542239,
-    aiThesis: "Identity and access management becomes exponentially more complex with AI agents. Every AI assistant needs its own identity, permissions, and audit trail. Okta's TAM expands with every agent deployed. The market fears AI replaces Okta; reality is AI creates orders of magnitude more identities to manage."
+    aiThesis: "Identity and access management becomes exponentially more complex with AI agents. Every AI assistant needs its own identity, permissions, and audit trail. Okta's TAM expands with every agent deployed. The market fears AI replaces Okta; reality is AI creates orders of magnitude more identities to manage.",
+    sources: [{"label": "Non-Human Identity Security (Sep 2025)", "url": "https://investor.okta.com/news-and-events/news-releases/news-details/2025/New-Okta-Platform-Innovations-Extend-Identity-Security-Fabric-to-Non-Human-Identities-in-an-Agentic-AI-Future/default.aspx"}, {"label": "Shadow AI Governance", "url": "https://www.okta.com/newsroom/press-releases/okta-secures-the-agentic-enterprise-with-new-tools-for-discovering-and-mitigating-shadow-ai-risks/"}]
   },
   "NOW": {
     name: "SERVICENOW, INC.",
@@ -817,7 +833,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.28,
     legacyCostPenalty: 0.63,
-    aiThesis: "ServiceNow's workflow automation is a deterministic system \u2014 cascading state, approval chains, compliance audit trails. AI makes IT service management faster (auto-triage, auto-resolve) but cannot replace the structured workflow engine. NOW is an AI beneficiary disguised as a victim. Down 46% despite 20%+ growth."
+    aiThesis: "ServiceNow's workflow automation is a deterministic system \u2014 cascading state, approval chains, compliance audit trails. AI makes IT service management faster (auto-triage, auto-resolve) but cannot replace the structured workflow engine. NOW is an AI beneficiary disguised as a victim. Down 46% despite 20%+ growth.",
+    sources: [{"label": "AI Agents for ITSM (Sep 2024)", "url": "https://newsroom.servicenow.com/press-releases/details/2024/ServiceNow-to-unlock-247-productivity-at-massive-scale-with-AI-agents-for-IT-Customer-Service-Procurement-HR-Software-Development-and-more-09-10-2024-traffic/default.aspx"}, {"label": "Now Assist", "url": "https://www.servicenow.com/platform/now-assist.html"}]
   },
   "SAP": {
     name: "SAP SE",
@@ -868,7 +885,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.28,
     legacyCostPenalty: 0.63,
-    aiThesis: "ERP is the most deterministic enterprise software \u2014 financial close, supply chain planning, regulatory compliance all require 100% accuracy. AI augments SAP (co-pilot for procurement, automated journal entries) but cannot replace it. The 52-year installed base is the deepest moat in software. SAP's AI strategy is embedding, not competing."
+    aiThesis: "ERP is the most deterministic enterprise software \u2014 financial close, supply chain planning, regulatory compliance all require 100% accuracy. AI augments SAP (co-pilot for procurement, automated journal entries) but cannot replace it. The 52-year installed base is the deepest moat in software. SAP's AI strategy is embedding, not competing.",
+    sources: [{"label": "Joule AI Copilot (Sep 2023)", "url": "https://news.sap.com/2023/09/joule-new-generative-ai-assistant/"}, {"label": "Joule Collaborative Agents (Oct 2024)", "url": "https://news.sap.com/2024/10/sap-teched-copilot-joule-collaborative-capabilities-enterprise-ai/"}]
   },
   "INTU": {
     name: "Intuit Inc",
@@ -919,7 +937,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.72,
     disruptionSusceptibility: 0.4,
     legacyCostPenalty: 0.43,
-    aiThesis: "Tax preparation and small business accounting are deterministic systems \u2014 100% accuracy is required by law. AI augments TurboTax (auto-categorization, tax optimization suggestions) but cannot replace the compliance engine. Intuit's massive proprietary tax dataset is a training data moat. Down 46% despite consistent profitability."
+    aiThesis: "Tax preparation and small business accounting are deterministic systems \u2014 100% accuracy is required by law. AI augments TurboTax (auto-categorization, tax optimization suggestions) but cannot replace the compliance engine. Intuit's massive proprietary tax dataset is a training data moat. Down 46% despite consistent profitability.",
+    sources: [{"label": "Intuit Assist AI Platform", "url": "https://www.intuit.com/intuitassist/"}, {"label": "Investor Day 2024 AI Announcement", "url": "https://investors.intuit.com/news-events/press-releases/detail/1216/intuit-unveils-new-ai-driven-expert-platform-experiences-at-investor-day-2024"}]
   },
   "PYPL": {
     name: "PayPal Holdings, Inc. Common Stock",
@@ -970,7 +989,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.67,
     disruptionSusceptibility: 0.62,
     legacyCostPenalty: 0.681351,
-    aiThesis: "PayPal's AI opportunity is in fraud detection, checkout optimization, and merchant tools. The two-sided network (consumers + merchants) creates data for AI training. But payments is increasingly commoditized, and AI enables new payment methods that could disintermediate PayPal. Mixed thesis."
+    aiThesis: "PayPal's AI opportunity is in fraud detection, checkout optimization, and merchant tools. The two-sided network (consumers + merchants) creates data for AI training. But payments is increasingly commoditized, and AI enables new payment methods that could disintermediate PayPal. Mixed thesis.",
+    sources: [{"label": "AI Scam Alerts (Jul 2025)", "url": "https://newsroom.paypal-corp.com/2025-7-21-Introducing-AI-Powered-Scam-Alerts-for-Friends-and-Family-Payments"}, {"label": "ML Fraud Detection", "url": "https://www.paypal.com/us/brc/article/payment-fraud-detection-machine-learning"}]
   },
   "APPF": {
     name: "AppFolio Inc.",
@@ -1021,7 +1041,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.72,
     disruptionSusceptibility: 0.4,
     legacyCostPenalty: 0.63,
-    aiThesis: "AppFolio's property management SaaS serves a highly regulated vertical (tenant screening, lease compliance, accounting). AI automates maintenance coordination, rent optimization, and tenant communication WITHIN AppFolio's platform. The regulatory moat protects against AI displacement."
+    aiThesis: "AppFolio's property management SaaS serves a highly regulated vertical (tenant screening, lease compliance, accounting). AI automates maintenance coordination, rent optimization, and tenant communication WITHIN AppFolio's platform. The regulatory moat protects against AI displacement.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.appfolioinc.com/"}]
   },
   "SQ": {
     name: null,
@@ -1072,7 +1093,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.67,
     disruptionSusceptibility: 0.62,
     legacyCostPenalty: 0.615752,
-    aiThesis: "Block's Cash App and Square merchant ecosystem generate unique transaction data for AI-powered lending, fraud detection, and financial management. The integration of Bitcoin with AI-powered financial tools is a differentiated strategy. But the stock has been volatile for non-AI reasons (crypto correlation)."
+    aiThesis: "Block's Cash App and Square merchant ecosystem generate unique transaction data for AI-powered lending, fraud detection, and financial management. The integration of Bitcoin with AI-powered financial tools is a differentiated strategy. But the stock has been volatile for non-AI reasons (crypto correlation).",
+    sources: [{"label": "Investor Relations", "url": "https://investors.block.xyz/"}]
   },
   "META": {
     name: "Meta Platforms, Inc. Class A Common Stock",
@@ -1123,7 +1145,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.88,
     disruptionSusceptibility: 0.35,
     legacyCostPenalty: 0.38,
-    aiThesis: "Meta's AI-powered ad targeting (Advantage+) is the most profitable AI application in production today. AI doesn't disrupt Meta \u2014 it IS Meta's product. Every improvement in ad targeting AI directly increases revenue per impression. The risk is regulatory (antitrust, privacy), not technological."
+    aiThesis: "Meta's AI-powered ad targeting (Advantage+) is the most profitable AI application in production today. AI doesn't disrupt Meta \u2014 it IS Meta's product. Every improvement in ad targeting AI directly increases revenue per impression. The risk is regulatory (antitrust, privacy), not technological.",
+    sources: [{"label": "Advantage+ Launch (Aug 2022)", "url": "https://about.fb.com/news/2022/08/introducing-new-automation-tools-to-increase-sales-and-drive-growth/"}, {"label": "Andromeda AI Ads Engine (Dec 2024)", "url": "https://engineering.fb.com/2024/12/02/production-engineering/meta-andromeda-advantage-automation-next-gen-personalized-ads-retrieval-engine/"}]
   },
   "DOCS": {
     name: "Doximity Inc.",
@@ -1174,7 +1197,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.8,
     disruptionSusceptibility: 0.2,
     legacyCostPenalty: 0.53,
-    aiThesis: "Doximity's physician network (80%+ of US doctors) has a unique data moat \u2014 peer influence patterns, referral networks, prescription behavior. AI could enhance physician decision support through Doximity's platform. The risk: -68% drawdown reflects declining growth and questioning of the network's monetization ceiling."
+    aiThesis: "Doximity's physician network (80%+ of US doctors) has a unique data moat \u2014 peer influence patterns, referral networks, prescription behavior. AI could enhance physician decision support through Doximity's platform. The risk: -68% drawdown reflects declining growth and questioning of the network's monetization ceiling.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.doximity.com/"}]
   },
   "TOST": {
     name: "Toast Inc.",
@@ -1225,7 +1249,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.72,
     disruptionSusceptibility: 0.4,
     legacyCostPenalty: 0.57,
-    aiThesis: "Toast's restaurant technology platform generates data from POS, payments, payroll, and guest engagement. AI enhances every layer \u2014 demand forecasting, dynamic pricing, automated scheduling, personalized marketing. Vertical SaaS with deep domain data is AI-resistant because the data moat is domain-specific. Down 44%."
+    aiThesis: "Toast's restaurant technology platform generates data from POS, payments, payroll, and guest engagement. AI enhances every layer \u2014 demand forecasting, dynamic pricing, automated scheduling, personalized marketing. Vertical SaaS with deep domain data is AI-resistant because the data moat is domain-specific. ARR grew 26% to over $2B in FY2025.",
+    sources: [{"label": "FY2025 Earnings (26% ARR growth)", "url": "https://www.businesswire.com/news/home/20260212058106/en/Toast-Announces-Fourth-Quarter-and-Full-Year-2025-Financial-Results"}, {"label": "Quarterly Results", "url": "https://investors.toasttab.com/financials/quarterly-results/default.aspx"}]
   },
   "NVDA": {
     name: "Nvidia Corp",
@@ -1276,7 +1301,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.95,
     disruptionSusceptibility: 0.3,
     legacyCostPenalty: 0.36,
-    aiThesis: "NVIDIA is the foundational AI compute provider. Every AI training run and most inference workloads use NVIDIA GPUs. This is not an AI disruption thesis \u2014 it's the AI picks-and-shovels thesis. The risk: custom ASICs (Google TPU, Amazon Trainium) eventually reduce GPU dominance. Only -13% from highs; expensive."
+    aiThesis: "NVIDIA is the foundational AI compute provider. Every AI training run and most inference workloads use NVIDIA GPUs. This is not an AI disruption thesis \u2014 it's the AI picks-and-shovels thesis. The risk: custom ASICs (Google TPU, Amazon Trainium) eventually reduce GPU dominance. Only -13% from highs; expensive.",
+    sources: [{"label": "Investor Relations", "url": "https://investor.nvidia.com/"}]
   },
   "AMZN": {
     name: "Amazon.Com Inc",
@@ -1327,7 +1353,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.9,
     disruptionSusceptibility: 0.22,
     legacyCostPenalty: 0.48,
-    aiThesis: "AWS is the #1 cloud provider and AI training/inference infrastructure. Amazon is simultaneously an AI infrastructure winner AND an AI-driven retail/logistics optimizer. The multi-segment business makes consolidated P/S misleading \u2014 AWS alone would trade at 10x+ revenue."
+    aiThesis: "AWS is the #1 cloud provider and AI training/inference infrastructure. Amazon is simultaneously an AI infrastructure winner AND an AI-driven retail/logistics optimizer. The multi-segment business makes consolidated P/S misleading \u2014 AWS alone would trade at 10x+ revenue.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.aboutamazon.com/"}]
   },
   "FTNT": {
     name: "Fortinet, Inc.",
@@ -1378,7 +1405,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.53,
-    aiThesis: "Fortinet's unified security platform (firewall + SD-WAN + SASE) benefits from AI-powered threat detection while its hardware form factor creates a moat AI-only vendors can't replicate. The convergence of networking and security, accelerated by AI workloads, plays to Fortinet's integrated platform advantage."
+    aiThesis: "Fortinet's unified security platform (firewall + SD-WAN + SASE) benefits from AI-powered threat detection while its hardware form factor creates a moat AI-only vendors can't replicate. The convergence of networking and security, accelerated by AI workloads, plays to Fortinet's integrated platform advantage.",
+    sources: []
   },
   "CTSH": {
     name: "Cognizant Technology Solutions",
@@ -1429,7 +1457,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.55,
     disruptionSusceptibility: 0.7,
     legacyCostPenalty: 0.78,
-    aiThesis: "Cognizant's IT services face the same AI coding displacement as Accenture but with lower margins and higher offshore labor dependency. If AI replaces 30% of coding tasks, offshore body shops lose 30% of revenue. The pivot to AI consulting is underway but unproven. Down 30%."
+    aiThesis: "Cognizant's IT services face the same AI coding displacement as Accenture but with lower margins and higher offshore labor dependency. If AI replaces 30% of coding tasks, offshore body shops lose 30% of revenue. The pivot to AI consulting is underway but unproven. Down 30%.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.cognizant.com/"}]
   },
   "MNDY": {
     name: "monday.com Ltd. Ordinary Shares",
@@ -1480,7 +1509,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.6,
     disruptionSusceptibility: 0.75,
     legacyCostPenalty: 0.53041,
-    aiThesis: "Monday.com's work management platform faces direct AI disruption \u2014 AI agents could automate project tracking, status updates, and resource allocation. However, the collaboration layer (who talks to whom, organizational context) is harder to replace. At -76% from highs with 27% growth, the question is how much of the business AI actually threatens."
+    aiThesis: "Monday.com's work management platform faces direct AI disruption \u2014 AI agents could automate project tracking, status updates, and resource allocation. However, the collaboration layer (who talks to whom, organizational context) is harder to replace. At -76% from highs with 27% growth, the question is how much of the business AI actually threatens.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.monday.com/"}]
   },
   "PAYC": {
     name: "Paycom Software Inc.",
@@ -1531,7 +1561,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.45,
     legacyCostPenalty: 0.63,
-    aiThesis: "Paycom's single-database HCM architecture means AI features (automated payroll corrections, compliance alerts) can be deployed across the entire platform instantly. The deterministic nature of payroll (zero error tolerance) protects against AI displacement. The question: does AI reduce the NUMBER of employees, reducing Paycom's per-seat revenue?"
+    aiThesis: "Paycom's single-database HCM architecture means AI features (automated payroll corrections, compliance alerts) can be deployed across the entire platform instantly. The deterministic nature of payroll (zero error tolerance) protects against AI displacement. The question: does AI reduce the NUMBER of employees, reducing Paycom's per-seat revenue?",
+    sources: [{"label": "Investor Relations", "url": "https://investors.paycom.com/"}]
   },
   "ASAN": {
     name: "Asana, Inc. Class A Common Stock",
@@ -1582,7 +1613,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.6,
     disruptionSusceptibility: 0.75,
     legacyCostPenalty: 0.61712,
-    aiThesis: "Asana's work management faces the same AI disruption risk as Monday.com but with weaker financials \u2014 NRR near 100% (flat), slower growth. The thesis is binary: either AI copilots enhance work management tools, or AI agents replace them entirely. Asana's position is more vulnerable than Monday's."
+    aiThesis: "Asana's work management faces the same AI disruption risk as Monday.com but with weaker financials \u2014 NRR near 100% (flat), slower growth. The thesis is binary: either AI copilots enhance work management tools, or AI agents replace them entirely. Asana's position is more vulnerable than Monday's.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.asana.com/"}]
   },
   "MU": {
     name: "Micron Technology, Inc.",
@@ -1633,7 +1665,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.95,
     disruptionSusceptibility: 0.3,
     legacyCostPenalty: 0.36,
-    aiThesis: "Micron's HBM (High Bandwidth Memory) is essential for AI accelerators \u2014 every GPU needs co-packaged memory. AI drives a structural increase in memory content per chip. The cyclicality risk is real but the secular AI tailwind is strong. Not beaten down (-3%) because the market recognizes this."
+    aiThesis: "Micron's HBM (High Bandwidth Memory) is essential for AI accelerators \u2014 every GPU needs co-packaged memory. AI drives a structural increase in memory content per chip. The cyclicality risk is real but the secular AI tailwind is strong. Not beaten down (-3%) because the market recognizes this.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.micron.com/"}]
   },
   "ZS": {
     name: "Zscaler, Inc. Common Stock",
@@ -1684,7 +1717,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.558,
-    aiThesis: "Zscaler's zero-trust cloud security architecture becomes more critical as AI agents access data across boundaries. The Anthropic Claude Code Security launch was the trigger for the SaaS selloff, but ironically, AI coding tools don't replace SASE \u2014 they need it. Down 54% from highs."
+    aiThesis: "Zscaler's zero-trust cloud security architecture becomes more critical as AI agents access data across boundaries. The Anthropic Claude Code Security launch was the trigger for the SaaS selloff, but ironically, AI coding tools don't replace SASE \u2014 they need it. Down 54% from highs.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.zscaler.com/"}]
   },
   "BILL": {
     name: "BILL Holdings Inc.",
@@ -1735,7 +1769,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.67,
     disruptionSusceptibility: 0.62,
     legacyCostPenalty: 0.6375,
-    aiThesis: "AP automation is a deterministic system \u2014 invoice matching, payment routing, compliance verification all require accuracy. AI enhances BILL's workflow (auto-categorization, anomaly detection) but doesn't replace it. Activist pressure (Starboard) creates additional discount beyond AI fears."
+    aiThesis: "AP automation is a deterministic system \u2014 invoice matching, payment routing, compliance verification all require accuracy. AI enhances BILL's workflow (auto-categorization, anomaly detection) but doesn't replace it. Activist pressure (Starboard) creates additional discount beyond AI fears.",
+    sources: [{"label": "Investor Relations", "url": "https://investor.bill.com/"}]
   },
   "TSM": {
     name: "Taiwan Semiconductor Manufacturing",
@@ -1786,7 +1821,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.95,
     disruptionSusceptibility: 0.3,
     legacyCostPenalty: 0.36,
-    aiThesis: "TSMC manufactures every leading-edge AI chip (NVIDIA, AMD, Apple, Qualcomm). AI demand is the primary growth driver. As the world's only advanced-node foundry, TSMC has an irreplaceable monopoly position. Geopolitical risk (Taiwan) is the main concern, not AI disruption."
+    aiThesis: "TSMC manufactures every leading-edge AI chip (NVIDIA, AMD, Apple, Qualcomm). AI demand is the primary growth driver. As the world's only advanced-node foundry, TSMC has an irreplaceable monopoly position. Geopolitical risk (Taiwan) is the main concern, not AI disruption.",
+    sources: [{"label": "Investor Relations", "url": "https://investor.tsmc.com/"}]
   },
   "GOOGL": {
     name: "Alphabet Inc. Class A Common Stock",
@@ -1837,7 +1873,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.9,
     disruptionSusceptibility: 0.22,
     legacyCostPenalty: 0.48,
-    aiThesis: "Google has the deepest AI research bench (DeepMind, Gemini) but is under existential threat from AI-powered search alternatives. The defensive moat is ad revenue concentration. AI could be Google's biggest opportunity (cloud, enterprise) or biggest risk (search disruption). A bifurcated thesis."
+    aiThesis: "Google has the deepest AI research bench (DeepMind, Gemini) but is under existential threat from AI-powered search alternatives. The defensive moat is ad revenue concentration. AI could be Google's biggest opportunity (cloud, enterprise) or biggest risk (search disruption). A bifurcated thesis.",
+    sources: [{"label": "Investor Relations", "url": "https://abc.xyz/investor/"}]
   },
   "MSFT": {
     name: "Microsoft Corp",
@@ -1888,7 +1925,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.9,
     disruptionSusceptibility: 0.22,
     legacyCostPenalty: 0.48,
-    aiThesis: "Microsoft is the #1 AI infrastructure provider through Azure + OpenAI partnership. Copilot is embedding AI into the enterprise stack (Office, GitHub, Teams). AI is Microsoft's biggest growth driver. Not a dislocation candidate \u2014 the stock isn't beaten down enough for the thesis."
+    aiThesis: "Microsoft is the #1 AI infrastructure provider through Azure + OpenAI partnership. Copilot is embedding AI into the enterprise stack (Office, GitHub, Teams). AI is Microsoft's biggest growth driver. Not a dislocation candidate \u2014 the stock isn't beaten down enough for the thesis.",
+    sources: [{"label": "Investor Relations", "url": "https://www.microsoft.com/en-us/investor"}]
   },
   "PCTY": {
     name: "Paylocity Holding Corp.",
@@ -1939,7 +1977,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.45,
     legacyCostPenalty: 0.63,
-    aiThesis: "Paylocity's mid-market HCM platform faces the same AI dynamics as Paycom \u2014 AI enhances payroll/HR automation but can't replace the compliance-critical system of record. The community features (peer recognition, surveys) add engagement data that AI could leverage. Down 46% from highs."
+    aiThesis: "Paylocity's mid-market HCM platform faces the same AI dynamics as Paycom \u2014 AI enhances payroll/HR automation but can't replace the compliance-critical system of record. The community features (peer recognition, surveys) add engagement data that AI could leverage. Down 46% from highs.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.paylocity.com/"}]
   },
   "AMD": {
     name: "Advanced Micro Devices",
@@ -1990,7 +2029,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.95,
     disruptionSusceptibility: 0.3,
     legacyCostPenalty: 0.28,
-    aiThesis: "AMD is the #2 GPU maker for AI workloads (MI300X) and #2 x86 CPU. AI accelerates AMD's growth but it's a distant second to NVIDIA in AI training. The thesis: AMD captures the AI inference market (where cost per token matters more than peak performance) as models shift from training to deployment."
+    aiThesis: "AMD is the #2 GPU maker for AI workloads (MI300X) and #2 x86 CPU. AI accelerates AMD's growth but it's a distant second to NVIDIA in AI training. The thesis: AMD captures the AI inference market (where cost per token matters more than peak performance) as models shift from training to deployment.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.amd.com/"}]
   },
   "VEEV": {
     name: "Veeva Systems Inc.",
@@ -2041,7 +2081,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.8,
     disruptionSusceptibility: 0.2,
     legacyCostPenalty: 0.53,
-    aiThesis: "Veeva's FDA-validated clinical trial systems have the highest regulatory switching costs in software. Moving off Veeva requires re-validation of GxP-compliant processes \u2014 a multi-year, multi-million dollar undertaking. AI accelerates drug discovery (using Veeva's data) but cannot displace the compliance layer."
+    aiThesis: "Veeva's FDA-validated clinical trial systems have the highest regulatory switching costs in software. Moving off Veeva requires re-validation of GxP-compliant processes \u2014 a multi-year, multi-million dollar undertaking. AI accelerates drug discovery (using Veeva's data) but cannot displace the compliance layer.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.veeva.com/"}]
   },
   "SHOP": {
     name: "Shopify Inc.",
@@ -2092,7 +2133,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.82,
     disruptionSusceptibility: 0.5,
     legacyCostPenalty: 0.38,
-    aiThesis: "Shopify is embedding AI across the merchant experience \u2014 Shopify Magic (product descriptions, image editing), Sidekick (AI assistant), and Shop AI (consumer recommendations). AI doesn't displace the e-commerce platform; it makes merchants more productive ON the platform. Down 31% in the broader SaaS selloff."
+    aiThesis: "Shopify is embedding AI across the merchant experience \u2014 Shopify Magic (product descriptions, image editing), Sidekick (AI assistant), and Shop AI (consumer recommendations). AI doesn't displace the e-commerce platform; it makes merchants more productive ON the platform. Down 31% in the broader SaaS selloff.",
+    sources: [{"label": "Shopify Magic AI", "url": "https://www.shopify.com/magic"}, {"label": "Investor Relations", "url": "https://investors.shopify.com/"}]
   },
   "PCOR": {
     name: "Procore Technologies Inc.",
@@ -2143,7 +2185,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.72,
     disruptionSusceptibility: 0.4,
     legacyCostPenalty: 0.67,
-    aiThesis: "Procore's construction management platform digitizes an industry that's 80% manual. AI construction tools (schedule optimization, safety prediction, cost estimation) are additive to Procore's platform, not competitive with it. Construction data is so domain-specific that horizontal AI tools can't replicate it."
+    aiThesis: "Procore's construction management platform digitizes an industry that's 80% manual. AI construction tools (schedule optimization, safety prediction, cost estimation) are additive to Procore's platform, not competitive with it. Construction data is so domain-specific that horizontal AI tools can't replicate it.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.procore.com/"}]
   },
   "PANW": {
     name: "Palo Alto Networks, Inc. Common Stock",
@@ -2194,7 +2237,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.53,
-    aiThesis: "Palo Alto Networks is platformizing cybersecurity \u2014 consolidating point solutions into one platform. AI accelerates this by enabling cross-domain threat correlation that only an integrated platform can provide. The risk: platformization cannibalizes high-margin point products during transition."
+    aiThesis: "Palo Alto Networks is platformizing cybersecurity \u2014 consolidating point solutions into one platform. AI accelerates this by enabling cross-domain threat correlation that only an integrated platform can provide. The risk: platformization cannibalizes high-margin point products during transition.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.paloaltonetworks.com/"}]
   },
   "FI": {
     name: null,
@@ -2245,7 +2289,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.67,
     disruptionSusceptibility: 0.62,
     legacyCostPenalty: 0.68,
-    aiThesis: "Fiserv powers banking infrastructure for thousands of financial institutions. AI transforms how banks serve customers, but the core processing layer is a regulated utility. Similar to FIS \u2014 AI is a modest positive, not a transformation catalyst."
+    aiThesis: "Fiserv powers banking infrastructure for thousands of financial institutions. AI transforms how banks serve customers, but the core processing layer is a regulated utility. Similar to FIS \u2014 AI is a modest positive, not a transformation catalyst.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.fiserv.com/"}]
   },
   "ANET": {
     name: "Arista Networks",
@@ -2296,7 +2341,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.85,
     disruptionSusceptibility: 0.3,
     legacyCostPenalty: 0.43,
-    aiThesis: "Arista's data center switches are the nervous system of AI training clusters. AI workloads require ultra-high bandwidth networking between GPUs \u2014 Arista's 400G/800G switches are the standard. AI directly increases Arista's TAM. Not a dislocation candidate at -18%."
+    aiThesis: "Arista's data center switches are the nervous system of AI training clusters. AI workloads require ultra-high bandwidth networking between GPUs \u2014 Arista's 400G/800G switches are the standard. AI directly increases Arista's TAM. Not a dislocation candidate at -18%.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.arista.com/"}]
   },
   "CYBR": {
     name: "CyberArk Software Ltd.",
@@ -2347,7 +2393,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.56975,
-    aiThesis: "CyberArk's privileged access management becomes critical as AI agents need privileged credentials to perform tasks. Every AI workflow that accesses production systems needs PAM governance. AI expands the TAM for privileged access management rather than threatening it."
+    aiThesis: "CyberArk's privileged access management becomes critical as AI agents need privileged credentials to perform tasks. Every AI workflow that accesses production systems needs PAM governance. AI expands the TAM for privileged access management rather than threatening it.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.cyberark.com/"}]
   },
   "CHKP": {
     name: "Check Point Software Technologies Ltd",
@@ -2398,7 +2445,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.53,
-    aiThesis: "Check Point's legacy firewall business is mature and AI has minimal impact on its core value proposition. Neither strongly disrupted nor strongly enhanced. AI may accelerate the shift to cloud-native security competitors, putting pressure on Check Point's on-premise installed base."
+    aiThesis: "Check Point's legacy firewall business is mature and AI has minimal impact on its core value proposition. Neither strongly disrupted nor strongly enhanced. AI may accelerate the shift to cloud-native security competitors, putting pressure on Check Point's on-premise installed base.",
+    sources: [{"label": "Investor Relations", "url": "https://www.checkpoint.com/about-us/investor-relations/"}]
   },
   "TWLO": {
     name: "Twilio Inc.",
@@ -2449,7 +2497,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.6,
     disruptionSusceptibility: 0.75,
     legacyCostPenalty: 0.597215,
-    aiThesis: "Twilio's communications APIs are the infrastructure layer for AI voice and messaging agents. Every AI agent that needs to call, text, or email a customer goes through a CPaaS provider like Twilio. The agentic AI boom directly increases Twilio's API volume. Down only 14% \u2014 the market partially recognizes this."
+    aiThesis: "Twilio's communications APIs are the infrastructure layer for AI voice and messaging agents. Every AI agent that needs to call, text, or email a customer goes through a CPaaS provider like Twilio. The agentic AI boom directly increases Twilio's API volume. Down only 14% \u2014 the market partially recognizes this.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.twilio.com/"}]
   },
   "FIS": {
     name: "Fidelity National Information Services, Inc.",
@@ -2500,7 +2549,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.67,
     disruptionSusceptibility: 0.62,
     legacyCostPenalty: 0.68,
-    aiThesis: "Legacy payment infrastructure. AI helps with fraud detection and transaction routing, but FIS's business is fundamentally a payment processing utility. AI impact is incremental, not transformational. The stock is cheap for structural reasons (low growth), not AI mispricing."
+    aiThesis: "Legacy payment infrastructure. AI helps with fraud detection and transaction routing, but FIS's business is fundamentally a payment processing utility. AI impact is incremental, not transformational. The stock is cheap for structural reasons (low growth), not AI mispricing.",
+    sources: [{"label": "Investor Relations", "url": "https://investor.fisglobal.com/"}]
   },
   "RBRK": {
     name: "Rubrik Inc.",
@@ -2551,7 +2601,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.5375,
-    aiThesis: "Data security and backup become MORE critical in an AI world \u2014 more data generated, more data to protect, more compliance requirements for AI training data. Rubrik's +49% growth reflects enterprise urgency around data governance. The risk: still deeply unprofitable, growth-stage economics."
+    aiThesis: "Data security and backup become MORE critical in an AI world \u2014 more data generated, more data to protect, more compliance requirements for AI training data. Rubrik's +49% growth reflects enterprise urgency around data governance. The risk: still deeply unprofitable, growth-stage economics.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.rubrik.com/"}]
   },
   "AVGO": {
     name: "Broadcom Inc. Common Stock",
@@ -2602,7 +2653,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.95,
     disruptionSusceptibility: 0.3,
     legacyCostPenalty: 0.36,
-    aiThesis: "Broadcom's networking chips and custom AI accelerators (TPU partner for Google) position it as critical AI infrastructure. The VMware acquisition adds enterprise software revenue. AI drives demand for both networking bandwidth and custom silicon. Not a dislocation candidate at current valuations."
+    aiThesis: "Broadcom's networking chips and custom AI accelerators (TPU partner for Google) position it as critical AI infrastructure. The VMware acquisition adds enterprise software revenue. AI drives demand for both networking bandwidth and custom silicon. Not a dislocation candidate at current valuations.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.broadcom.com/"}]
   },
   "DDOG": {
     name: "Datadog, Inc. Class A Common Stock",
@@ -2653,7 +2705,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.9,
     disruptionSusceptibility: 0.65,
     legacyCostPenalty: 0.408237,
-    aiThesis: "Observability becomes more critical, not less, as AI agents proliferate across infrastructure. More microservices, more AI inference endpoints, more things to monitor. Datadog's data gravity moat (years of telemetry history) deepens with AI adoption. The counterargument: AI could commoditize basic monitoring."
+    aiThesis: "Observability becomes more critical, not less, as AI agents proliferate across infrastructure. More microservices, more AI inference endpoints, more things to monitor. Datadog's data gravity moat (years of telemetry history) deepens with AI adoption. The counterargument: AI could commoditize basic monitoring.",
+    sources: []
   },
   "PATH": {
     name: "UiPath Inc.",
@@ -2704,7 +2757,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.6,
     disruptionSusceptibility: 0.75,
     legacyCostPenalty: 0.53,
-    aiThesis: "UiPath is the ultimate irony of the AI disruption narrative \u2014 an automation company being disrupted by AI. But UiPath's Screen Agent (built on Claude) actually ranked #1 on the OSWorld computer-use benchmark. If agentic AI needs a 'body' to interact with legacy systems, UiPath may be it. High-risk, high-reward."
+    aiThesis: "UiPath is the ultimate irony of the AI disruption narrative \u2014 an automation company being disrupted by AI. But UiPath's Screen Agent (built on Claude) actually ranked #1 on the OSWorld computer-use benchmark. If agentic AI needs a 'body' to interact with legacy systems, UiPath may be it. High-risk, high-reward.",
+    sources: [{"label": "Screen Agent #1 on OSWorld", "url": "https://os-world.github.io/"}, {"label": "Investor Relations", "url": "https://investor.uipath.com/"}]
   },
   "MDB": {
     name: "MongoDB, Inc. Class A",
@@ -2755,7 +2809,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.88,
     disruptionSusceptibility: 0.5,
     legacyCostPenalty: 0.468898,
-    aiThesis: "MongoDB's document database is popular for AI application development because of its flexible schema. But AI could also reduce the need for application-specific databases if LLMs can work with any data format. Revenue growth is strong (19%) but the multiple remains elevated."
+    aiThesis: "MongoDB's document database is popular for AI application development because of its flexible schema. But AI could also reduce the need for application-specific databases if LLMs can work with any data format. Revenue growth is strong (19%) but the multiple remains elevated.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.mongodb.com/"}]
   },
   "ACN": {
     name: "Accenture PLC",
@@ -2806,7 +2861,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.55,
     disruptionSusceptibility: 0.7,
     legacyCostPenalty: 0.787,
-    aiThesis: "Accenture is the world's largest IT consulting firm. AI coding assistants and agentic workflows directly threaten billable developer hours \u2014 the core of the business model. Accenture is pivoting to 'AI transformation consulting' but the disruption to traditional services is real. Down 40%."
+    aiThesis: "Accenture is the world's largest IT consulting firm. AI coding assistants and agentic workflows directly threaten billable developer hours \u2014 the core of the business model. Accenture is pivoting to 'AI transformation consulting' but the disruption to traditional services is real. Down 40%.",
+    sources: [{"label": "Investor Relations", "url": "https://www.accenture.com/us-en/about/company/investor-relations"}]
   },
   "PLTR": {
     name: "Palantir Technologies Inc. Class A Common Stock",
@@ -2857,7 +2913,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.92,
     disruptionSusceptibility: 0.15,
     legacyCostPenalty: 0.33,
-    aiThesis: "Palantir is the AI beneficiary poster child \u2014 military and intelligence AI spending is surging, and Palantir's classified data infrastructure is irreplaceable. However, at P/S ~100x, the stock prices in perfect execution. AI is absolutely positive for Palantir's business; the question is whether the valuation already reflects this."
+    aiThesis: "Palantir is the AI beneficiary poster child \u2014 military and intelligence AI spending is surging, and Palantir's classified data infrastructure is irreplaceable. However, at P/S ~100x, the stock prices in perfect execution. AI is absolutely positive for Palantir's business; the question is whether the valuation already reflects this.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.palantir.com/"}]
   },
   "GWRE": {
     name: "Guidewire Software Inc.",
@@ -2908,7 +2965,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.72,
     disruptionSusceptibility: 0.4,
     legacyCostPenalty: 0.6525,
-    aiThesis: "Guidewire provides core systems for P&C insurers \u2014 policy administration, claims management, billing. These are deterministic systems where errors have regulatory consequences. AI enhances claims processing (auto-adjudication) but runs on top of Guidewire, not instead of it. The stock's -39% drawdown reflects slow growth."
+    aiThesis: "Guidewire provides core systems for P&C insurers \u2014 policy administration, claims management, billing. These are deterministic systems where errors have regulatory consequences. AI enhances claims processing (auto-adjudication) but runs on top of Guidewire, not instead of it. The stock's -39% drawdown reflects slow growth.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.guidewire.com/"}]
   },
   "ZM": {
     name: "Zoom Communications, Inc. Class A Common Stock",
@@ -2959,7 +3017,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.6,
     disruptionSusceptibility: 0.75,
     legacyCostPenalty: 0.581283,
-    aiThesis: "Zoom's core video conferencing faces commoditization, and NRR has contracted below 100%. AI features (meeting summaries, real-time translation) add value but don't create switching costs. The cash hoard ($7B) provides a floor, but growth is structurally impaired. AI makes meetings shorter, not more frequent."
+    aiThesis: "Zoom's core video conferencing faces commoditization, and NRR has contracted below 100%. AI features (meeting summaries, real-time translation) add value but don't create switching costs. The cash hoard ($7B) provides a floor, but growth is structurally impaired. AI makes meetings shorter, not more frequent.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.zoom.us/"}]
   },
   "AMAT": {
     name: "Applied Materials Inc",
@@ -3010,7 +3069,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.95,
     disruptionSusceptibility: 0.3,
     legacyCostPenalty: 0.361228,
-    aiThesis: "Applied Materials makes the semiconductor equipment used to manufacture AI chips. AI drives capital spending at foundries and memory fabs. This is a second-derivative AI play \u2014 Applied Materials benefits when TSMC and Samsung invest in AI chip capacity. Not directly disrupted or enhanced by AI in its own operations."
+    aiThesis: "Applied Materials makes the semiconductor equipment used to manufacture AI chips. AI drives capital spending at foundries and memory fabs. This is a second-derivative AI play \u2014 Applied Materials benefits when TSMC and Samsung invest in AI chip capacity. Not directly disrupted or enhanced by AI in its own operations.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.appliedmaterials.com/"}]
   },
   "CRWD": {
     name: "CrowdStrike Holdings, Inc. Class A Common Stock",
@@ -3061,7 +3121,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.570238,
-    aiThesis: "CrowdStrike's endpoint security is a deterministic system \u2014 false negatives in threat detection are catastrophic. AI enhances but cannot replace the security fabric. However, at P/S 22x after only a -21% pullback, CrowdStrike isn't cheap enough to be 'dislocated' \u2014 it's just slightly less expensive."
+    aiThesis: "CrowdStrike's endpoint security is a deterministic system \u2014 false negatives in threat detection are catastrophic. AI enhances but cannot replace the security fabric. However, at P/S 22x after only a -21% pullback, CrowdStrike isn't cheap enough to be 'dislocated' \u2014 it's just slightly less expensive.",
+    sources: [{"label": "Investor Relations", "url": "https://ir.crowdstrike.com/"}]
   },
   "DAY": {
     name: "Dayforce Inc.",
@@ -3112,7 +3173,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.45,
     legacyCostPenalty: 0.565,
-    aiThesis: "Dayforce (formerly Ceridian) is navigating the transition from legacy Ceridian to cloud-native HCM. AI could accelerate the migration but the stock's underperformance (-3% drawdown) reflects execution concerns, not AI disruption fears. The AI thesis here is weak \u2014 it's more of a turnaround story."
+    aiThesis: "Dayforce (formerly Ceridian) is navigating the transition from legacy Ceridian to cloud-native HCM. AI could accelerate the migration but the stock's underperformance (-3% drawdown) reflects execution concerns, not AI disruption fears. The AI thesis here is weak \u2014 it's more of a turnaround story.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.dayforce.com/"}]
   },
   "AFRM": {
     name: "Affirm Holdings, Inc. Class A Common Stock",
@@ -3163,7 +3225,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.67,
     disruptionSusceptibility: 0.62,
     legacyCostPenalty: 0.617,
-    aiThesis: "BNPL is a credit product, and AI transforms credit underwriting \u2014 real-time risk assessment, personalized repayment terms. Affirm's ML-based underwriting is already AI-native. The risk: BNPL regulatory scrutiny and consumer credit cycle are bigger drivers than AI for this stock."
+    aiThesis: "BNPL is a credit product, and AI transforms credit underwriting \u2014 real-time risk assessment, personalized repayment terms. Affirm's ML-based underwriting is already AI-native. The risk: BNPL regulatory scrutiny and consumer credit cycle are bigger drivers than AI for this stock.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.affirm.com/"}]
   },
   "EPAM": {
     name: "EPAM SYSTEMS, INC.",
@@ -3214,7 +3277,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.55,
     disruptionSusceptibility: 0.7,
     legacyCostPenalty: 0.701177,
-    aiThesis: "EPAM's digital engineering services are directly threatened by AI \u2014 code generation, test automation, and design tools reduce the need for outsourced development. Higher-value consulting (architecture, strategy) may survive but lower-margin coding work is at risk. Down 38%."
+    aiThesis: "EPAM's digital engineering services are directly threatened by AI \u2014 code generation, test automation, and design tools reduce the need for outsourced development. Higher-value consulting (architecture, strategy) may survive but lower-margin coding work is at risk. Down 38%.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.epam.com/"}]
   },
   "CFLT": {
     name: "Confluent, Inc. Class A Common Stock",
@@ -3265,7 +3329,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.88,
     disruptionSusceptibility: 0.5,
     legacyCostPenalty: 0.456445,
-    aiThesis: "Data streaming (Kafka) is critical for real-time AI inference pipelines \u2014 every AI agent that acts on live data needs a streaming backbone. Confluent's problem isn't AI disruption; it's that Kafka is open-source and self-hosted by most enterprises. The moat question is about managed services, not AI."
+    aiThesis: "Data streaming (Kafka) is critical for real-time AI inference pipelines \u2014 every AI agent that acts on live data needs a streaming backbone. Confluent's problem isn't AI disruption; it's that Kafka is open-source and self-hosted by most enterprises. The moat question is about managed services, not AI.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.confluent.io/"}]
   },
   "FROG": {
     name: "JFrog Ltd.",
@@ -3316,7 +3381,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.9,
     disruptionSusceptibility: 0.65,
     legacyCostPenalty: 0.33,
-    aiThesis: "Software supply chain security is a growing concern as AI-generated code introduces unknown dependencies. JFrog's binary repository management and Shadow AI Detection product address a real enterprise pain point. AI accelerates code production, which accelerates the need for JFrog's governance layer."
+    aiThesis: "Software supply chain security is a growing concern as AI-generated code introduces unknown dependencies. JFrog's binary repository management and Shadow AI Detection product address a real enterprise pain point. AI accelerates code production, which accelerates the need for JFrog's governance layer.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.jfrog.com/"}]
   },
   "WIT": {
     name: "Wipro Limited",
@@ -3367,7 +3433,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.55,
     disruptionSusceptibility: 0.7,
     legacyCostPenalty: 0.8,
-    aiThesis: "Wipro's Indian IT services model is the most AI-vulnerable business model in this universe \u2014 high headcount, low-margin coding and testing work that AI automates first. The stock reflects this existential risk. Revenue is actually declining (-5% YoY)."
+    aiThesis: "Wipro's Indian IT services model is the most AI-vulnerable business model in this universe \u2014 high headcount, low-margin coding and testing work that AI automates first. The stock reflects this existential risk. Revenue is actually declining (-5% YoY).",
+    sources: [{"label": "Investor Relations", "url": "https://www.wipro.com/investors/"}]
   },
   "ORCL": {
     name: "Oracle Corp",
@@ -3418,7 +3485,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.7,
     disruptionSusceptibility: 0.28,
     legacyCostPenalty: 0.63,
-    aiThesis: "Oracle's cloud infrastructure (OCI) is the dark horse in AI compute \u2014 cheaper than AWS/Azure for training workloads, with NVIDIA partnerships. But the legacy database business faces real pressure from AI-native alternatives. A bifurcated story: cloud is AI-positive, database is AI-threatened."
+    aiThesis: "Oracle's cloud infrastructure (OCI) is the dark horse in AI compute \u2014 cheaper than AWS/Azure for training workloads, with NVIDIA partnerships. But the legacy database business faces real pressure from AI-native alternatives. A bifurcated story: cloud is AI-positive, database is AI-threatened.",
+    sources: [{"label": "Investor Relations", "url": "https://investor.oracle.com/"}]
   },
   "SNOW": {
     name: "Snowflake Inc.",
@@ -3469,7 +3537,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.88,
     disruptionSusceptibility: 0.5,
     legacyCostPenalty: 0.555376,
-    aiThesis: "Snowflake is the enterprise data cloud \u2014 AI models need data, and Snowflake is where enterprise data lives. The bear case: AI query interfaces could commoditize the SQL layer. The bull case: Snowflake Cortex (built-in AI) makes it the platform FOR AI, not just the data warehouse USED by AI."
+    aiThesis: "Snowflake is the enterprise data cloud \u2014 AI models need data, and Snowflake is where enterprise data lives. The bear case: AI query interfaces could commoditize the SQL layer. The bull case: Snowflake Cortex (built-in AI) makes it the platform FOR AI, not just the data warehouse USED by AI.",
+    sources: [{"label": "Cortex AI Product", "url": "https://www.snowflake.com/en/data-cloud/cortex/"}, {"label": "Investor Relations", "url": "https://investors.snowflake.com/"}]
   },
   "GLOB": {
     name: "GLOBANT S.A.",
@@ -3520,7 +3589,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.55,
     disruptionSusceptibility: 0.7,
     legacyCostPenalty: 0.710256,
-    aiThesis: "Globant's digital transformation services face the most severe AI disruption risk in IT services \u2014 revenue growth collapsed to 1.6% as clients reduce outsourced development in favor of AI tools. The market may be right about this one. Down 68% and decelerating."
+    aiThesis: "Globant's digital transformation services face the most severe AI disruption risk in IT services \u2014 revenue growth collapsed to 1.6% as clients reduce outsourced development in favor of AI tools. The market may be right about this one. Down 68% and decelerating.",
+    sources: [{"label": "Investor Relations", "url": "https://investors.globant.com/"}]
   },
   "IBM": {
     name: "International Business Machines Corporation",
@@ -3571,7 +3641,8 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.55,
     disruptionSusceptibility: 0.7,
     legacyCostPenalty: 0.7872,
-    aiThesis: "IBM's consulting business faces AI displacement similar to Accenture. The Red Hat OpenShift platform benefits from AI workload deployment, but consulting revenue dwarfs software. WatsonX AI products are a hedge but haven't inflected revenue yet. Mixed thesis, not a clear winner or loser."
+    aiThesis: "IBM's consulting business faces AI displacement similar to Accenture. The Red Hat OpenShift platform benefits from AI workload deployment, but consulting revenue dwarfs software. WatsonX AI products are a hedge but haven't inflected revenue yet. Mixed thesis, not a clear winner or loser.",
+    sources: [{"label": "Investor Relations", "url": "https://www.ibm.com/investor/"}]
   },
   "NET": {
     name: "Cloudflare, Inc. Class A common stock, par value $0.001 per share",
@@ -3622,6 +3693,7 @@ export const TICKER_DETAILS: Record<string, TickerDetail> = {
     aiTailwind: 0.78,
     disruptionSusceptibility: 0.38,
     legacyCostPenalty: 0.498894,
-    aiThesis: "Cloudflare's edge computing and CDN business benefits from AI inference at the edge \u2014 but at P/S 31x after only a -16% pullback, it's expensive. The market is right to assign a premium for AI-edge potential, but the multiple compression hasn't created a dislocation opportunity."
+    aiThesis: "Cloudflare's edge computing and CDN business benefits from AI inference at the edge \u2014 but at P/S 31x after only a -16% pullback, it's expensive. The market is right to assign a premium for AI-edge potential, but the multiple compression hasn't created a dislocation opportunity.",
+    sources: [{"label": "Investor Relations", "url": "https://cloudflare.net/"}]
   },
 };

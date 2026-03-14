@@ -165,6 +165,23 @@ export function TickerDetailPanel({ ticker, detail, colSpan, narrative }: Ticker
               <p className="text-[12px] leading-relaxed text-gray-300">
                 {d.aiThesis}
               </p>
+              {/* Source links — verify claims */}
+              {d.sources && d.sources.length > 0 && (
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 pt-1.5 border-t border-blue-900/30">
+                  <span className="text-[9px] text-gray-600 uppercase tracking-wider">Sources:</span>
+                  {d.sources.map((s, i) => (
+                    <a
+                      key={i}
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-blue-400/80 hover:text-blue-300 underline underline-offset-2 decoration-blue-400/30 hover:decoration-blue-300/60 transition-colors"
+                    >
+                      {s.label}
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {/* AI Narrative — model explanation */}
