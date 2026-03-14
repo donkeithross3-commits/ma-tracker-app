@@ -137,6 +137,14 @@ function OpusFeedback({ messageId, tokenUsage }: { messageId: string; tokenUsage
 function ThinkingBlock({ thinking }: { thinking: string }) {
   const [open, setOpen] = useState(false);
   if (!thinking) return null;
+
+  // Detect brain exchange format (contains ═══ SYSTEM PROMPT / USER PROMPT / RESPONSE sections)
+  const isBrainExchange = thinking.includes("═══ SYSTEM PROMPT") || thinking.includes("═══ USER PROMPT");
+
+  if (isBrainExchange) {
+    return <BrainExchangeBlock content={thinking} />;
+  }
+
   return (
     <div className="mt-1">
       <button
@@ -151,6 +159,69 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
           {thinking}
         </pre>
       )}
+    </div>
+  );
+}
+
+function BrainExchangeBlock({ content }: { content: string }) {
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+
+  // Parse sections from the formatted content
+  const sections: { label: string; body: string; color: string }[] = [];
+  const sectionRegex = /═══ (SYSTEM PROMPT|USER PROMPT|RESPONSE) \(([^)]+)\) ═══\n([\s\S]*?)(?=\n═══ |$)/g;
+  let match;
+  while ((match = sectionRegex.exec(content)) !== null) {
+    const name = match[1];
+    const meta = match[2];
+    const body = match[3].trim();
+    const label = name === "SYSTEM PROMPT"
+      ? `System Prompt (${meta})`
+      : name === "USER PROMPT"
+      ? `Prompt → Claude (${meta})`
+      : `Response ← Claude (${meta})`;
+    const color = name === "SYSTEM PROMPT"
+      ? "text-gray-500 border-gray-700"
+      : name === "USER PROMPT"
+      ? "text-cyan-400 border-cyan-800"
+      : "text-emerald-400 border-emerald-800";
+    sections.push({ label, body, color });
+  }
+
+  // Fallback if parsing fails
+  if (sections.length === 0) {
+    return (
+      <div className="mt-1">
+        <pre className="text-xs text-gray-500 bg-gray-900 rounded p-2 whitespace-pre-wrap max-h-60 overflow-y-auto">
+          {content}
+        </pre>
+      </div>
+    );
+  }
+
+  const toggle = (label: string) =>
+    setOpenSections(prev => ({ ...prev, [label]: !prev[label] }));
+
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="text-xs text-amber-400/70 font-medium mb-1">🧠 LLM Exchange</div>
+      {sections.map((s) => (
+        <div key={s.label} className={`border-l-2 ${s.color.split(" ")[1]} pl-2`}>
+          <button
+            onClick={() => toggle(s.label)}
+            className={`text-xs ${s.color.split(" ")[0]} hover:brightness-125 flex items-center gap-1 w-full text-left`}
+          >
+            {openSections[s.label]
+              ? <ChevronDown className="w-3 h-3 flex-shrink-0" />
+              : <ChevronRight className="w-3 h-3 flex-shrink-0" />}
+            {s.label}
+          </button>
+          {openSections[s.label] && (
+            <pre className="mt-1 text-xs text-gray-400 bg-gray-950 rounded p-2 whitespace-pre-wrap max-h-[50vh] overflow-y-auto">
+              {s.body}
+            </pre>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -537,6 +608,11 @@ export default function ChiefOfStaffPage() {
                   {entry.token_usage?.cost_usd ? (
                     <span className="text-xs text-orange-400/70 mt-0.5 flex items-center gap-0.5">
                       <DollarSign className="w-2.5 h-2.5" />{entry.token_usage.cost_usd.toFixed(4)}
+                      {entry.token_usage.input_tokens ? (
+                        <span className="text-gray-600 ml-0.5">
+                          ({(entry.token_usage.input_tokens / 1000).toFixed(1)}k/{(entry.token_usage.output_tokens / 1000).toFixed(1)}k)
+                        </span>
+                      ) : null}
                       {entry.feedback && (
                         <span className="ml-1 text-gray-600">
                           {entry.feedback.escalation_worthy === true ? "+" : entry.feedback.escalation_worthy === false ? "-" : "?"}

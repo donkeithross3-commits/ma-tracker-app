@@ -66,6 +66,9 @@ class ActivityPostRequest(BaseModel):
     specialist: str = "autoloop"
     model: str = "system"
     confidence: float = 1.0
+    thinking: str = ""  # Optional: LLM prompt/reasoning for transparency
+    token_usage: Optional[dict] = None  # Optional: {input_tokens, output_tokens, cost_usd}
+    latency_ms: int = 0
 
 
 @router.post("/activity")
@@ -79,6 +82,9 @@ async def cos_post_activity(req: ActivityPostRequest):
         specialist=req.specialist,
         model=req.model,
         confidence=req.confidence,
+        thinking=req.thinking,
+        token_usage=req.token_usage or {},
+        latency_ms=req.latency_ms,
     )
     append_activity(entry)
     return {"ok": True, "message_id": entry.message_id}
