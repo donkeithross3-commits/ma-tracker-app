@@ -402,20 +402,26 @@ export default function FleetUtilizationPage() {
 
   const speedNeedleDeg = -120 + (fleetSpeedPct / 100) * 240;
   const ringCircumference = 2 * Math.PI * 74;
+  const smallRingCirc = 2 * Math.PI * 60;
   const ringOffset = ringCircumference * (1 - fleetSpeedPct / 100);
 
-  // CPU gauge: current cores used as % of 10 available
+  // CPU gauge: sum ALL active CPU cores across all machines (% of 18 total: 10 mac + 8 droplet)
+  const CPU_TOTAL_CORES = 18;
   const cpuSpeedPct = useMemo(() => {
     if (!status) return 0;
+    let totalCores = 0;
     for (const row of status.machines) {
-      if (row.orchestrator?.research_processes?.total_cpu_pct != null) {
-        return Math.max(0, Math.min(100, row.orchestrator.research_processes.total_cpu_pct / 10));
-      }
+      const o = row.orchestrator;
+      if (!o) continue;
+      // Research processes (detected via ps, reported as CPU %)
+      const rpCores = (o.research_processes?.total_cpu_pct ?? 0) / 100;
+      // Orchestrator CPU workers (LightGBM jobs etc)
+      const orchWorkers = o.cpu?.workers ?? 0;
+      totalCores += rpCores + orchWorkers;
     }
-    return 0;
+    return Math.max(0, Math.min(100, (totalCores / CPU_TOTAL_CORES) * 100));
   }, [status]);
   const cpuNeedleDeg = -120 + (cpuSpeedPct / 100) * 240;
-  const cpuRingOffset = ringCircumference * (1 - cpuSpeedPct / 100);
 
   if (loading && !util) {
     return (
@@ -474,10 +480,10 @@ export default function FleetUtilizationPage() {
                     <span className="text-gray-600 ml-1">7d</span>
                   </span>
                 </div>
-                <div className="px-3 pt-2 pb-2.5">
+                <div className="px-3 py-2">
                   <div className="rounded-xl border border-cyan-900/40 bg-gradient-to-br from-slate-950 via-cyan-950/40 to-gray-900 overflow-hidden relative">
                     <div className="pointer-events-none absolute inset-0 fleet-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 240" className="mx-auto w-full max-w-[240px]">
+                    <svg viewBox="0 0 200 190" className="mx-auto w-full max-w-[180px]">
                       <defs>
                         <linearGradient id="fleetDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
                           <stop offset="0%" stopColor="#22d3ee" />
@@ -485,34 +491,34 @@ export default function FleetUtilizationPage() {
                           <stop offset="100%" stopColor="#facc15" />
                         </linearGradient>
                       </defs>
-                      <text x="100" y="18" textAnchor="middle" fill="rgba(165,243,252,0.7)" fontSize="9" fontWeight="500" letterSpacing="0.18em" className="uppercase">THROTTLE</text>
-                      <circle cx="100" cy="115" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
+                      <text x="100" y="14" textAnchor="middle" fill="rgba(165,243,252,0.7)" fontSize="9" fontWeight="500" letterSpacing="0.18em" className="uppercase">THROTTLE</text>
+                      <circle cx="100" cy="90" r="60" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="9" />
                       <circle
                         cx="100"
-                        cy="115"
-                        r="74"
+                        cy="90"
+                        r="60"
                         fill="none"
                         stroke="url(#fleetDialGradient)"
-                        strokeWidth="10"
+                        strokeWidth="9"
                         strokeLinecap="round"
-                        strokeDasharray={ringCircumference}
-                        strokeDashoffset={ringOffset}
-                        transform="rotate(-90 100 115)"
+                        strokeDasharray={smallRingCirc}
+                        strokeDashoffset={smallRingCirc * (1 - fleetSpeedPct / 100)}
+                        transform="rotate(-90 100 90)"
                         className="transition-all duration-700 ease-out"
                       />
                       <line
                         x1="100"
-                        y1="115"
+                        y1="90"
                         x2="100"
-                        y2="49"
+                        y2="37"
                         stroke="#67e8f9"
-                        strokeWidth="4"
+                        strokeWidth="3.5"
                         strokeLinecap="round"
-                        transform={`rotate(${speedNeedleDeg} 100 115)`}
+                        transform={`rotate(${speedNeedleDeg} 100 90)`}
                         className="transition-all duration-700 ease-out"
                       />
-                      <circle cx="100" cy="115" r="7" fill="#e2e8f0" />
-                      <text x="100" y="230" textAnchor="middle" fill="#a5f3fc" fontSize="24" fontWeight="600">{fmtPct(fleetSpeedPct)}</text>
+                      <circle cx="100" cy="90" r="6" fill="#e2e8f0" />
+                      <text x="100" y="180" textAnchor="middle" fill="#a5f3fc" fontSize="20" fontWeight="600">{fmtPct(fleetSpeedPct)}</text>
                     </svg>
                   </div>
 
@@ -580,10 +586,10 @@ export default function FleetUtilizationPage() {
                     ) : <span className="text-gray-600">loading...</span>}
                   </span>
                 </div>
-                <div className="px-3 pt-2 pb-2.5">
+                <div className="px-3 py-2">
                   <div className="rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-gray-900 overflow-hidden relative">
                     <div className="pointer-events-none absolute inset-0 cpu-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 240" className="mx-auto w-full max-w-[240px]">
+                    <svg viewBox="0 0 200 190" className="mx-auto w-full max-w-[180px]">
                       <defs>
                         <linearGradient id="cpuDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
                           <stop offset="0%" stopColor="#34d399" />
@@ -591,81 +597,78 @@ export default function FleetUtilizationPage() {
                           <stop offset="100%" stopColor="#facc15" />
                         </linearGradient>
                       </defs>
-                      <text x="100" y="18" textAnchor="middle" fill="rgba(167,243,208,0.7)" fontSize="9" fontWeight="500" letterSpacing="0.18em" className="uppercase">THROTTLE</text>
-                      <circle cx="100" cy="115" r="74" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="10" />
+                      <text x="100" y="14" textAnchor="middle" fill="rgba(167,243,208,0.7)" fontSize="9" fontWeight="500" letterSpacing="0.18em" className="uppercase">THROTTLE</text>
+                      <circle cx="100" cy="90" r="60" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="9" />
                       <circle
                         cx="100"
-                        cy="115"
-                        r="74"
+                        cy="90"
+                        r="60"
                         fill="none"
                         stroke="url(#cpuDialGradient)"
-                        strokeWidth="10"
+                        strokeWidth="9"
                         strokeLinecap="round"
-                        strokeDasharray={ringCircumference}
-                        strokeDashoffset={cpuRingOffset}
-                        transform="rotate(-90 100 115)"
+                        strokeDasharray={smallRingCirc}
+                        strokeDashoffset={smallRingCirc * (1 - cpuSpeedPct / 100)}
+                        transform="rotate(-90 100 90)"
                         className="transition-all duration-700 ease-out"
                       />
                       <line
                         x1="100"
-                        y1="115"
+                        y1="90"
                         x2="100"
-                        y2="49"
+                        y2="37"
                         stroke="#34d399"
-                        strokeWidth="4"
+                        strokeWidth="3.5"
                         strokeLinecap="round"
-                        transform={`rotate(${cpuNeedleDeg} 100 115)`}
+                        transform={`rotate(${cpuNeedleDeg} 100 90)`}
                         className="transition-all duration-700 ease-out"
                       />
-                      <circle cx="100" cy="115" r="7" fill="#e2e8f0" />
-                      <text x="100" y="230" textAnchor="middle" fill="#a7f3d0" fontSize="22" fontWeight="600">
-                        {cpuSpeedPct > 0 ? `${(cpuSpeedPct / 10).toFixed(1)} cores` : "0.0 cores"}
+                      <circle cx="100" cy="90" r="6" fill="#e2e8f0" />
+                      <text x="100" y="180" textAnchor="middle" fill="#a7f3d0" fontSize="18" fontWeight="600">
+                        {cpuSpeedPct > 0 ? `${(cpuSpeedPct * CPU_TOTAL_CORES / 100).toFixed(1)} cores` : "0.0 cores"}
                       </text>
                     </svg>
                   </div>
 
                   {/* Machine bars */}
-                  <div className="mt-2.5 space-y-1.5">
+                  <div className="mt-2 space-y-1.5">
                     {(() => {
-                      const rpTotalCpu = (() => {
-                        for (const row of status?.machines || []) {
-                          if (row.orchestrator?.research_processes?.total_cpu_pct != null) {
-                            return row.orchestrator.research_processes.total_cpu_pct;
-                          }
-                        }
-                        return 0;
-                      })();
-                      const rpJobs = (() => {
-                        for (const row of status?.machines || []) {
-                          if (row.orchestrator?.research_processes?.jobs) {
-                            return row.orchestrator.research_processes.jobs;
-                          }
-                        }
-                        return [] as ResearchJob[];
-                      })();
-                      const coresPct = Math.min(100, rpTotalCpu / 10);
-                      return (
-                        <>
-                          {/* Mac */}
-                          <div>
+                      // Gather CPU data from ALL machines with orchestrator
+                      const cpuMachines = (status?.machines || [])
+                        .filter(m => m.orchestrator)
+                        .map(m => {
+                          const o = m.orchestrator!;
+                          const rpCores = (o.research_processes?.total_cpu_pct ?? 0) / 100;
+                          const orchWorkers = o.cpu?.workers ?? 0;
+                          const totalCores = rpCores + orchWorkers;
+                          const rpJobs = o.research_processes?.jobs ?? [];
+                          const task = o.current_task;
+                          const maxCores = m.machine === "mac" ? 10 : m.machine === "droplet" ? 8 : 4;
+                          const label = m.machine === "mac" ? "M4 Pro" : m.machine === "droplet" ? "8 vCPU" : "";
+                          return { machine: m.machine, totalCores, maxCores, rpJobs, task, label, orchWorkers };
+                        });
+                      return cpuMachines.map(cm => {
+                        const pct = Math.min(100, (cm.totalCores / cm.maxCores) * 100);
+                        return (
+                          <div key={cm.machine}>
                             <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-300 font-medium">mac <span className="text-gray-600 font-normal">M4 Pro</span></span>
-                              <span className="text-emerald-300 tabular-nums">
-                                {(rpTotalCpu / 100).toFixed(1)}/10 cores
+                              <span className="text-gray-300 font-medium">{cm.machine} <span className="text-gray-600 font-normal">{cm.label}</span></span>
+                              <span className={`tabular-nums ${cm.totalCores > 0 ? "text-emerald-300" : "text-gray-600"}`}>
+                                {cm.totalCores.toFixed(1)}/{cm.maxCores} cores
                               </span>
                             </div>
                             <div className="mt-0.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
                               <div
-                                className="h-full rounded-full cpu-speed-bar"
+                                className={`h-full rounded-full ${cm.totalCores > 0 ? "cpu-speed-bar" : "bg-gray-700"}`}
                                 style={{
-                                  width: `${Math.max(2, coresPct)}%`,
-                                  animationDuration: `${Math.max(0.45, 2.6 - coresPct / 55)}s`,
+                                  width: `${Math.max(2, pct)}%`,
+                                  ...(cm.totalCores > 0 ? { animationDuration: `${Math.max(0.45, 2.6 - pct / 55)}s` } : {}),
                                 }}
                               />
                             </div>
-                            {rpJobs.length > 0 ? (
+                            {cm.rpJobs.length > 0 ? (
                               <div className="mt-0.5 space-y-0">
-                                {rpJobs.map((job, i) => (
+                                {cm.rpJobs.map((job, i) => (
                                   <div key={i} className="flex items-center gap-1.5 text-[10px]">
                                     <span className="text-emerald-400 font-mono truncate max-w-[140px]">{job.script || "unknown"}</span>
                                     {(job.workers ?? 0) > 0 && <span className="text-gray-600">{job.workers}w</span>}
@@ -674,23 +677,14 @@ export default function FleetUtilizationPage() {
                                   </div>
                                 ))}
                               </div>
+                            ) : cm.task ? (
+                              <div className="text-[10px] text-emerald-400/70 mt-0.5 truncate">{cm.task}</div>
                             ) : (
                               <div className="text-[10px] text-gray-600 mt-0.5">idle</div>
                             )}
                           </div>
-                          {/* Droplet */}
-                          <div>
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-300 font-medium">droplet <span className="text-gray-600 font-normal">8 vCPU</span></span>
-                              <span className="text-gray-600 tabular-nums">weekend only</span>
-                            </div>
-                            <div className="mt-0.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                              <div className="h-full rounded-full bg-gray-700" style={{ width: "2%" }} />
-                            </div>
-                            <div className="text-[10px] text-gray-600 mt-0.5">6 cores available · cron TBD</div>
-                          </div>
-                        </>
-                      );
+                        );
+                      });
                     })()}
                   </div>
                   {/* CPU attainment summary */}
