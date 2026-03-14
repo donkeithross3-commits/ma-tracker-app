@@ -395,8 +395,14 @@ export default function ChiefOfStaffPage() {
         )}
       </div>
 
+      {/* Status banner */}
+      <div className="px-4 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-400/80 flex items-center gap-2">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+        One-way status updates only — not monitoring incoming chats. Check the Activity Log for fleet status.
+      </div>
+
       {/* Two-panel layout */}
-      <div className="flex h-[calc(100vh-49px)]">
+      <div className="flex h-[calc(100vh-54px)]">
         {/* Chat panel — 60% */}
         <div className="w-3/5 flex flex-col border-r border-gray-800">
           {/* Messages */}
