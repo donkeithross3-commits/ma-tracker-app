@@ -1,4 +1,43 @@
 // Cockpit shared types, fetchers, caching, and regime classification
+import https from "https";
+
+// FRED's Apache server advertises HTTP/2 via ALPN but its upgrade handling
+// confuses Node 22's undici (used by global fetch()), causing requests to hang
+// indefinitely. Force HTTP/1.1 via a dedicated https.Agent.
+const fredAgent = new https.Agent({
+  ALPNProtocols: ["http/1.1"],
+  keepAlive: false,
+});
+
+function fredFetch(url: string, timeoutMs = 10000): Promise<{ ok: boolean; status: number; text: () => Promise<string> }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = https.get(
+      {
+        hostname: parsed.hostname,
+        path: parsed.pathname + parsed.search,
+        agent: fredAgent,
+        headers: { "User-Agent": "DR3-Dashboard/1.0", Accept: "*/*" },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (c: Buffer) => (data += c.toString()));
+        res.on("end", () =>
+          resolve({
+            ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
+            status: res.statusCode ?? 500,
+            text: async () => data,
+          })
+        );
+      }
+    );
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      reject(new Error(`FRED request timed out after ${timeoutMs}ms`));
+    });
+    req.on("error", reject);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -181,7 +220,7 @@ export async function fetchFredSeries(
   const fmt = (d: Date) => d.toISOString().split("T")[0];
   const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}&cosd=${fmt(start)}&coed=${fmt(end)}`;
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const res = await fredFetch(url, 10000);
   if (!res.ok) {
     console.error(`FRED fetch failed for ${seriesId}: ${res.status}`);
     return [];
