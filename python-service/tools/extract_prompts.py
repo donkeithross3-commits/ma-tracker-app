@@ -17,7 +17,9 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
-# Add parent to path so imports work when run as a module
+# Add /service to path so imports work inside Docker container
+sys.path.insert(0, "/service")
+# Also add parent dir for local runs
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 

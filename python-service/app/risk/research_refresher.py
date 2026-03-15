@@ -265,34 +265,64 @@ async def refresh_research(pool, ticker: str) -> Optional[Dict[str, Any]]:
 
     try:
         model = "claude-sonnet-4-6"
-        client = Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model=model,
-            max_tokens=1000,
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        raw = None
 
-        # Log to unified API call tracker
-        try:
-            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
-            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-            cost = compute_cost(
-                model, response.usage.input_tokens, response.usage.output_tokens,
-                cache_creation, cache_read,
+        # Try CLI first when enabled ($0 via Max subscription)
+        use_cli = os.environ.get("USE_CLI_ASSESSMENT", "false").lower() == "true"
+        if use_cli:
+            from .engine import _call_claude_cli
+            cli_result = _call_claude_cli(
+                system_prompt="You are an M&A research analyst updating deal research.",
+                user_prompt=prompt,
+                ticker=ticker,
+                model=model,
+                effort="medium",
+                timeout=180,
             )
-            await log_api_call(
-                pool, source="research_refresher", model=model, ticker=ticker,
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
-                cache_creation_tokens=cache_creation,
-                cache_read_tokens=cache_read,
-                cost_usd=cost,
-            )
-        except Exception:
-            pass  # Non-fatal
+            if cli_result is not None:
+                raw = cli_result["text"]
+                try:
+                    await log_api_call(
+                        pool, source="research_refresher", model=cli_result["model"],
+                        ticker=ticker,
+                        input_tokens=cli_result["input_tokens"],
+                        output_tokens=cli_result["output_tokens"],
+                        cost_usd=0.0,
+                        metadata={"via": "cli"},
+                    )
+                except Exception:
+                    pass
 
-        raw = response.content[0].text
+        if raw is None:
+            # API fallback
+            client = Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=model,
+                max_tokens=1000,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            # Log to unified API call tracker
+            try:
+                cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+                cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+                cost = compute_cost(
+                    model, response.usage.input_tokens, response.usage.output_tokens,
+                    cache_creation, cache_read,
+                )
+                await log_api_call(
+                    pool, source="research_refresher", model=model, ticker=ticker,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    cache_creation_tokens=cache_creation,
+                    cache_read_tokens=cache_read,
+                    cost_usd=cost,
+                )
+            except Exception:
+                pass  # Non-fatal
+
+            raw = response.content[0].text
         if raw.strip().startswith("```"):
             lines = raw.strip().split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw

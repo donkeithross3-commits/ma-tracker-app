@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import time
 import uuid
 from datetime import date, datetime
@@ -116,6 +117,116 @@ ENABLE_CALIBRATION = os.environ.get("RISK_CALIBRATION", "false").lower() == "tru
 ENABLE_REVIEW_QUEUE = os.environ.get("RISK_REVIEW_QUEUE", "false").lower() == "true"
 ENABLE_SIGNAL_WEIGHTS = os.environ.get("RISK_SIGNAL_WEIGHTS", "false").lower() == "true"
 ENABLE_BATCH_MODE = os.environ.get("RISK_BATCH_MODE", "false").lower() == "true"
+
+# CLI-based assessment via Claude Max subscription ($0 marginal cost)
+# Set USE_CLI_ASSESSMENT=true to use Claude CLI instead of API for assessments.
+# Requires Claude CLI installed and authenticated with OAuth (Max subscription).
+# Falls back to API if CLI is unavailable or fails.
+USE_CLI_ASSESSMENT = os.environ.get("USE_CLI_ASSESSMENT", "false").lower() == "true"
+CLI_EFFORT_LEVEL = os.environ.get("CLI_EFFORT_LEVEL", "medium")  # medium|high|max
+CLI_MODEL = os.environ.get("CLI_MODEL", "opus")  # Use best model since $0/call
+CLI_TIMEOUT = int(os.environ.get("CLI_TIMEOUT", "300"))  # 5 min default
+
+
+def _call_claude_cli(
+    system_prompt: str,
+    user_prompt: str,
+    ticker: str,
+    model: str | None = None,
+    effort: str | None = None,
+    timeout: int | None = None,
+) -> dict | None:
+    """Call Claude via CLI (Max subscription) instead of API.
+
+    Uses ``claude -p`` in print mode for non-interactive single-shot calls.
+    Cost: $0 marginal (included in Max subscription).
+
+    Returns dict with keys: text, input_tokens, output_tokens, elapsed_ms, model
+    Returns None if CLI is unavailable or fails (caller should fall back to API).
+    """
+    cli_model = model or CLI_MODEL
+    cli_effort = effort or CLI_EFFORT_LEVEL
+    cli_timeout = timeout or CLI_TIMEOUT
+
+    # Normalize full model IDs to CLI short names
+    for full_id, short in [
+        ("claude-opus-4-6", "opus"),
+        ("claude-sonnet-4-6", "sonnet"),
+        ("claude-haiku-4-5", "haiku"),
+    ]:
+        if full_id in cli_model:
+            cli_model = short
+            break
+
+    # Build full prompt with system context prepended
+    full_prompt = f"<system>\n{system_prompt}\n</system>\n\n{user_prompt}"
+
+    # CRITICAL: Remove ANTHROPIC_API_KEY from env so CLI uses OAuth (Max subscription)
+    # instead of per-token API billing
+    cli_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+
+    try:
+        t0 = time.monotonic()
+        result = subprocess.run(
+            [
+                "claude", "-p", full_prompt,
+                "--output-format", "json",
+                "--model", cli_model,
+                "--effort", cli_effort,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=cli_timeout,
+            env=cli_env,
+        )
+
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+        if result.returncode != 0:
+            logger.warning(
+                "CLI call failed for %s (exit %d): %s",
+                ticker, result.returncode, result.stderr[:300],
+            )
+            return None
+
+        # Parse CLI JSON output
+        raw_output = result.stdout.strip()
+        try:
+            cli_json = json.loads(raw_output)
+            text = cli_json.get("result", raw_output)
+            # Extract real token usage from CLI response if available
+            usage = cli_json.get("usage", {})
+            input_tokens = usage.get("input_tokens", len(full_prompt) // 4)
+            output_tokens = usage.get("output_tokens", len(text) // 4)
+        except json.JSONDecodeError:
+            text = raw_output
+            input_tokens = len(full_prompt) // 4
+            output_tokens = len(text) // 4
+
+        logger.info(
+            "CLI call for %s: cli-%s, effort=%s, ~%d in / ~%d out, $0 (subscription), %dms",
+            ticker, cli_model, cli_effort, input_tokens, output_tokens, elapsed_ms,
+        )
+
+        return {
+            "text": text,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "elapsed_ms": elapsed_ms,
+            "model": f"cli-{cli_model}",
+        }
+
+    except FileNotFoundError:
+        logger.warning("Claude CLI not found in PATH, falling back to API")
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "CLI call for %s timed out after %ds, falling back to API",
+            ticker, cli_timeout,
+        )
+    except Exception as e:
+        logger.warning("CLI call failed for %s (%s), falling back to API", ticker, e)
+
+    return None
 
 
 def _normalize_assessment_json(parsed: dict) -> dict:
@@ -651,6 +762,9 @@ class RiskAssessmentEngine:
     ) -> dict:
         """Call Claude to assess risk for a single deal. Returns parsed JSON response.
 
+        When USE_CLI_ASSESSMENT is enabled, tries Claude CLI first ($0 via Max
+        subscription), falling back to the API if CLI is unavailable or fails.
+
         Args:
             context: Deal context dict.
             system_prompt: Override system prompt (used for delta assessments).
@@ -662,6 +776,65 @@ class RiskAssessmentEngine:
         sys_text = system_prompt or RISK_ASSESSMENT_SYSTEM_PROMPT
         prompt = user_prompt or build_deal_assessment_prompt(context)
 
+        # --- CLI path (Max subscription, $0/call) ---
+        if USE_CLI_ASSESSMENT:
+            cli_result = _call_claude_cli(
+                system_prompt=sys_text,
+                user_prompt=prompt,
+                ticker=ticker,
+                model=model,
+            )
+            if cli_result is not None:
+                raw_text = cli_result["text"]
+                try:
+                    parsed = _extract_json(raw_text)
+                except (json.JSONDecodeError, ValueError):
+                    logger.error(
+                        "CLI returned invalid JSON for %s: %s",
+                        ticker, raw_text[:500],
+                    )
+                    # Fall through to API path
+                    cli_result = None
+
+            if cli_result is not None:
+                parsed = _normalize_assessment_json(parsed)
+
+                # Enrich with metadata (CLI = $0 cost)
+                parsed["_meta"] = {
+                    "model": cli_result["model"],
+                    "tokens_used": cli_result["input_tokens"] + cli_result["output_tokens"],
+                    "processing_time_ms": cli_result["elapsed_ms"],
+                    "cost_usd": 0.0,
+                    "input_tokens": cli_result["input_tokens"],
+                    "output_tokens": cli_result["output_tokens"],
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "via": "cli",
+                    "effort": CLI_EFFORT_LEVEL,
+                }
+
+                # Log to unified API call tracker with $0 cost
+                try:
+                    from .api_cost_tracker import log_api_call
+                    await log_api_call(
+                        self.pool,
+                        source="risk_engine",
+                        model=cli_result["model"],
+                        ticker=ticker,
+                        input_tokens=cli_result["input_tokens"],
+                        output_tokens=cli_result["output_tokens"],
+                        cost_usd=0.0,
+                        metadata={"via": "cli", "effort": CLI_EFFORT_LEVEL},
+                    )
+                except Exception:
+                    pass  # Non-fatal
+
+                return parsed
+
+            # CLI failed — fall through to API
+            logger.info("CLI failed for %s, falling back to API", ticker)
+
+        # --- API path (standard per-token billing) ---
         t0 = time.monotonic()
         try:
             response = self.anthropic.messages.create(
@@ -724,6 +897,7 @@ class RiskAssessmentEngine:
             "output_tokens": response.usage.output_tokens,
             "cache_creation_tokens": cache_creation,
             "cache_read_tokens": cache_read,
+            "via": "api",
         }
 
         # Log to unified API call tracker
@@ -1091,8 +1265,10 @@ class RiskAssessmentEngine:
                 logger.error("Failed to process reuse for %s: %s", ticker, e, exc_info=True)
 
         # --- Phase 3: API calls (batch or sequential) ---
+        # Skip batch mode when CLI is enabled (CLI is inherently sequential,
+        # and $0/call makes batch's 50% discount irrelevant)
         batch_used = False
-        if ENABLE_BATCH_MODE and len(api_bucket) >= 2:
+        if ENABLE_BATCH_MODE and not USE_CLI_ASSESSMENT and len(api_bucket) >= 2:
             try:
                 batch_results = await self._run_batch_assessments(
                     api_bucket, deal_contexts, run_id=run_id,
@@ -1425,6 +1601,31 @@ Write a concise 3-5 sentence executive summary. Focus on:
 3. Notable discrepancies between our AI grades and the Google Sheet
 4. Significant changes from yesterday
 Keep it actionable and direct."""
+
+        # Try CLI first for summary generation ($0)
+        if USE_CLI_ASSESSMENT:
+            cli_result = _call_claude_cli(
+                system_prompt="You are an M&A portfolio risk analyst.",
+                user_prompt=summary_prompt,
+                ticker="SUMMARY",
+                model=self.summary_model,
+                effort="medium",  # Summaries don't need max effort
+                timeout=120,
+            )
+            if cli_result is not None:
+                try:
+                    from .api_cost_tracker import log_api_call
+                    await log_api_call(
+                        self.pool, source="risk_summary",
+                        model=cli_result["model"],
+                        input_tokens=cli_result["input_tokens"],
+                        output_tokens=cli_result["output_tokens"],
+                        cost_usd=0.0,
+                        metadata={"run_id": str(run_id), "via": "cli"},
+                    )
+                except Exception:
+                    pass
+                return cli_result["text"]
 
         response = self.anthropic.messages.create(
             model=self.summary_model,

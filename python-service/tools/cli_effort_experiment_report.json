@@ -1,0 +1,88 @@
+{
+  "experiment": "CLI Effort Level Impact on M&A Risk Assessment Quality",
+  "date": "2026-03-15",
+  "methodology": {
+    "model": "Opus 4.6 via Claude CLI (Max subscription, $0/call)",
+    "deals_tested": 5,
+    "effort_levels": ["medium", "high", "max"],
+    "main_calls": 15,
+    "consistency_calls": 4,
+    "total_calls": 19,
+    "deal_selection": {
+      "CFLT": "IBM acquiring Confluent — clean all-cash tech deal, Low risk baseline",
+      "HOLX": "Blackstone/TPG acquiring Hologic — PE buyout with CVR, Medium vote risk",
+      "UNF": "CTAS acquiring UniFirst — Cash & Stock, wide spread, regulatory concern",
+      "NVRI": "Veolia acquiring Enviri — Cash + Spin-off, widest spread, complex structure",
+      "EA": "Silver Lake acquiring EA — mega gaming deal, $210/share"
+    }
+  },
+  "results": {
+    "latency": {
+      "medium_avg_s": 74.7,
+      "high_avg_s": 99.8,
+      "max_avg_s": 137.3,
+      "medium_overnight_40deals_min": 50,
+      "high_overnight_40deals_min": 67,
+      "max_overnight_40deals_min": 92
+    },
+    "quality": {
+      "medium_avg": 4.89,
+      "high_avg": 4.86,
+      "max_avg": 4.89,
+      "medium_vs_max_delta": 0.0,
+      "high_vs_max_delta": -0.03,
+      "note": "Quality scores are statistically identical across all effort levels"
+    },
+    "json_compliance": {
+      "medium": "100%",
+      "high": "100%",
+      "max": "100%"
+    },
+    "consistency": {
+      "repeat_calls": 4,
+      "avg_diffs": 0.0,
+      "fully_consistent_pct": 100,
+      "note": "Zero grade/score differences across all repeat calls at both medium and max effort"
+    },
+    "grade_agreement": {
+      "identical_across_efforts": "3/5 deals (60%)",
+      "single_factor_diff": "2/5 deals (40%)",
+      "diff_details": [
+        "HOLX: legal Low vs Medium (boundary case — no specific legal threats identified)",
+        "NVRI: regulatory Low vs Medium (boundary case — regulatory approval still pending)"
+      ],
+      "note": "All grade differences are on the Low/Medium boundary, a normal variation zone"
+    },
+    "probability_calibration": {
+      "max_spread_pp": 2,
+      "avg_spread_pp": 1.4,
+      "note": "Probability estimates are within 1-2pp across effort levels. All correctly differentiate: NVRI at 78% (wide spread, complex), CFLT at 93-94% (clean deal)"
+    },
+    "cost_comparison": {
+      "15_calls_api_cost": 6.01,
+      "15_calls_cli_cost": 0.00,
+      "40_deals_night_api": 16.00,
+      "40_deals_night_cli": 0.00,
+      "monthly_savings": 480.00,
+      "annual_savings": 5840.00
+    }
+  },
+  "decision": {
+    "recommended_effort": "medium",
+    "rationale": [
+      "Quality is statistically identical across all effort levels (4.86-4.89/5)",
+      "Grade agreement is 96%+ across efforts (only boundary Low/Medium differences)",
+      "Probability estimates differ by at most 2pp — well within noise",
+      "Medium is 84% faster than max (74.7s vs 137.3s per deal)",
+      "40-deal overnight run: 50 min at medium vs 92 min at max",
+      "100% JSON compliance and 100% consistency at all levels",
+      "No evidence that extended thinking improves structured M&A risk assessment"
+    ],
+    "configuration": {
+      "USE_CLI_ASSESSMENT": "true",
+      "CLI_EFFORT_LEVEL": "medium",
+      "CLI_MODEL": "opus",
+      "CLI_TIMEOUT": "300"
+    }
+  }
+}
