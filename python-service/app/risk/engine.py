@@ -127,6 +127,42 @@ CLI_EFFORT_LEVEL = os.environ.get("CLI_EFFORT_LEVEL", "medium")  # medium|high|m
 CLI_MODEL = os.environ.get("CLI_MODEL", "opus")  # Use best model since $0/call
 CLI_TIMEOUT = int(os.environ.get("CLI_TIMEOUT", "300"))  # 5 min default
 
+# Resolve claude CLI binary path (may be in nvm, homebrew, or system PATH)
+_CLI_BINARY = None
+
+
+def _find_claude_cli() -> str | None:
+    """Find the claude CLI binary, checking common install locations."""
+    global _CLI_BINARY
+    if _CLI_BINARY is not None:
+        return _CLI_BINARY
+
+    # Check explicit override first
+    explicit = os.environ.get("CLAUDE_CLI_PATH")
+    if explicit and os.path.isfile(explicit):
+        _CLI_BINARY = explicit
+        return _CLI_BINARY
+
+    # Search PATH + common locations
+    import shutil
+    found = shutil.which("claude")
+    if found:
+        _CLI_BINARY = found
+        return _CLI_BINARY
+
+    # Common nvm/homebrew paths not in container PATH
+    for candidate in [
+        "/home/don/.nvm/versions/node/v22.22.1/bin/claude",  # droplet nvm
+        "/opt/homebrew/bin/claude",  # macOS homebrew
+        "/usr/local/bin/claude",
+    ]:
+        if os.path.isfile(candidate):
+            _CLI_BINARY = candidate
+            return _CLI_BINARY
+
+    _CLI_BINARY = ""  # Sentinel: searched but not found
+    return None
+
 
 def _call_claude_cli(
     system_prompt: str,
@@ -161,6 +197,12 @@ def _call_claude_cli(
     # Build full prompt with system context prepended
     full_prompt = f"<system>\n{system_prompt}\n</system>\n\n{user_prompt}"
 
+    # Find the claude binary
+    cli_binary = _find_claude_cli()
+    if not cli_binary:
+        logger.warning("Claude CLI not found, falling back to API")
+        return None
+
     # CRITICAL: Remove ANTHROPIC_API_KEY from env so CLI uses OAuth (Max subscription)
     # instead of per-token API billing
     cli_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
@@ -169,7 +211,7 @@ def _call_claude_cli(
         t0 = time.monotonic()
         result = subprocess.run(
             [
-                "claude", "-p", full_prompt,
+                cli_binary, "-p", full_prompt,
                 "--output-format", "json",
                 "--model", cli_model,
                 "--effort", cli_effort,
