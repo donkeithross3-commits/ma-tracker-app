@@ -691,96 +691,62 @@ export default function FleetUtilizationPage() {
         {/* ================================================================
             SECTION 1: Fleet Summary Bar
             ================================================================ */}
-        <section className="rounded border border-gray-800 bg-gray-900 px-4 py-2 flex items-center gap-3 text-sm flex-wrap">
-          <span className="flex items-center gap-1.5">
+        <section className="rounded border border-gray-800 bg-gray-900 px-3 py-1.5 flex items-center gap-2 text-xs">
+          {/* GPU live + attainment triplet */}
+          <span className="flex items-center gap-1">
             <span className={`inline-block w-1.5 h-1.5 rounded-full ${
               fleetSummary.gpuAvg >= 30 ? "bg-emerald-400" :
-              fleetSummary.gpuAvg >= 10 ? "bg-amber-400" :
-              "bg-gray-500"
+              fleetSummary.gpuAvg >= 10 ? "bg-amber-400" : "bg-gray-500"
             }`} />
-            <span className="text-gray-400">GPU:</span>
+            <span className="text-gray-500">GPU</span>
             <span className={`font-medium tabular-nums ${pctColor(fleetSummary.gpuAvg)}`}>
-              {fmtPct(fleetSummary.gpuAvg)} avg
+              {fmtPct(fleetSummary.gpuAvg)}
             </span>
-            <span className="text-gray-600">({fleetSummary.gpuCount} machines)</span>
+            {util && (<>
+              <span className="text-gray-700">/</span>
+              <span className={`tabular-nums ${pctColor(util.trailing.hour?.fleet_attainment_pct ?? 0)}`}>
+                {fmtPct(util.trailing.hour?.fleet_attainment_pct ?? 0)}
+              </span>
+              <span className="text-gray-700">/</span>
+              <span className={`tabular-nums ${pctColor(util.trailing.day.fleet_attainment_pct)}`}>
+                {fmtPct(util.trailing.day.fleet_attainment_pct)}
+              </span>
+            </>)}
           </span>
-
           <span className="text-gray-700">|</span>
-
-          <span className="flex items-center gap-1.5">
+          {/* CPU live + attainment triplet */}
+          <span className="flex items-center gap-1">
             <span className={`inline-block w-1.5 h-1.5 rounded-full ${
               fleetSummary.activeCores >= 5 ? "bg-emerald-400" :
-              fleetSummary.activeCores >= 1 ? "bg-amber-400" :
-              "bg-gray-500"
+              fleetSummary.activeCores >= 1 ? "bg-amber-400" : "bg-gray-500"
             }`} />
-            <span className="text-gray-400">CPU:</span>
+            <span className="text-gray-500">CPU</span>
             <span className={`font-medium tabular-nums ${fleetSummary.activeCores >= 1 ? "text-emerald-300" : "text-gray-500"}`}>
-              {fleetSummary.activeCores.toFixed(1)}/{fleetSummary.totalCores} cores
+              {fleetSummary.activeCores.toFixed(0)}/{fleetSummary.totalCores}
             </span>
+            {cpuUtil?.trailing && (<>
+              <span className="text-gray-700">/</span>
+              <span className={`tabular-nums ${pctColor(((cpuUtil.trailing.hour?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}`}>
+                {fmtPct(((cpuUtil.trailing.hour?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}
+              </span>
+              <span className="text-gray-700">/</span>
+              <span className={`tabular-nums ${pctColor(((cpuUtil.trailing.day?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}`}>
+                {fmtPct(((cpuUtil.trailing.day?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}
+              </span>
+            </>)}
+            <span className="text-gray-600 text-[9px]">1m/1h/24h</span>
           </span>
-
-          {util && (
-            <>
-              <span className="text-gray-700">|</span>
-              <span className="flex items-center gap-1.5">
-                <span className="text-gray-500">GPU</span>
-                <span className={`font-medium tabular-nums ${pctColor(fleetSummary.gpuAvg)}`}>
-                  {fmtPct(fleetSummary.gpuAvg)}
-                </span>
-                <span className="text-gray-700">/</span>
-                <span className={`font-medium tabular-nums ${pctColor(util.trailing.hour?.fleet_attainment_pct ?? 0)}`}>
-                  {fmtPct(util.trailing.hour?.fleet_attainment_pct ?? 0)}
-                </span>
-                <span className="text-gray-700">/</span>
-                <span className={`font-medium tabular-nums ${pctColor(util.trailing.day.fleet_attainment_pct)}`}>
-                  {fmtPct(util.trailing.day.fleet_attainment_pct)}
-                </span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="text-gray-500">CPU</span>
-                <span className={`font-medium tabular-nums ${pctColor((fleetSummary.activeCores / fleetSummary.totalCores) * 100)}`}>
-                  {fmtPct((fleetSummary.activeCores / fleetSummary.totalCores) * 100)}
-                </span>
-                <span className="text-gray-700">/</span>
-                <span className={`font-medium tabular-nums ${pctColor(((cpuUtil?.trailing?.hour?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}`}>
-                  {fmtPct(((cpuUtil?.trailing?.hour?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}
-                </span>
-                <span className="text-gray-700">/</span>
-                <span className={`font-medium tabular-nums ${pctColor(((cpuUtil?.trailing?.day?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}`}>
-                  {fmtPct(((cpuUtil?.trailing?.day?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}
-                </span>
-                <span className="text-gray-600 text-[10px]">1m/1h/24h</span>
-              </span>
-            </>
-          )}
-
           <span className="text-gray-700">|</span>
           <span className={`tabular-nums ${ageClass(fleetSummary.newestAge)}`}>
-            Last checkin: {fmtAge(fleetSummary.newestAge)} ago
+            {fmtAge(fleetSummary.newestAge)}
           </span>
-
-          {/* Orchestrator state (compact) */}
-          {mergedOrchestrator && (
-            <>
-              <span className="text-gray-700">|</span>
-              <span className="flex items-center gap-1.5">
-                <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                  mergedOrchestrator.state === "collecting" ? "bg-cyan-400 animate-pulse" :
-                  mergedOrchestrator.state === "cpu_job" ? "bg-emerald-400 animate-pulse" :
-                  "bg-gray-600"
-                }`} />
-                <span className="text-gray-400">Orch:</span>
-                <span className={
-                  mergedOrchestrator.state === "collecting" ? "text-cyan-300" :
-                  mergedOrchestrator.state === "cpu_job" ? "text-emerald-300" :
-                  "text-gray-500"
-                }>{mergedOrchestrator.state || "unknown"}</span>
-                {mergedOrchestrator.pid && (
-                  <span className="text-gray-600 text-xs">PID {mergedOrchestrator.pid}</span>
-                )}
-              </span>
-            </>
-          )}
+          {mergedOrchestrator && (<>
+            <span className="text-gray-700">|</span>
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+              mergedOrchestrator.state === "cpu_job" ? "bg-emerald-400 animate-pulse" :
+              mergedOrchestrator.state === "collecting" ? "bg-cyan-400 animate-pulse" : "bg-gray-600"
+            }`} />
+          </>)}
         </section>
 
         {/* ================================================================
