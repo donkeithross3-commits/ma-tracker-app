@@ -207,6 +207,13 @@ def _call_claude_cli(
     # instead of per-token API billing
     cli_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
+    # Ensure the directory containing the CLI binary (and node) is in PATH.
+    # Inside Docker, nvm paths aren't in the default PATH.
+    cli_dir = os.path.dirname(cli_binary)
+    current_path = cli_env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    if cli_dir not in current_path:
+        cli_env["PATH"] = f"{cli_dir}:{current_path}"
+
     try:
         t0 = time.monotonic()
         result = subprocess.run(
