@@ -461,16 +461,18 @@ export default function FleetUtilizationPage() {
       const vramTotalGb = spec.gpuVram ?? null;
       const gpuJob = machineRunState(row || { machine: name });
 
-      // CPU active cores: prefer system_cpu_pct (actual OS-level utilization)
-      // over total_cpu_pct (sum of detected process CPU%, misses n_jobs workers)
+      // CPU active cores: use the MAX of system-level CPU% and process-sum CPU%.
+      // system_cpu_pct (from OS) can be stale/unreliable on Windows.
+      // total_cpu_pct (sum of detected processes) misses n_jobs child workers.
+      // Taking the max gives the most honest picture.
       const rp = orch?.research_processes;
-      const sysCpuPct = rp?.system_cpu_pct;
-      const rpCores = isStale ? 0 : (
-        sysCpuPct != null && sysCpuPct >= 0
-          ? (sysCpuPct / 100) * spec.cores  // system-level: fraction of THIS machine's cores
-          : (rp?.total_cpu_pct ?? 0) / 100   // fallback: process-sum (may undercount)
+      const sysCpuCores = isStale ? 0 : (
+        rp?.system_cpu_pct != null ? (rp.system_cpu_pct / 100) * spec.cores : 0
       );
-      const activeCores = rpCores;
+      const processCpuCores = isStale ? 0 : (
+        (rp?.total_cpu_pct ?? 0) / 100
+      );
+      const activeCores = Math.max(sysCpuCores, processCpuCores);
 
       // Processes (filter out < 1% CPU)
       const rpJobs = isStale ? [] : (orch?.research_processes?.jobs ?? []);
