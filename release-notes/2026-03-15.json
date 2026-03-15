@@ -1,8 +1,17 @@
 {
   "date": "2026-03-15",
-  "title": "Fleet Dashboard Job Summary + Benchmark Targets",
-  "summary": "Machine cards now summarize 3+ identical jobs into a single compact line, and benchmark job names include the --targets arg so parallel experiments are distinguishable.",
+  "title": "Parkinson's Research Page + Fleet Dashboard Improvements",
+  "summary": "New Parkinson's / PSP-Richardson's research page tracking dual proteinopathy treatment landscape with 13 therapies, 6 action items, and daily autonomous updates. Plus fleet dashboard job summary improvements.",
   "features": [
+    {
+      "id": "parkinsons-research-page",
+      "title": "Parkinson's & PSP Research Page",
+      "summary": "New dedicated page tracking the dual proteinopathy treatment landscape — clinical trials, immunotherapy, diagnostics, and action items.",
+      "description": "A comprehensive research dashboard at /parkinsons tracking the treatment landscape for dual alpha-synuclein + tau proteinopathy. Features include:\\n\\n- **6 prioritized action items** — trial enrollment windows (AADvac1 PSP Platform Trial, prasinezumab Phase 3), diagnostic requests, and treatment discussions\\n- **13 tracked therapies** — vaccines (VacSYn, UB-312, AFFITOPE, AADvac1), antibodies (prasinezumab, bepranemab), GLP-1 neuroprotectants, gene therapy, and delivery technologies\\n- **5 diagnostic recommendations** — tau PET, CSF biomarkers, genetic testing, DaT-SPECT\\n- **Evidence tier system** — every therapy and update classified from Tier 1 (published Phase 2/3) to Tier 5 (theoretical)\\n- **Research timeline** — reverse-chronological feed that will grow daily as the autonomous research loop runs\\n\\nDesigned comfort-mode-first with 44px+ touch targets, large readable text, and high contrast. The page's primary user has Parkinson's.\\n\\nIncludes a Python research updater that integrates with ClinicalTrials.gov v2 API and PubMed for automated daily updates.",
+      "category": "general",
+      "image": null,
+      "screenshot": null
+    },
     {
       "id": "fleet-job-summary",
       "title": "Compact Job Summary in Machine Cards",

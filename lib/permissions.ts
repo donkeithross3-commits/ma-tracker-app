@@ -2,7 +2,7 @@
 // Project permissioning utilities
 // ---------------------------------------------------------------------------
 
-export type ProjectKey = "krj" | "ma-options" | "sheet-portfolio"
+export type ProjectKey = "krj" | "ma-options" | "sheet-portfolio" | "parkinsons"
 
 export interface ProjectMeta {
   label: string
@@ -26,12 +26,18 @@ export const ALL_PROJECTS: Record<ProjectKey, ProjectMeta> = {
     path: "/sheet-portfolio",
     description: "Event-driven M&A portfolio from production Google Sheet",
   },
+  parkinsons: {
+    label: "Parkinson's Research",
+    path: "/parkinsons",
+    description: "Dual proteinopathy treatment landscape — clinical trials and daily research updates",
+  },
 }
 
 export const DEFAULT_PROJECT_ACCESS: ProjectKey[] = [
   "krj",
   "ma-options",
   "sheet-portfolio",
+  "parkinsons",
 ]
 
 /**
@@ -78,6 +84,10 @@ export function getProjectKeyFromPath(pathname: string): string | null {
     pathname.startsWith("/sheet-portfolio/")
   )
     return "sheet-portfolio"
+
+  // /parkinsons or /parkinsons/... -> "parkinsons"
+  if (pathname === "/parkinsons" || pathname.startsWith("/parkinsons/"))
+    return "parkinsons"
 
   return null
 }

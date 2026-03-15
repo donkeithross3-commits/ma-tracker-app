@@ -1,0 +1,378 @@
+{
+  "last_updated": "2026-03-15T12:00:00Z",
+  "patient_profile": {
+    "diagnosis": "PD with PSP-Richardson's features (dual proteinopathy)",
+    "confirmed_pathology": ["alpha-synuclein (skin biopsy+)"],
+    "clinical_features": [
+      "right-hand tremor",
+      "levodopa-responsive",
+      "backward falls",
+      "eye movement abnormalities"
+    ],
+    "suspected_pathology": ["4-repeat tau (PSP pattern)"],
+    "therapeutic_framing": "Dual proteinopathy means MORE therapeutic targets, not fewer. Cross-seeding between alpha-synuclein and tau means therapies targeting either protein could benefit both pathologies."
+  },
+  "action_items": [
+    {
+      "id": "action-001",
+      "priority": "highest",
+      "title": "Screen for AADvac1 PSP Platform Trial",
+      "description": "The PSP Platform Trial at UCSF, UCSD, and Mass General is enrolling NOW (Q1 2026). AADvac1 targets tau protein — directly relevant to the PSP features. This is the most time-sensitive action item. Contact CurePSP or trial sites directly to inquire about eligibility screening.",
+      "contact": "CurePSP (curepsp.org); Trial sites: UCSF Memory & Aging Center, UC San Diego, Massachusetts General Hospital",
+      "deadline": "Enrolling Q1 2026 — ACT NOW",
+      "status": "pending",
+      "date_added": "2026-03-15",
+      "date_resolved": null
+    },
+    {
+      "id": "action-002",
+      "priority": "highest",
+      "title": "Discuss Prasinezumab Phase 3 Trial Enrollment",
+      "description": "Roche's prasinezumab (anti-alpha-synuclein antibody) Phase 3 PADOVA trial is enrolling 900 patients at sites across the US. This targets the CONFIRMED alpha-synuclein pathology. Ask the neurologist about eligibility and nearby trial sites. ClinicalTrials.gov: NCT04777331.",
+      "contact": "Roche/Genentech clinical trials; neurologist referral to trial site",
+      "deadline": "Currently enrolling — discuss at next neurology visit",
+      "status": "pending",
+      "date_added": "2026-03-15",
+      "date_resolved": null
+    },
+    {
+      "id": "action-003",
+      "priority": "high",
+      "title": "Request Tau PET Imaging + CSF Biomarker Panel",
+      "description": "These diagnostic tests would clarify the extent of tau pathology and quantify alpha-synuclein seeding activity. Tau PET (flortaucipir) visualizes tau distribution. CSF alpha-synuclein seed amplification assay (SAA) quantifies seeding. CSF phospho-tau panel (p-tau 181, 217, 231) quantifies tau burden. These results inform trial eligibility and treatment strategy.",
+      "contact": "Current neurologist; may need referral to academic movement disorder center",
+      "deadline": "Request at next neurology visit",
+      "status": "pending",
+      "date_added": "2026-03-15",
+      "date_resolved": null
+    },
+    {
+      "id": "action-004",
+      "priority": "high",
+      "title": "Discuss Lixisenatide (GLP-1 Agonist) with Neurologist",
+      "description": "Lixisenatide showed reduced motor disability progression in NEJM 2024 Phase 2 trial (LixiPark). While not yet approved for PD, it's available as a diabetes medication and the neuroprotective evidence is strong (Tier 1). Some neurologists are prescribing off-label. Discuss risk/benefit with the care team.",
+      "contact": "Current neurologist",
+      "deadline": "Discuss at next visit",
+      "status": "pending",
+      "date_added": "2026-03-15",
+      "date_resolved": null
+    },
+    {
+      "id": "action-005",
+      "priority": "medium",
+      "title": "Monitor ACI-7104.056 (VacSYn) Phase 2 Expansion",
+      "description": "AC Immune's alpha-synuclein vaccine showed exceptional results: >20x antibody levels, 100% seroconversion, no UPDRS III progression at 74 weeks. Stage 2 expansion to 150 patients is expected. No action needed now, but this could become enrollable within 6-12 months. Keep monitoring.",
+      "contact": "AC Immune (acimmune.com); ClinicalTrials.gov",
+      "deadline": "Monitor — expansion expected 2026-2027",
+      "status": "pending",
+      "date_added": "2026-03-15",
+      "date_resolved": null
+    },
+    {
+      "id": "action-006",
+      "priority": "medium",
+      "title": "Explore Dendritic Cell Vaccine Feasibility",
+      "description": "Preclinical research shows dendritic cell vaccines can be dual-loaded with alpha-synuclein AND tau antigens — potentially addressing both pathologies simultaneously. This is still early-stage (Tier 3) but the dual proteinopathy makes this approach uniquely relevant. Ask the neurologist or an academic center about any open trials or compassionate use.",
+      "contact": "Academic movement disorder center; ClinicalTrials.gov",
+      "deadline": "No urgency — exploratory inquiry",
+      "status": "pending",
+      "date_added": "2026-03-15",
+      "date_resolved": null
+    }
+  ],
+  "tracked_therapies": [
+    {
+      "id": "therapy-001",
+      "name": "ACI-7104.056 (VacSYn)",
+      "category": "active_immunotherapy",
+      "target": "alpha-synuclein",
+      "mechanism": "Peptide vaccine using SupraAntigen platform — mimics oligomerized alpha-synuclein conformation to generate antibodies that clear pathological aggregates",
+      "evidence_tier": 1,
+      "status": "Phase 2 — positive interim results",
+      "latest_update": "Interim data: >20x anti-α-syn antibody levels vs baseline, 100% seroconversion rate, no UPDRS III motor score progression at 74 weeks. Stage 2 expansion (150 patients) expected.",
+      "relevance_to_patient": "Directly targets confirmed α-syn pathology. Strong immunogenicity data suggests robust antibody response. If approved, could slow or halt synuclein-driven degeneration. Cross-seeding benefit possible (reducing α-syn may reduce tau templating).",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://www.clinicaltrialvanguard.com/news/enormous-parkinsons-breakthrough-phase-2-trial-shows-positive-results/",
+        "https://www.biopharmadive.com/news/ac-immune-parksinsons-drug-data-alpha-synuclein/807688/"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-002",
+      "name": "UB-312",
+      "category": "active_immunotherapy",
+      "target": "alpha-synuclein",
+      "mechanism": "Peptide vaccine targeting C-terminal region of alpha-synuclein using UBITh platform technology",
+      "evidence_tier": 2,
+      "status": "Phase 1b — completing ~April 2025, results pending",
+      "latest_update": "Phase 1b study in PD patients nearing completion. Safety and immunogenicity data expected in 2025.",
+      "relevance_to_patient": "Another α-syn vaccine approach — different epitope than VacSYn. If VacSYn fails, UB-312 may succeed due to targeting different region of the protein.",
+      "clinicaltrials_id": "NCT04075318",
+      "source_urls": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC11638298/"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-003",
+      "name": "PD01A / PD03A (AFFITOPE)",
+      "category": "active_immunotherapy",
+      "target": "alpha-synuclein",
+      "mechanism": "Short peptide mimicking α-syn epitope (AFFITOPE technology) — generates antibodies without autoimmune risk of full-protein vaccines",
+      "evidence_tier": 2,
+      "status": "Phase 1 — immunogenic and safe",
+      "latest_update": "Demonstrated immunogenicity and acceptable safety profile in Phase 1. Further development status under review by AFFiRiS.",
+      "relevance_to_patient": "Third α-syn vaccine approach. Lower autoimmune risk due to short peptide design. Earlier stage but diversifies the vaccine pipeline.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC11638298/"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-004",
+      "name": "AADvac1",
+      "category": "active_immunotherapy",
+      "target": "tau",
+      "mechanism": "Tau peptide vaccine targeting mis-disordered tau protein — selected for PSP Platform Trial based on Phase 1 safety and immunogenicity data",
+      "evidence_tier": 2,
+      "status": "PSP Platform Trial Phase 2a — ENROLLING Q1 2026",
+      "latest_update": "Selected as one of two regimens for the PSP Platform Trial. Enrolling at UCSF, UCSD, and Mass General. This is the first dedicated PSP immunotherapy trial with a tau vaccine.",
+      "relevance_to_patient": "HIGHEST RELEVANCE — directly targets suspected tau pathology (PSP features). The PSP Platform Trial is specifically designed for patients with PSP-Richardson's phenotype. Enrollment is NOW.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://www.psp.org/news/details/progressive-supranuclear-palsy-phase-2-platform-clinical-trial-announces-the-selection-of-aadvac1-and-azp2006-for-its-first-two-regimens"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-005",
+      "name": "AZP2006",
+      "category": "small_molecule",
+      "target": "tau",
+      "mechanism": "Restores lysosomal homeostasis and modulates progranulin — addresses tau clearance mechanism rather than directly binding tau",
+      "evidence_tier": 2,
+      "status": "PSP Platform Trial — enrolling",
+      "latest_update": "Selected as the second regimen for the PSP Platform Trial alongside AADvac1. Novel mechanism targeting tau clearance rather than tau itself.",
+      "relevance_to_patient": "Relevant for PSP features. Different mechanism than AADvac1 (clearance vs. immunotherapy) — if one fails, the other may work through a different pathway.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://www.psp.org/news/details/progressive-supranuclear-palsy-phase-2-platform-clinical-trial-announces-the-selection-of-aadvac1-and-azp2006-for-its-first-two-regimens"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-006",
+      "name": "Anti-pT181 Mucosal Vaccine",
+      "category": "active_immunotherapy",
+      "target": "tau",
+      "mechanism": "Nasal mucosal vaccine targeting phospho-tau181 epitope — non-invasive delivery, targets specific phosphorylation site implicated in tau seeding",
+      "evidence_tier": 3,
+      "status": "Enrollment expected early 2026",
+      "latest_update": "University of New Mexico developing mucosal (nasal) vaccine against phospho-tau181. Preclinical data encouraging. Enrollment expected early 2026.",
+      "relevance_to_patient": "Targets tau phosphorylation specifically implicated in PSP. Non-invasive nasal delivery is attractive for patients with motor symptoms. Earlier stage but novel approach.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://www.sciencedaily.com/releases/2025/04/250423164249.htm"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-007",
+      "name": "Prasinezumab",
+      "category": "passive_immunotherapy",
+      "target": "alpha-synuclein",
+      "mechanism": "Monoclonal antibody targeting aggregated alpha-synuclein — binds and promotes clearance of extracellular α-syn aggregates",
+      "evidence_tier": 1,
+      "status": "Phase 3 PADOVA trial — enrolling 900 patients",
+      "latest_update": "Roche's Phase 3 PADOVA trial is the largest α-syn immunotherapy trial in history. 900 patients across global sites. Phase 2b showed 28% slowing of motor progression in rapid progressors. Phase 3 expanded to broader PD population.",
+      "relevance_to_patient": "Directly targets confirmed α-syn pathology. Most advanced α-syn antibody in clinical development. Phase 3 enrollment is ACTIVE — should discuss trial participation with neurologist.",
+      "clinicaltrials_id": "NCT04777331",
+      "source_urls": [
+        "https://www.roche.com/media/releases/med-cor-2025-06-16",
+        "https://link.springer.com/article/10.1007/s40120-024-00614-9"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-008",
+      "name": "Bepranemab",
+      "category": "passive_immunotherapy",
+      "target": "tau",
+      "mechanism": "Anti-tau monoclonal antibody targeting central region of tau protein — binds both 3R and 4R tau isoforms",
+      "evidence_tier": 2,
+      "status": "Open-label extension in PSP — completing Nov 2026",
+      "latest_update": "Open-label extension study in PSP patients ongoing, expected completion November 2026. Safety and preliminary efficacy data expected.",
+      "relevance_to_patient": "Targets tau in PSP specifically. One of few monoclonal antibodies being tested in PSP (not just AD). Completion in Nov 2026 means results could inform treatment decisions.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://link.springer.com/article/10.1007/s40120-024-00614-9"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-009",
+      "name": "Brain-Shuttled α-Syn Antibody",
+      "category": "passive_immunotherapy",
+      "target": "alpha-synuclein",
+      "mechanism": "Engineered antibody with transferrin receptor binding domain — crosses blood-brain barrier at 10-40x higher brain concentrations than standard antibodies",
+      "evidence_tier": 3,
+      "status": "Preclinical / early development",
+      "latest_update": "Published in npj Parkinson's Disease 2025. Brain-shuttle technology achieves dramatically higher CNS penetration. Could solve the BBB problem that limits current antibody therapies.",
+      "relevance_to_patient": "If current antibodies (prasinezumab) fail due to poor brain penetration, brain-shuttled versions could succeed. Technology platform could be applied to both α-syn and tau antibodies.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://www.nature.com/articles/s41531-025-01117-6"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-010",
+      "name": "Lixisenatide",
+      "category": "neuroprotection",
+      "target": "GLP-1 receptor (neuroprotection)",
+      "mechanism": "GLP-1 receptor agonist — activates neuronal survival pathways, reduces neuroinflammation, promotes neurotrophic factor release. Originally a diabetes medication.",
+      "evidence_tier": 1,
+      "status": "Phase 2 positive — further trials planned",
+      "latest_update": "NEJM 2024 (LixiPark trial): Lixisenatide reduced motor disability progression vs placebo over 12 months. First GLP-1 agonist to show disease-modifying signal in PD. Further Phase 3 trials in planning.",
+      "relevance_to_patient": "Neuroprotective regardless of protein pathology — could benefit both α-syn and tau-driven degeneration. Already approved for diabetes (available off-label). Discuss with neurologist.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://www.nejm.org/doi/full/10.1056/NEJMoa2312323"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-011",
+      "name": "Exenatide",
+      "category": "neuroprotection",
+      "target": "GLP-1 receptor (neuroprotection)",
+      "mechanism": "GLP-1 receptor agonist — same class as lixisenatide but different pharmacokinetic profile",
+      "evidence_tier": 1,
+      "status": "Phase 3 — NEGATIVE (Lancet 2025)",
+      "latest_update": "Lancet 2025: Phase 3 trial of exenatide in PD was NEGATIVE — did not slow progression. However, different GLP-1RAs may differ in efficacy. Lixisenatide's positive result suggests the class isn't dead.",
+      "relevance_to_patient": "Negative result for this specific GLP-1 agonist, but the class remains promising (lixisenatide was positive). Highlights that not all GLP-1RAs are equivalent for neurodegeneration.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(24)02808-3/fulltext"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-012",
+      "name": "BIIB101 (Anti-SNCA ASO)",
+      "category": "gene_therapy",
+      "target": "alpha-synuclein (gene silencing)",
+      "mechanism": "Antisense oligonucleotide targeting SNCA mRNA — reduces production of alpha-synuclein at the genetic level rather than clearing existing aggregates",
+      "evidence_tier": 2,
+      "status": "Phase 1 in MSA",
+      "latest_update": "Ionis/Biogen antisense oligonucleotide reducing SNCA expression. Phase 1 study in MSA (another synucleinopathy). If successful, could expand to PD and dual proteinopathies.",
+      "relevance_to_patient": "Upstream approach — stops α-syn production rather than clearing aggregates. Could be combined with immunotherapy (reduce production + clear existing). Currently in MSA but PD expansion possible.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC9853504/"
+      ],
+      "last_checked": "2026-03-15"
+    },
+    {
+      "id": "therapy-013",
+      "name": "Focused Ultrasound BBB Opening",
+      "category": "delivery_technology",
+      "target": "Blood-brain barrier (delivery enhancement)",
+      "mechanism": "MRI-guided focused ultrasound transiently opens the blood-brain barrier, allowing antibodies and other therapeutics to reach brain tissue at much higher concentrations",
+      "evidence_tier": 2,
+      "status": "Phase 1 safe in PD dementia — combination trials next",
+      "latest_update": "Phase 1 demonstrated safety of focused ultrasound BBB opening in PD dementia patients. The next frontier is combining FUS with immunotherapy — open the BBB, then deliver antibodies directly to affected brain regions.",
+      "relevance_to_patient": "Could dramatically improve efficacy of any antibody therapy (prasinezumab, bepranemab, brain-shuttled Abs). Particularly relevant for dual proteinopathy — could deliver both α-syn and tau antibodies in same session.",
+      "clinicaltrials_id": null,
+      "source_urls": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC9124903/"
+      ],
+      "last_checked": "2026-03-15"
+    }
+  ],
+  "research_updates": [
+    {
+      "id": "update-001",
+      "date": "2026-03-15",
+      "title": "Initial Research Compilation — Dual Proteinopathy Treatment Landscape",
+      "summary": "Comprehensive analysis of the treatment landscape for dual alpha-synuclein + tau proteinopathy. Identified 13 tracked therapies across 6 categories: 3 alpha-synuclein vaccines (VacSYn, UB-312, AFFITOPE), 3 tau-targeting approaches (AADvac1, AZP2006, anti-pT181), 3 monoclonal antibodies (prasinezumab, bepranemab, brain-shuttled Ab), 2 GLP-1 neuroprotectants (lixisenatide, exenatide), 1 gene therapy (BIIB101), and 1 delivery technology (focused ultrasound). The key insight: cross-seeding between α-syn and tau means therapies targeting either protein could benefit both pathologies. The dual proteinopathy is an OPPORTUNITY — more therapeutic targets, not fewer.",
+      "evidence_tier": null,
+      "category": "compilation",
+      "source_urls": [
+        "https://jamanetwork.com/journals/jama/fullarticle/2816441",
+        "https://www.frontiersin.org/journals/neurology/articles/10.3389/fneur.2024.1510796/full",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC5961706/",
+        "https://www.sciencedirect.com/science/article/abs/pii/S0304394021003426",
+        "https://www.frontiersin.org/journals/neuroscience/articles/10.3389/fnins.2025.1570553/full",
+        "https://translationalneurodegeneration.biomedcentral.com/articles/10.1186/s40035-024-00407-y",
+        "https://link.springer.com/article/10.1186/s40035-025-00490-9",
+        "https://www.clinicaltrialvanguard.com/news/enormous-parkinsons-breakthrough-phase-2-trial-shows-positive-results/",
+        "https://www.biopharmadive.com/news/ac-immune-parksinsons-drug-data-alpha-synuclein/807688/",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC11638298/",
+        "https://www.psp.org/news/details/progressive-supranuclear-palsy-phase-2-platform-clinical-trial-announces-the-selection-of-aadvac1-and-azp2006-for-its-first-two-regimens",
+        "https://www.sciencedaily.com/releases/2025/04/250423164249.htm",
+        "https://www.roche.com/media/releases/med-cor-2025-06-16",
+        "https://link.springer.com/article/10.1007/s40120-024-00614-9",
+        "https://www.nature.com/articles/s41531-025-01117-6",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC11581883/",
+        "https://www.mdpi.com/1422-0067/27/5/2194",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC4514430/",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC9853504/",
+        "https://insight.jci.org/articles/view/135633",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC9124903/",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC12374370/",
+        "https://www.nejm.org/doi/full/10.1056/NEJMoa2312323",
+        "https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(24)02808-3/fulltext",
+        "https://www.nature.com/articles/s41467-021-21022-9",
+        "https://www.science.org/doi/10.1126/sciadv.adf4888",
+        "https://www.nejm.org/doi/full/10.1056/NEJMoa2308719",
+        "https://awesomeagents.ai/news/ai-mrna-vaccine-dog-cancer-rosie/"
+      ],
+      "implications_for_patient": "The treatment landscape for dual proteinopathy is the richest it has ever been. Two trial enrollment windows are open NOW (AADvac1 for tau, prasinezumab for α-syn). GLP-1 neuroprotection (lixisenatide) is available today. The next 12-24 months will see VacSYn expansion, bepranemab results, and focused ultrasound combinations. The strategic priority is: (1) enroll in available trials, (2) pursue biomarker clarification, (3) discuss neuroprotection with the care team."
+    }
+  ],
+  "diagnostic_recommendations": [
+    {
+      "id": "diag-001",
+      "test": "Tau PET Imaging (Flortaucipir)",
+      "purpose": "Visualize tau protein distribution in the brain. Can confirm PSP pattern (subcortical tau in basal ganglia, brainstem, cerebellum) vs Alzheimer's pattern (cortical tau). Critical for trial eligibility and treatment planning.",
+      "availability": "Major academic medical centers with PET imaging capability. May require referral from neurologist.",
+      "status": "recommended",
+      "date_recommended": "2026-03-15"
+    },
+    {
+      "id": "diag-002",
+      "test": "CSF Alpha-Synuclein Seed Amplification Assay (SAA/RT-QuIC)",
+      "purpose": "Quantify alpha-synuclein seeding activity in cerebrospinal fluid. Complements the positive skin biopsy by measuring how actively α-syn is misfolding and spreading. Higher seeding activity may indicate faster progression or better response to anti-α-syn therapy.",
+      "availability": "Research labs and some academic centers. Lumbar puncture required.",
+      "status": "recommended",
+      "date_recommended": "2026-03-15"
+    },
+    {
+      "id": "diag-003",
+      "test": "CSF Phospho-Tau Panel (p-tau 181, 217, 231)",
+      "purpose": "Quantify tau phosphorylation burden. Different phospho-tau species reflect different aspects of tau pathology. p-tau217 is the most specific for tau aggregation. Results help quantify the 'tau side' of the dual proteinopathy.",
+      "availability": "Clinical labs (Quest, LabCorp offer some; research panels at academic centers more comprehensive). Lumbar puncture required.",
+      "status": "recommended",
+      "date_recommended": "2026-03-15"
+    },
+    {
+      "id": "diag-004",
+      "test": "Genetic Testing (GBA, LRRK2, MAPT, SNCA)",
+      "purpose": "Screen for genetic variants that influence disease course and unlock gene-targeted therapies. GBA mutations (most common PD risk gene) have specific therapeutics in trials. LRRK2 mutations have kinase inhibitors in development. MAPT mutations affect tau biology. SNCA variants affect α-syn expression.",
+      "availability": "Genetic counseling + commercial genetic testing. Some covered by insurance with PD diagnosis.",
+      "status": "recommended",
+      "date_recommended": "2026-03-15"
+    },
+    {
+      "id": "diag-005",
+      "test": "DaT-SPECT (Dopamine Transporter Scan)",
+      "purpose": "Quantify dopamine transporter density in the striatum. Confirms and quantifies dopaminergic neurodegeneration. May be required for eligibility in some clinical trials (prasinezumab Phase 3 requires DaT-SPECT confirmation).",
+      "availability": "Nuclear medicine departments at most hospitals. Outpatient procedure.",
+      "status": "recommended",
+      "date_recommended": "2026-03-15"
+    }
+  ]
+}

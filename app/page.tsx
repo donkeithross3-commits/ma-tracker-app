@@ -92,6 +92,15 @@ export default async function Home() {
       badgeClasses: "bg-green-500/20 text-green-400",
       hoverBorder: "hover:border-green-500",
     },
+    {
+      key: "parkinsons",
+      href: "/parkinsons",
+      title: "Parkinson's Research",
+      description: "Dual proteinopathy treatment landscape — clinical trials, immunotherapy, and daily research updates",
+      badge: "Research",
+      badgeClasses: "bg-rose-500/20 text-rose-400",
+      hoverBorder: "hover:border-rose-500",
+    },
   ] as const;
 
   return (
