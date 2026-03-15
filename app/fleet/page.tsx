@@ -717,11 +717,20 @@ export default function FleetUtilizationPage() {
             <>
               <span className="text-gray-700">|</span>
               <span className="flex items-center gap-1.5">
-                <span className="text-gray-400">24h attainment:</span>
+                <span className="text-gray-400">24h:</span>
                 <span className={`font-medium tabular-nums ${pctColor(util.trailing.day.fleet_attainment_pct)}`}>
                   {fmtPct(util.trailing.day.fleet_attainment_pct)}
                 </span>
                 <span className="text-gray-600">GPU</span>
+                {cpuUtil?.trailing?.day?.avg_cores != null && (
+                  <>
+                    <span className="text-gray-700">·</span>
+                    <span className={`font-medium tabular-nums ${pctColor((cpuUtil.trailing.day.avg_cores! / CPU_TOTAL_CORES) * 100)}`}>
+                      {fmtPct((cpuUtil.trailing.day.avg_cores! / CPU_TOTAL_CORES) * 100)}
+                    </span>
+                    <span className="text-gray-600">CPU</span>
+                  </>
+                )}
               </span>
             </>
           )}
