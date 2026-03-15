@@ -838,7 +838,7 @@ export default function FleetUtilizationPage() {
                   </div>
 
                   {/* Process list (only > 1% CPU) */}
-                  {card.significantJobs.length > 0 && (
+                  {card.significantJobs.length > 0 && card.significantJobs.length <= 2 && (
                     <div className="space-y-0">
                       {card.significantJobs.map((job, i) => (
                         <div key={i} className="flex items-center justify-between text-xs py-0.5">
@@ -856,6 +856,25 @@ export default function FleetUtilizationPage() {
                       ))}
                     </div>
                   )}
+                  {/* Summarized job list when 3+ jobs */}
+                  {card.significantJobs.length >= 3 && (() => {
+                    const counts = new Map<string, number>();
+                    for (const j of card.significantJobs) {
+                      const name = j.script || "unknown";
+                      counts.set(name, (counts.get(name) ?? 0) + 1);
+                    }
+                    const groups = Array.from(counts.entries())
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([name, count]) => count > 1 ? `${count} ${name}` : name);
+                    return (
+                      <div className="text-xs text-emerald-300/80 font-mono py-0.5 leading-snug">
+                        <span className="inline-block w-1 h-1 rounded-full bg-emerald-400 mr-1.5 align-middle" />
+                        {card.significantJobs.length} CPU jobs
+                        <span className="text-gray-500 mx-1">&middot;</span>
+                        <span className="text-gray-400">{groups.join(" + ")}</span>
+                      </div>
+                    );
+                  })()}
 
                   {/* Orchestrator info for mac */}
                   {card.orchState && card.name === "mac" && (

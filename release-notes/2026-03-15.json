@@ -1,0 +1,25 @@
+{
+  "date": "2026-03-15",
+  "title": "Fleet Dashboard Job Summary + Benchmark Targets",
+  "summary": "Machine cards now summarize 3+ identical jobs into a single compact line, and benchmark job names include the --targets arg so parallel experiments are distinguishable.",
+  "features": [
+    {
+      "id": "fleet-job-summary",
+      "title": "Compact Job Summary in Machine Cards",
+      "summary": "Machine cards with 3+ jobs show a summary line instead of listing each process individually.",
+      "description": "When a machine is running 3+ CPU jobs (e.g., garage-pc with 11 parallel benchmarks), the machine card now shows a compact summary like '12 CPU jobs -- 1 synth:C3_nn + 11 bench:gbdt/full/pnl_call' instead of listing each one individually. Machines with 1-2 jobs still show the full per-process detail. The detailed Currently Running table below is unchanged for when you need per-job info.",
+      "category": "general",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "benchmark-target-names",
+      "title": "Benchmark Job Names Include Target",
+      "summary": "Benchmark jobs now show which --targets arg they're running, turning 'bench:gbdt/full' into 'bench:gbdt/full/pnl_call'.",
+      "description": "The fleet collector's script name parser now extracts the --targets argument from benchmark commands. This turns generic names like 'bench:gbdt/full' into specific ones like 'bench:gbdt/full/pnl_call' or 'bench:gbdt/full/otm30', so you can tell parallel experiments apart on the dashboard. Updated on both GPU machines and the Mac orchestrator.",
+      "category": "general",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
