@@ -1,8 +1,35 @@
 {
   "date": "2026-03-14",
-  "title": "Fleet Dashboard Redesign",
-  "summary": "Complete redesign of the fleet dashboard: removed misleading throttle gauges, eliminated duplication, unified GPU and CPU data into per-machine cards with correct hardware specs.",
+  "title": "AI Research v4 + Fleet Dashboard Redesign",
+  "summary": "Major overhaul of the AI Disruption Research page (70-stock curated universe, rebuilt scoring model, AI Impact Thesis with source citations) plus fleet dashboard redesign.",
   "features": [
+    {
+      "id": "ai-research-v4-universe",
+      "title": "AI Research: Curated 70-Stock Universe",
+      "summary": "Every stock now has a specific, defensible AI impact thesis. Non-thesis stocks removed, 9 quality SaaS names added.",
+      "description": "Universe curated from 59 to 70 tickers across 18 industries. Removed 10 stocks that didn't fit (HIMS was DTC pharmacy not SaaS, insurance companies had no AI thesis, SMCI drawdown was accounting scandal). Added WDAY, KVYO, FRSH, RBRK, S, FROG, NTNX, PATH, BILL. Added Bain 'deterministic vs probabilistic' system type classification. 4 new industries: Healthcare IT, Vertical SaaS, E-Commerce Platforms, HR/Workforce Management.",
+      "category": "intel",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "ai-research-v4-scoring",
+      "title": "AI Research: Rebuilt Scoring Model",
+      "summary": "Fixed 5 scoring bugs including a +258% valuation error, news confidence weighting, and AI positioning bias.",
+      "description": "5 critical scoring fixes: (1) Multi-segment valuation cap — AMZN gap was +258%, now capped at 30%. (2) News confidence multiplier — stocks with 0 articles no longer get false NLP scores. (3) AI positioning score demeaned (mean was -0.46, now 0). (4) Valuation-adjusted dislocation — expensive stocks with small drawdowns don't score as 'dislocated'. (5) Rule of 40 integrated into fundamentals. 8 new columns: system_type, rule_of_40, revenue_per_employee, news_confidence, data_coverage_pct, valuation_confidence, is_multi_segment.",
+      "category": "intel",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "ai-research-v4-thesis",
+      "title": "AI Research: Impact Thesis + Source Citations",
+      "summary": "Each stock shows a specific AI thesis with clickable source links for key claims.",
+      "description": "Every ticker now leads with a blue 'AI IMPACT THESIS' callout — a specific view on how AI changes that company. Theses name both bull and bear case. Top 20 tickers have clickable source links to SEC filings, earnings releases, and product announcements (e.g., Klaviyo $500M buyback 8-K, SentinelOne $1B ARR milestone, Workday 97% retention). Removed the redundant 'Signal Rationale' cards section.",
+      "category": "intel",
+      "image": null,
+      "screenshot": null
+    },
     {
       "id": "fleet-dashboard-redesign",
       "title": "Fleet Dashboard Redesign",
