@@ -39,6 +39,7 @@ type UtilizationResponse = {
     carry_max_seconds: number;
   };
   trailing: {
+    hour?: WindowBucket;
     day: WindowBucket;
     week: WindowBucket;
   };
@@ -722,20 +723,33 @@ export default function FleetUtilizationPage() {
             <>
               <span className="text-gray-700">|</span>
               <span className="flex items-center gap-1.5">
-                <span className="text-gray-400">24h:</span>
+                <span className="text-gray-500">GPU</span>
+                <span className={`font-medium tabular-nums ${pctColor(fleetSummary.gpuAvg)}`}>
+                  {fmtPct(fleetSummary.gpuAvg)}
+                </span>
+                <span className="text-gray-700">/</span>
+                <span className={`font-medium tabular-nums ${pctColor(util.trailing.hour?.fleet_attainment_pct ?? 0)}`}>
+                  {fmtPct(util.trailing.hour?.fleet_attainment_pct ?? 0)}
+                </span>
+                <span className="text-gray-700">/</span>
                 <span className={`font-medium tabular-nums ${pctColor(util.trailing.day.fleet_attainment_pct)}`}>
                   {fmtPct(util.trailing.day.fleet_attainment_pct)}
                 </span>
-                <span className="text-gray-600">GPU</span>
-                {cpuUtil?.trailing?.day?.avg_cores != null && (
-                  <>
-                    <span className="text-gray-700">·</span>
-                    <span className={`font-medium tabular-nums ${pctColor((cpuUtil.trailing.day.avg_cores! / CPU_TOTAL_CORES) * 100)}`}>
-                      {fmtPct((cpuUtil.trailing.day.avg_cores! / CPU_TOTAL_CORES) * 100)}
-                    </span>
-                    <span className="text-gray-600">CPU</span>
-                  </>
-                )}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="text-gray-500">CPU</span>
+                <span className={`font-medium tabular-nums ${pctColor((fleetSummary.activeCores / fleetSummary.totalCores) * 100)}`}>
+                  {fmtPct((fleetSummary.activeCores / fleetSummary.totalCores) * 100)}
+                </span>
+                <span className="text-gray-700">/</span>
+                <span className={`font-medium tabular-nums ${pctColor(((cpuUtil?.trailing?.hour?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}`}>
+                  {fmtPct(((cpuUtil?.trailing?.hour?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}
+                </span>
+                <span className="text-gray-700">/</span>
+                <span className={`font-medium tabular-nums ${pctColor(((cpuUtil?.trailing?.day?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}`}>
+                  {fmtPct(((cpuUtil?.trailing?.day?.avg_cores ?? 0) / CPU_TOTAL_CORES) * 100)}
+                </span>
+                <span className="text-gray-600 text-[10px]">1m/1h/24h</span>
               </span>
             </>
           )}

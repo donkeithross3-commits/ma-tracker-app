@@ -361,6 +361,13 @@ def build_utilization_report(
         earliest_start=earliest_start,
     )
 
+    trailing_hour = _window_summary(
+        machine_points=machine_points,
+        machine_names=machine_names,
+        start=now_utc - timedelta(hours=1),
+        end=now_utc,
+        carry_max_seconds=carry_max_seconds,
+    )
     trailing_day = _window_summary(
         machine_points=machine_points,
         machine_names=machine_names,
@@ -427,6 +434,7 @@ def build_utilization_report(
             "carry_max_seconds": carry_max_seconds,
         },
         "trailing": {
+            "hour": trailing_hour,
             "day": trailing_day,
             "week": trailing_week,
         },
@@ -599,6 +607,12 @@ def build_cpu_utilization_report(
     cpu_points = _load_cpu_points(telemetry_file, earliest_start=earliest_start)
     mac_points = cpu_points.get("mac", [])
 
+    trailing_hour = _cpu_window_summary(
+        points=mac_points,
+        start=now_utc - timedelta(hours=1),
+        end=now_utc,
+        carry_max_seconds=carry_max_seconds,
+    )
     trailing_day = _cpu_window_summary(
         points=mac_points,
         start=now_utc - timedelta(days=1),
@@ -633,6 +647,7 @@ def build_cpu_utilization_report(
     return {
         "as_of": now_utc.isoformat(),
         "trailing": {
+            "hour": trailing_hour,
             "day": trailing_day,
             "week": trailing_week,
         },
