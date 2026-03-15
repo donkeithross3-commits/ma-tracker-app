@@ -36,10 +36,12 @@ export const authConfig: NextAuthConfig = {
       const isHealthCheck = pathname === "/api/health"
 
       // Internal API endpoints (called by Python service or agent, not browser)
+      // Keep this list minimal; all read/control APIs should stay session-gated.
+      const isFleetCheckinAPI = pathname === "/api/fleet/checkin"
       const isInternalAPI = pathname === "/api/ma-options/validate-agent-key" ||
                             pathname === "/api/ma-options/agent-version" ||
                             pathname === "/api/ma-options/download-agent-update" ||
-                            pathname.startsWith("/api/fleet/")
+                            isFleetCheckinAPI
       // Admin seed (protected by query secret, not session)
       const isAdminEndpoint = pathname === "/api/admin/seed-whitelist"
       
@@ -75,6 +77,8 @@ export const authConfig: NextAuthConfig = {
       } else if (
         pathname === "/ma-options" || pathname.startsWith("/ma-options/") ||
         pathname === "/charts" || pathname.startsWith("/charts/") ||
+        pathname === "/fleet" || pathname.startsWith("/fleet/") ||
+        pathname.startsWith("/api/fleet/") ||
         pathname === "/deals" || pathname.startsWith("/deals/") ||
         pathname === "/portfolio" || pathname.startsWith("/portfolio/") ||
         pathname === "/edgar" || pathname.startsWith("/edgar/") ||
@@ -85,12 +89,14 @@ export const authConfig: NextAuthConfig = {
         projectKey = "ma-options"
       } else if (pathname === "/sheet-portfolio" || pathname.startsWith("/sheet-portfolio/")) {
         projectKey = "sheet-portfolio"
+      } else if (pathname === "/parkinsons" || pathname.startsWith("/parkinsons/")) {
+        projectKey = "parkinsons"
       }
 
       if (projectKey) {
         // Default to all projects for backward compatibility (existing users without projectAccess)
         const projectAccess: string[] =
-          auth?.user?.projectAccess ?? ["krj", "ma-options", "sheet-portfolio"]
+          auth?.user?.projectAccess ?? ["krj", "ma-options", "sheet-portfolio", "parkinsons"]
         if (!projectAccess.includes(projectKey)) {
           return Response.redirect(new URL("/", request.url))
         }
