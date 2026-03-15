@@ -267,7 +267,7 @@ function ActionItemCard({
                 </Badge>
               )}
             </div>
-            <CardTitle className="text-lg leading-tight">
+            <CardTitle className="text-lg leading-tight text-white">
               {item.title}
             </CardTitle>
           </div>
