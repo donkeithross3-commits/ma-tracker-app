@@ -601,6 +601,7 @@ export default function FleetUtilizationPage() {
     const items: Array<{
       name: string;
       machine: string;
+      type: "GPU" | "CPU";
       status: string;
       duration: string;
       completedAt: string;
@@ -613,6 +614,7 @@ export default function FleetUtilizationPage() {
       items.push({
         name: r.name || "--",
         machine: r.machine || "--",
+        type: "GPU",
         status: (r.profitable ?? 0) > 0 ? "profitable" : "completed",
         duration: r.configs ? `${r.configs} configs` : "--",
         completedAt: timeAgo(r.collected_at),
@@ -626,6 +628,7 @@ export default function FleetUtilizationPage() {
       items.push({
         name: j.name || "--",
         machine: j.machine || "--",
+        type: "CPU",
         status: j.status || "unknown",
         duration: j.elapsed_min != null ? `${j.elapsed_min.toFixed(1)}m` : "--",
         completedAt: timeAgo(j.completed_at),
@@ -931,7 +934,7 @@ export default function FleetUtilizationPage() {
                         <th className="text-left px-3 py-1.5">Job</th>
                         <th className="text-left px-3 py-1.5">Machine</th>
                         <th className="text-center px-3 py-1.5">Type</th>
-                        <th className="text-right px-3 py-1.5">CPU %</th>
+                        <th className="text-right px-3 py-1.5">Load</th>
                         <th className="text-right px-3 py-1.5">Elapsed</th>
                       </tr>
                     </thead>
@@ -949,8 +952,12 @@ export default function FleetUtilizationPage() {
                               {j.type}
                             </span>
                           </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
-                            {j.cpuPct != null ? `${j.cpuPct.toFixed(0)}%` : j.isGpu ? (
+                          <td className="px-3 py-1.5 text-right tabular-nums text-gray-300" title={j.cpuPct != null && j.cpuPct > 100 ? `${j.cpuPct.toFixed(0)}% = using ${(j.cpuPct/100).toFixed(1)} cores` : undefined}>
+                            {j.cpuPct != null ? (
+                              j.cpuPct > 100
+                                ? <>{(j.cpuPct/100).toFixed(1)} <span className="text-gray-500 text-[10px]">cores</span></>
+                                : `${j.cpuPct.toFixed(0)}%`
+                            ) : j.isGpu ? (
                               <span className="text-purple-400 text-[10px]">GPU</span>
                             ) : "--"}
                           </td>
@@ -980,6 +987,7 @@ export default function FleetUtilizationPage() {
                       <tr className="border-b border-gray-800">
                         <th className="text-left px-3 py-1.5">Job</th>
                         <th className="text-left px-3 py-1.5">Machine</th>
+                        <th className="text-center px-3 py-1.5">Type</th>
                         <th className="text-left px-3 py-1.5">Status</th>
                         <th className="text-right px-3 py-1.5">Duration</th>
                         <th className="text-right px-3 py-1.5">Completed</th>
@@ -993,6 +1001,13 @@ export default function FleetUtilizationPage() {
                           </td>
                           <td className="px-3 py-1.5 text-gray-400">
                             {j.machine.replace("-pc", "")}
+                          </td>
+                          <td className="px-3 py-1.5 text-center">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              j.type === "GPU" ? "bg-purple-900/50 text-purple-300" : "bg-emerald-900/50 text-emerald-300"
+                            }`}>
+                              {j.type}
+                            </span>
                           </td>
                           <td className="px-3 py-1.5">
                             <span className={
