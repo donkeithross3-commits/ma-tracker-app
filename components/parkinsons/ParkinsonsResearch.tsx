@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Circle,
   Clock,
+  Dna,
   ExternalLink,
   Filter,
   FlaskConical,
@@ -78,6 +79,28 @@ interface DiagnosticRecommendation {
   date_recommended: string;
 }
 
+interface GenomicStep {
+  id: string;
+  title: string;
+  description: string;
+  how: string;
+  status?: string;
+}
+
+interface GenomicPhase {
+  id: string;
+  phase: string;
+  status: string;
+  urgency: string;
+  steps: GenomicStep[];
+}
+
+interface GenomicRoadmapData {
+  title: string;
+  description: string;
+  phases: GenomicPhase[];
+}
+
 interface PatientProfile {
   diagnosis: string;
   confirmed_pathology: string[];
@@ -93,6 +116,7 @@ interface ResearchData {
   tracked_therapies: TrackedTherapy[];
   research_updates: ResearchUpdate[];
   diagnostic_recommendations: DiagnosticRecommendation[];
+  genomic_roadmap?: GenomicRoadmapData;
 }
 
 // ─── Evidence Tier Helpers ─────────────────────────────────────────────
@@ -884,6 +908,147 @@ function PatientContext({
   );
 }
 
+// ─── Genomic Roadmap ───────────────────────────────────────────────────
+
+const PHASE_STYLES: Record<
+  string,
+  { border: string; bg: string; accent: string; badge: string }
+> = {
+  "phase-1": {
+    border: "border-rose-500/40",
+    bg: "bg-gradient-to-br from-rose-900/20 to-gray-900",
+    accent: "text-rose-400",
+    badge: "bg-rose-500/20 text-rose-300 border-rose-500/30",
+  },
+  "phase-2": {
+    border: "border-cyan-500/40",
+    bg: "bg-gradient-to-br from-cyan-900/20 to-gray-900",
+    accent: "text-cyan-400",
+    badge: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+  },
+  "phase-3": {
+    border: "border-emerald-500/40",
+    bg: "bg-gradient-to-br from-emerald-900/20 to-gray-900",
+    accent: "text-emerald-400",
+    badge: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+  },
+};
+
+function GenomicRoadmapSection({
+  roadmap,
+}: {
+  roadmap: GenomicRoadmapData;
+}) {
+  const [expandedPhase, setExpandedPhase] = useState<string | null>(
+    "phase-1"
+  );
+
+  return (
+    <section>
+      <div className="flex items-center gap-3 mb-2">
+        <Dna className="h-6 w-6 text-rose-400" />
+        <h2 className="text-2xl font-bold text-white">
+          Personalized Genomic Medicine
+        </h2>
+        <Badge className="bg-rose-500/20 text-rose-400 border-rose-500/30 text-sm">
+          NEW
+        </Badge>
+      </div>
+      <p className="text-base text-gray-400 mb-2">
+        {roadmap.description}
+      </p>
+      <p className="text-sm text-amber-400/80 mb-5 font-medium">
+        Step 1 is to get the genetic data — everything else builds on it.
+      </p>
+
+      <div className="space-y-4">
+        {roadmap.phases.map((phase) => {
+          const style =
+            PHASE_STYLES[phase.id] || PHASE_STYLES["phase-1"];
+          const isExpanded = expandedPhase === phase.id;
+          const completedSteps = phase.steps.filter(
+            (s) => s.status === "completed"
+          ).length;
+
+          return (
+            <div
+              key={phase.id}
+              className={`border rounded-xl overflow-hidden ${style.border} ${style.bg}`}
+            >
+              {/* Phase header */}
+              <button
+                onClick={() =>
+                  setExpandedPhase(isExpanded ? null : phase.id)
+                }
+                className="w-full text-left px-5 py-4 hover:bg-white/5 transition-colors min-h-[56px] flex items-center gap-4"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <h3 className="text-lg font-bold text-white">
+                      {phase.phase}
+                    </h3>
+                    <span
+                      className={`text-xs px-2.5 py-0.5 rounded-full border font-medium ${style.badge}`}
+                    >
+                      {completedSteps}/{phase.steps.length} steps
+                    </span>
+                  </div>
+                  <p className={`text-sm mt-0.5 ${style.accent} font-medium`}>
+                    {phase.urgency}
+                  </p>
+                </div>
+                <div className="shrink-0">
+                  {isExpanded ? (
+                    <ChevronUp className="h-5 w-5 text-gray-500" />
+                  ) : (
+                    <ChevronDown className="h-5 w-5 text-gray-500" />
+                  )}
+                </div>
+              </button>
+
+              {/* Steps */}
+              {isExpanded && (
+                <div className="px-5 pb-5 space-y-4 border-t border-white/10">
+                  {phase.steps.map((step, idx) => (
+                    <div
+                      key={step.id}
+                      className="bg-gray-900/60 border border-gray-700/50 rounded-lg p-4"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`shrink-0 flex items-center justify-center h-7 w-7 rounded-full text-sm font-bold ${style.badge}`}
+                        >
+                          {idx + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-base font-semibold text-white">
+                            {step.title}
+                          </h4>
+                          <p className="text-base text-gray-300 mt-1 leading-relaxed">
+                            {step.description}
+                          </p>
+                          <div className="mt-3 bg-gray-800/80 border border-gray-700/50 rounded-lg p-3">
+                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                              How to do it
+                            </p>
+                            <p className="text-base text-gray-200 leading-relaxed">
+                              {step.how}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 // ─── Evidence Tier Legend ───────────────────────────────────────────────
 
 function EvidenceLegend() {
@@ -1012,6 +1177,10 @@ export default function ParkinsonsResearch({
             recommendations={diagnostics}
             onToggleDiagnostic={handleToggleDiagnostic}
           />
+
+          {data.genomic_roadmap && (
+            <GenomicRoadmapSection roadmap={data.genomic_roadmap} />
+          )}
 
           <PatientContext
             profile={data.patient_profile}

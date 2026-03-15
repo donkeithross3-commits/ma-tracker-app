@@ -36,6 +36,17 @@
       "date_resolved": null
     },
     {
+      "id": "action-007",
+      "priority": "highest",
+      "title": "Order Comprehensive Genetic Testing (WGS/WES + PD Panel)",
+      "description": "Genetic testing is the KEY that unlocks personalized medicine. It reveals druggable variants (GBA → ambroxol/venglustat, LRRK2 → kinase inhibitors), HLA type for vaccine compatibility prediction, MAPT variants affecting tau biology, and SNCA variants affecting alpha-synuclein expression. Without this data, all therapy selection is generic. With it, we can computationally predict which vaccines and antibodies will work best for THIS patient specifically.",
+      "contact": "Step 1: Ask neurologist for referral to genetic counselor. Step 2: Order Invitae Parkinson's Disease Panel (invitae.com/en/find-a-provider) — often $0 with insurance for PD patients. Step 3: If budget allows, request Whole Genome Sequencing (WGS) through a research program like GP2 (gp2.org) or commercial provider (Nebula Genomics, Dante Labs). Step 4: Request HLA typing if not included.",
+      "deadline": "Order at next neurology visit — results take 2-4 weeks",
+      "status": "pending",
+      "date_added": "2026-03-15",
+      "date_resolved": null
+    },
+    {
       "id": "action-003",
       "priority": "high",
       "title": "Request Tau PET Imaging + CSF Biomarker Panel",
@@ -294,6 +305,16 @@
   ],
   "research_updates": [
     {
+      "id": "update-002",
+      "date": "2026-03-15",
+      "title": "Personalized Genomic Medicine Roadmap — From Generic to Patient-Specific Therapy Selection",
+      "summary": "Added a 3-phase roadmap for personalized medicine. Phase 1: obtain comprehensive genetic data (Invitae PD Panel + WGS via GP2 program + HLA typing). Phase 2: computational analysis including variant interpretation, drug-gene interaction screening, HLA-epitope vaccine compatibility prediction (using NetMHCpan — a technique borrowed from cancer immunotherapy, novel for neurodegeneration), and AlphaFold3 structural modeling of any patient-specific variants. Phase 3: re-rank all 13 tracked therapies using a composite score combining genetic relevance, HLA compatibility, drug interactions, and evidence tier — producing a truly personalized treatment ranking.",
+      "evidence_tier": null,
+      "category": "personalized_medicine",
+      "source_urls": [],
+      "implications_for_patient": "The immediate action is to order genetic testing — this is the single step that unlocks everything. The Invitae PD Panel is often free with a PD diagnosis. The GP2 program offers free whole genome sequencing. Once we have the data, we can build computational pipelines to predict which of the 13 tracked therapies are most likely to work for THIS patient specifically, based on their unique genetic profile and immune system."
+    },
+    {
       "id": "update-001",
       "date": "2026-03-15",
       "title": "Initial Research Compilation — Dual Proteinopathy Treatment Landscape",
@@ -333,6 +354,119 @@
       "implications_for_patient": "The treatment landscape for dual proteinopathy is the richest it has ever been. Two trial enrollment windows are open NOW (AADvac1 for tau, prasinezumab for α-syn). GLP-1 neuroprotection (lixisenatide) is available today. The next 12-24 months will see VacSYn expansion, bepranemab results, and focused ultrasound combinations. The strategic priority is: (1) enroll in available trials, (2) pursue biomarker clarification, (3) discuss neuroprotection with the care team."
     }
   ],
+  "genomic_roadmap": {
+    "title": "Personalized Genomic Medicine Roadmap",
+    "description": "Step-by-step plan to move from generic treatment landscape to PERSONALIZED therapy selection using the patient's own genetic data, computational biology, and AI-driven analysis.",
+    "phases": [
+      {
+        "id": "phase-1",
+        "phase": "Phase 1: Get the Genetic Data",
+        "status": "not_started",
+        "urgency": "Do this NOW — everything else depends on it",
+        "steps": [
+          {
+            "id": "step-1a",
+            "title": "Request genetic counseling referral",
+            "description": "Ask the neurologist for a referral to a genetic counselor who specializes in neurodegeneration. The counselor will explain what tests are available, what the results might mean, and help navigate insurance coverage.",
+            "how": "At the next neurology appointment, say: 'I'd like a referral to a genetic counselor to discuss comprehensive genetic testing. We want to identify any variants that could affect treatment selection or qualify for gene-targeted clinical trials.'",
+            "status": "not_started"
+          },
+          {
+            "id": "step-1b",
+            "title": "Order Invitae PD Panel (clinical-grade, often free)",
+            "description": "Invitae offers a Parkinson's Disease genetic panel covering GBA, LRRK2, SNCA, PARK2/Parkin, PINK1, DJ-1, VPS35, and other PD-associated genes. For patients with a PD diagnosis, copay is often $0 through their patient assistance program.",
+            "how": "The genetic counselor or neurologist orders this. If ordering directly: visit invitae.com, search 'Parkinson's Disease Panel', and use their provider portal. Results arrive in 2-3 weeks as a clinical report with variant interpretation.",
+            "status": "not_started"
+          },
+          {
+            "id": "step-1c",
+            "title": "Enroll in GP2 for free Whole Genome Sequencing",
+            "description": "The Global Parkinson's Genetics Program (GP2) offers FREE whole genome sequencing to PD patients at participating sites worldwide. GP2 is funded by the Aligning Science Across Parkinson's (ASAP) initiative. WGS provides complete genetic data — far more than a panel — enabling all downstream computational analyses.",
+            "how": "Visit gp2.org and click 'Participate'. Find a participating site near the patient. Contact the site coordinator to enroll. They will collect a blood or saliva sample and return WGS results. This is a research program, so results may take longer (2-6 months) but provide the most complete data.",
+            "status": "not_started"
+          },
+          {
+            "id": "step-1d",
+            "title": "Alternative: Commercial WGS if GP2 unavailable",
+            "description": "If GP2 doesn't have a nearby site, commercial whole genome sequencing is available. Nebula Genomics (~$299 for 30x WGS) or Dante Labs (~$199) provide raw data files (VCF/BAM) that we can analyze computationally. These are research-grade, not clinical-grade — results should be confirmed by clinical testing before making treatment decisions.",
+            "how": "Order online from nebula.org or dantelabs.com. They ship a saliva collection kit. Mail it back. Raw data (VCF file) arrives in 4-8 weeks. Download the VCF file — this is the input for all our computational pipelines.",
+            "status": "not_started"
+          },
+          {
+            "id": "step-1e",
+            "title": "Request HLA typing",
+            "description": "HLA (Human Leukocyte Antigen) typing reveals which immune system molecules the patient has. This determines which peptide fragments from alpha-synuclein and tau the patient's immune system can present to T cells — critical for predicting vaccine response. HLA typing is standard in transplant medicine and cancer immunotherapy.",
+            "how": "HLA type is embedded in WGS/WES data (we can extract it computationally using tools like OptiType or HLA-HD). If only doing a panel test, ask the genetic counselor to add HLA Class I (A, B, C) and Class II (DRB1, DQB1, DPB1) typing. Clinical labs (Quest, LabCorp) offer standalone HLA typing — often covered by insurance if requested by a physician."
+          }
+        ]
+      },
+      {
+        "id": "phase-2",
+        "phase": "Phase 2: Computational Analysis (We Build This)",
+        "status": "not_started",
+        "urgency": "Ready to build as soon as genetic data arrives",
+        "steps": [
+          {
+            "id": "step-2a",
+            "title": "Variant interpretation pipeline",
+            "description": "Upload the VCF file from genetic testing. Filter for neurodegeneration-relevant genes (GBA, LRRK2, MAPT, SNCA, GRN, C9orf72, TMEM106B, and ~50 others). Annotate each variant with: ClinVar pathogenicity classification, gnomAD population frequency, CADD score (deleteriousness), protein impact prediction (SIFT, PolyPhen-2).",
+            "how": "We will build an automated pipeline on the dashboard. Input: VCF file. Output: prioritized list of clinically relevant variants with drug interaction annotations. Tools: bcftools, ANNOVAR or VEP (Ensembl Variant Effect Predictor), ClinVar API, gnomAD API.",
+            "status": "not_started"
+          },
+          {
+            "id": "step-2b",
+            "title": "Drug-gene interaction screening",
+            "description": "Cross-reference the patient's genetic variants against the Drug-Gene Interaction Database (DGIdb), PharmGKB, and ClinicalTrials.gov to identify: (1) FDA-approved drugs that target the patient's specific variant pathways (repurposing candidates), (2) clinical trials specifically recruiting patients with these variants, (3) pharmacogenomic interactions that affect drug metabolism (e.g., CYP2D6 variants affecting levodopa metabolism).",
+            "how": "Automated pipeline: query DGIdb API (dgidb.org/api) and PharmGKB API with each significant variant. Cross-reference with ClinicalTrials.gov 'genetic' eligibility criteria. Output: ranked list of drugs and trials matched to the patient's genome.",
+            "status": "not_started"
+          },
+          {
+            "id": "step-2c",
+            "title": "HLA-epitope vaccine compatibility prediction",
+            "description": "THIS IS THE NOVEL ANALYSIS. Using the patient's HLA type, predict which peptide epitopes from alpha-synuclein and tau protein will bind most strongly to their specific HLA molecules. Then cross-reference against the exact epitopes used in each trial vaccine (VacSYn, UB-312, AADvac1, anti-pT181). Result: a personalized ranking of which vaccines are most likely to generate a strong immune response in THIS patient.",
+            "how": "Tools: NetMHCpan 4.1 (HLA-peptide binding prediction, state of the art), MHCflurry 2.0 (deep learning alternative). Input: patient HLA alleles + peptide sequences from each vaccine. Output: predicted binding affinity (IC50) for each vaccine epitope × patient HLA combination. We display this as a vaccine compatibility matrix on the dashboard.",
+            "status": "not_started"
+          },
+          {
+            "id": "step-2d",
+            "title": "AlphaFold3 structural variant modeling",
+            "description": "If the patient has any missense variants in SNCA, MAPT, or GBA, use AlphaFold3 to predict how these variants affect protein structure. Map variant positions onto the known alpha-synuclein and tau fibril structures (from cryo-EM). Visualize using interactive 3D protein viewer (Mol*/3Dmol.js) embedded in the dashboard.",
+            "how": "Use AlphaFold3 server (alphafoldserver.com) or ColabFold for structure prediction. Compare wild-type vs. variant structures. Overlay with known drug binding sites and vaccine epitope locations. This is educational AND could reveal if a variant affects a drug target site.",
+            "status": "not_started"
+          }
+        ]
+      },
+      {
+        "id": "phase-3",
+        "phase": "Phase 3: Personalized Treatment Ranking",
+        "status": "not_started",
+        "urgency": "Becomes possible after Phases 1-2 complete",
+        "steps": [
+          {
+            "id": "step-3a",
+            "title": "Re-rank all 13 tracked therapies by patient-specific relevance",
+            "description": "Using genetic data + HLA compatibility + drug-gene interactions, re-score every tracked therapy. A therapy that targets a pathway affected by the patient's specific variants ranks higher. A vaccine whose epitopes bind strongly to the patient's HLA ranks higher. A drug with pharmacogenomic interactions gets flagged.",
+            "how": "Composite scoring algorithm combining: (1) genetic variant relevance score, (2) HLA-epitope binding affinity, (3) drug-gene interaction strength, (4) evidence tier, (5) enrollment availability. Display as a personalized therapy ranking on the dashboard — replacing the generic evidence-tier sort with a patient-specific sort.",
+            "status": "not_started"
+          },
+          {
+            "id": "step-3b",
+            "title": "Generate personalized clinical trial eligibility report",
+            "description": "Many clinical trials have genetic inclusion/exclusion criteria (e.g., 'GBA carriers only' or 'LRRK2-negative required'). With genetic data, we can automatically filter ClinicalTrials.gov to show ONLY trials the patient is genetically eligible for.",
+            "how": "Parse ClinicalTrials.gov eligibility criteria for genetic requirements. Match against patient genotype. Filter the tracked therapies table to highlight trials with confirmed genetic eligibility. Flag any trials the patient is EXCLUDED from.",
+            "status": "not_started"
+          },
+          {
+            "id": "step-3c",
+            "title": "Discuss personalized report with neurologist",
+            "description": "Bring the personalized treatment ranking, vaccine compatibility prediction, and drug-gene interaction report to the neurologist. These computational findings should INFORM the clinical conversation, not replace it. The neurologist may identify clinical factors that modify the computational ranking.",
+            "how": "Print or share the dashboard page. Walk through: (1) genetic variants found, (2) which trials the patient is genetically eligible for, (3) which vaccines are predicted to work best with their immune system, (4) any drug repurposing candidates. Ask: 'Given these results, which trials should we prioritize?'",
+            "status": "not_started"
+          }
+        ]
+      }
+    ]
+  },
   "diagnostic_recommendations": [
     {
       "id": "diag-001",
@@ -360,9 +494,17 @@
     },
     {
       "id": "diag-004",
-      "test": "Genetic Testing (GBA, LRRK2, MAPT, SNCA)",
-      "purpose": "Screen for genetic variants that influence disease course and unlock gene-targeted therapies. GBA mutations (most common PD risk gene) have specific therapeutics in trials. LRRK2 mutations have kinase inhibitors in development. MAPT mutations affect tau biology. SNCA variants affect α-syn expression.",
-      "availability": "Genetic counseling + commercial genetic testing. Some covered by insurance with PD diagnosis.",
+      "test": "Genetic Testing (PD Panel + WGS/WES)",
+      "purpose": "THE KEY TO PERSONALIZED MEDICINE. Screen for genetic variants that unlock gene-targeted therapies AND enable computational analysis. GBA mutations → ambroxol, venglustat trials. LRRK2 mutations → kinase inhibitor trials (LRRK2i). MAPT variants → tau biology insights, PSP trial stratification. SNCA variants → α-syn expression levels, ASO eligibility. Full genome enables drug-gene interaction screening and HLA-based vaccine compatibility prediction.",
+      "availability": "Option A (Clinical Panel): Invitae PD Panel — often $0 copay with PD diagnosis, results in 2-3 weeks. Order via neurologist or genetic counselor. Option B (Research WGS): GP2 Global Parkinson's Genetics Program (gp2.org) — free WGS for PD patients at participating sites. Option C (Commercial WGS): Nebula Genomics (~$299) or Dante Labs (~$199) for 30x whole genome — provides raw data for computational analysis.",
+      "status": "recommended",
+      "date_recommended": "2026-03-15"
+    },
+    {
+      "id": "diag-006",
+      "test": "HLA Typing (HLA Class I + II)",
+      "purpose": "Determines which immune system 'locks' the patient has — critical for predicting which vaccine peptide epitopes (the 'keys') will generate the strongest immune response. Enables computational prediction of vaccine compatibility: which trial vaccines (VacSYn, AADvac1, UB-312, anti-pT181) use epitopes that this patient's immune system can best recognize and respond to. Standard in cancer immunotherapy, novel application for neurodegeneration.",
+      "availability": "Usually included in WGS/WES data. Can also be ordered separately via clinical labs (Quest, LabCorp) or specialty HLA labs. Often covered by insurance if medically indicated. Some genetic testing panels include HLA as part of the report.",
       "status": "recommended",
       "date_recommended": "2026-03-15"
     },
