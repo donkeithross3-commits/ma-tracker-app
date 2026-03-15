@@ -97,6 +97,7 @@ type ResearchProcesses = {
   jobs?: ResearchJob[];
   total_workers?: number;
   total_cpu_pct?: number;
+  system_cpu_pct?: number;
 };
 
 type RunningExperiment = {
@@ -172,7 +173,7 @@ type StatusMachine = {
     clock_mhz?: number;
     power_w?: number;
   };
-  heartbeats?: Record<string, { state?: string; current_job?: string; timestamp?: string }>;
+  heartbeats?: Record<string, { state?: string; current_job?: string; timestamp?: string; elapsed_minutes?: number; started_at?: string }>;
   queues?: Record<string, { jobs?: Array<{ status?: string; name?: string }> }>;
   orchestrator?: OrchestratorStatus;
 };
@@ -460,10 +461,16 @@ export default function FleetUtilizationPage() {
       const vramTotalGb = spec.gpuVram ?? null;
       const gpuJob = machineRunState(row || { machine: name });
 
-      // CPU active cores from research_processes
-      const rpCores = isStale ? 0 : (orch?.research_processes?.total_cpu_pct ?? 0) / 100;
-      const orchWorkers = isStale ? 0 : (orch?.cpu?.workers ?? 0);
-      const activeCores = rpCores + orchWorkers;
+      // CPU active cores: prefer system_cpu_pct (actual OS-level utilization)
+      // over total_cpu_pct (sum of detected process CPU%, misses n_jobs workers)
+      const rp = orch?.research_processes;
+      const sysCpuPct = rp?.system_cpu_pct;
+      const rpCores = isStale ? 0 : (
+        sysCpuPct != null && sysCpuPct >= 0
+          ? (sysCpuPct / 100) * spec.cores  // system-level: fraction of THIS machine's cores
+          : (rp?.total_cpu_pct ?? 0) / 100   // fallback: process-sum (may undercount)
+      );
+      const activeCores = rpCores;
 
       // Processes (filter out < 1% CPU)
       const rpJobs = isStale ? [] : (orch?.research_processes?.jobs ?? []);
@@ -529,17 +536,47 @@ export default function FleetUtilizationPage() {
       type: "GPU" | "CPU";
       cpuPct: number | null;
       elapsed: string;
+      isGpu?: boolean;
     }> = [];
 
     for (const card of machineCards) {
-      // GPU job
+      // GPU job — extract elapsed from heartbeat data
       if (card.spec.gpu && card.gpuJob && card.gpuJob !== "polling" && card.gpuJob !== "unknown") {
+        let gpuElapsed = "--";
+        const heartbeats = card.row?.heartbeats || {};
+        for (const hb of Object.values(heartbeats)) {
+          if (hb?.state === "running") {
+            // Use elapsed_minutes from heartbeat if available (written by sweep_queue.py)
+            if (hb.elapsed_minutes != null) {
+              const mins = Math.round(hb.elapsed_minutes);
+              if (mins >= 60) {
+                const h = Math.floor(mins / 60);
+                const m = mins % 60;
+                gpuElapsed = `${h}h ${m}m`;
+              } else {
+                gpuElapsed = `${mins}m`;
+              }
+            } else if (hb.timestamp) {
+              // Fallback: compute from heartbeat timestamp vs now
+              const hbTs = Date.parse(hb.timestamp);
+              if (Number.isFinite(hbTs)) {
+                const ageSec = (Date.now() - hbTs) / 1000;
+                // The heartbeat timestamp is "when last updated", not "when started".
+                // If it's recent (< 5min old), the job is still running but we
+                // don't know total elapsed. Show "running" instead of misleading time.
+                gpuElapsed = ageSec < 300 ? "running" : "--";
+              }
+            }
+            break;
+          }
+        }
         jobs.push({
           name: card.gpuJob,
           machine: card.name,
           type: "GPU",
           cpuPct: null,
-          elapsed: "--",
+          elapsed: gpuElapsed,
+          isGpu: true,
         });
       }
       // CPU jobs (already filtered to >= 1%)
@@ -902,7 +939,9 @@ export default function FleetUtilizationPage() {
                             </span>
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
-                            {j.cpuPct != null ? `${j.cpuPct.toFixed(0)}%` : "--"}
+                            {j.cpuPct != null ? `${j.cpuPct.toFixed(0)}%` : j.isGpu ? (
+                              <span className="text-purple-400 text-[10px]">GPU</span>
+                            ) : "--"}
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">
                             {j.elapsed}
