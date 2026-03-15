@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-14",
+  "title": "Fleet Dashboard Redesign",
+  "summary": "Complete redesign of the fleet dashboard: removed misleading throttle gauges, eliminated duplication, unified GPU and CPU data into per-machine cards with correct hardware specs.",
+  "features": [
+    {
+      "id": "fleet-dashboard-redesign",
+      "title": "Fleet Dashboard Redesign",
+      "summary": "Replaced throttle gauges and duplicated tables with a summary bar, per-machine cards, and a unified research pipeline view.",
+      "description": "The fleet dashboard has been completely redesigned to fix several problems:\n\n1. Removed the GPU Warp Speed and CPU Warp Speed throttle gauges -- they looked impressive but were misleading about actual utilization.\n\n2. Replaced three duplicated data presentations (throttle bars, GPU table, CPU table) with a single set of per-machine cards. Each card shows GPU stats, CPU core utilization (used/total), and active processes in one place.\n\n3. Fixed wrong core counts: gaming-pc now correctly shows 16 cores (i7-12700F) instead of 4, and garage-pc shows 24 cores (i7-14700K) instead of 4.\n\n4. Added a compact fleet summary bar at the top showing GPU avg utilization, active CPU cores out of total, 24h attainment, and last checkin age.\n\n5. Filtered out 0% CPU processes (like idle sweep_queue.py instances) that were adding noise.\n\n6. Unified the research pipeline into Currently Running (all active jobs across all machines) and Recently Completed (merged GPU sweep results and CPU jobs into one table).\n\n7. Historical utilization tables (GPU Daily 14d, GPU Weekly 8w, CPU Daily 7d) are preserved at the bottom with correct fleet core counts.",
+      "category": "general",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}

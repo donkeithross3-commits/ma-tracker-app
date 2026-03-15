@@ -48,7 +48,7 @@ type UtilizationResponse = {
 
 type GpuPipelineEntry = {
   job?: string | null;
-  job_state?: string;   // "running" | "idle" | "unreachable"
+  job_state?: string;
   queue_depth?: number;
   queue_total?: number;
 };
@@ -66,8 +66,8 @@ type RecentResult = {
 
 type RecentCpuJob = {
   name?: string;
-  machine?: string;      // "droplet" | "gaming-pc" | "garage-pc" | "mac"
-  status?: string;       // "completed" | "failed" | "timeout"
+  machine?: string;
+  status?: string;
   elapsed_min?: number;
   completed_at?: string;
 };
@@ -128,7 +128,6 @@ type OrchestratorStatus = {
   completed_count?: number;
   fleet_health?: FleetHealth;
   research_processes?: ResearchProcesses;
-  // Legacy fields (kept for backward compat with old telemetry)
   idle_seconds?: number;
   cpu_budget?: {
     max_workers?: number;
@@ -182,6 +181,46 @@ type StatusResponse = {
   machines: StatusMachine[];
 };
 
+type MachineCard = {
+  name: string;
+  spec: typeof MACHINE_SPECS[string];
+  row: StatusMachine | undefined;
+  isStale: boolean;
+  gpuUtil: number | null;
+  gpuTemp: number | null;
+  vramUsedGb: number | null;
+  vramTotalGb: number | null;
+  gpuJob: string | null;
+  activeCores: number;
+  significantJobs: ResearchJob[];
+  orchState: string | undefined;
+  orchPid: number | undefined;
+  health: FleetHealth | undefined;
+  ageSeconds: number | null | undefined;
+};
+
+// ---------------------------------------------------------------------------
+// Hardware specs (hardcoded, source of truth)
+// ---------------------------------------------------------------------------
+
+const MACHINE_SPECS: Record<string, {
+  gpu?: string;
+  gpuVram?: number; // GB
+  cpu: string;
+  cores: number;
+  role: string;
+}> = {
+  "gaming-pc": { gpu: "RTX 4060", gpuVram: 8, cpu: "i7-12700F", cores: 16, role: "GPU + CPU compute" },
+  "garage-pc": { gpu: "RTX 3080 Ti", gpuVram: 12, cpu: "i7-14700K", cores: 24, role: "GPU + CPU compute" },
+  "droplet":   { cpu: "8 vCPU", cores: 8, role: "Fleet brain + compute" },
+  "mac":       { cpu: "M4 Pro", cores: 10, role: "Orchestrator + compute" },
+};
+
+const CPU_TOTAL_CORES = Object.values(MACHINE_SPECS).reduce((sum, s) => sum + s.cores, 0); // 58
+
+// Preferred display order
+const MACHINE_ORDER = ["gaming-pc", "garage-pc", "droplet", "mac"];
+
 // ---------------------------------------------------------------------------
 // Formatters
 // ---------------------------------------------------------------------------
@@ -201,6 +240,12 @@ function fmtAge(seconds?: number | null): string {
   if (seconds < 60) return `${Math.round(seconds)}s`;
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
   return `${(seconds / 3600).toFixed(1)}h`;
+}
+
+function fmtElapsed(elapsed?: string | null): string {
+  if (!elapsed) return "--";
+  // elapsed comes as "HH:MM:SS" or similar from the agent
+  return elapsed;
 }
 
 function ageClass(seconds?: number | null): string {
@@ -261,9 +306,16 @@ function machineRunState(machine: StatusMachine): string {
   return "unknown";
 }
 
-// Expected checkins per 24h at 1/min
-const EXPECTED_SAMPLES_24H = 1440;
-const SAMPLE_RATE_WARN_PCT = 0.80; // warn below 80% of expected
+function timeAgo(isoStr?: string | null): string {
+  if (!isoStr) return "--";
+  const ms = Date.now() - Date.parse(isoStr);
+  if (!Number.isFinite(ms) || ms < 0) return "--";
+  const sec = ms / 1000;
+  if (sec < 60) return `${Math.round(sec)}s ago`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -309,22 +361,10 @@ export default function FleetUtilizationPage() {
   // Polling with document.hidden check
   useEffect(() => {
     fetchData();
-
-    const tick = () => {
-      if (!document.hidden) {
-        fetchData();
-      }
-    };
+    const tick = () => { if (!document.hidden) fetchData(); };
     timerRef.current = setInterval(tick, 60000);
-
-    const handleVisibility = () => {
-      if (!document.hidden) {
-        // Refresh immediately when tab becomes visible
-        fetchData();
-      }
-    };
+    const handleVisibility = () => { if (!document.hidden) fetchData(); };
     document.addEventListener("visibilitychange", handleVisibility);
-
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       document.removeEventListener("visibilitychange", handleVisibility);
@@ -339,22 +379,11 @@ export default function FleetUtilizationPage() {
     return map;
   }, [status]);
 
-  // Extract CPU orchestrator data — merge from all machines with orchestrator field
-  // Mac posts recent_results (GPU sweeps), droplet posts recent_cpu_jobs
-  const orchestratorMachine = useMemo(() => {
-    for (const row of status?.machines || []) {
-      if (row.orchestrator) return row;
-    }
-    return null;
-  }, [status]);
-
   // Merge orchestrator data from all machines
   const mergedOrchestrator = useMemo(() => {
     const allOrch = (status?.machines || []).filter(m => m.orchestrator);
     if (allOrch.length === 0) return null;
-    // Start with the first orchestrator (typically Mac — has GPU pipeline, results, health)
     const primary = allOrch[0].orchestrator!;
-    // Merge recent_cpu_jobs and recent_results from all orchestrator machines
     const allResults: RecentResult[] = [];
     const allCpuJobs: RecentCpuJob[] = [];
     const allRunning: RunningExperiment[] = [];
@@ -376,6 +405,14 @@ export default function FleetUtilizationPage() {
       pending_queue: allPending.length > 0 ? allPending : primary.pending_queue,
       completed_count: totalCompleted || primary.completed_count,
     };
+  }, [status]);
+
+  // Orchestrator machine for checkin age display
+  const orchestratorMachine = useMemo(() => {
+    for (const row of status?.machines || []) {
+      if (row.orchestrator) return row;
+    }
+    return null;
   }, [status]);
 
   const dailyRows = useMemo(() => {
@@ -400,56 +437,170 @@ export default function FleetUtilizationPage() {
     });
   }, [util]);
 
-  const machineSpeed = useMemo(() => {
-    if (!util) return [];
-    return util.machines.map((machine) => {
-      const row = statusByMachine.get(machine);
-      const rawUtil = typeof row?.gpu?.util === "number" ? row.gpu.util : 0;
-      const powerW = typeof row?.gpu?.power_w === "number" ? row.gpu.power_w : null;
-      let utilPct = Math.max(0, Math.min(100, rawUtil));
-      const powerActive = powerW !== null && powerW >= 50;
-      if (utilPct === 0 && powerActive) {
-        utilPct = 80;
-      }
+  // -----------------------------------------------------------------------
+  // Derived data: per-machine card info
+  // -----------------------------------------------------------------------
+
+  const machineCards = useMemo(() => {
+    if (!status) return [];
+
+    return MACHINE_ORDER.map((name): MachineCard | null => {
+      const row = statusByMachine.get(name);
+      const spec = MACHINE_SPECS[name];
+      if (!spec) return null;
+
+      const gpu = row?.gpu;
+      const orch = row?.orchestrator;
+      const isStale = row?.stale === true || (row?.age_seconds != null && row.age_seconds > 300);
+
+      // GPU info
+      const gpuUtil = typeof gpu?.util === "number" ? gpu.util : null;
+      const gpuTemp = gpu?.temp ?? null;
+      const vramUsedGb = gpu?.mem_used_mb != null ? gpu.mem_used_mb / 1024 : null;
+      const vramTotalGb = spec.gpuVram ?? null;
+      const gpuJob = machineRunState(row || { machine: name });
+
+      // CPU active cores from research_processes
+      const rpCores = isStale ? 0 : (orch?.research_processes?.total_cpu_pct ?? 0) / 100;
+      const orchWorkers = isStale ? 0 : (orch?.cpu?.workers ?? 0);
+      const activeCores = rpCores + orchWorkers;
+
+      // Processes (filter out < 1% CPU)
+      const rpJobs = isStale ? [] : (orch?.research_processes?.jobs ?? []);
+      const significantJobs = rpJobs.filter(j => (j.cpu_pct ?? 0) >= 1);
+
+      // Orchestrator state for mac
+      const orchState = orch?.state;
+      const orchPid = orch?.pid;
+
+      // Brain cost (placeholder -- from fleet health)
+      const health = orch?.fleet_health;
+
       return {
-        machine,
-        utilPct,
-        powerW,
-        powerActive,
-        state: machineRunState(row || { machine }),
+        name,
+        spec,
+        row,
+        isStale,
+        gpuUtil,
+        gpuTemp,
+        vramUsedGb,
+        vramTotalGb,
+        gpuJob: spec.gpu ? gpuJob : null,
+        activeCores,
+        significantJobs,
+        orchState,
+        orchPid,
+        health,
+        ageSeconds: row?.age_seconds,
       };
-    });
-  }, [util, statusByMachine]);
+    }).filter((c): c is MachineCard => c !== null);
+  }, [status, statusByMachine]);
 
-  const fleetSpeedPct = useMemo(() => {
-    if (machineSpeed.length === 0) return 0;
-    const total = machineSpeed.reduce((sum, row) => sum + row.utilPct, 0);
-    return Math.max(0, Math.min(100, total / machineSpeed.length));
-  }, [machineSpeed]);
+  // Fleet summary numbers
+  const fleetSummary = useMemo(() => {
+    const gpuMachines = machineCards.filter(c => c.spec.gpu);
+    const gpuAvg = gpuMachines.length > 0
+      ? gpuMachines.reduce((s, c) => s + (c.gpuUtil ?? 0), 0) / gpuMachines.length
+      : 0;
+    const totalActiveCores = machineCards.reduce((s, c) => s + c.activeCores, 0);
 
-  const speedNeedleDeg = -120 + (fleetSpeedPct / 100) * 240;
-  const ringCircumference = 2 * Math.PI * 74;
-  const smallRingCirc = 2 * Math.PI * 60;
-  const ringOffset = ringCircumference * (1 - fleetSpeedPct / 100);
-
-  // CPU gauge: sum ALL active CPU cores across all machines
-  // mac=10, droplet=8, gaming-pc=16, garage-pc=24 → 58 total
-  const CPU_TOTAL_CORES = 58;
-  const cpuSpeedPct = useMemo(() => {
-    if (!status) return 0;
-    let totalCores = 0;
-    for (const row of status.machines) {
-      const o = row.orchestrator;
-      if (!o) continue;
-      // Research processes (detected via ps, reported as CPU %)
-      const rpCores = (o.research_processes?.total_cpu_pct ?? 0) / 100;
-      // Orchestrator CPU workers (LightGBM jobs etc)
-      const orchWorkers = o.cpu?.workers ?? 0;
-      totalCores += rpCores + orchWorkers;
+    // Find newest checkin
+    let newestAge: number | null = null;
+    for (const c of machineCards) {
+      if (c.ageSeconds != null && (newestAge === null || c.ageSeconds < newestAge)) {
+        newestAge = c.ageSeconds;
+      }
     }
-    return Math.max(0, Math.min(100, (totalCores / CPU_TOTAL_CORES) * 100));
-  }, [status]);
-  const cpuNeedleDeg = -120 + (cpuSpeedPct / 100) * 240;
+
+    return {
+      gpuAvg,
+      gpuCount: gpuMachines.length,
+      activeCores: totalActiveCores,
+      totalCores: CPU_TOTAL_CORES,
+      newestAge,
+    };
+  }, [machineCards]);
+
+  // Running jobs for the pipeline table (all machines, all types)
+  const runningJobs = useMemo(() => {
+    const jobs: Array<{
+      name: string;
+      machine: string;
+      type: "GPU" | "CPU";
+      cpuPct: number | null;
+      elapsed: string;
+    }> = [];
+
+    for (const card of machineCards) {
+      // GPU job
+      if (card.spec.gpu && card.gpuJob && card.gpuJob !== "polling" && card.gpuJob !== "unknown") {
+        jobs.push({
+          name: card.gpuJob,
+          machine: card.name,
+          type: "GPU",
+          cpuPct: null,
+          elapsed: "--",
+        });
+      }
+      // CPU jobs (already filtered to >= 1%)
+      for (const j of card.significantJobs) {
+        jobs.push({
+          name: j.script || "unknown",
+          machine: card.name,
+          type: "CPU",
+          cpuPct: j.cpu_pct ?? null,
+          elapsed: fmtElapsed(j.elapsed),
+        });
+      }
+    }
+
+    return jobs;
+  }, [machineCards]);
+
+  // Recently completed jobs (merged GPU results + CPU jobs)
+  const recentCompleted = useMemo(() => {
+    const items: Array<{
+      name: string;
+      machine: string;
+      status: string;
+      duration: string;
+      completedAt: string;
+      sortKey: number;
+    }> = [];
+
+    const results = mergedOrchestrator?.recent_results ?? [];
+    for (const r of results) {
+      const ts = parseIsoMillis(r.collected_at);
+      items.push({
+        name: r.name || "--",
+        machine: r.machine || "--",
+        status: (r.profitable ?? 0) > 0 ? "profitable" : "completed",
+        duration: r.configs ? `${r.configs} configs` : "--",
+        completedAt: timeAgo(r.collected_at),
+        sortKey: ts ?? 0,
+      });
+    }
+
+    const cpuJobs = mergedOrchestrator?.recent_cpu_jobs ?? [];
+    for (const j of cpuJobs) {
+      const ts = parseIsoMillis(j.completed_at);
+      items.push({
+        name: j.name || "--",
+        machine: j.machine || "--",
+        status: j.status || "unknown",
+        duration: j.elapsed_min != null ? `${j.elapsed_min.toFixed(1)}m` : "--",
+        completedAt: timeAgo(j.completed_at),
+        sortKey: ts ?? 0,
+      });
+    }
+
+    items.sort((a, b) => b.sortKey - a.sortKey);
+    return items.slice(0, 20);
+  }, [mergedOrchestrator]);
+
+  // -----------------------------------------------------------------------
+  // Render
+  // -----------------------------------------------------------------------
 
   if (loading && !util) {
     return (
@@ -461,6 +612,7 @@ export default function FleetUtilizationPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
+      {/* Header */}
       <header className="border-b border-gray-800 bg-gray-950/80 backdrop-blur sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div>
@@ -486,1020 +638,612 @@ export default function FleetUtilizationPage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-5 space-y-4">
+      <main className="max-w-7xl mx-auto px-4 py-4 space-y-4">
         {error && (
           <div className="rounded border border-red-600/40 bg-red-950/40 text-red-300 px-3 py-2 text-sm">
             {error}
           </div>
         )}
 
-        {util && (
-          <>
-            {/* --- Warp Speed Gauges: GPU + CPU side-by-side (hero) --- */}
-            <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* GPU Warp Speed Gauge */}
-              <div className="rounded border border-gray-800 bg-gray-900">
-                <div className="px-3 py-1.5 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                  <span>GPU Warp Speed</span>
-                  <span className="text-xs font-normal tabular-nums">
-                    <span className="text-cyan-400">{fmtPct(util.trailing.day.fleet_attainment_pct)}</span>
-                    <span className="text-gray-600 mx-1">24h</span>
-                    <span className="text-emerald-400">{fmtPct(util.trailing.week.fleet_attainment_pct)}</span>
-                    <span className="text-gray-600 ml-1">7d</span>
-                  </span>
-                </div>
-                <div className="px-3 py-2">
-                  <div className="rounded-xl border border-cyan-900/40 bg-gradient-to-br from-slate-950 via-cyan-950/40 to-gray-900 overflow-hidden relative">
-                    <div className="pointer-events-none absolute inset-0 fleet-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 190" className="mx-auto w-full max-w-[180px]">
-                      <defs>
-                        <linearGradient id="fleetDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                          <stop offset="0%" stopColor="#22d3ee" />
-                          <stop offset="50%" stopColor="#34d399" />
-                          <stop offset="100%" stopColor="#facc15" />
-                        </linearGradient>
-                      </defs>
-                      <text x="100" y="14" textAnchor="middle" fill="rgba(165,243,252,0.7)" fontSize="9" fontWeight="500" letterSpacing="0.18em" className="uppercase">THROTTLE</text>
-                      <circle cx="100" cy="90" r="60" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="9" />
-                      <circle
-                        cx="100"
-                        cy="90"
-                        r="60"
-                        fill="none"
-                        stroke="url(#fleetDialGradient)"
-                        strokeWidth="9"
-                        strokeLinecap="round"
-                        strokeDasharray={smallRingCirc}
-                        strokeDashoffset={smallRingCirc * (1 - fleetSpeedPct / 100)}
-                        transform="rotate(-90 100 90)"
-                        className="transition-all duration-700 ease-out"
-                      />
-                      <line
-                        x1="100"
-                        y1="90"
-                        x2="100"
-                        y2="37"
-                        stroke="#67e8f9"
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                        transform={`rotate(${speedNeedleDeg} 100 90)`}
-                        className="transition-all duration-700 ease-out"
-                      />
-                      <circle cx="100" cy="90" r="6" fill="#e2e8f0" />
-                      <text x="100" y="180" textAnchor="middle" fill="#a5f3fc" fontSize="20" fontWeight="600">{fmtPct(fleetSpeedPct)}</text>
-                    </svg>
-                  </div>
+        {/* ================================================================
+            SECTION 1: Fleet Summary Bar
+            ================================================================ */}
+        <section className="rounded border border-gray-800 bg-gray-900 px-4 py-2 flex items-center gap-3 text-sm flex-wrap">
+          <span className="flex items-center gap-1.5">
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+              fleetSummary.gpuAvg >= 30 ? "bg-emerald-400" :
+              fleetSummary.gpuAvg >= 10 ? "bg-amber-400" :
+              "bg-gray-500"
+            }`} />
+            <span className="text-gray-400">GPU:</span>
+            <span className={`font-medium tabular-nums ${pctColor(fleetSummary.gpuAvg)}`}>
+              {fmtPct(fleetSummary.gpuAvg)} avg
+            </span>
+            <span className="text-gray-600">({fleetSummary.gpuCount} machines)</span>
+          </span>
 
-                  <div className="mt-2.5 space-y-1.5">
-                    {machineSpeed.map((row) => {
-                      const statusRow = statusByMachine.get(row.machine);
-                      const gpu = statusRow?.gpu;
-                      return (
-                        <div key={`spd-${row.machine}`}>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-300 font-medium">{row.machine}</span>
-                            <span className="text-cyan-300 tabular-nums">
-                              {fmtPct(row.utilPct)}
-                              {row.powerW !== null && (
-                                <span className="text-gray-500 ml-1 font-normal">({Math.round(row.powerW)}W)</span>
-                              )}
-                              {gpu?.temp != null && (
-                                <span className={`ml-1 font-normal ${tempColor(gpu.temp)}`}>{gpu.temp}°</span>
-                              )}
+          <span className="text-gray-700">|</span>
+
+          <span className="flex items-center gap-1.5">
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+              fleetSummary.activeCores >= 5 ? "bg-emerald-400" :
+              fleetSummary.activeCores >= 1 ? "bg-amber-400" :
+              "bg-gray-500"
+            }`} />
+            <span className="text-gray-400">CPU:</span>
+            <span className={`font-medium tabular-nums ${fleetSummary.activeCores >= 1 ? "text-emerald-300" : "text-gray-500"}`}>
+              {fleetSummary.activeCores.toFixed(1)}/{fleetSummary.totalCores} cores
+            </span>
+          </span>
+
+          {util && (
+            <>
+              <span className="text-gray-700">|</span>
+              <span className="flex items-center gap-1.5">
+                <span className="text-gray-400">24h attainment:</span>
+                <span className={`font-medium tabular-nums ${pctColor(util.trailing.day.fleet_attainment_pct)}`}>
+                  {fmtPct(util.trailing.day.fleet_attainment_pct)}
+                </span>
+                <span className="text-gray-600">GPU</span>
+              </span>
+            </>
+          )}
+
+          <span className="text-gray-700">|</span>
+          <span className={`tabular-nums ${ageClass(fleetSummary.newestAge)}`}>
+            Last checkin: {fmtAge(fleetSummary.newestAge)} ago
+          </span>
+
+          {/* Orchestrator state (compact) */}
+          {mergedOrchestrator && (
+            <>
+              <span className="text-gray-700">|</span>
+              <span className="flex items-center gap-1.5">
+                <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                  mergedOrchestrator.state === "collecting" ? "bg-cyan-400 animate-pulse" :
+                  mergedOrchestrator.state === "cpu_job" ? "bg-emerald-400 animate-pulse" :
+                  "bg-gray-600"
+                }`} />
+                <span className="text-gray-400">Orch:</span>
+                <span className={
+                  mergedOrchestrator.state === "collecting" ? "text-cyan-300" :
+                  mergedOrchestrator.state === "cpu_job" ? "text-emerald-300" :
+                  "text-gray-500"
+                }>{mergedOrchestrator.state || "unknown"}</span>
+                {mergedOrchestrator.pid && (
+                  <span className="text-gray-600 text-xs">PID {mergedOrchestrator.pid}</span>
+                )}
+              </span>
+            </>
+          )}
+        </section>
+
+        {/* ================================================================
+            SECTION 2: Per-Machine Cards (2x2 grid)
+            ================================================================ */}
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {machineCards.map((card) => {
+            const spec = card.spec;
+            const hasGpu = !!spec.gpu;
+
+            return (
+              <div
+                key={card.name}
+                className={`rounded border bg-gray-900 ${
+                  card.isStale ? "border-red-800/60" : "border-gray-800"
+                }`}
+              >
+                {/* Card header */}
+                <div className="px-3 py-1.5 border-b border-gray-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-200">{card.name}</span>
+                    {hasGpu && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-900/50 text-purple-300 font-medium">
+                        {spec.gpu}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span>{spec.cpu} {spec.cores} cores</span>
+                    <span className={ageClass(card.ageSeconds)}>
+                      {fmtAge(card.ageSeconds)}
+                    </span>
+                    {card.isStale && (
+                      <span className="text-red-400 font-medium">STALE</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="px-3 py-2 space-y-2">
+                  {/* GPU row */}
+                  {hasGpu && (
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-0.5">
+                        <span className="text-gray-400">GPU</span>
+                        <span className="tabular-nums">
+                          <span className={pctColor(card.gpuUtil ?? undefined)}>
+                            {card.gpuUtil != null ? `${card.gpuUtil.toFixed(0)}%` : "--"}
+                          </span>
+                          {card.gpuTemp != null && (
+                            <span className={`ml-2 ${tempColor(card.gpuTemp)}`}>{card.gpuTemp}°C</span>
+                          )}
+                          {card.vramUsedGb != null && card.vramTotalGb != null && (
+                            <span className="ml-2 text-gray-400">
+                              {card.vramUsedGb.toFixed(1)}/{card.vramTotalGb}G VRAM
                             </span>
-                          </div>
-                          <div className="mt-0.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                            <div
-                              className="h-full rounded-full fleet-speed-bar"
-                              style={{
-                                width: `${Math.max(2, row.utilPct)}%`,
-                                animationDuration: `${Math.max(0.45, 2.6 - row.utilPct / 55)}s`,
-                              }}
-                            />
-                          </div>
-                          <div className="text-[10px] text-gray-600 mt-0.5 truncate">{row.state}</div>
+                          )}
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-700 ${
+                            (card.gpuUtil ?? 0) > 0 ? "fleet-speed-bar" : "bg-gray-700"
+                          }`}
+                          style={{
+                            width: `${Math.max(2, card.gpuUtil ?? 0)}%`,
+                            ...(card.gpuUtil && card.gpuUtil > 0 ? { animationDuration: `${Math.max(0.45, 2.6 - card.gpuUtil / 55)}s` } : {}),
+                          }}
+                        />
+                      </div>
+                      {card.gpuJob && card.gpuJob !== "polling" && card.gpuJob !== "unknown" && (
+                        <div className="text-[10px] text-cyan-400 mt-0.5 truncate font-mono" title={card.gpuJob}>
+                          {card.gpuJob}
                         </div>
-                      );
-                    })}
-                  </div>
-                  {/* GPU attainment summary */}
-                  <div className="mt-2 pt-1.5 border-t border-gray-800/60 grid grid-cols-3 gap-2 text-[10px] text-gray-500 tabular-nums">
-                    <div>
-                      <span className="text-gray-600">24h</span>{" "}
-                      {fmtHours(util.trailing.day.achieved_gpu_hours)}<span className="text-gray-700">/{fmtHours(util.trailing.day.possible_gpu_hours)}</span>
+                      )}
                     </div>
-                    <div>
-                      <span className="text-gray-600">7d</span>{" "}
-                      {fmtHours(util.trailing.week.achieved_gpu_hours)}<span className="text-gray-700">/{fmtHours(util.trailing.week.possible_gpu_hours)}</span>
-                    </div>
-                    <div className="text-right">
-                      Cov {fmtPct(util.trailing.day.fleet_coverage_pct)}
-                    </div>
-                  </div>
-                </div>
-              </div>
+                  )}
 
-              {/* CPU Warp Speed Gauge */}
-              <div className="rounded border border-gray-800 bg-gray-900">
-                <div className="px-3 py-1.5 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                  <span>CPU Warp Speed</span>
-                  <span className="text-xs font-normal tabular-nums">
-                    {cpuUtil?.trailing ? (
-                      <>
-                        <span className="text-cyan-400">{(cpuUtil.trailing.day?.avg_cores ?? 0).toFixed(1)}</span>
-                        <span className="text-gray-600 mx-1">cores 24h</span>
-                        <span className="text-emerald-400">{(cpuUtil.trailing.week?.avg_cores ?? 0).toFixed(1)}</span>
-                        <span className="text-gray-600 ml-1">7d</span>
-                      </>
-                    ) : <span className="text-gray-600">loading...</span>}
-                  </span>
-                </div>
-                <div className="px-3 py-2">
-                  <div className="rounded-xl border border-emerald-900/40 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-gray-900 overflow-hidden relative">
-                    <div className="pointer-events-none absolute inset-0 cpu-speed-grid opacity-25" />
-                    <svg viewBox="0 0 200 190" className="mx-auto w-full max-w-[180px]">
-                      <defs>
-                        <linearGradient id="cpuDialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                          <stop offset="0%" stopColor="#34d399" />
-                          <stop offset="50%" stopColor="#10b981" />
-                          <stop offset="100%" stopColor="#facc15" />
-                        </linearGradient>
-                      </defs>
-                      <text x="100" y="14" textAnchor="middle" fill="rgba(167,243,208,0.7)" fontSize="9" fontWeight="500" letterSpacing="0.18em" className="uppercase">THROTTLE</text>
-                      <circle cx="100" cy="90" r="60" fill="none" stroke="rgba(55,65,81,0.55)" strokeWidth="9" />
-                      <circle
-                        cx="100"
-                        cy="90"
-                        r="60"
-                        fill="none"
-                        stroke="url(#cpuDialGradient)"
-                        strokeWidth="9"
-                        strokeLinecap="round"
-                        strokeDasharray={smallRingCirc}
-                        strokeDashoffset={smallRingCirc * (1 - cpuSpeedPct / 100)}
-                        transform="rotate(-90 100 90)"
-                        className="transition-all duration-700 ease-out"
+                  {/* CPU row */}
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-0.5">
+                      <span className="text-gray-400">CPU</span>
+                      <span className={`tabular-nums ${card.activeCores >= 1 ? "text-emerald-300" : "text-gray-500"}`}>
+                        {card.activeCores.toFixed(1)}/{spec.cores} cores active
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-700 ${
+                          card.activeCores > 0 ? "cpu-speed-bar" : "bg-gray-700"
+                        }`}
+                        style={{
+                          width: `${Math.max(2, Math.min(100, (card.activeCores / spec.cores) * 100))}%`,
+                          ...(card.activeCores > 0 ? { animationDuration: `${Math.max(0.45, 2.6 - (card.activeCores / spec.cores) * 100 / 55)}s` } : {}),
+                        }}
                       />
-                      <line
-                        x1="100"
-                        y1="90"
-                        x2="100"
-                        y2="37"
-                        stroke="#34d399"
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                        transform={`rotate(${cpuNeedleDeg} 100 90)`}
-                        className="transition-all duration-700 ease-out"
-                      />
-                      <circle cx="100" cy="90" r="6" fill="#e2e8f0" />
-                      <text x="100" y="180" textAnchor="middle" fill="#a7f3d0" fontSize="18" fontWeight="600">
-                        {cpuSpeedPct > 0 ? `${(cpuSpeedPct * CPU_TOTAL_CORES / 100).toFixed(1)} cores` : "0.0 cores"}
-                      </text>
-                    </svg>
+                    </div>
                   </div>
 
-                  {/* Machine bars */}
-                  <div className="mt-2 space-y-1.5">
-                    {(() => {
-                      // Gather CPU data from ALL machines with orchestrator
-                      const cpuMachines = (status?.machines || [])
-                        .filter(m => m.orchestrator)
-                        .map(m => {
-                          const o = m.orchestrator!;
-                          const machineStale = m.stale === true || (m.age_seconds != null && m.age_seconds > 300);
-                          const rpCores = machineStale ? 0 : (o.research_processes?.total_cpu_pct ?? 0) / 100;
-                          const orchWorkers = machineStale ? 0 : (o.cpu?.workers ?? 0);
-                          const totalCores = rpCores + orchWorkers;
-                          const rpJobs = machineStale ? [] : (o.research_processes?.jobs ?? []);
-                          const task = o.current_task;
-                          const maxCores = m.machine === "mac" ? 10 : m.machine === "droplet" ? 8 : m.machine === "gaming-pc" ? 16 : m.machine === "garage-pc" ? 24 : 8;
-                          const label = m.machine === "mac" ? "M4 Pro" : m.machine === "droplet" ? "8 vCPU" : m.machine === "gaming-pc" ? "i7-12700F" : m.machine === "garage-pc" ? "i7-14700K" : "";
-                          return { machine: m.machine, totalCores, maxCores, rpJobs, task, label, orchWorkers, machineStale };
-                        });
-                      return cpuMachines.map(cm => {
-                        const pct = Math.min(100, (cm.totalCores / cm.maxCores) * 100);
-                        return (
-                          <div key={cm.machine}>
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-300 font-medium">{cm.machine} <span className="text-gray-600 font-normal">{cm.label}</span></span>
-                              <span className={`tabular-nums ${cm.totalCores > 0 ? "text-emerald-300" : "text-gray-600"}`}>
-                                {cm.totalCores.toFixed(1)}/{cm.maxCores} cores
-                              </span>
-                            </div>
-                            <div className="mt-0.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${cm.totalCores > 0 ? "cpu-speed-bar" : "bg-gray-700"}`}
-                                style={{
-                                  width: `${Math.max(2, pct)}%`,
-                                  ...(cm.totalCores > 0 ? { animationDuration: `${Math.max(0.45, 2.6 - pct / 55)}s` } : {}),
-                                }}
-                              />
-                            </div>
-                            {cm.rpJobs.length > 0 ? (
-                              <div className="mt-0.5 space-y-0">
-                                {cm.rpJobs.map((job, i) => (
-                                  <div key={i} className="flex items-center gap-1.5 text-[10px]">
-                                    <span className="text-emerald-400 font-mono truncate max-w-[140px]">{job.script || "unknown"}</span>
-                                    {(job.workers ?? 0) > 0 && <span className="text-gray-600">{job.workers}w</span>}
-                                    <span className="tabular-nums text-gray-500">{(job.cpu_pct ?? 0).toFixed(0)}%</span>
-                                    {job.elapsed && <span className="text-gray-700">{job.elapsed}</span>}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : cm.machineStale && cm.task ? (
-                              <div className="text-[10px] text-red-400/70 mt-0.5 truncate line-through" title={`STALE — checkin lost. Job likely dead: ${cm.task}`}>{cm.task} ⚠</div>
-                            ) : cm.task ? (
-                              <div className="text-[10px] text-emerald-400/70 mt-0.5 truncate">{cm.task}</div>
-                            ) : cm.machineStale ? (
-                              <div className="text-[10px] text-red-400/70 mt-0.5">stale — no checkin</div>
-                            ) : (
-                              <div className="text-[10px] text-gray-600 mt-0.5">idle</div>
-                            )}
-                          </div>
-                        );
-                      });
-                    })()}
-                  </div>
-                  {/* CPU attainment summary */}
-                  {cpuUtil?.trailing && (
-                    <div className="mt-2 pt-1.5 border-t border-gray-800/60 grid grid-cols-3 gap-2 text-[10px] text-gray-500 tabular-nums">
-                      <div>
-                        <span className="text-gray-600">24h</span>{" "}
-                        {(cpuUtil.trailing.day?.total_core_hours ?? 0).toFixed(1)} core·h
-                      </div>
-                      <div>
-                        <span className="text-gray-600">7d</span>{" "}
-                        {(cpuUtil.trailing.week?.total_core_hours ?? 0).toFixed(1)} core·h
-                      </div>
-                      <div className="text-right">
-                        peak {(cpuUtil.trailing.day?.peak_cores ?? 0).toFixed(1)} cores
-                      </div>
+                  {/* Process list (only > 1% CPU) */}
+                  {card.significantJobs.length > 0 && (
+                    <div className="space-y-0">
+                      {card.significantJobs.map((job, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs py-0.5">
+                          <span className="flex items-center gap-1.5">
+                            <span className="inline-block w-1 h-1 rounded-full bg-emerald-400" />
+                            <span className="text-emerald-300 font-mono truncate max-w-[180px]" title={job.script || undefined}>
+                              {job.script || "unknown"}
+                            </span>
+                          </span>
+                          <span className="text-gray-500 tabular-nums whitespace-nowrap ml-2">
+                            {(job.cpu_pct ?? 0).toFixed(0)}%
+                            {job.elapsed && <span className="text-gray-600 ml-1.5">{job.elapsed}</span>}
+                          </span>
+                        </div>
+                      ))}
                     </div>
+                  )}
+
+                  {/* Orchestrator info for mac */}
+                  {card.orchState && card.name === "mac" && (
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                        card.orchState === "collecting" ? "bg-cyan-400 animate-pulse" :
+                        card.orchState === "cpu_job" ? "bg-emerald-400 animate-pulse" :
+                        "bg-gray-600"
+                      }`} />
+                      <span>Orchestrator: {card.orchState}</span>
+                      {card.orchPid && <span className="text-gray-600">PID {card.orchPid}</span>}
+                    </div>
+                  )}
+
+                  {/* Stale warning */}
+                  {card.isStale && (
+                    <div className="text-[10px] text-red-400/80 mt-0.5">
+                      No checkin for {fmtAge(card.ageSeconds)} -- data may be stale
+                    </div>
+                  )}
+
+                  {/* Empty state */}
+                  {card.significantJobs.length === 0 && !card.isStale && (card.gpuJob === "polling" || card.gpuJob === "unknown" || !card.gpuJob) && card.activeCores < 1 && (
+                    <div className="text-[10px] text-gray-600">idle</div>
                   )}
                 </div>
               </div>
-            </section>
+            );
+          })}
+        </section>
 
-            {/* --- Live Machine Snapshot --- */}
-            <section className="rounded border border-gray-800 bg-gray-900">
-              <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300">
-                Live Machine Snapshot
+        {/* ================================================================
+            SECTION 3: Research Pipeline
+            ================================================================ */}
+        {(runningJobs.length > 0 || recentCompleted.length > 0) && (
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {/* Currently Running */}
+            {runningJobs.length > 0 && (
+              <div className="rounded border border-gray-800 bg-gray-900">
+                <div className="px-3 py-1.5 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                  <span>Currently Running</span>
+                  <span className="text-xs text-gray-500 font-normal">{runningJobs.length} jobs</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="text-gray-500">
+                      <tr className="border-b border-gray-800">
+                        <th className="text-left px-3 py-1.5">Job</th>
+                        <th className="text-left px-3 py-1.5">Machine</th>
+                        <th className="text-center px-3 py-1.5">Type</th>
+                        <th className="text-right px-3 py-1.5">CPU %</th>
+                        <th className="text-right px-3 py-1.5">Elapsed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {runningJobs.map((j, i) => (
+                        <tr key={`rj-${i}`} className="border-b border-gray-800/50">
+                          <td className="px-3 py-1.5 text-gray-300 max-w-[220px] truncate font-mono" title={j.name}>
+                            {j.name}
+                          </td>
+                          <td className="px-3 py-1.5 text-gray-400">{j.machine}</td>
+                          <td className="px-3 py-1.5 text-center">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              j.type === "GPU" ? "bg-purple-900/50 text-purple-300" : "bg-emerald-900/50 text-emerald-300"
+                            }`}>
+                              {j.type}
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">
+                            {j.cpuPct != null ? `${j.cpuPct.toFixed(0)}%` : "--"}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">
+                            {j.elapsed}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-xs text-gray-500">
-                    <tr className="border-b border-gray-800">
-                      <th className="text-left px-3 py-2">Machine</th>
-                      <th className="text-right px-3 py-2">GPU Util / Power</th>
-                      <th className="text-right px-3 py-2">Temp</th>
-                      <th className="text-right px-3 py-2">VRAM</th>
-                      <th className="text-right px-3 py-2">Clock</th>
-                      <th className="text-right px-3 py-2">Obs Avg 24h</th>
-                      <th className="text-right px-3 py-2">Samples 24h</th>
-                      <th className="text-right px-3 py-2">24h</th>
-                      <th className="text-right px-3 py-2">7d</th>
-                      <th className="text-right px-3 py-2">Coverage 24h</th>
-                      <th className="text-left px-3 py-2">Current State</th>
-                      <th className="text-right px-3 py-2">Status Age</th>
+            )}
+
+            {/* Recently Completed */}
+            {recentCompleted.length > 0 && (
+              <div className="rounded border border-gray-800 bg-gray-900">
+                <div className="px-3 py-1.5 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                  <span>Recently Completed</span>
+                  <span className="text-xs text-gray-500 font-normal">
+                    {mergedOrchestrator?.completed_count ? `${mergedOrchestrator.completed_count} total` : ""}
+                  </span>
+                </div>
+                <div className="overflow-x-auto max-h-[320px] overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="text-gray-500 sticky top-0 bg-gray-900">
+                      <tr className="border-b border-gray-800">
+                        <th className="text-left px-3 py-1.5">Job</th>
+                        <th className="text-left px-3 py-1.5">Machine</th>
+                        <th className="text-left px-3 py-1.5">Status</th>
+                        <th className="text-right px-3 py-1.5">Duration</th>
+                        <th className="text-right px-3 py-1.5">Completed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentCompleted.map((j, i) => (
+                        <tr key={`rc-${i}`} className="border-b border-gray-800/50">
+                          <td className="px-3 py-1.5 text-gray-300 max-w-[200px] truncate" title={j.name}>
+                            {j.name}
+                          </td>
+                          <td className="px-3 py-1.5 text-gray-400">
+                            {j.machine.replace("-pc", "")}
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <span className={
+                              j.status === "completed" ? "text-emerald-400" :
+                              j.status === "profitable" ? "text-emerald-300 font-medium" :
+                              j.status === "timeout" ? "text-amber-400" :
+                              j.status === "failed" ? "text-red-400" :
+                              "text-gray-500"
+                            }>
+                              {j.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-gray-400">
+                            {j.duration}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">
+                            {j.completedAt}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* GPU Pipeline (queue progress per machine) */}
+        {mergedOrchestrator?.gpu_pipeline && Object.keys(mergedOrchestrator.gpu_pipeline).length > 0 && (
+          <section className="rounded border border-gray-800 bg-gray-900">
+            <div className="px-3 py-1.5 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                GPU Queue Progress
+                <span className="text-xs font-normal text-gray-500">sweep queue depth</span>
+              </span>
+              <span className="text-xs text-gray-500 flex items-center gap-2">
+                {(mergedOrchestrator.fleet_health?.retry_queue_size ?? mergedOrchestrator.retry_queue_size ?? 0) > 0 && (
+                  <span className="text-amber-300">
+                    {mergedOrchestrator.fleet_health?.retry_queue_size ?? mergedOrchestrator.retry_queue_size} retries
+                  </span>
+                )}
+                {mergedOrchestrator.fleet_health?.idle_gpu_alert && (
+                  <span className="text-amber-300">{mergedOrchestrator.fleet_health.idle_gpu_alert} idle</span>
+                )}
+              </span>
+            </div>
+            <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {Object.entries(mergedOrchestrator.gpu_pipeline).map(([machine, info]) => {
+                const jState = info.job_state || "unknown";
+                const dotColor =
+                  jState === "running" ? "bg-emerald-400" :
+                  jState === "idle" ? "bg-gray-500" :
+                  "bg-red-400";
+                const depth = info.queue_depth ?? 0;
+                const total = info.queue_total ?? 0;
+                const done = Math.max(0, total - depth);
+                const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+                return (
+                  <div key={machine} className="rounded border border-gray-800 bg-gray-950/50 px-3 py-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="flex items-center gap-1.5 text-xs font-medium text-gray-200">
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full ${dotColor}`} />
+                        {machine}
+                      </span>
+                      <span className="text-xs text-gray-500">{jState}</span>
+                    </div>
+                    <div className="text-xs text-cyan-300 truncate mb-1.5" title={info.job || undefined}>
+                      {info.job || "--"}
+                    </div>
+                    {total > 0 && (
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-cyan-600"
+                            style={{ width: `${Math.max(2, pct)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-gray-500 tabular-nums whitespace-nowrap">
+                          {done}/{total}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Pending queue */}
+        {mergedOrchestrator?.pending_queue && mergedOrchestrator.pending_queue.length > 0 && (
+          <section className="rounded border border-gray-800 bg-gray-900">
+            <div className="px-3 py-1.5 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+              <span>Pending Queue</span>
+              <span className="text-xs text-gray-500 font-normal">{mergedOrchestrator.pending_queue.length} queued</span>
+            </div>
+            <div className="overflow-x-auto max-h-[200px] overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="text-gray-500 sticky top-0 bg-gray-900">
+                  <tr className="border-b border-gray-800">
+                    <th className="text-left px-3 py-1">Experiment</th>
+                    <th className="text-left px-3 py-1">Target</th>
+                    <th className="text-left px-3 py-1">P</th>
+                    <th className="text-left px-3 py-1">Hypothesis</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mergedOrchestrator.pending_queue.map((p, i) => (
+                    <tr key={`pend-${i}`} className="border-b border-gray-800/30">
+                      <td className="px-3 py-1 text-gray-400 max-w-[180px] truncate" title={p.name}>
+                        {p.name || "--"}
+                      </td>
+                      <td className="px-3 py-1 text-gray-500">
+                        {(p.target_machine || "--").replace("-pc", "")}
+                      </td>
+                      <td className="px-3 py-1 text-gray-600">
+                        P{p.priority ?? "?"}
+                      </td>
+                      <td className="px-3 py-1 text-gray-600 max-w-[300px] truncate" title={p.hypothesis || undefined}>
+                        {p.hypothesis || "--"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* ================================================================
+            SECTION 4: Historical Utilization Tables (GPU Daily, GPU Weekly, CPU Daily)
+            ================================================================ */}
+        {util && (
+          <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* GPU Daily Attainment */}
+            <div className="rounded border border-gray-800 bg-gray-900">
+              <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                <span>GPU Daily ({util.settings.daily_days}d)</span>
+                <span className="text-xs text-gray-500 font-normal">latest first</span>
+              </div>
+              <div className="max-h-[420px] overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="text-gray-500">
+                    <tr className="border-b border-gray-800 sticky top-0 bg-gray-900">
+                      <th className="text-left px-2 py-1.5">Date</th>
+                      <th className="text-right px-2 py-1.5">Fleet %</th>
+                      {util.machines.map((m) => (
+                        <th key={`dh-${m}`} className="text-right px-2 py-1.5">
+                          {m.replace("-pc", "")}
+                        </th>
+                      ))}
+                      <th className="text-right px-2 py-1.5">Cov %</th>
+                      <th className="text-right px-2 py-1.5">GPU h</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {util.machines.map((machine) => {
-                      const row = statusByMachine.get(machine);
-                      const day = util.trailing.day.machines[machine];
-                      const week = util.trailing.week.machines[machine];
-                      const gpu = row?.gpu;
-                      const samples = day?.samples ?? 0;
-                      const sampleHealth =
-                        samples >= EXPECTED_SAMPLES_24H * SAMPLE_RATE_WARN_PCT
-                          ? "text-gray-400"
-                          : samples >= EXPECTED_SAMPLES_24H * 0.5
-                            ? "text-amber-300"
-                            : "text-red-300";
-                      const vramPct =
-                        gpu?.mem_used_mb && gpu?.mem_total_mb
-                          ? ((gpu.mem_used_mb / gpu.mem_total_mb) * 100).toFixed(0)
-                          : null;
-                      return (
-                        <tr key={machine} className="border-b border-gray-800/70">
-                          <td className="px-3 py-2 font-medium text-gray-200">{machine}</td>
-                          <td className="px-3 py-2 text-right">
-                            {fmtPct(gpu?.util)}
-                            {typeof gpu?.power_w === "number" && (
-                              <span
-                                className={`ml-1 text-xs ${gpu.power_w >= 50 ? "text-emerald-400" : "text-gray-500"}`}
-                              >
-                                {Math.round(gpu.power_w)}W
-                              </span>
-                            )}
-                          </td>
-                          <td className={`px-3 py-2 text-right ${tempColor(gpu?.temp)}`}>
-                            {gpu?.temp != null ? `${gpu.temp}°C` : "--"}
-                          </td>
-                          <td className="px-3 py-2 text-right text-gray-300">
-                            {gpu?.mem_used_mb != null && gpu?.mem_total_mb != null ? (
-                              <span title={`${gpu.mem_used_mb} / ${gpu.mem_total_mb} MB`}>
-                                {(gpu.mem_used_mb / 1024).toFixed(1)}/{(gpu.mem_total_mb / 1024).toFixed(0)}G
-                                <span className="text-xs text-gray-500 ml-1">({vramPct}%)</span>
-                              </span>
-                            ) : (
-                              "--"
-                            )}
-                          </td>
-                          <td className="px-3 py-2 text-right text-gray-400">
-                            {gpu?.clock_mhz != null ? `${gpu.clock_mhz}MHz` : "--"}
-                          </td>
-                          <td className="px-3 py-2 text-right text-gray-300">
-                            {fmtPct(day?.observed_avg_util_pct)}
-                          </td>
-                          <td className={`px-3 py-2 text-right ${sampleHealth}`}>
-                            {samples}
-                            <span className="text-xs text-gray-600 ml-0.5">/{EXPECTED_SAMPLES_24H}</span>
-                          </td>
-                          <td className="px-3 py-2 text-right text-cyan-300">
-                            {fmtPct(day?.attainment_pct)}
-                          </td>
-                          <td className="px-3 py-2 text-right text-emerald-300">
-                            {fmtPct(week?.attainment_pct)}
-                          </td>
-                          <td
-                            className={`px-3 py-2 text-right ${(day?.coverage_pct ?? 0) < 25 ? "text-amber-300" : "text-gray-200"}`}
-                          >
-                            {fmtPct(day?.coverage_pct)}
-                          </td>
-                          <td className="px-3 py-2 text-gray-400 max-w-[160px] truncate">
-                            {machineRunState(row || { machine })}
-                          </td>
-                          <td className={`px-3 py-2 text-right ${ageClass(row?.age_seconds)}`}>
-                            {fmtAge(row?.age_seconds)}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {dailyRows.map((row) => (
+                      <tr key={`d-${row.label}`} className="border-b border-gray-800/60">
+                        <td className="px-2 py-1.5 text-gray-300">
+                          {row.label}{" "}
+                          {!row.complete && <span className="text-amber-400">(partial)</span>}
+                        </td>
+                        <td className={`px-2 py-1.5 text-right ${pctColor(row.fleet_attainment_pct)}`}>
+                          {fmtPct(row.fleet_attainment_pct)}
+                        </td>
+                        {util.machines.map((m) => {
+                          const mb = row.machines[m];
+                          return (
+                            <td
+                              key={`d-${row.label}-${m}`}
+                              className={`px-2 py-1.5 text-right ${pctColor(mb?.attainment_pct)}`}
+                            >
+                              {fmtPct(mb?.attainment_pct)}
+                            </td>
+                          );
+                        })}
+                        <td className="px-2 py-1.5 text-right text-gray-400">
+                          {fmtPct(row.fleet_coverage_pct)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-gray-400">
+                          {fmtHours(row.achieved_gpu_hours)} / {fmtHours(row.possible_gpu_hours)}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-              <div className="px-3 py-2 border-t border-gray-800 text-xs text-gray-500">
-                Current GPU data is the last check-in snapshot. Samples shows received/expected at 1/min.
-                Low coverage means 24h attainment may understate true usage.
+            </div>
+
+            {/* GPU Weekly Attainment */}
+            <div className="rounded border border-gray-800 bg-gray-900">
+              <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                <span>GPU Weekly ({util.settings.weekly_weeks}w)</span>
+                <span className="text-xs text-gray-500 font-normal">latest first</span>
               </div>
-            </section>
-
-            {/* --- Live CPU Machine Snapshot (all machines including GPU servers' CPU cores) --- */}
-            {(() => {
-              // Build running experiments lookup by machine from orchestrator data
-              const runningByMachine: Record<string, RunningExperiment[]> = {};
-              for (const exp of mergedOrchestrator?.running_experiments || []) {
-                const mach = exp.machine || "unknown";
-                if (!runningByMachine[mach]) runningByMachine[mach] = [];
-                runningByMachine[mach].push(exp);
-              }
-
-              // Include ALL machines (CPU-only and GPU servers doing CPU experiments)
-              const allMachines = (status?.machines || []).filter(m =>
-                m.machine !== "watchdog_state"
-              );
-              if (allMachines.length === 0) return null;
-
-              // Sort: machines with orchestrator first, then GPU machines, then others
-              const sortedMachines = [...allMachines].sort((a, b) => {
-                const aOrch = a.orchestrator ? 0 : 1;
-                const bOrch = b.orchestrator ? 0 : 1;
-                if (aOrch !== bOrch) return aOrch - bOrch;
-                return (a.machine || "").localeCompare(b.machine || "");
-              });
-
-              return (
-                <section className="rounded border border-gray-800 bg-gray-900">
-                  <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300">
-                    Live CPU Machine Snapshot
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="text-xs text-gray-500">
-                        <tr className="border-b border-gray-800">
-                          <th className="text-left px-3 py-2">Machine</th>
-                          <th className="text-left px-3 py-2">Role</th>
-                          <th className="text-right px-3 py-2">CPU Workers</th>
-                          <th className="text-left px-3 py-2">Current Task</th>
-                          <th className="text-left px-3 py-2">State</th>
-                          <th className="text-right px-3 py-2">Status Age</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedMachines.map((m) => {
-                          const o = m.orchestrator;
-                          const hb = m.heartbeats?.cpu_orchestrator;
-                          const hasGpu = m.gpu && Object.values(m.gpu).some(v => v != null && v !== 0);
-                          const machineName = m.machine || "unknown";
-
-                          // For GPU machines, derive CPU experiment state from orchestrator running_experiments
-                          const gpuMachineExps = hasGpu ? (runningByMachine[machineName] || []) : [];
-                          const isGpuWithCpuWork = hasGpu && gpuMachineExps.length > 0;
-
-                          // CPU state: native orchestrator state, or derived from running experiments
-                          // If the machine's checkin is stale (>5 min), override state to "stale"
-                          const isStale = m.stale === true || (m.age_seconds != null && m.age_seconds > 300);
-                          const rawCpuState = o?.state || hb?.state
-                            || (isGpuWithCpuWork ? "cpu_job" : (hasGpu ? "idle" : "offline"));
-                          const cpuState = (isStale && rawCpuState !== "idle" && rawCpuState !== "offline" && rawCpuState !== "stale")
-                            ? "stale" : rawCpuState;
-
-                          // Workers: native count, or count of running experiments on this GPU machine
-                          const workers = o?.cpu?.workers ?? (hasGpu ? gpuMachineExps.length : 0);
-
-                          // Task: native task, or list of experiment names running on this GPU machine
-                          const task = o?.current_task || hb?.current_job
-                            || (gpuMachineExps.length > 0
-                              ? gpuMachineExps.map(e => e.name || "experiment").join(", ")
-                              : null);
-
-                          const role = machineName === "mac" ? "compute + GPU collection"
-                            : machineName === "droplet" ? "fleet brain + compute"
-                            : hasGpu ? "GPU + CPU compute"
-                            : "compute";
-
+              <div className="max-h-[420px] overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="text-gray-500">
+                    <tr className="border-b border-gray-800 sticky top-0 bg-gray-900">
+                      <th className="text-left px-2 py-1.5">Week Start</th>
+                      <th className="text-right px-2 py-1.5">Fleet %</th>
+                      {util.machines.map((m) => (
+                        <th key={`wh-${m}`} className="text-right px-2 py-1.5">
+                          {m.replace("-pc", "")}
+                        </th>
+                      ))}
+                      <th className="text-right px-2 py-1.5">Cov %</th>
+                      <th className="text-right px-2 py-1.5">GPU h</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {weeklyRows.map((row) => (
+                      <tr key={`w-${row.label}`} className="border-b border-gray-800/60">
+                        <td className="px-2 py-1.5 text-gray-300">
+                          {row.label}{" "}
+                          {!row.complete && <span className="text-amber-400">(partial)</span>}
+                        </td>
+                        <td className={`px-2 py-1.5 text-right ${pctColor(row.fleet_attainment_pct)}`}>
+                          {fmtPct(row.fleet_attainment_pct)}
+                        </td>
+                        {util.machines.map((m) => {
+                          const mb = row.machines[m];
                           return (
-                            <tr key={machineName} className="border-b border-gray-800/50">
-                              <td className="px-3 py-2 text-gray-200 font-medium">
-                                {machineName}
-                                {hasGpu && (
-                                  <span className="ml-1.5 text-[10px] text-purple-400 font-normal">GPU</span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2 text-gray-500 text-xs">{role}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">
-                                <span className={workers > 0 ? "text-emerald-300" : "text-gray-500"}>
-                                  {workers}
-                                </span>
-                              </td>
-                              <td className={`px-3 py-2 text-xs max-w-[200px] truncate ${
-                                cpuState === "stale" ? "text-gray-600 line-through" : "text-cyan-300"
-                              }`} title={
-                                cpuState === "stale"
-                                  ? `STALE — last checkin ${fmtAge(m.age_seconds)} ago. Job may be dead.${task ? ` (was: ${task})` : ""}`
-                                  : task || undefined
-                              }>
-                                {cpuState === "stale" ? (task ? `${task} ⚠` : "—") : (task || "—")}
-                              </td>
-                              <td className="px-3 py-2">
-                                <span className="flex items-center gap-1.5 text-xs">
-                                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                                    cpuState === "stale" ? "bg-red-500" :
-                                    cpuState === "cpu_job" ? "bg-emerald-400 animate-pulse" :
-                                    cpuState === "collecting" ? "bg-cyan-400 animate-pulse" :
-                                    cpuState === "idle" ? "bg-gray-500" :
-                                    "bg-gray-600"
-                                  }`} />
-                                  <span className={
-                                    cpuState === "stale" ? "text-red-400" :
-                                    cpuState === "cpu_job" ? "text-emerald-300" :
-                                    cpuState === "collecting" ? "text-cyan-300" :
-                                    cpuState === "idle" ? "text-gray-400" : "text-gray-500"
-                                  }>{cpuState}</span>
-                                </span>
-                              </td>
-                              <td className={`px-3 py-2 text-right tabular-nums ${ageClass(m.age_seconds)}`}>
-                                {fmtAge(m.age_seconds)}
-                              </td>
-                            </tr>
+                            <td
+                              key={`w-${row.label}-${m}`}
+                              className={`px-2 py-1.5 text-right ${pctColor(mb?.attainment_pct)}`}
+                            >
+                              {fmtPct(mb?.attainment_pct)}
+                            </td>
                           );
                         })}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              );
-            })()}
+                        <td className="px-2 py-1.5 text-right text-gray-400">
+                          {fmtPct(row.fleet_coverage_pct)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-gray-400">
+                          {fmtHours(row.achieved_gpu_hours)} / {fmtHours(row.possible_gpu_hours)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-            {/* --- GPU Pipeline + CPU Compute + Results (from orchestrator) --- */}
-            {orchestratorMachine && mergedOrchestrator && (() => {
-              const orch = mergedOrchestrator;
-              const orchState = orch.state || "unknown";
-
-              const pipeline = orch.gpu_pipeline;
-              const results = orch.recent_results;
-              const cpuJobs = orch.recent_cpu_jobs;
-              const health = orch.fleet_health;
-              const hasPipeline = pipeline && Object.keys(pipeline).length > 0;
-
-              // Health bar text
-              const lastCollect = health?.last_collect_at || orch.last_collect_at;
-              const collectAgo = lastCollect ? (() => {
-                const ms = Date.now() - Date.parse(lastCollect);
-                if (!Number.isFinite(ms) || ms < 0) return "--";
-                const sec = ms / 1000;
-                if (sec < 60) return `${Math.round(sec)}s`;
-                if (sec < 3600) return `${Math.round(sec / 60)}m`;
-                return `${(sec / 3600).toFixed(1)}h`;
-              })() : "--";
-              const retries = health?.retry_queue_size ?? orch.retry_queue_size ?? 0;
-              const idleAlert = health?.idle_gpu_alert;
-
-              // CPU compute status
-              const cpu = orch.cpu;
-              const cpuLegacy = orch.cpu_budget;
-              const cpuWorkers = cpu?.workers ?? cpuLegacy?.max_workers ?? 0;
-              const cpuReason = cpu?.reason ?? cpuLegacy?.reason ?? "unknown";
-              const cpuIdleSec = cpu?.idle_seconds ?? orch.idle_seconds ?? 0;
-              const cpuTask = orch.current_task;
-              const cpuActive = orchState === "cpu_job";
-
-              // Research processes (agent-spawned CPU jobs)
-              const rp = orch.research_processes;
-              const rpJobs = rp?.jobs ?? [];
-              const rpTotalCpu = rp?.total_cpu_pct ?? 0;
-              const rpTotalWorkers = rp?.total_workers ?? 0;
-              const macCpuBusy = rpTotalCpu > 50 || cpuActive;
-
-              return (
-                <>
-                  {/* ========== GPU Pipeline ========== */}
-                  {hasPipeline && (
-                    <section className="rounded border border-gray-800 bg-gray-900">
-                      <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                        <span className="flex items-center gap-2">
-                          GPU Pipeline
-                          <span className="text-xs font-normal text-gray-500">current jobs + queue progress</span>
-                        </span>
-                        <span className="text-xs text-gray-500 flex items-center gap-2">
-                          <span className={retries > 0 ? "text-amber-300" : "text-gray-500"}>{retries > 0 ? `${retries} retries` : ""}</span>
-                          {idleAlert && <span className="text-amber-300">{idleAlert} idle</span>}
-                          {collectAgo !== "--" && <span className="text-gray-500">collected {collectAgo} ago</span>}
-                        </span>
-                      </div>
-                      <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {Object.entries(pipeline!).map(([machine, info]) => {
-                          const jState = info.job_state || "unknown";
-                          const dotColor =
-                            jState === "running" ? "bg-emerald-400" :
-                            jState === "idle" ? "bg-gray-500" :
-                            "bg-red-400";
-                          const depth = info.queue_depth ?? 0;
-                          const total = info.queue_total ?? 0;
-                          const done = Math.max(0, total - depth);
-                          const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-
-                          return (
-                            <div key={machine} className="rounded border border-gray-800 bg-gray-950/50 px-3 py-2">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="flex items-center gap-1.5 text-xs font-medium text-gray-200">
-                                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${dotColor}`} />
-                                  {machine}
-                                </span>
-                                <span className="text-xs text-gray-500">{jState}</span>
-                              </div>
-                              <div className="text-xs text-cyan-300 truncate mb-1.5" title={info.job || undefined}>
-                                {info.job || "—"}
-                              </div>
-                              {total > 0 && (
-                                <div className="flex items-center gap-2">
-                                  <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                                    <div
-                                      className="h-full rounded-full bg-cyan-600"
-                                      style={{ width: `${Math.max(2, pct)}%` }}
-                                    />
-                                  </div>
-                                  <span className="text-xs text-gray-500 tabular-nums whitespace-nowrap">
-                                    {done}/{total}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  )}
-
-                  {/* ========== Orchestrator Status (compact bar) ========== */}
-                  <div className="rounded border border-gray-800 bg-gray-900 px-3 py-1.5 flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-                    <span className="flex items-center gap-1.5">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                        orchState === "collecting" ? "bg-cyan-400 animate-pulse" :
-                        orchState === "cpu_job" ? "bg-emerald-400 animate-pulse" :
-                        "bg-gray-600"
-                      }`} />
-                      Orchestrator: <span className={
-                        orchState === "collecting" ? "text-cyan-300" :
-                        orchState === "cpu_job" ? "text-emerald-300" :
-                        orchState === "idle" ? "text-gray-400" : "text-gray-500"
-                      }>{orchState}</span>
-                    </span>
-                    <span className="text-gray-700">·</span>
-                    <span>PID {orch.pid}</span>
-                    <span className="text-gray-700">·</span>
-                    <span className={ageClass(orchestratorMachine.age_seconds)}>
-                      checkin {fmtAge(orchestratorMachine.age_seconds)} ago
-                    </span>
-                    {(health?.retry_queue_size ?? orch.retry_queue_size ?? 0) > 0 && (
-                      <>
-                        <span className="text-gray-700">·</span>
-                        <span className="text-amber-300">{health?.retry_queue_size ?? orch.retry_queue_size} retries</span>
-                      </>
-                    )}
-                  </div>
-
-                  {/* ========== CPU Research Pipeline (running + pending) ========== */}
-                  {(() => {
-                    const running = orch.running_experiments ?? [];
-                    const pending = orch.pending_queue ?? [];
-                    if (running.length === 0 && pending.length === 0) return null;
-
-                    // Group running by machine
-                    const byMachine: Record<string, RunningExperiment[]> = {};
-                    running.forEach(e => {
-                      const m = e.machine || "unknown";
-                      (byMachine[m] ??= []).push(e);
-                    });
-                    const machines = Object.keys(byMachine).sort();
-
-                    return (
-                      <section className="rounded border border-gray-800 bg-gray-900">
-                        <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                          <span className="flex items-center gap-2">
-                            CPU Research Pipeline
-                            <span className="text-xs font-normal text-gray-500">
-                              {running.length} running · {pending.length} queued
-                            </span>
-                          </span>
-                          <span className="text-xs text-gray-500 font-normal">
-                            {(orch.completed_count ?? 0) > 0 && `${orch.completed_count} completed`}
-                          </span>
-                        </div>
-
-                        {/* Running experiments - grouped by machine */}
-                        {running.length > 0 && (
-                          <div className="px-3 py-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                            {machines.map(machine => (
-                              <div key={machine} className="rounded border border-gray-800 bg-gray-950/50 px-3 py-2">
-                                <div className="flex items-center gap-1.5 mb-1.5">
-                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                  <span className="text-xs font-medium text-gray-200">
-                                    {machine.replace("-pc", "")}
-                                  </span>
-                                  <span className="text-xs text-gray-600">
-                                    {byMachine[machine].length} job{byMachine[machine].length > 1 ? "s" : ""}
-                                  </span>
-                                </div>
-                                {byMachine[machine].map((e, i) => (
-                                  <div key={`run-${machine}-${i}`} className="flex items-center justify-between text-xs py-0.5">
-                                    <span className="text-cyan-300 truncate max-w-[200px]" title={e.name}>
-                                      {e.name || "—"}
-                                    </span>
-                                    <span className="text-gray-500 tabular-nums whitespace-nowrap ml-2">
-                                      {e.elapsed_min != null ? `${e.elapsed_min.toFixed(0)}m` : "—"}
-                                      {e.max_hours != null && (
-                                        <span className="text-gray-700">/{(e.max_hours * 60).toFixed(0)}m</span>
-                                      )}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Pending queue */}
-                        {pending.length > 0 && (
-                          <div className="border-t border-gray-800">
-                            <div className="overflow-x-auto max-h-[200px] overflow-y-auto">
-                              <table className="w-full text-xs">
-                                <thead className="text-gray-500 sticky top-0 bg-gray-900">
-                                  <tr className="border-b border-gray-800">
-                                    <th className="text-left px-3 py-1">Queue</th>
-                                    <th className="text-left px-3 py-1">Target</th>
-                                    <th className="text-left px-3 py-1">P</th>
-                                    <th className="text-left px-3 py-1">Hypothesis</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {pending.map((p, i) => (
-                                    <tr key={`pend-${i}`} className="border-b border-gray-800/30">
-                                      <td className="px-3 py-1 text-gray-400 max-w-[180px] truncate" title={p.name}>
-                                        {p.name || "—"}
-                                      </td>
-                                      <td className="px-3 py-1 text-gray-500">
-                                        {(p.target_machine || "—").replace("-pc", "")}
-                                      </td>
-                                      <td className="px-3 py-1 text-gray-600">
-                                        P{p.priority ?? "?"}
-                                      </td>
-                                      <td className="px-3 py-1 text-gray-600 max-w-[300px] truncate" title={p.hypothesis || undefined}>
-                                        {p.hypothesis || "—"}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        )}
-                      </section>
-                    );
-                  })()}
-
-                  {/* ========== Experiment Results + CPU Jobs side by side ========== */}
-                  <div className={`grid gap-3 ${cpuJobs && cpuJobs.length > 0 && results && results.length > 0 ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"}`}>
-                  {results && results.length > 0 && (
-                    <section className="rounded border border-gray-800 bg-gray-900">
-                      <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                        <span>Recent Experiment Results</span>
-                        <span className="text-xs text-gray-500 font-normal">GPU sweeps</span>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead className="text-gray-500">
-                            <tr className="border-b border-gray-800">
-                              <th className="text-left px-3 py-1.5">Job</th>
-                              <th className="text-left px-3 py-1.5">Machine</th>
-                              <th className="text-right px-3 py-1.5">Configs</th>
-                              <th className="text-right px-3 py-1.5">Profitable</th>
-                              <th className="text-right px-3 py-1.5">Best PF</th>
-                              <th className="text-right px-3 py-1.5">vs Prod</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {results.map((r, i) => (
-                              <tr key={`res-${i}`} className="border-b border-gray-800/50">
-                                <td className="px-3 py-1.5 text-gray-300 max-w-[180px] truncate" title={r.name}>
-                                  {r.name || "—"}
-                                </td>
-                                <td className="px-3 py-1.5">
-                                  <span className="text-gray-400">{(r.machine || "").replace("-pc", "")}</span>
-                                </td>
-                                <td className="px-3 py-1.5 text-right text-gray-300 tabular-nums">
-                                  {r.configs ?? 0}
-                                </td>
-                                <td className="px-3 py-1.5 text-right tabular-nums">
-                                  <span className={(r.profitable ?? 0) > 0 ? "text-emerald-300" : "text-gray-500"}>
-                                    {r.profitable ?? 0}
-                                  </span>
-                                  {(r.configs ?? 0) > 0 && (
-                                    <span className="text-gray-500 ml-1">
-                                      ({(r.profitable_pct ?? 0).toFixed(0)}%)
-                                    </span>
-                                  )}
-                                </td>
-                                <td className={`px-3 py-1.5 text-right tabular-nums font-medium ${
-                                  (r.best_pf ?? 0) >= 3.01 ? "text-emerald-300" :
-                                  (r.best_pf ?? 0) > 1.0 ? "text-gray-200" : "text-gray-500"
-                                }`}>
-                                  {(r.best_pf ?? 0) > 0 ? (r.best_pf ?? 0).toFixed(2) : "—"}
-                                </td>
-                                <td className="px-3 py-1.5 text-right">
-                                  {(r.best_pf ?? 0) > 0 ? (
-                                    r.beats_production ? (
-                                      <span className="text-emerald-400">&#9650;</span>
-                                    ) : (
-                                      <span className="text-red-400">&#9660;</span>
-                                    )
-                                  ) : (
-                                    <span className="text-gray-600">—</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </section>
-                  )}
-
-                  {/* ========== Recent CPU Jobs ========== */}
-                  {cpuJobs && cpuJobs.length > 0 && (
-                    <section className="rounded border border-gray-800 bg-gray-900">
-                      <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                        <span>Recent CPU Jobs</span>
-                        <span className="text-xs text-gray-500 font-normal">fleet orchestrator</span>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead className="text-gray-500">
-                            <tr className="border-b border-gray-800">
-                              <th className="text-left px-3 py-1.5">Job</th>
-                              <th className="text-left px-3 py-1.5">Machine</th>
-                              <th className="text-left px-3 py-1.5">Status</th>
-                              <th className="text-right px-3 py-1.5">Duration</th>
-                              <th className="text-right px-3 py-1.5">Completed</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {[...cpuJobs].reverse().map((j, i) => {
-                              const completedAt = j.completed_at ? new Date(j.completed_at) : null;
-                              const ago = completedAt
-                                ? (() => {
-                                    const mins = Math.floor((Date.now() - completedAt.getTime()) / 60000);
-                                    if (mins < 60) return `${mins}m ago`;
-                                    const hrs = Math.floor(mins / 60);
-                                    if (hrs < 24) return `${hrs}h ago`;
-                                    return `${Math.floor(hrs / 24)}d ago`;
-                                  })()
-                                : "—";
-                              return (
-                                <tr key={`cpu-${i}`} className="border-b border-gray-800/50">
-                                  <td className="px-3 py-1.5 text-gray-300 max-w-[200px] truncate" title={j.name}>
-                                    {j.name || "—"}
-                                  </td>
-                                  <td className="px-3 py-1.5 text-gray-400">
-                                    {(j.machine || "—").replace("-pc", "")}
-                                  </td>
-                                  <td className="px-3 py-1.5">
-                                    <span className={j.status === "completed" ? "text-emerald-400" : j.status === "timeout" ? "text-amber-400" : "text-red-400"}>
-                                      {j.status || "—"}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-1.5 text-right text-gray-300 tabular-nums">
-                                    {j.elapsed_min != null ? `${j.elapsed_min.toFixed(1)}m` : "—"}
-                                  </td>
-                                  <td className="px-3 py-1.5 text-right text-gray-500 tabular-nums">
-                                    {ago}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </section>
-                  )}
-                  </div>
-                </>
-              );
-            })()}
-
-            {/* --- Attainment Tables: GPU Daily + GPU Weekly + CPU Daily --- */}
-            <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {/* GPU Daily Attainment */}
-              <div className="rounded border border-gray-800 bg-gray-900">
-                <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                  <span>GPU Daily ({util.settings.daily_days}d)</span>
-                  <span className="text-xs text-gray-500 font-normal">latest first</span>
-                </div>
-                <div className="max-h-[420px] overflow-auto">
+            {/* CPU Daily Attainment */}
+            <div className="rounded border border-gray-800 bg-gray-900">
+              <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
+                <span>CPU Daily (7d)</span>
+                <span className="text-xs text-gray-500 font-normal">
+                  {CPU_TOTAL_CORES} total cores · latest first
+                </span>
+              </div>
+              <div className="max-h-[420px] overflow-auto">
+                {cpuUtil?.daily && cpuUtil.daily.length > 0 ? (
                   <table className="w-full text-xs">
                     <thead className="text-gray-500">
                       <tr className="border-b border-gray-800 sticky top-0 bg-gray-900">
                         <th className="text-left px-2 py-1.5">Date</th>
-                        <th className="text-right px-2 py-1.5">Fleet %</th>
-                        {util.machines.map((m) => (
-                          <th key={`dh-${m}`} className="text-right px-2 py-1.5">
-                            {m.replace("-pc", "")}
-                          </th>
-                        ))}
+                        <th className="text-right px-2 py-1.5">Avg Cores</th>
+                        <th className="text-right px-2 py-1.5">Peak</th>
+                        <th className="text-right px-2 py-1.5">Core-h</th>
                         <th className="text-right px-2 py-1.5">Cov %</th>
-                        <th className="text-right px-2 py-1.5">GPU h</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {dailyRows.map((row) => (
-                        <tr key={`d-${row.label}`} className="border-b border-gray-800/60">
+                      {[...cpuUtil.daily].sort((a, b) =>
+                        String(b.label || "").localeCompare(String(a.label || ""))
+                      ).map((row) => (
+                        <tr key={`cpu-d-${row.label}`} className="border-b border-gray-800/60">
                           <td className="px-2 py-1.5 text-gray-300">
                             {row.label}{" "}
                             {!row.complete && <span className="text-amber-400">(partial)</span>}
                           </td>
-                          <td className={`px-2 py-1.5 text-right ${pctColor(row.fleet_attainment_pct)}`}>
-                            {fmtPct(row.fleet_attainment_pct)}
+                          <td className={`px-2 py-1.5 text-right tabular-nums ${(row.avg_cores ?? 0) >= 1 ? "text-emerald-300" : "text-gray-400"}`}>
+                            {(row.avg_cores ?? 0).toFixed(1)}
                           </td>
-                          {util.machines.map((m) => {
-                            const mb = row.machines[m];
-                            return (
-                              <td
-                                key={`d-${row.label}-${m}`}
-                                className={`px-2 py-1.5 text-right ${pctColor(mb?.attainment_pct)}`}
-                              >
-                                {fmtPct(mb?.attainment_pct)}
-                              </td>
-                            );
-                          })}
-                          <td className="px-2 py-1.5 text-right text-gray-400">
-                            {fmtPct(row.fleet_coverage_pct)}
+                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-400">
+                            {(row.peak_cores ?? 0).toFixed(1)}
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-400">
+                            {(row.total_core_hours ?? 0).toFixed(1)}
                           </td>
                           <td className="px-2 py-1.5 text-right text-gray-400">
-                            {fmtHours(row.achieved_gpu_hours)} / {fmtHours(row.possible_gpu_hours)}
+                            {fmtPct(row.coverage_pct)}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                </div>
+                ) : (
+                  <div className="px-3 py-4 text-xs text-gray-500 text-center">No CPU telemetry data yet</div>
+                )}
               </div>
-
-              {/* GPU Weekly Attainment */}
-              <div className="rounded border border-gray-800 bg-gray-900">
-                <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                  <span>GPU Weekly ({util.settings.weekly_weeks}w)</span>
-                  <span className="text-xs text-gray-500 font-normal">latest first</span>
-                </div>
-                <div className="max-h-[420px] overflow-auto">
-                  <table className="w-full text-xs">
-                    <thead className="text-gray-500">
-                      <tr className="border-b border-gray-800 sticky top-0 bg-gray-900">
-                        <th className="text-left px-2 py-1.5">Week Start</th>
-                        <th className="text-right px-2 py-1.5">Fleet %</th>
-                        {util.machines.map((m) => (
-                          <th key={`wh-${m}`} className="text-right px-2 py-1.5">
-                            {m.replace("-pc", "")}
-                          </th>
-                        ))}
-                        <th className="text-right px-2 py-1.5">Cov %</th>
-                        <th className="text-right px-2 py-1.5">GPU h</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {weeklyRows.map((row) => (
-                        <tr key={`w-${row.label}`} className="border-b border-gray-800/60">
-                          <td className="px-2 py-1.5 text-gray-300">
-                            {row.label}{" "}
-                            {!row.complete && <span className="text-amber-400">(partial)</span>}
-                          </td>
-                          <td className={`px-2 py-1.5 text-right ${pctColor(row.fleet_attainment_pct)}`}>
-                            {fmtPct(row.fleet_attainment_pct)}
-                          </td>
-                          {util.machines.map((m) => {
-                            const mb = row.machines[m];
-                            return (
-                              <td
-                                key={`w-${row.label}-${m}`}
-                                className={`px-2 py-1.5 text-right ${pctColor(mb?.attainment_pct)}`}
-                              >
-                                {fmtPct(mb?.attainment_pct)}
-                              </td>
-                            );
-                          })}
-                          <td className="px-2 py-1.5 text-right text-gray-400">
-                            {fmtPct(row.fleet_coverage_pct)}
-                          </td>
-                          <td className="px-2 py-1.5 text-right text-gray-400">
-                            {fmtHours(row.achieved_gpu_hours)} / {fmtHours(row.possible_gpu_hours)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* CPU Daily Attainment */}
-              <div className="rounded border border-gray-800 bg-gray-900">
-                <div className="px-3 py-2 border-b border-gray-800 text-sm font-medium text-gray-300 flex items-center justify-between">
-                  <span>CPU Daily (7d)</span>
-                  <span className="text-xs text-gray-500 font-normal">latest first</span>
-                </div>
-                <div className="max-h-[420px] overflow-auto">
-                  {cpuUtil?.daily && cpuUtil.daily.length > 0 ? (
-                    <table className="w-full text-xs">
-                      <thead className="text-gray-500">
-                        <tr className="border-b border-gray-800 sticky top-0 bg-gray-900">
-                          <th className="text-left px-2 py-1.5">Date</th>
-                          <th className="text-right px-2 py-1.5">Avg Cores</th>
-                          <th className="text-right px-2 py-1.5">Peak</th>
-                          <th className="text-right px-2 py-1.5">Core·h</th>
-                          <th className="text-right px-2 py-1.5">Cov %</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...cpuUtil.daily].sort((a, b) =>
-                          String(b.label || "").localeCompare(String(a.label || ""))
-                        ).map((row) => (
-                          <tr key={`cpu-d-${row.label}`} className="border-b border-gray-800/60">
-                            <td className="px-2 py-1.5 text-gray-300">
-                              {row.label}{" "}
-                              {!row.complete && <span className="text-amber-400">(partial)</span>}
-                            </td>
-                            <td className={`px-2 py-1.5 text-right tabular-nums ${(row.avg_cores ?? 0) >= 1 ? "text-emerald-300" : "text-gray-400"}`}>
-                              {(row.avg_cores ?? 0).toFixed(1)}
-                            </td>
-                            <td className="px-2 py-1.5 text-right tabular-nums text-gray-400">
-                              {(row.peak_cores ?? 0).toFixed(1)}
-                            </td>
-                            <td className="px-2 py-1.5 text-right tabular-nums text-gray-400">
-                              {(row.total_core_hours ?? 0).toFixed(1)}
-                            </td>
-                            <td className="px-2 py-1.5 text-right text-gray-400">
-                              {fmtPct(row.coverage_pct)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <div className="px-3 py-4 text-xs text-gray-500 text-center">No CPU telemetry data yet</div>
-                  )}
-                </div>
-              </div>
-            </section>
-          </>
+            </div>
+          </section>
         )}
       </main>
-      <style jsx>{`
-        .fleet-speed-grid {
-          background-image:
-            linear-gradient(to right, rgba(34, 211, 238, 0.22) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(34, 211, 238, 0.16) 1px, transparent 1px);
-          background-size: 16px 16px;
-        }
 
+      <style jsx>{`
         .fleet-speed-bar {
           background-image: linear-gradient(
             110deg,
@@ -1513,13 +1257,6 @@ export default function FleetUtilizationPage() {
           animation-timing-function: linear;
           animation-iteration-count: infinite;
           box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
-        }
-
-        .cpu-speed-grid {
-          background-image:
-            linear-gradient(to right, rgba(52, 211, 153, 0.22) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(52, 211, 153, 0.16) 1px, transparent 1px);
-          background-size: 16px 16px;
         }
 
         .cpu-speed-bar {
