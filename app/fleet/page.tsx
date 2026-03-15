@@ -736,17 +736,9 @@ export default function FleetUtilizationPage() {
             </>)}
             <span className="text-gray-600 text-[9px]">1m/1h/24h</span>
           </span>
-          <span className="text-gray-700">|</span>
           <span className={`tabular-nums ${ageClass(fleetSummary.newestAge)}`}>
             {fmtAge(fleetSummary.newestAge)}
           </span>
-          {mergedOrchestrator && (<>
-            <span className="text-gray-700">|</span>
-            <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-              mergedOrchestrator.state === "cpu_job" ? "bg-emerald-400 animate-pulse" :
-              mergedOrchestrator.state === "collecting" ? "bg-cyan-400 animate-pulse" : "bg-gray-600"
-            }`} />
-          </>)}
         </section>
 
         {/* ================================================================
