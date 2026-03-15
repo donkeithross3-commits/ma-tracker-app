@@ -214,6 +214,13 @@ def _call_claude_cli(
     if cli_dir not in current_path:
         cli_env["PATH"] = f"{cli_dir}:{current_path}"
 
+    # The CLI needs a writable HOME directory for session files and config.
+    # Inside Docker the container user may not have a writable home, so we
+    # use /tmp/claude-cli-home as a persistent writable location.
+    cli_home = "/tmp/claude-cli-home"
+    os.makedirs(f"{cli_home}/.claude", exist_ok=True)
+    cli_env["HOME"] = cli_home
+
     try:
         t0 = time.monotonic()
         result = subprocess.run(
