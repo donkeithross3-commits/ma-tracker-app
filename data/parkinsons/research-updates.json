@@ -12,14 +12,111 @@
     "suspected_pathology": ["4-repeat tau (PSP pattern)"],
     "therapeutic_framing": "Dual proteinopathy means MORE therapeutic targets, not fewer. Cross-seeding between alpha-synuclein and tau means therapies targeting either protein could benefit both pathologies."
   },
+  "trial_enrollment_guide": {
+    "trial_name": "PSP Platform Trial — AADvac1 (Tau Vaccine)",
+    "trial_id": "NCT07173803",
+    "status_note": "ClinicalTrials.gov shows 'Not Yet Recruiting' (last updated Nov 2025) but CurePSP announced Q1 2026 enrollment. The registry often lags — call the enrollment center for real-time status.",
+    "why_this_trial": "AADvac1 is a tau vaccine — it directly targets the protein causing the PSP features (backward falls, eye movement problems). The trial has 75% chance of active drug (3:1 randomization), covers transportation and hotel costs, and after 12 months ALL participants (including placebo) get the option to receive the real drug.",
+    "key_insight": "IMPORTANT: The trial accepts 'possible' PSP Richardson's — not just 'probable.' This is a LOWER diagnostic bar and may fit your dad's current presentation. His neurologist is already a movement specialist who performed the biopsy and MRI — they may already have or can quickly provide the diagnosis needed.",
+    "contacts": {
+      "enrollment_center": {
+        "name": "ATRI Recruitment & Retention Unit (USC)",
+        "phone": "213-821-0569",
+        "email": "psp-participate@usc.edu",
+        "role": "Central enrollment for all ~50 trial sites nationwide. They can tell you real-time status, nearest site, and start eligibility screening."
+      },
+      "curepsp_hopeline": {
+        "name": "CurePSP Hope Line",
+        "phone": "800-457-4777",
+        "email": "info@curepsp.org",
+        "role": "Nonprofit partner for trial recruitment. Can answer questions, connect you with a trial site, and provide support resources."
+      }
+    },
+    "what_to_say": "My father has been diagnosed with Parkinson's disease but also has features consistent with PSP Richardson's syndrome — backward falls and eye movement abnormalities. His neurologist is a movement disorder specialist who has already performed a skin biopsy (positive for alpha-synuclein) and brain MRI. We're interested in the PSP Platform Trial evaluating AADvac1 (NCT07173803). Can you help us determine eligibility and find the nearest trial site?",
+    "steps": [
+      {
+        "id": "enroll-1",
+        "title": "Call or email the enrollment center",
+        "description": "Call 213-821-0569 or email psp-participate@usc.edu. Use the script above. They handle enrollment for all ~50 trial sites and can tell you real-time recruitment status and the nearest site to your dad.",
+        "status": "not_started"
+      },
+      {
+        "id": "enroll-2",
+        "title": "Contact the neurologist about PSP diagnosis",
+        "description": "Your dad's neurologist is already a movement specialist with biopsy and MRI results. Ask: 'Based on [dad's] backward falls and eye movement issues, could he meet criteria for possible or probable PSP Richardson's syndrome under the 2017 MDS criteria? We're interested in a clinical trial (NCT07173803) that requires this diagnosis.' Show them the ClinicalTrials.gov link. The existing MRI may already show relevant findings (midbrain atrophy / 'hummingbird sign').",
+        "status": "not_started"
+      },
+      {
+        "id": "enroll-3",
+        "title": "Sign up for CurePSP trial updates",
+        "description": "Register at curepsp.org/ptp to get trial status updates by email. Also call the Hope Line (800-457-4777) — they exist specifically to help families navigate this process.",
+        "status": "not_started"
+      },
+      {
+        "id": "enroll-4",
+        "title": "Gather documentation for screening visit",
+        "description": "When a site schedules a screening visit, bring: (1) Current medication list — especially carbidopa-levodopa dosing, (2) Skin biopsy results — the positive phosphorylated alpha-synuclein report, (3) Neurologist records — symptom history, onset dates, progression notes, (4) Brain MRI results already performed, (5) Timeline of when falls and eye movement issues started — must be less than 5 years, (6) The care partner who will attend all visits (a family member must commit to accompanying him).",
+        "status": "not_started"
+      },
+      {
+        "id": "enroll-5",
+        "title": "Also ask about the AZP2006 arm and prasinezumab",
+        "description": "Don't put all eggs in one basket. The same trial also tests AZP2006 (different mechanism, same sites). Also ask about prasinezumab Phase 3 (NCT04777331) for the alpha-synuclein side — contact Roche/Genentech trial sites. Your dad's movement disorder specialist may know of additional trials at their center.",
+        "status": "not_started"
+      }
+    ],
+    "eligibility": [
+      {
+        "requirement": "Clinical diagnosis of possible or probable PSP Richardson's syndrome (2017 MDS criteria)",
+        "dad_status": "Needs formal PSP evaluation — but his symptoms (backward falls, eye movement abnormalities) fit. 'Possible' PSP is sufficient. Neurologist may already have enough to diagnose.",
+        "met": "unknown"
+      },
+      {
+        "requirement": "Progressive symptoms for fewer than 5 years",
+        "dad_status": "Need to confirm timeline of when falls and eye movement issues started",
+        "met": "unknown"
+      },
+      {
+        "requirement": "Preserved ability to walk (ambulatory)",
+        "dad_status": "Needs to be ambulatory at time of screening",
+        "met": "unknown"
+      },
+      {
+        "requirement": "Minimal cognitive impairment",
+        "dad_status": "Needs cognitive assessment at screening",
+        "met": "unknown"
+      },
+      {
+        "requirement": "Care partner available for all visits",
+        "dad_status": "Family member must commit to attending every trial visit",
+        "met": "unknown"
+      }
+    ],
+    "trial_benefits": [
+      "75% chance of receiving active drug (3:1 randomization, not 50/50)",
+      "After 12 months, ALL participants (including placebo) get option for active drug",
+      "Transportation costs covered by the trial",
+      "Hotel/accommodation costs covered by the trial",
+      "Spanish-speaking clinicians available",
+      "Up to 50 trial sites nationwide — enrollment center will find the nearest one"
+    ],
+    "source_urls": [
+      "https://clinicaltrials.gov/study/NCT07173803",
+      "https://www.psp.org/ptp",
+      "https://www.psp.org/news/details/progressive-supranuclear-palsy-phase-2-platform-clinical-trial-announces-the-selection-of-aadvac1-and-azp2006-for-its-first-two-regimens",
+      "https://www.ucsf.edu/news/2024/09/428366/new-hope-progressive-supranuclear-palsy-innovative-trial",
+      "https://www.brainsupportnetwork.org/ucsf-led-platform-trial-for-psp-enrolling-fall-2025/",
+      "https://pmc.ncbi.nlm.nih.gov/articles/PMC5516529/"
+    ]
+  },
   "action_items": [
     {
       "id": "action-001",
       "priority": "highest",
-      "title": "Screen for AADvac1 PSP Platform Trial",
-      "description": "The PSP Platform Trial at UCSF, UCSD, and Mass General is enrolling NOW (Q1 2026). AADvac1 targets tau protein — directly relevant to the PSP features. This is the most time-sensitive action item. Contact CurePSP or trial sites directly to inquire about eligibility screening.",
-      "contact": "CurePSP (curepsp.org); Trial sites: UCSF Memory & Aging Center, UC San Diego, Massachusetts General Hospital",
-      "deadline": "Enrolling Q1 2026 — ACT NOW",
+      "title": "PSP Platform Trial — Call Enrollment Center NOW",
+      "description": "Call 213-821-0569 or email psp-participate@usc.edu to start the enrollment process for the AADvac1 tau vaccine trial (NCT07173803). See the Trial Enrollment Guide at the top of this page for the complete step-by-step instructions, what to say, and eligibility checklist.",
+      "contact": "ATRI Enrollment Center: 213-821-0569 / psp-participate@usc.edu | CurePSP Hope Line: 800-457-4777",
+      "deadline": "Enrolling Q1 2026 — CALL THIS WEEK",
       "status": "pending",
       "date_added": "2026-03-15",
       "date_resolved": null

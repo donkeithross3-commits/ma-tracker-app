@@ -14,13 +14,17 @@ import {
   AlertTriangle,
   CheckCircle2,
   Circle,
+  ClipboardList,
   Clock,
+  Copy,
   Dna,
   ExternalLink,
   Filter,
   FlaskConical,
   Heart,
   Info,
+  Phone,
+  Mail,
   Shield,
   Syringe,
   Target,
@@ -79,6 +83,43 @@ interface DiagnosticRecommendation {
   date_recommended: string;
 }
 
+interface TrialContact {
+  name: string;
+  phone: string;
+  email: string;
+  role: string;
+}
+
+interface TrialStep {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+}
+
+interface TrialEligibility {
+  requirement: string;
+  dad_status: string;
+  met: string;
+}
+
+interface TrialEnrollmentGuideData {
+  trial_name: string;
+  trial_id: string;
+  status_note: string;
+  why_this_trial: string;
+  key_insight: string;
+  contacts: {
+    enrollment_center: TrialContact;
+    curepsp_hopeline: TrialContact;
+  };
+  what_to_say: string;
+  steps: TrialStep[];
+  eligibility: TrialEligibility[];
+  trial_benefits: string[];
+  source_urls: string[];
+}
+
 interface GenomicStep {
   id: string;
   title: string;
@@ -117,6 +158,7 @@ interface ResearchData {
   research_updates: ResearchUpdate[];
   diagnostic_recommendations: DiagnosticRecommendation[];
   genomic_roadmap?: GenomicRoadmapData;
+  trial_enrollment_guide?: TrialEnrollmentGuideData;
 }
 
 // ─── Evidence Tier Helpers ─────────────────────────────────────────────
@@ -908,6 +950,256 @@ function PatientContext({
   );
 }
 
+// ─── Trial Enrollment Guide (Hero Section for Mom) ─────────────────────
+
+function TrialEnrollmentGuide({
+  guide,
+}: {
+  guide: TrialEnrollmentGuideData;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [showEligibility, setShowEligibility] = useState(false);
+  const [showDocs, setShowDocs] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(guide.what_to_say).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    });
+  }, [guide.what_to_say]);
+
+  return (
+    <section className="relative">
+      {/* Big hero card */}
+      <div className="bg-gradient-to-br from-violet-900/30 via-gray-900 to-blue-900/20 border-2 border-violet-500/50 rounded-2xl overflow-hidden">
+        {/* Header */}
+        <div className="px-5 py-5 border-b border-violet-500/20">
+          <div className="flex items-center gap-3 mb-2">
+            <ClipboardList className="h-7 w-7 text-violet-400" />
+            <h2 className="text-2xl font-bold text-white">
+              Trial Enrollment Guide
+            </h2>
+            <Badge className="bg-red-500/30 text-red-300 border-red-500/40 text-sm font-bold animate-pulse">
+              ACT NOW
+            </Badge>
+          </div>
+          <p className="text-lg text-violet-200 font-medium">
+            {guide.trial_name}
+          </p>
+          <p className="text-base text-gray-300 mt-1">
+            {guide.why_this_trial}
+          </p>
+        </div>
+
+        {/* Key Insight Banner */}
+        <div className="px-5 py-3 bg-amber-900/30 border-b border-amber-500/20">
+          <p className="text-base text-amber-200 leading-relaxed">
+            <strong className="text-amber-300">Key:</strong>{" "}
+            {guide.key_insight}
+          </p>
+        </div>
+
+        {/* Two big contact cards side by side */}
+        <div className="px-5 py-5">
+          <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">
+            Who to Call
+          </h3>
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Enrollment Center */}
+            <div className="bg-gray-800/60 border border-violet-500/30 rounded-xl p-4">
+              <p className="text-sm text-violet-400 font-bold uppercase tracking-wider mb-2">
+                {guide.contacts.enrollment_center.name}
+              </p>
+              <a
+                href={`tel:${guide.contacts.enrollment_center.phone}`}
+                className="flex items-center gap-3 bg-violet-600 hover:bg-violet-500 text-white rounded-xl px-5 py-4 text-xl font-bold transition-colors min-h-[56px] mb-3"
+              >
+                <Phone className="h-6 w-6 shrink-0" />
+                {guide.contacts.enrollment_center.phone}
+              </a>
+              <a
+                href={`mailto:${guide.contacts.enrollment_center.email}`}
+                className="flex items-center gap-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl px-5 py-3 text-base font-medium transition-colors min-h-[48px] mb-2"
+              >
+                <Mail className="h-5 w-5 shrink-0" />
+                {guide.contacts.enrollment_center.email}
+              </a>
+              <p className="text-sm text-gray-400 mt-2">
+                {guide.contacts.enrollment_center.role}
+              </p>
+            </div>
+
+            {/* CurePSP */}
+            <div className="bg-gray-800/60 border border-blue-500/30 rounded-xl p-4">
+              <p className="text-sm text-blue-400 font-bold uppercase tracking-wider mb-2">
+                {guide.contacts.curepsp_hopeline.name}
+              </p>
+              <a
+                href={`tel:${guide.contacts.curepsp_hopeline.phone}`}
+                className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl px-5 py-4 text-xl font-bold transition-colors min-h-[56px] mb-3"
+              >
+                <Phone className="h-6 w-6 shrink-0" />
+                {guide.contacts.curepsp_hopeline.phone}
+              </a>
+              <a
+                href={`mailto:${guide.contacts.curepsp_hopeline.email}`}
+                className="flex items-center gap-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl px-5 py-3 text-base font-medium transition-colors min-h-[48px] mb-2"
+              >
+                <Mail className="h-5 w-5 shrink-0" />
+                {guide.contacts.curepsp_hopeline.email}
+              </a>
+              <p className="text-sm text-gray-400 mt-2">
+                {guide.contacts.curepsp_hopeline.role}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* What to say — copyable script */}
+        <div className="px-5 pb-5">
+          <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">
+            What to Say When You Call
+          </h3>
+          <div className="bg-gray-800/80 border border-gray-600 rounded-xl p-4 relative">
+            <p className="text-base text-gray-200 leading-relaxed italic pr-12">
+              &ldquo;{guide.what_to_say}&rdquo;
+            </p>
+            <button
+              onClick={handleCopy}
+              className="absolute top-3 right-3 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+              aria-label="Copy to clipboard"
+            >
+              {copied ? (
+                <CheckCircle2 className="h-5 w-5 text-green-400" />
+              ) : (
+                <Copy className="h-5 w-5 text-gray-400" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Steps */}
+        <div className="px-5 pb-5">
+          <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">
+            Step-by-Step
+          </h3>
+          <div className="space-y-3">
+            {guide.steps.map((step, idx) => (
+              <div
+                key={step.id}
+                className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-4 flex items-start gap-4"
+              >
+                <span className="shrink-0 flex items-center justify-center h-8 w-8 rounded-full bg-violet-500/20 text-violet-300 text-sm font-bold border border-violet-500/30">
+                  {idx + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-base font-semibold text-white">
+                    {step.title}
+                  </h4>
+                  <p className="text-base text-gray-300 mt-1 leading-relaxed">
+                    {step.description}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Expandable: Eligibility */}
+        <div className="px-5 pb-3">
+          <button
+            onClick={() => setShowEligibility(!showEligibility)}
+            className="w-full text-left flex items-center justify-between bg-gray-800/40 border border-gray-700/50 rounded-xl px-4 py-3 min-h-[48px] hover:bg-gray-800/60 transition-colors"
+          >
+            <span className="text-base font-medium text-gray-300">
+              Eligibility Requirements &amp; Dad&apos;s Status
+            </span>
+            {showEligibility ? (
+              <ChevronUp className="h-5 w-5 text-gray-500" />
+            ) : (
+              <ChevronDown className="h-5 w-5 text-gray-500" />
+            )}
+          </button>
+          {showEligibility && (
+            <div className="mt-3 space-y-2">
+              {guide.eligibility.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="bg-gray-800/60 border border-gray-700/50 rounded-lg p-3"
+                >
+                  <p className="text-base text-white font-medium">
+                    {item.requirement}
+                  </p>
+                  <p className="text-sm text-amber-300/80 mt-1">
+                    {item.dad_status}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Expandable: Documentation */}
+        <div className="px-5 pb-3">
+          <button
+            onClick={() => setShowDocs(!showDocs)}
+            className="w-full text-left flex items-center justify-between bg-gray-800/40 border border-gray-700/50 rounded-xl px-4 py-3 min-h-[48px] hover:bg-gray-800/60 transition-colors"
+          >
+            <span className="text-base font-medium text-gray-300">
+              What the Trial Covers
+            </span>
+            {showDocs ? (
+              <ChevronUp className="h-5 w-5 text-gray-500" />
+            ) : (
+              <ChevronDown className="h-5 w-5 text-gray-500" />
+            )}
+          </button>
+          {showDocs && (
+            <div className="mt-3 space-y-2">
+              {guide.trial_benefits.map((benefit, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-3 bg-emerald-900/20 border border-emerald-500/20 rounded-lg px-4 py-2.5"
+                >
+                  <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                  <p className="text-base text-emerald-200">{benefit}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Source links */}
+        <div className="px-5 pb-5 pt-2 border-t border-gray-800/50">
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={`https://clinicaltrials.gov/study/${guide.trial_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-cyan-400 hover:text-cyan-300 min-h-[44px] px-3 bg-cyan-500/10 rounded-lg"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              ClinicalTrials.gov ({guide.trial_id})
+            </a>
+            <a
+              href="https://www.psp.org/ptp"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-cyan-400 hover:text-cyan-300 min-h-[44px] px-3 bg-cyan-500/10 rounded-lg"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              CurePSP Trial Page
+            </a>
+            <p className="text-xs text-gray-600 self-center ml-2">
+              {guide.status_note}
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ─── Genomic Roadmap ───────────────────────────────────────────────────
 
 const PHASE_STYLES: Record<
@@ -1161,6 +1453,13 @@ export default function ParkinsonsResearch({
 
         {/* Evidence Legend */}
         <EvidenceLegend />
+
+        {/* Trial Enrollment Guide — THE most important section */}
+        {data.trial_enrollment_guide && (
+          <div className="mt-6">
+            <TrialEnrollmentGuide guide={data.trial_enrollment_guide} />
+          </div>
+        )}
 
         {/* Main Content */}
         <div className="mt-6 space-y-10">
