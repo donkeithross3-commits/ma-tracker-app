@@ -38,7 +38,14 @@ async function proxyFleet(request: NextRequest) {
       fetchOptions.body = await request.text();
     }
 
-    const response = await fetch(targetUrl, fetchOptions);
+    // Utilization endpoint parses a large telemetry file — give it more
+    // time but don't hang indefinitely (Cloudflare 524s at ~100s).
+    const isUtilization = subPath.includes("utilization");
+    const timeoutMs = isUtilization ? 60_000 : 15_000;
+    const response = await fetch(targetUrl, {
+      ...fetchOptions,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     const data = await response.json();
 
     return NextResponse.json(data, {

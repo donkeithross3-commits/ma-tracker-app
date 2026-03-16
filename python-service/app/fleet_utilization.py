@@ -421,8 +421,10 @@ def build_utilization_report(
         summary["complete"] = end_local <= now_local
         weekly.append(summary)
 
-    # Opportunistic rotation — runs inline but skips if file is small
-    rotate_telemetry(telemetry_file, max_age_days=30, min_size_mb=10.0)
+    # Opportunistic rotation — trim data older than the report window.
+    # With daily_days=14 and weekly_weeks=8, we only need ~60 days max.
+    # Previous 30-day/10MB thresholds let the file grow to 345MB+.
+    rotate_telemetry(telemetry_file, max_age_days=max(daily_days, weekly_weeks * 7) + 7, min_size_mb=5.0)
 
     return {
         "as_of": now_utc.isoformat(),

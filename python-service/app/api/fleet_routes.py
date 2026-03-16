@@ -8,6 +8,7 @@ GET  /fleet/alerts   — Current active alerts (public)
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -23,6 +24,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/fleet", tags=["fleet"])
 
 FLEET_DATA_DIR = Path(os.environ.get("FLEET_DATA_DIR", "/home/don/apps/data/fleet"))
+
+# ---------------------------------------------------------------------------
+# In-memory cache for expensive utilization endpoints (telemetry.jsonl is huge)
+# ---------------------------------------------------------------------------
+UTILIZATION_CACHE_TTL = 300  # 5 minutes
+
+_utilization_cache: dict[str, Any] = {"data": None, "ts": 0.0, "key": ""}
+_cpu_utilization_cache: dict[str, Any] = {"data": None, "ts": 0.0, "key": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -169,13 +178,27 @@ async def fleet_utilization(
     tz: str = Query("America/New_York"),
     carry_max_seconds: int = Query(600, ge=0, le=3600),
 ) -> dict[str, Any]:
-    """Daily/weekly GPU utilization attainment rollups for the dashboard."""
+    """Daily/weekly GPU utilization attainment rollups for the dashboard.
+
+    Results are cached in-memory for 5 minutes — telemetry.jsonl can be
+    hundreds of MB and parsing it on every request causes 524 timeouts.
+    """
+    cache_key = f"{daily_days}:{weekly_weeks}:{tz}:{carry_max_seconds}"
+    now = time.monotonic()
+    if (
+        _utilization_cache["data"] is not None
+        and _utilization_cache["key"] == cache_key
+        and (now - _utilization_cache["ts"]) < UTILIZATION_CACHE_TTL
+    ):
+        return _utilization_cache["data"]
+
     statuses = load_latest_statuses(FLEET_DATA_DIR)
     # Filter out machines with no GPU data (e.g. Mac CPU orchestrator node)
     gpu_machines = [
         m for m, data in statuses.items()
         if data.get("gpu") and any(v is not None for v in data["gpu"].values())
     ]
+    t0 = time.monotonic()
     report = build_utilization_report(
         fleet_data_dir=FLEET_DATA_DIR,
         latest_machines=sorted(gpu_machines),
@@ -184,6 +207,12 @@ async def fleet_utilization(
         timezone_name=tz,
         carry_max_seconds=carry_max_seconds,
     )
+    elapsed = time.monotonic() - t0
+    logger.info("[perf] fleet utilization report built in %.2fs", elapsed)
+
+    _utilization_cache["data"] = report
+    _utilization_cache["ts"] = time.monotonic()
+    _utilization_cache["key"] = cache_key
     return report
 
 
@@ -194,9 +223,26 @@ async def fleet_cpu_utilization(
     carry_max_seconds: int = Query(600, ge=0, le=3600),
 ) -> dict[str, Any]:
     """CPU utilization rollups for Mac research workers."""
-    return build_cpu_utilization_report(
+    cache_key = f"{daily_days}:{tz}:{carry_max_seconds}"
+    now = time.monotonic()
+    if (
+        _cpu_utilization_cache["data"] is not None
+        and _cpu_utilization_cache["key"] == cache_key
+        and (now - _cpu_utilization_cache["ts"]) < UTILIZATION_CACHE_TTL
+    ):
+        return _cpu_utilization_cache["data"]
+
+    t0 = time.monotonic()
+    report = build_cpu_utilization_report(
         fleet_data_dir=FLEET_DATA_DIR,
         daily_days=daily_days,
         timezone_name=tz,
         carry_max_seconds=carry_max_seconds,
     )
+    elapsed = time.monotonic() - t0
+    logger.info("[perf] fleet cpu-utilization report built in %.2fs", elapsed)
+
+    _cpu_utilization_cache["data"] = report
+    _cpu_utilization_cache["ts"] = time.monotonic()
+    _cpu_utilization_cache["key"] = cache_key
+    return report

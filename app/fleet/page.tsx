@@ -156,6 +156,7 @@ type CpuWindowSummary = {
 type CpuUtilizationResponse = {
   as_of?: string;
   trailing?: {
+    hour?: CpuWindowSummary;
     day?: CpuWindowSummary;
     week?: CpuWindowSummary;
   };
@@ -334,26 +335,44 @@ export default function FleetUtilizationPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [utilRes, statusRes, cpuUtilRes] = await Promise.all([
+      // Status is fast (reads small JSON files) — always fetch it.
+      // Utilization parses a large telemetry file and can be slow on
+      // first hit (before server cache warms).  Use Promise.allSettled
+      // so a slow/failed utilization doesn't block status.
+      const [utilResult, statusResult, cpuUtilResult] = await Promise.allSettled([
         fetch("/api/fleet/utilization?daily_days=14&weekly_weeks=8", { cache: "no-store" }),
         fetch("/api/fleet/status", { cache: "no-store" }),
         fetch("/api/fleet/cpu-utilization?daily_days=7", { cache: "no-store" }),
       ]);
 
-      if (!utilRes.ok) throw new Error(`utilization API ${utilRes.status}`);
-      if (!statusRes.ok) throw new Error(`status API ${statusRes.status}`);
-
-      const utilJson = (await utilRes.json()) as UtilizationResponse;
-      const statusJson = (await statusRes.json()) as StatusResponse;
-      setUtil(utilJson);
-      setStatus(statusJson);
-      if (cpuUtilRes.ok) {
-        setCpuUtil((await cpuUtilRes.json()) as CpuUtilizationResponse);
+      // Status — required
+      if (statusResult.status === "rejected") {
+        throw new Error("status API failed");
       }
+      const statusRes = statusResult.value;
+      if (!statusRes.ok) throw new Error(`status API ${statusRes.status}`);
+      setStatus((await statusRes.json()) as StatusResponse);
+
+      // GPU utilization — optional, degrade gracefully
+      if (utilResult.status === "fulfilled" && utilResult.value.ok) {
+        setUtil((await utilResult.value.json()) as UtilizationResponse);
+      } else {
+        const reason = utilResult.status === "rejected"
+          ? utilResult.reason?.message ?? "timeout"
+          : `HTTP ${utilResult.value.status}`;
+        console.warn("Fleet utilization unavailable:", reason);
+        // Keep previous data if we had it; don't blank it out
+      }
+
+      // CPU utilization — optional
+      if (cpuUtilResult.status === "fulfilled" && cpuUtilResult.value.ok) {
+        setCpuUtil((await cpuUtilResult.value.json()) as CpuUtilizationResponse);
+      }
+
       setRefreshAt(new Date().toISOString());
       setError(null);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to load fleet utilization";
+      const msg = err instanceof Error ? err.message : "Failed to load fleet data";
       setError(msg);
     } finally {
       setLoading(false);
