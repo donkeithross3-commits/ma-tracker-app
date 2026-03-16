@@ -1596,6 +1596,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Determine quantity based on budget
         # Budget is the hard cap — never spend more than this per entry.
+        # Qty is initially estimated from the midpoint premium, then re-sized
+        # after we get the real ask price from IB (see "Re-size" block below).
         budget = cfg.get("contract_budget_usd", 150.0)
         max_contracts = cfg.get("max_contracts", 5)
 
@@ -1721,6 +1723,18 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 self._last_signal["suppressed"] = f"ask_exceeds_budget (ask ${opt_ask:.2f} > cap ${max_affordable_premium:.2f})"
             return []
 
+        # ── Re-size qty using the actual limit price ──
+        # The initial qty estimate used a midpoint premium. Now that we have the
+        # real market price, re-compute to fill the budget properly.
+        # e.g. $150 budget / ($0.20 ask * 100) = 7 contracts, not 1.
+        old_qty = qty
+        qty = min(max_contracts, max(1, int(budget / (limit_price * 100))))
+        if qty != old_qty:
+            logger.info(
+                "Re-sized qty: %d → %d (limit=$%.2f, budget=$%.0f, max=%d)",
+                old_qty, qty, limit_price, budget, max_contracts,
+            )
+
         # Attach option selection details to pending lineage (WS2)
         if self._pending_lineage is not None:
             self._pending_lineage["option_selection"] = {
@@ -1734,6 +1748,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 "limit_price": limit_price,
                 "budget": budget,
                 "max_affordable_premium": max_affordable_premium,
+                "quantity": qty,
             }
 
         multiplier = float(contract_dict.get("multiplier", 100))
@@ -1746,7 +1761,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             limit_price=limit_price,
             estimated_notional=limit_price * qty * multiplier,
             reason=f"BMC[{self._ticker}] signal: {signal.direction} p={signal.probability:.3f} "
-                   f"strike={strike} {right} {dte_label} limit=${limit_price:.2f}",
+                   f"strike={strike} {right} {dte_label} limit=${limit_price:.2f} x{qty}",
         )
 
         logger.info(
