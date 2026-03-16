@@ -2599,13 +2599,28 @@ async def relay_bmc_config(request: BMCConfigRequest):
 
 
 def _sanitize_nan(obj):
-    """Recursively replace NaN/Inf floats with None for JSON compliance."""
+    """Recursively replace NaN/Inf floats with None for JSON compliance.
+
+    Handles both Python floats and numpy scalar types (np.float32, np.float64,
+    np.int64, etc.) which may not pass isinstance(obj, float).
+    """
     import math
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    # Handle numpy scalars (np.float32, np.float64, np.int64, etc.)
+    try:
+        if hasattr(obj, "item"):  # numpy scalar .item() → Python scalar
+            val = obj.item()
+            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                return None
+            return val
+    except (ValueError, OverflowError):
         return None
     if isinstance(obj, dict):
         return {k: _sanitize_nan(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         return [_sanitize_nan(v) for v in obj]
     return obj
 
@@ -2624,7 +2639,7 @@ def _extract_bmc_strategies(strategies_list: list) -> list:
                 "ticker": state.get("ticker", sid.replace("bmc_", "").upper()),
                 "strategy_id": sid,
                 "signal": _sanitize_nan(state),
-                "config": strat.get("config"),
+                "config": _sanitize_nan(strat.get("config")),
             })
     return results
 
@@ -2666,7 +2681,7 @@ async def relay_bmc_signal(user_id: str = "", fresh: int = 0):
                 "source": "cached_telemetry",
                 "running": telemetry.get("running", False),
                 "strategies": bmc_strategies,
-                "budget_status": telemetry.get("budget_status", {}),
+                "budget_status": _sanitize_nan(telemetry.get("budget_status", {})),
             }
             # Pass through stale flag if telemetry was restored from previous provider
             if telemetry.get("stale"):
@@ -2700,7 +2715,7 @@ async def relay_bmc_signal(user_id: str = "", fresh: int = 0):
             "source": "direct_query",
             "running": response_data.get("running", False),
             "strategies": bmc_strategies,
-            "budget_status": response_data.get("budget_status", {}),
+            "budget_status": _sanitize_nan(response_data.get("budget_status", {})),
         }
         # Include boot phase if agent is still booting
         if provider and provider.boot_phase:
