@@ -2952,9 +2952,24 @@ async def relay_gateway_stop(request: GatewayControlRequest):
 
     docker stop prevents restart:always from restarting the container.
     Only docker start or system reboot brings it back.
+
+    Also notifies the agent to suppress auto-reconnect (ib_disconnect).
     """
     logger.info(f"Gateway STOP requested by user {request.userId}")
     try:
+        # Notify agent FIRST so it suppresses auto-reconnect before we kill the gateway
+        try:
+            await send_request_to_provider(
+                request_type="ib_disconnect",
+                payload={},
+                user_id=request.userId,
+                timeout=5.0,
+            )
+            logger.info("Agent notified to suppress auto-reconnect")
+        except Exception as e:
+            # Non-fatal — agent may be offline; gateway stop should still proceed
+            logger.warning(f"Could not notify agent of disconnect (continuing): {e}")
+
         proc = await asyncio.create_subprocess_exec(
             "docker", "stop", _GATEWAY_CONTAINER,
             stdout=asyncio.subprocess.PIPE,
@@ -2965,7 +2980,7 @@ async def relay_gateway_stop(request: GatewayControlRequest):
             err_msg = stderr.decode().strip()
             return {"success": False, "message": f"docker stop failed: {err_msg}"}
         logger.info(f"IB Gateway container stopped by user {request.userId}")
-        return {"success": True, "message": "IB Gateway stopped. IBKR Mobile can now connect."}
+        return {"success": True, "message": "IB Gateway stopped. Auto-reconnect suppressed."}
     except asyncio.TimeoutError:
         return {"success": False, "message": "docker stop timed out (30s)"}
     except Exception as e:
@@ -2975,7 +2990,10 @@ async def relay_gateway_stop(request: GatewayControlRequest):
 
 @router.post("/relay/gateway/start")
 async def relay_gateway_start(request: GatewayControlRequest):
-    """Start IB Gateway container. Re-enables automated IB connection."""
+    """Start IB Gateway container. Re-enables automated IB connection.
+
+    Also notifies the agent to clear the disconnect flag and resume auto-reconnect.
+    """
     logger.info(f"Gateway START requested by user {request.userId}")
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -2988,7 +3006,21 @@ async def relay_gateway_start(request: GatewayControlRequest):
             err_msg = stderr.decode().strip()
             return {"success": False, "message": f"docker start failed: {err_msg}"}
         logger.info(f"IB Gateway container started by user {request.userId}")
-        return {"success": True, "message": "IB Gateway started. Agent will auto-reconnect."}
+
+        # Notify agent to clear disconnect flag and trigger reconnect
+        try:
+            await send_request_to_provider(
+                request_type="ib_reconnect",
+                payload={"force": False},
+                user_id=request.userId,
+                timeout=10.0,
+            )
+            logger.info("Agent notified to resume auto-reconnect")
+        except Exception as e:
+            # Non-fatal — agent will reconnect via health loop once flag clears
+            logger.warning(f"Could not notify agent to reconnect (will auto-recover): {e}")
+
+        return {"success": True, "message": "IB Gateway started. Agent reconnecting."}
     except asyncio.TimeoutError:
         return {"success": False, "message": "docker start timed out (30s)"}
     except Exception as e:

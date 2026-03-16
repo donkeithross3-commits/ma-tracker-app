@@ -228,6 +228,10 @@ class IBDataAgent:
         # TWS reconnection state
         self._tws_reconnecting = False
         self._tws_last_connected: Optional[float] = None
+        # User-initiated disconnect: suppresses auto-reconnect in health loop.
+        # Set by ib_disconnect request (e.g. "Stop Gateway" button).
+        # Cleared by ib_reconnect request or gateway start.
+        self._user_disconnect = False
         # Zombie gateway detection: connected but all data farms DOWN
         self._farms_down_since: Optional[float] = None
         
@@ -364,6 +368,12 @@ class IBDataAgent:
                                 self._farms_down_since = None
                             continue
                 # --- TWS is down ---
+                # If user explicitly disconnected (e.g. "Stop Gateway"), don't auto-reconnect.
+                # Just wait quietly until they click "Start Gateway" or "Reconnect IB".
+                # (_handle_ib_disconnect already logged the suppression message.)
+                if self._user_disconnect:
+                    self._tws_reconnecting = False  # ensure clean state
+                    continue
                 was_previously_connected = self._tws_last_connected is not None
                 if not self._tws_reconnecting:
                     if was_previously_connected:
@@ -534,6 +544,8 @@ class IBDataAgent:
                 return await self._handle_position_risk_config(payload)
             elif request_type == "ib_reconnect":
                 return await self._handle_ib_reconnect(payload)
+            elif request_type == "ib_disconnect":
+                return await self._handle_ib_disconnect(payload)
             elif request_type == "get_ib_executions":
                 return await self._run_in_thread(self._handle_get_ib_executions_sync, payload)
             elif request_type == "fetch_historical_bars":
@@ -563,7 +575,9 @@ class IBDataAgent:
             farm_status = self.scanner.get_farm_status()
             data_available = self.scanner.is_data_available()
             read_only = getattr(self.scanner, "read_only_session", False)
-        if self._tws_reconnecting:
+        if self._user_disconnect:
+            message = "IB disconnected by user — click Reconnect to resume"
+        elif self._tws_reconnecting:
             message = "IB TWS reconnecting..."
         elif connected and not data_available:
             message = "IB TWS connected but data farms are down"
@@ -576,6 +590,7 @@ class IBDataAgent:
         return {
             "connected": connected,
             "reconnecting": self._tws_reconnecting,
+            "user_disconnect": self._user_disconnect,
             "message": message,
             "farm_status": farm_status,
             "data_available": data_available,
@@ -603,6 +618,11 @@ class IBDataAgent:
         # Already reconnecting via health loop — don't double-trigger
         if self._tws_reconnecting:
             return {"success": False, "connected": False, "message": "IB reconnect already in progress"}
+
+        # Clear user-disconnect flag — user wants to reconnect
+        if self._user_disconnect:
+            logger.info("Clearing user-disconnect flag — auto-reconnect re-enabled")
+            self._user_disconnect = False
 
         if force:
             logger.info("Force reconnect triggered from dashboard — tearing down existing connection")
@@ -701,8 +721,36 @@ class IBDataAgent:
                 "message": f"Reconnect failed: {str(e)}"
             }
 
+    async def _handle_ib_disconnect(self, payload: dict = None) -> dict:
+        """Handle user-initiated IB disconnect (e.g. 'Stop Gateway' button).
+
+        Sets the _user_disconnect flag so the health loop does NOT auto-reconnect.
+        The flag is cleared when the user clicks 'Start Gateway' or 'Reconnect IB'.
+        """
+        self._user_disconnect = True
+        logger.info("User-initiated IB disconnect — auto-reconnect SUPPRESSED")
+
+        # Actually disconnect the socket if connected
+        if self.scanner and self.scanner.isConnected():
+            try:
+                self.scanner.disconnect()
+                logger.info("IB socket disconnected")
+            except Exception as e:
+                logger.error("Error disconnecting IB socket: %s", e)
+
+        # Stop any in-progress reconnect attempt
+        self._tws_reconnecting = False
+
+        return {
+            "success": True,
+            "connected": False,
+            "message": "IB disconnected. Auto-reconnect suppressed until you reconnect manually.",
+        }
+
     def _ib_not_connected_error(self) -> str:
         """Return appropriate error string based on connection state."""
+        if self._user_disconnect:
+            return "IB disconnected by user -- click Reconnect IB to resume"
         if self._tws_reconnecting:
             return "IB reconnecting -- please wait..."
         return "IB not connected"
