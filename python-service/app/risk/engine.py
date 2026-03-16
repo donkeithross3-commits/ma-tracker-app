@@ -887,10 +887,14 @@ class RiskAssessmentEngine:
 
                 return parsed
 
-            # CLI failed — fall through to API
+            # CLI failed — fall through to API only if we have budget
             logger.info("CLI failed for %s, falling back to API", ticker)
 
         # --- API path (standard per-token billing) ---
+        # If CLI mode is primary, don't burn API credits on fallback — skip gracefully
+        if USE_CLI_ASSESSMENT:
+            raise RuntimeError(f"CLI assessment failed for {ticker} and API fallback disabled (CLI mode)")
+
         t0 = time.monotonic()
         try:
             response = self.anthropic.messages.create(
@@ -1683,6 +1687,11 @@ Keep it actionable and direct."""
                 except Exception:
                     pass
                 return cli_result["text"]
+
+        # If CLI mode is primary but CLI failed for summary, skip API fallback
+        if USE_CLI_ASSESSMENT:
+            logger.warning("CLI summary generation failed, skipping API fallback (CLI mode)")
+            return "Summary generation failed — CLI was unavailable and API fallback is disabled in CLI mode."
 
         response = self.anthropic.messages.create(
             model=self.summary_model,
