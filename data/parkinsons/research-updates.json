@@ -43,13 +43,13 @@
       {
         "id": "enroll-2",
         "title": "Contact the neurologist about PSP diagnosis",
-        "description": "Your dad's neurologist is already a movement specialist with biopsy and MRI results. Ask: 'Based on [dad's] backward falls and eye movement issues, could he meet criteria for possible or probable PSP Richardson's syndrome under the 2017 MDS criteria? We're interested in a clinical trial (NCT07173803) that requires this diagnosis.' Show them the ClinicalTrials.gov link. The existing MRI may already show relevant findings (midbrain atrophy / 'hummingbird sign').",
+        "description": "Your dad's neurologist is already a movement specialist with biopsy and MRI results. Ask: 'Based on [dad's] backward falls and eye movement issues, could he meet criteria for possible or probable PSP Richardson's syndrome under the 2017 MDS criteria? We're interested in a clinical trial (NCT07173803) that requires this diagnosis.' Show them this link: https://clinicaltrials.gov/study/NCT07173803 — The existing MRI may already show relevant findings (midbrain atrophy / 'hummingbird sign').",
         "status": "not_started"
       },
       {
         "id": "enroll-3",
         "title": "Sign up for CurePSP trial updates",
-        "description": "Register at curepsp.org/ptp to get trial status updates by email. Also call the Hope Line (800-457-4777) — they exist specifically to help families navigate this process.",
+        "description": "Register at https://www.psp.org/ptp to get trial status updates by email. Also call the Hope Line (800-457-4777) — they exist specifically to help families navigate this process.",
         "status": "not_started"
       },
       {
@@ -61,7 +61,7 @@
       {
         "id": "enroll-5",
         "title": "Also ask about the AZP2006 arm and prasinezumab",
-        "description": "Don't put all eggs in one basket. The same trial also tests AZP2006 (different mechanism, same sites). Also ask about prasinezumab Phase 3 (NCT04777331) for the alpha-synuclein side — contact Roche/Genentech trial sites. Your dad's movement disorder specialist may know of additional trials at their center.",
+        "description": "Don't put all eggs in one basket. The same trial also tests AZP2006 (different mechanism, same sites). Also ask about prasinezumab Phase 3 for the alpha-synuclein side: https://clinicaltrials.gov/study/NCT04777331 — contact Roche/Genentech trial sites. Your dad's movement disorder specialist may know of additional trials at their center.",
         "status": "not_started"
       }
     ],

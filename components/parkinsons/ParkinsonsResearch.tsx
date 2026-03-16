@@ -213,6 +213,39 @@ function EvidenceBadge({ tier }: { tier: number | null }) {
   );
 }
 
+// ─── Text with Auto-Linked URLs ────────────────────────────────────────
+
+const URL_REGEX = /(https?:\/\/[^\s,)]+)/g;
+
+function LinkedText({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) {
+  const parts = text.split(URL_REGEX);
+  return (
+    <span className={className}>
+      {parts.map((part, i) =>
+        URL_REGEX.test(part) ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 break-all"
+          >
+            {part.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </span>
+  );
+}
+
 // ─── Priority Helpers ──────────────────────────────────────────────────
 
 const PRIORITY_CONFIG: Record<
@@ -1097,7 +1130,7 @@ function TrialEnrollmentGuide({
                     {step.title}
                   </h4>
                   <p className="text-base text-gray-300 mt-1 leading-relaxed">
-                    {step.description}
+                    <LinkedText text={step.description} />
                   </p>
                 </div>
               </div>
@@ -1317,14 +1350,14 @@ function GenomicRoadmapSection({
                             {step.title}
                           </h4>
                           <p className="text-base text-gray-300 mt-1 leading-relaxed">
-                            {step.description}
+                            <LinkedText text={step.description} />
                           </p>
                           <div className="mt-3 bg-gray-800/80 border border-gray-700/50 rounded-lg p-3">
                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
                               How to do it
                             </p>
                             <p className="text-base text-gray-200 leading-relaxed">
-                              {step.how}
+                              <LinkedText text={step.how} />
                             </p>
                           </div>
                         </div>
