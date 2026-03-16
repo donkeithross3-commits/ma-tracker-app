@@ -2679,9 +2679,13 @@ class IBDataAgent:
         return None
 
     def _expand_directional_strategies(self, strat_cfg: dict) -> Optional[List[dict]]:
-        """If ticker has both UP and DOWN production models, return two configs.
+        """If ticker has both UP and DOWN *active* models, return two configs.
 
-        Returns None if expansion is not applicable (single model or error).
+        Returns None if expansion is not applicable:
+        - Single active model (symmetric or directional-only)
+        - No active models for ticker
+        - Active model is symmetric (no UP/DOWN in target_column)
+        - model_version already pinned in config
         """
         config = strat_cfg.get("config", {})
         ticker = config.get("ticker", "")
@@ -2710,21 +2714,33 @@ class IBDataAgent:
 
             registry = ModelRegistry(registry_path)
 
-            production = [
+            # CRITICAL: filter by BOTH "production" tag AND status == "active".
+            # Retired models keep their "production" tag but must not be selected.
+            # Previous code only checked tags, causing retired hybrid_film models
+            # to be selected over active lightgbm models.
+            active_production = [
                 v for v in registry._versions
-                if "production" in v.tags and v.ticker == ticker
+                if "production" in v.tags
+                and v.status == "active"
+                and v.ticker == ticker
             ]
+
             up_models = sorted(
-                [v for v in production if "UP" in (v.target_column or "")],
-                key=lambda v: v.created_at, reverse=True,
+                [v for v in active_production if "UP" in (v.target_column or "")],
+                key=lambda v: v.promoted_at or v.created_at, reverse=True,
             )
             down_models = sorted(
-                [v for v in production if "DOWN" in (v.target_column or "")],
-                key=lambda v: v.created_at, reverse=True,
+                [v for v in active_production if "DOWN" in (v.target_column or "")],
+                key=lambda v: v.promoted_at or v.created_at, reverse=True,
             )
 
             if not (up_models and down_models):
-                return None  # Single model -- no expansion needed
+                # No directional pair available.  Could be:
+                # - Symmetric model (p_otm_itm_30bp) with no UP/DOWN direction
+                # - Only one direction has an active model
+                # In either case, let the strategy load the single active model
+                # via get_production() / get_active() in _init_bmc_pipeline.
+                return None
 
             base_id = strat_cfg.get("strategy_id", f"bmc_{ticker.lower()}")
 
@@ -3175,10 +3191,20 @@ class IBDataAgent:
                 # Only persist entry strategies, not risk managers
                 if sid.startswith("bmc_risk_"):
                     continue
+                # Build a copy of config so we can update model_version to current
+                persisted_config = dict(state.config)
+                # Sync config.model_version with the CURRENTLY loaded model.
+                # Without this, auto-restart reloads a stale model_version from
+                # the original directional expansion, then swap_model fixes it --
+                # wasting a load cycle and risking failure if the stale model
+                # is retired/deleted.
+                if hasattr(state.strategy, "_model_version") and state.strategy._model_version:
+                    persisted_config["model_version"] = state.strategy._model_version
+
                 strat_entry = {
                     "strategy_id": sid,
                     "strategy_type": state.config.get("_strategy_type", "big_move_convexity"),
-                    "config": state.config,
+                    "config": persisted_config,
                     "ticker_budget": state.ticker_entry_budget,
                     "ticker_entries_placed": state.ticker_entries_placed,
                 }

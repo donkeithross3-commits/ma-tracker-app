@@ -904,11 +904,31 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 prod_version = registry.get(model_version_pin)
             except KeyError:
                 raise RuntimeError(f"Model version '{model_version_pin}' not found in registry")
+            # Safety: warn if pinned model is retired (stale config from auto-restart)
+            if hasattr(prod_version, 'status') and prod_version.status == "retired":
+                active = registry.get_active(ticker=self._ticker)
+                if active:
+                    logger.warning(
+                        "Pinned model %s is retired (status=%s). "
+                        "Overriding with active model %s (%s, %s)",
+                        model_version_pin, prod_version.status,
+                        active.version_id, active.model_type, active.target_column,
+                    )
+                    prod_version = active
+                else:
+                    logger.warning(
+                        "Pinned model %s is retired but no active model found -- using it anyway",
+                        model_version_pin,
+                    )
         else:
-            prod_version = registry.get_production(ticker=self._ticker)
+            # Primary: get_active() (status-based, supports models without "production" tag)
+            # Fallback: get_production() (tag-based, backward compat)
+            prod_version = registry.get_active(ticker=self._ticker)
+            if prod_version is None:
+                prod_version = registry.get_production(ticker=self._ticker)
         if prod_version is None:
             raise RuntimeError(
-                f"No production model for ticker '{self._ticker}' in {registry_path}. "
+                f"No active/production model for ticker '{self._ticker}' in {registry_path}. "
                 "Run scripts/train_production_model.py first."
             )
 
