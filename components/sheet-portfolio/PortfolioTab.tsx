@@ -83,6 +83,11 @@ const FACTOR_LABEL_MAP: Record<string, string> = {
   legal: "L",
   regulatory: "R",
   mac: "M",
+  market: "Mkt",
+  competing_bid: "CB",
+  timing: "T",
+  spread: "S",
+  overall: "O",
 };
 
 type SortKey = keyof Deal | "__default__";
@@ -712,7 +717,7 @@ export default function PortfolioTab() {
                       >
                         {/* Ticker */}
                         <td className="py-1.5 px-2 font-mono font-semibold">
-                          <span className="inline-flex items-center gap-1">
+                          <div className="flex items-center gap-1">
                             <Link
                               href={`/sheet-portfolio/${deal.ticker}`}
                               prefetch={false}
@@ -724,20 +729,24 @@ export default function PortfolioTab() {
                             {diff?.diff_type === "added" && (
                               <span className="text-[10px] px-1 py-0.5 rounded bg-green-500/15 text-green-400 leading-none">NEW</span>
                             )}
-                            {tickerChanges && tickerChanges.length > 0 && tickerChanges.map((c, ci) => (
-                              <span
-                                key={ci}
-                                className={`text-[10px] px-1 py-0.5 rounded leading-none cursor-default whitespace-nowrap ${
-                                  c.direction === "worsened"
-                                    ? "bg-red-500/15 text-red-400"
-                                    : "bg-green-500/15 text-green-400"
-                                }`}
-                                title={`${c.factor}: ${c.old_level} \u2192 ${c.new_level} (${c.direction})${c.explanation ? "\n" + c.explanation.slice(0, 150) : ""}`}
-                              >
-                                {c.direction === "worsened" ? "\u25BC" : "\u25B2"}{c.factor}
+                            {tickerChanges && tickerChanges.length > 0 && (
+                              <span className="inline-flex items-center gap-0.5 flex-wrap">
+                                {tickerChanges.map((c, ci) => (
+                                  <span
+                                    key={ci}
+                                    className={`text-[9px] px-0.5 rounded leading-none cursor-default whitespace-nowrap ${
+                                      c.direction === "worsened"
+                                        ? "bg-red-500/15 text-red-400"
+                                        : "bg-green-500/15 text-green-400"
+                                    }`}
+                                    title={`${c.factor}: ${c.old_level} \u2192 ${c.new_level} (${c.direction})${c.explanation ? "\n" + c.explanation.slice(0, 150) : ""}`}
+                                  >
+                                    {c.direction === "worsened" ? "\u25BC" : "\u25B2"}{FACTOR_LABEL_MAP[c.factor] || c.factor.charAt(0).toUpperCase()}
+                                  </span>
+                                ))}
                               </span>
-                            ))}
-                          </span>
+                            )}
+                          </div>
                         </td>
                         {/* Acquiror */}
                         <td
