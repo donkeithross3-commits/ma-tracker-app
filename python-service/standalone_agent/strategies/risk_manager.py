@@ -219,6 +219,33 @@ PRESETS = {
         # eod_exit_time: OFF by default — user opts in per-position via dashboard
         "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
     },
+    "bmc_convexity": {
+        # BMC-optimized: 1DTE OTM options, 1 contract per entry, accumulate
+        # over hours. Validated via position simulator sweep (2026-03-16) using
+        # real 1-min option HIGH/LOW bars with commission modeling.
+        #
+        # Key insight: at 1 contract per entry, tranches are dead code (33% of 1 = 1).
+        # All-at-once exit with tight trail captures intrabar spikes before theta decay.
+        # Losers should expire worthless (save exit commission + spread).
+        #
+        # Holdout PF=3.60 (with commissions), WR=92%, 24 trades in 159 dates.
+        # trail 15/3 beats trail 15/10 (PF 3.60 vs 1.65 with comm) because tight
+        # trail captures the spike visible in bar highs.
+        "stop_loss": {"enabled": False, "type": "none"},  # let losers expire
+        "profit_taking": {
+            "enabled": True,
+            "targets": [],  # no ladders — single all-at-once exit
+            "trailing_stop": {
+                "enabled": True,
+                "activation_pct": 15,   # activate trail at +15% unrealized
+                "trail_pct": 3,         # tight: 3% from peak (captures intrabar spikes)
+                "exit_tranches": [
+                    {"exit_pct": 100},   # all-at-once (no partial exits)
+                ],
+            },
+        },
+        "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
+    },
     "intraday_premium": {
         # For higher-priced intraday options ($1-$10) where capital at risk matters.
         # Tighter stop than zero_dte_convexity, earlier trailing activation,

@@ -9,7 +9,7 @@ Wraps the big_move_convexity ML pipeline:
                                        │
                     [signal fires] → select OTM option → OrderAction(BUY)
                                        │
-                    [on_fill] → spawn RiskManagerStrategy (intraday_convexity preset)
+                    [on_fill] → spawn RiskManagerStrategy (bmc_convexity preset)
 
 Configurable parameters are hot-reloadable via execution_config.
 
@@ -359,14 +359,14 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Parse risk config from frontend (flows through BMCConfig)
         self._risk_config = {
-            "preset": config.get("risk_preset", "intraday_convexity"),
+            "preset": config.get("risk_preset", "bmc_convexity"),
             "stop_loss_enabled": config.get("risk_stop_loss_enabled", False),
             "stop_loss_type": config.get("risk_stop_loss_type", "none"),
             "stop_loss_trigger_pct": config.get("risk_stop_loss_trigger_pct", -5.0),
             "trailing_enabled": config.get("risk_trailing_enabled", True),
-            "trailing_activation_pct": config.get("risk_trailing_activation_pct", 25),
-            "trailing_trail_pct": config.get("risk_trailing_trail_pct", 15),
-            "profit_targets_enabled": config.get("risk_profit_targets_enabled", True),
+            "trailing_activation_pct": config.get("risk_trailing_activation_pct", 15),
+            "trailing_trail_pct": config.get("risk_trailing_trail_pct", 3),
+            "profit_targets_enabled": config.get("risk_profit_targets_enabled", False),
             "profit_targets": config.get("risk_profit_targets", []),
         }
 
@@ -479,13 +479,13 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Update risk config from latest config (hot-reload support)
         self._risk_config = {
-            "preset": config.get("risk_preset", self._risk_config.get("preset", "intraday_convexity")),
+            "preset": config.get("risk_preset", self._risk_config.get("preset", "bmc_convexity")),
             "stop_loss_enabled": config.get("risk_stop_loss_enabled", self._risk_config.get("stop_loss_enabled", False)),
             "stop_loss_type": config.get("risk_stop_loss_type", self._risk_config.get("stop_loss_type", "none")),
             "stop_loss_trigger_pct": config.get("risk_stop_loss_trigger_pct", self._risk_config.get("stop_loss_trigger_pct", -5.0)),
             "trailing_enabled": config.get("risk_trailing_enabled", self._risk_config.get("trailing_enabled", True)),
-            "trailing_activation_pct": config.get("risk_trailing_activation_pct", self._risk_config.get("trailing_activation_pct", 25)),
-            "trailing_trail_pct": config.get("risk_trailing_trail_pct", self._risk_config.get("trailing_trail_pct", 15)),
+            "trailing_activation_pct": config.get("risk_trailing_activation_pct", self._risk_config.get("trailing_activation_pct", 15)),
+            "trailing_trail_pct": config.get("risk_trailing_trail_pct", self._risk_config.get("trailing_trail_pct", 3)),
             "profit_targets_enabled": config.get("risk_profit_targets_enabled", self._risk_config.get("profit_targets_enabled", True)),
             "profit_targets": config.get("risk_profit_targets", self._risk_config.get("profit_targets", [])),
         }
@@ -1817,7 +1817,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "premium_max": cfg.get("premium_max", 3.00),
         }
         # Include risk preset
-        risk_preset = cfg.get("risk_preset", "intraday_convexity")
+        risk_preset = cfg.get("risk_preset", "bmc_convexity")
         profile_keys["risk_preset"] = risk_preset
 
         # Machine ID: content hash
@@ -1825,7 +1825,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         profile_hash = f"ep:{hashlib.sha256(canon.encode()).hexdigest()[:12]}"
 
         # Human label
-        preset_short = {"zero_dte_convexity": "z0c", "intraday_convexity": "i1c", "intraday_premium": "inp", "conservative": "con", "custom": "cst"}.get(risk_preset, risk_preset[:3])
+        preset_short = {"zero_dte_convexity": "z0c", "intraday_convexity": "i1c", "bmc_convexity": "bmc", "intraday_premium": "inp", "conservative": "con", "custom": "cst"}.get(risk_preset, risk_preset[:3])
         threshold = int(profile_keys["signal_threshold"] * 100)
         budget = int(profile_keys["contract_budget_usd"])
         profile_label = f"ep:{preset_short}-t{threshold}-b{budget}"
