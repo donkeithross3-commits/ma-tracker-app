@@ -117,7 +117,7 @@ _DEFAULTS: dict[str, Any] = {
 # Cross-asset tickers for correlation features (Group C) and backfill.
 # Must include every ticker referenced by any TickerFeatureConfig.reference_tickers
 # in py_proj ticker_features.py (currently: UUP, SPY, TLT, DBB for metals).
-_CROSS_ASSET_TICKERS = ["QQQ", "IWM", "TLT", "GLD", "HYG", "UUP", "DBB"]
+_CROSS_ASSET_TICKERS = ["QQQ", "IWM", "TLT", "GLD", "HYG", "UUP", "USO", "DBB"]
 
 # Ticker-specific defaults for option selection, spreads, and Polygon channels.
 # These override _DEFAULTS when a ticker profile is applied in on_start().
@@ -136,8 +136,10 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "otm_target_pct": 1.5,            # ~$10 OTM on ~$680 → $0.30-$0.80 premium (1DTE)
         # Richness gate: require richness >= 1.5 (research: PF=6.36, all folds profitable)
         "straddle_richness_min": 1.5,
-        # VIX band: 14-25 optimal (below 14 = no vol; above 25 = 0% WR historically)
-        "vix_gate_min": 14,
+        # VIX band: 12-25 (2026-03-16: lowered from 14 to 12 — gate sweep on v5i
+        # shows vix_min=12 gives ALL 5 folds profitable including fold 0 at PF=1.25,
+        # +28% more signals (1575 vs 1230). vix_min=14 was killing profitable low-vol signals.)
+        "vix_gate_min": 12,
         "vix_gate_max": 25,
         "options_gate_enabled": True,     # enable for SPY (validated 2026-03-09)
     },
