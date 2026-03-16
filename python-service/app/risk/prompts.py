@@ -817,10 +817,14 @@ def build_delta_assessment_prompt(
                     if items:
                         sections.append(f"  {label}:")
                         for item in items:
-                            if "factor" in item:
+                            if isinstance(item, str):
+                                sections.append(f"    - {item}")
+                            elif isinstance(item, dict) and "factor" in item:
                                 sections.append(f"    - {item['factor']} ({item.get('weight', '?')}, {item.get('direction', '?')})")
-                            elif "anchor" in item:
+                            elif isinstance(item, dict) and "anchor" in item:
                                 sections.append(f"    - {item['anchor']}: ${item.get('value', '?')}")
+                            else:
+                                sections.append(f"    - {item}")
         sections.append(f"  Summary: {prev_assessment.get('deal_summary', 'N/A')}")
         # Include previous disagreements so AI can flag new vs persisting
         prev_disagreements = ai_resp.get("production_disagreements", []) if isinstance(ai_resp, dict) else []

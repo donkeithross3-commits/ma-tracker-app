@@ -239,9 +239,11 @@ def _call_claude_cli(
         elapsed_ms = int((time.monotonic() - t0) * 1000)
 
         if result.returncode != 0:
+            # Log both stderr AND stdout — CLI may put errors in stdout as JSON
+            error_detail = result.stderr[:500] or result.stdout[:500] or "(no output)"
             logger.warning(
                 "CLI call failed for %s (exit %d): %s",
-                ticker, result.returncode, result.stderr[:300],
+                ticker, result.returncode, error_detail,
             )
             return None
 
