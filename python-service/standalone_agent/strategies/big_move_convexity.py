@@ -1723,17 +1723,17 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 self._last_signal["suppressed"] = f"ask_exceeds_budget (ask ${opt_ask:.2f} > cap ${max_affordable_premium:.2f})"
             return []
 
-        # ── Re-size qty using the actual limit price ──
-        # The initial qty estimate used a midpoint premium. Now that we have the
-        # real market price, re-compute to fill the budget properly.
-        # e.g. $150 budget / ($0.20 ask * 100) = 7 contracts, not 1.
-        old_qty = qty
-        qty = min(max_contracts, max(1, int(budget / (limit_price * 100))))
-        if qty != old_qty:
-            logger.info(
-                "Re-sized qty: %d → %d (limit=$%.2f, budget=$%.0f, max=%d)",
-                old_qty, qty, limit_price, budget, max_contracts,
-            )
+        # ── Qty per entry: intentionally 1 contract ──
+        # The budget ($150) is a CEILING (can we afford this option?), not a
+        # TARGET (fill the budget every time). Buying 1 contract per entry is
+        # correct because signal persistence is the edge:
+        #   Entry 1: PF=0.59 (losing), Entry 3+: PF=3.84+ (winning)
+        # Buying 5 contracts on entry 1 would 5x our exposure to the weakest
+        # signal. Instead, each 15-min entry adds 1 contract, naturally
+        # scaling into moves that persist. The budget ensures we CAN buy a
+        # $1.50 option when that's what the model picks.
+        contracts_per_entry = cfg.get("contracts_per_entry", 1)
+        qty = min(max_contracts, max(1, contracts_per_entry))
 
         # Attach option selection details to pending lineage (WS2)
         if self._pending_lineage is not None:
