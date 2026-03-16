@@ -1351,6 +1351,9 @@ class RiskAssessmentEngine:
 
                 # Smart model routing based on significance
                 routed_model = get_model_for_significance(significance.value)
+                # Guard: if we're in the API bucket, "reuse" isn't valid — use full model
+                if routed_model == "reuse":
+                    routed_model = get_model("full_assessment")
 
                 strategy = "full"
                 assessment = None
