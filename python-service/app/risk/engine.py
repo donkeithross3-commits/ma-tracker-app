@@ -1250,7 +1250,8 @@ class RiskAssessmentEngine:
                 logger.error("Failed to collect context for %s: %s", ticker, e, exc_info=True)
 
         # --- Budget pre-check (after we know how many API calls are needed) ---
-        if api_bucket:
+        # Skip budget check when using CLI — CLI uses Max subscription ($0 marginal cost)
+        if api_bucket and not USE_CLI_ASSESSMENT:
             try:
                 from .budget import check_budget, DEFAULT_COST_PER_DEAL
                 estimated_run_cost = len(api_bucket) * DEFAULT_COST_PER_DEAL
