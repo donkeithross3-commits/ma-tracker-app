@@ -322,21 +322,23 @@ class DealIdentifier:
             f"(dropped {len(all_clusters) - len(strong_clusters)} weak clusters)"
         )
 
-        # Step 4: Resolve metadata (batched to respect rate limits)
+        # Step 4: Resolve metadata SEQUENTIALLY to respect SEC rate limits.
+        # SEC's data.sec.gov enforces 10 req/sec strictly. asyncio.gather
+        # fires all requests simultaneously which causes 429s. Sequential
+        # with 0.2s delay = ~5 req/sec, safe margin.
         if resolve_metadata:
+            # First load the ticker map (one request, covers most CIKs)
+            await self.resolver.load_ticker_map()
+
             unique_ciks = {c.target_cik for c in strong_clusters}
-            logger.info(f"Resolving metadata for {len(unique_ciks)} unique CIKs")
+            logger.info(f"Resolving metadata for {len(unique_ciks)} unique CIKs (sequential)")
 
             cik_list = list(unique_ciks)
-            for i in range(0, len(cik_list), batch_size):
-                batch = cik_list[i:i + batch_size]
-                await asyncio.gather(
-                    *[self.resolve_metadata(cik) for cik in batch]
-                )
-                if i + batch_size < len(cik_list):
+            for i, cik in enumerate(cik_list):
+                await self.resolve_metadata(cik)
+                if (i + 1) % 100 == 0:
                     logger.info(
-                        f"Metadata resolution: {min(i + batch_size, len(cik_list))}"
-                        f"/{len(cik_list)} CIKs"
+                        f"Metadata resolution: {i + 1}/{len(cik_list)} CIKs"
                     )
 
         # Step 5: Build identified deals
