@@ -54,7 +54,7 @@ class DealEnricher:
 
     def __init__(self):
         self.http_client: Optional[httpx.AsyncClient] = None
-        self.cli_model = os.environ.get("CLI_MODEL", "sonnet")
+        self.cli_model = os.environ.get("CLI_MODEL", "opus")
         self.cli_effort = os.environ.get("CLI_EFFORT_LEVEL", "medium")
 
     async def _get_http(self) -> httpx.AsyncClient:
