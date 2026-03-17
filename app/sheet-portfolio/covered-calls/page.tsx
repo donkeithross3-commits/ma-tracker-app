@@ -53,13 +53,13 @@ export default function CoveredCallsPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [groupByTicker, setGroupByTicker] = useState(true);
 
-  const scan = useCallback(async () => {
+  const doScan = useCallback(async (yieldPct: number, oi: number) => {
     setLoading(true);
     setError(null);
     try {
       const qs = new URLSearchParams({
-        min_yield: (minYield / 100).toString(),
-        min_liquidity: minOI.toString(),
+        min_yield: (yieldPct / 100).toString(),
+        min_liquidity: oi.toString(),
       });
       const resp = await fetch(`/api/sheet-portfolio/risk/covered-calls?${qs}`, {
         method: "POST",
@@ -75,10 +75,12 @@ export default function CoveredCallsPage() {
     } finally {
       setLoading(false);
     }
-  }, [minYield, minOI]);
+  }, []);
 
-  // Auto-scan on page load
-  useEffect(() => { scan(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const scan = useCallback(() => doScan(minYield, minOI), [doScan, minYield, minOI]);
+
+  // Auto-scan on page load with 0/0 defaults
+  useEffect(() => { doScan(0, 0); }, [doScan]);
 
   // Sort and optionally group by ticker (best per ticker)
   const sorted = useMemo(() => {
