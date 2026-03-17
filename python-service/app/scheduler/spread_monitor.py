@@ -146,8 +146,8 @@ class SpreadMonitor:
             if not deal_price or not live_price or deal_price == 0:
                 continue
 
-            # Compute spread: (deal_price - live_price) / live_price * 100
-            spread = (deal_price - live_price) / live_price * 100.0
+            # Compute spread: (deal_price - live_price) / deal_price * 100
+            spread = (deal_price - live_price) / deal_price * 100.0
 
             old_spread = self.last_spreads.get(ticker)
             self.last_spreads[ticker] = spread

@@ -113,7 +113,7 @@ export function SpreadHistoryChart({ dealId, ticker, dealPrice, announcedDate }:
       // Compute spread for each bar
       const points: SpreadPoint[] = bars.map((bar) => {
         const dateStr = new Date(bar.time * 1000).toISOString().split("T")[0];
-        const spreadPct = ((dealPrice - bar.close) / bar.close) * 100;
+        const spreadPct = dealPrice > 0 ? ((dealPrice - bar.close) / dealPrice) * 100 : 0;
         return {
           date: dateStr,
           close: bar.close,

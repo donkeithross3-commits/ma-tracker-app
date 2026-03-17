@@ -263,7 +263,7 @@ async def scan_deal(deal: DealRequest):
         current_price = underlying_data['price']
 
         # Calculate spread
-        spread_pct = ((deal_input.total_deal_value - current_price) / current_price) * 100
+        spread_pct = ((deal_input.total_deal_value - current_price) / deal_input.total_deal_value) * 100 if deal_input.total_deal_value else 0
 
         # Fetch option chain - use deal close date to select appropriate expirations
         logger.info(f"Fetching option chain for {deal.ticker}")

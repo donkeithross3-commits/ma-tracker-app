@@ -163,8 +163,9 @@ export async function GET(
         }
       }
 
-      const spreadPct =
-        ((effectiveDealPrice - bar.c) / bar.c) * 100;
+      const spreadPct = effectiveDealPrice > 0
+        ? ((effectiveDealPrice - bar.c) / effectiveDealPrice) * 100
+        : 0;
 
       return {
         date: dateStr,
