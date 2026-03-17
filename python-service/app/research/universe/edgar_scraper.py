@@ -37,11 +37,13 @@ MA_FORM_TYPES: Set[str] = {
     "SC TO-T/A",    # Amendment
     "SC TO-I",      # Issuer tender offer
     "SC TO-I/A",
-    # Target responses
+    # Target responses (SEC uses both hyphenated and non-hyphenated forms)
     "SC 14D9",      # Solicitation/recommendation statement
     "SC 14D9/A",
-    "SC 14D-9",     # Alternate formatting
+    "SC 14D-9",     # Alternate formatting (with hyphen)
     "SC 14D-9/A",
+    "SC14D9",       # No space variant
+    "SC14D9/A",
     # Proxy statements
     "DEFM14A",      # Definitive merger proxy
     "PREM14A",      # Preliminary merger proxy
@@ -204,7 +206,9 @@ class EdgarMasterIndexScraper:
                     continue
 
                 # Filter for M&A form types
-                if form_type not in MA_FORM_TYPES:
+                # Normalize form type: SEC uses both "SC 14D9" and "SC 14D-9"
+                normalized_form = form_type.replace("14D-9", "14D9")
+                if normalized_form not in MA_FORM_TYPES and form_type not in MA_FORM_TYPES:
                     continue
 
                 # Parse date
@@ -214,23 +218,17 @@ class EdgarMasterIndexScraper:
                     continue
 
                 # Extract accession number from filename
-                # Filename format: edgar/data/{CIK}/{ACCESSION_NO_DASHES}/{filename}
-                accession_match = re.search(r"edgar/data/\d+/(\d{10}-\d{2}-\d{6})/", filename)
+                # Actual format: edgar/data/{CIK}/{ACCESSION}.txt
+                # e.g., edgar/data/1000045/0000950170-24-003542.txt
+                accession_match = re.search(
+                    r"edgar/data/\d+/(\d{10}-\d{2}-\d{6})", filename
+                )
                 if not accession_match:
-                    # Try alternate: accession number without dashes in path
-                    acc_match2 = re.search(r"edgar/data/\d+/(\d+)/", filename)
-                    if acc_match2:
-                        raw = acc_match2.group(1)
-                        if len(raw) == 18:
-                            accession_number = f"{raw[:10]}-{raw[10:12]}-{raw[12:]}"
-                        else:
-                            continue
-                    else:
-                        continue
-                else:
-                    accession_number = accession_match.group(1)
+                    continue
 
-                # Extract just the filename part
+                accession_number = accession_match.group(1)
+
+                # Extract just the filename part (the .txt file)
                 doc_filename = filename.split("/")[-1] if "/" in filename else filename
 
                 filing = RawFiling(

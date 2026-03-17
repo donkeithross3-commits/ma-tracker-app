@@ -364,7 +364,7 @@ class DealIdentifier:
         strong_types = {
             "DEFM14A", "PREM14A", "DEFM14C",
             "SC TO-T", "SC TO-T/A",
-            "SC 14D9", "SC 14D9/A", "SC 14D-9", "SC 14D-9/A",
+            "SC 14D9", "SC 14D9/A", "SC 14D-9", "SC 14D-9/A", "SC14D9", "SC14D9/A",
             "S-4", "F-4",
         }
 
