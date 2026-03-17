@@ -1057,6 +1057,9 @@ async def scan_covered_calls(
                     "downside_cushion": opt.bid / current_price if current_price > 0 else 0,
                     "breakeven": opp.breakeven,
                     "days_to_expiry": (datetime.strptime(opt.expiry, "%Y%m%d") - datetime.now()).days if opt.expiry else 0,
+                    "days_to_close": (close_dt - datetime.now()).days,
+                    "close_date": close_dt.strftime("%Y-%m-%d"),
+                    "expires_before_close": datetime.strptime(opt.expiry, "%Y%m%d") <= close_dt if opt.expiry else False,
                     "notes": opp.notes,
                 })
 

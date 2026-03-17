@@ -46,6 +46,9 @@ export interface CoveredCallResult {
   static_return: number;
   implied_vol: number | null;
   days_to_expiry: number;
+  days_to_close: number;
+  close_date: string;
+  expires_before_close: boolean;
   open_interest: number;
   volume: number;
   bid: number;

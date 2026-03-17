@@ -237,8 +237,9 @@ export default function CoveredCallsPage() {
                     <Th align="right">Stock Px</Th>
                     <Th align="right">Deal Px</Th>
                     <Th align="right">Strike</Th>
-                    <Th align="left">Expiry</Th>
-                    <Th align="right">DTE</Th>
+                    <Th align="left" onClick={() => toggleSort("days_to_expiry")}>
+                      Expiry{sortIndicator("days_to_expiry")}
+                    </Th>
                     <Th align="right" onClick={() => toggleSort("premium")}>
                       Premium{sortIndicator("premium")}
                     </Th>
@@ -278,8 +279,23 @@ export default function CoveredCallsPage() {
                       <td className="py-1.5 px-2 text-right font-mono">{fmtDollar(r.current_price)}</td>
                       <td className="py-1.5 px-2 text-right font-mono">{fmtDollar(r.deal_price)}</td>
                       <td className="py-1.5 px-2 text-right font-mono">{fmtDollar(r.strike)}</td>
-                      <td className="py-1.5 px-2 font-mono text-gray-300">{formatExpiry(r.expiry)}</td>
-                      <td className="py-1.5 px-2 text-right font-mono text-gray-400">{r.days_to_expiry}d</td>
+                      <td className="py-1.5 px-2 font-mono text-gray-300 whitespace-nowrap">
+                        {formatExpiry(r.expiry)}
+                        <span className="text-gray-500 ml-1">({r.days_to_expiry}d)</span>
+                        {r.expires_before_close != null && (
+                          <span className={`ml-1 text-[9px] px-1 py-0.5 rounded ${
+                            r.expires_before_close
+                              ? "bg-green-500/15 text-green-400"
+                              : "bg-yellow-500/15 text-yellow-400"
+                          }`}
+                            title={r.expires_before_close
+                              ? `Expires before deal close (${r.close_date}) — option likely expires worthless, you keep premium and tender`
+                              : `Expires after deal close (${r.close_date}) — assignment risk if deal closes early`}
+                          >
+                            {r.expires_before_close ? "pre" : "post"}
+                          </span>
+                        )}
+                      </td>
                       <td className="py-1.5 px-2 text-right font-mono text-green-400">{fmtDollar(r.premium)}</td>
                       <td className={`py-1.5 px-2 text-right font-mono font-bold ${yieldColor(r.annualized_yield)}`}>
                         {fmtPctBold(r.annualized_yield)}
