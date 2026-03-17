@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import Link from "next/link";
 import type { CoveredCallResult, CoveredCallsResponse } from "@/types/ma-options";
 
@@ -47,8 +47,8 @@ export default function CoveredCallsPage() {
   const [data, setData] = useState<CoveredCallsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [minYield, setMinYield] = useState(5);
-  const [minOI, setMinOI] = useState(10);
+  const [minYield, setMinYield] = useState(0);
+  const [minOI, setMinOI] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("annualized_yield");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [groupByTicker, setGroupByTicker] = useState(true);
@@ -76,6 +76,9 @@ export default function CoveredCallsPage() {
       setLoading(false);
     }
   }, [minYield, minOI]);
+
+  // Auto-scan on page load
+  useEffect(() => { scan(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sort and optionally group by ticker (best per ticker)
   const sorted = useMemo(() => {
@@ -282,18 +285,25 @@ export default function CoveredCallsPage() {
                       <td className="py-1.5 px-2 font-mono text-gray-300 whitespace-nowrap">
                         {formatExpiry(r.expiry)}
                         <span className="text-gray-500 ml-1">({r.days_to_expiry}d)</span>
-                        {r.expires_before_close != null && (
-                          <span className={`ml-1 text-[9px] px-1 py-0.5 rounded ${
-                            r.expires_before_close
-                              ? "bg-green-500/15 text-green-400"
-                              : "bg-yellow-500/15 text-yellow-400"
-                          }`}
-                            title={r.expires_before_close
-                              ? `Expires before deal close (${r.close_date}) — option likely expires worthless, you keep premium and tender`
-                              : `Expires after deal close (${r.close_date}) — assignment risk if deal closes early`}
-                          >
-                            {r.expires_before_close ? "pre" : "post"}
-                          </span>
+                        {r.days_to_close != null && (
+                          (() => {
+                            const diff = r.days_to_close - r.days_to_expiry;
+                            const absDiff = Math.abs(diff);
+                            const isPre = r.expires_before_close;
+                            return (
+                              <span className={`ml-1 text-[9px] px-1 py-0.5 rounded ${
+                                isPre
+                                  ? "bg-green-500/15 text-green-400"
+                                  : "bg-yellow-500/15 text-yellow-400"
+                              }`}
+                                title={isPre
+                                  ? `Expires ${absDiff}d before deal close (${r.close_date}) — option likely expires worthless, you keep premium and tender`
+                                  : `Expires ${absDiff}d after deal close (${r.close_date}) — assignment risk if deal closes early`}
+                              >
+                                {isPre ? `${absDiff}d pre` : `${absDiff}d post`}
+                              </span>
+                            );
+                          })()
                         )}
                       </td>
                       <td className="py-1.5 px-2 text-right font-mono text-green-400">{fmtDollar(r.premium)}</td>
