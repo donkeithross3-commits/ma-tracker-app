@@ -79,7 +79,7 @@ async def _get_active_deals(pool) -> Dict[str, str]:
         if not snap:
             return {}
         rows = await conn.fetch(
-            """SELECT sr.ticker, COALESCE(sd.target_name, sr.ticker) AS company_name
+            """SELECT sr.ticker, COALESCE(sd.target, sr.ticker) AS company_name
                FROM sheet_rows sr
                LEFT JOIN sheet_deal_details sd ON sr.ticker = sd.ticker
                WHERE sr.snapshot_id = $1 AND sr.ticker IS NOT NULL
