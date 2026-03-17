@@ -234,6 +234,8 @@ class IBDataAgent:
         self._user_disconnect = False
         # Zombie gateway detection: connected but all data farms DOWN
         self._farms_down_since: Optional[float] = None
+        # Shared Polygon WS infrastructure for BMC strategies
+        self._shared_polygon_infra = None
         
     def connect_to_ib(self) -> bool:
         """Connect to IB TWS. Tries configured port first; on failure tries the other (7496/7497)
@@ -1756,12 +1758,34 @@ class IBDataAgent:
         if to_load and len(to_load) > 1:
             shared_bootstrap = await self._shared_bootstrap_all_tickers(to_load)
 
+        # ── Create shared Polygon WS infrastructure for BMC strategies ──
+        # One WS connection + data store for all strategies instead of N connections.
+        bmc_count = sum(1 for c in to_load if c.get("strategy_type", c.get("config", {}).get("_strategy_type", "")) == "big_move_convexity"
+                        or c.get("strategy_id", "").startswith("bmc_"))
+        if bmc_count >= 2 and not self._shared_polygon_infra:
+            try:
+                from strategies.big_move_convexity import SharedPolygonInfra
+                use_delayed = any(c.get("config", {}).get("use_delayed_data", False) for c in to_load)
+                self._shared_polygon_infra = SharedPolygonInfra(use_delayed=use_delayed)
+                self._shared_polygon_infra.start()
+                # Inject bootstrap data into shared data store ONCE
+                if shared_bootstrap:
+                    self._shared_polygon_infra.inject_bootstrap(shared_bootstrap)
+                logger.info("Created SharedPolygonInfra for %d BMC strategies", bmc_count)
+            except Exception:
+                logger.exception("Failed to create SharedPolygonInfra — falling back to per-strategy")
+                self._shared_polygon_infra = None
+
         # ── Pass 2: load strategies in parallel ──
         if to_load:
-            # Inject shared bootstrap data into each strategy's config
+            # Inject shared bootstrap data and shared Polygon infra into each strategy's config
             if shared_bootstrap:
                 for cfg in to_load:
                     cfg.setdefault("config", {})["_shared_bootstrap"] = shared_bootstrap
+            if self._shared_polygon_infra:
+                for cfg in to_load:
+                    if cfg.get("strategy_id", "").startswith("bmc_"):
+                        cfg.setdefault("config", {})["_shared_polygon_infra"] = self._shared_polygon_infra
 
             await self._send_boot_phase(
                 "strategies_loading",
@@ -1963,6 +1987,15 @@ class IBDataAgent:
         self.engine_config_store.clear()
         self.execution_engine._auto_restart_paused = False
         self.execution_engine.stop()
+
+        # Force-shutdown shared Polygon WS (safety net — strategies release on stop,
+        # but force-shutdown ensures cleanup even if a strategy's on_stop fails)
+        if self._shared_polygon_infra is not None:
+            try:
+                self._shared_polygon_infra.shutdown()
+            except Exception:
+                logger.debug("Error shutting down SharedPolygonInfra", exc_info=True)
+            self._shared_polygon_infra = None
 
         # Push a final execution_telemetry with running=False so the relay cache
         # is updated immediately.  Without this, the stale cached telemetry
@@ -2246,12 +2279,19 @@ class IBDataAgent:
             "ticker_budget": ticker_budget,
         }
 
+        # Inject shared Polygon infra if available (new ticker joins existing shared WS)
+        if self._shared_polygon_infra and strategy_id.startswith("bmc_"):
+            config["_shared_polygon_infra"] = self._shared_polygon_infra
+
         # ── Directional expansion: split into UP/DOWN if both models exist ──
         if config.get("ticker") and not config.get("model_version"):
             expanded = self._expand_directional_strategies(strat_cfg)
             if expanded:
                 results = []
                 for exp_cfg in expanded:
+                    # Propagate shared infra to expanded configs
+                    if self._shared_polygon_infra:
+                        exp_cfg.setdefault("config", {})["_shared_polygon_infra"] = self._shared_polygon_infra
                     exp_result = await self._load_single_strategy(exp_cfg)
                     results.append(exp_result)
                 result = {
@@ -3191,8 +3231,10 @@ class IBDataAgent:
                 # Only persist entry strategies, not risk managers
                 if sid.startswith("bmc_risk_"):
                     continue
-                # Build a copy of config so we can update model_version to current
-                persisted_config = dict(state.config)
+                # Build a copy of config so we can update model_version to current.
+                # Strip non-serializable internal keys (shared infra, bootstrap data).
+                persisted_config = {k: v for k, v in state.config.items()
+                                    if not k.startswith("_shared_")}
                 # Sync config.model_version with the CURRENTLY loaded model.
                 # Without this, auto-restart reloads a stale model_version from
                 # the original directional expansion, then swap_model fixes it --

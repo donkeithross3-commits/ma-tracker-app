@@ -232,6 +232,202 @@ def _get_option_trading_class(ticker: str, expiry_date) -> str:
     return ""
 
 
+class SharedPolygonInfra:
+    """Shared Polygon WS + data pipeline for all BMC strategies.
+
+    Instead of each strategy creating its own PolygonWSClient + LiveDataStore +
+    BarAccumulator (N strategies × identical channels = N WS connections),
+    this class provides a single shared instance that all strategies read from.
+
+    Lifecycle is ref-counted: strategies call acquire() on start and release()
+    on stop.  The WS connection shuts down only when the last strategy releases.
+    """
+
+    def __init__(self, *, use_delayed: bool = False) -> None:
+        self._ref_count = 0
+        self._lock = threading.Lock()
+        self._started = False
+        self._shutdown_requested = False
+
+        # Shared components (created in start())
+        self.data_store = None
+        self.bar_accumulator = None
+        self.polygon_provider = None
+        self.polygon_client = None
+        self.last_bar_update_ts: float = 0.0
+
+        self._ws_thread: Optional[threading.Thread] = None
+        self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._use_delayed = use_delayed
+        self._subscribed_tickers: set[str] = set()
+        self._polygon_feed_dead = False
+
+    def start(self) -> None:
+        """Create data store, bar accumulator, Polygon WS client, and start WS thread."""
+        if self._started:
+            return
+
+        from big_move_convexity.live.data_store import LiveDataStore
+        from big_move_convexity.bars.bar_accumulator import BarAccumulator
+        from big_move_convexity.dpal.polygon_ws import PolygonWebSocketProvider
+        from big_move_convexity.dpal.polygon_ws_client import PolygonWSClient
+
+        self.data_store = LiveDataStore(max_bars_per_type=10000)
+        self.bar_accumulator = BarAccumulator(
+            self.data_store,
+            resolutions=["time_5s", "time_15s", "time_1m"],
+        )
+
+        polygon_api_key = os.environ.get("POLYGON_API_KEY", "")
+        if not polygon_api_key:
+            logger.error("POLYGON_API_KEY not set — shared Polygon WS will not connect")
+
+        self.polygon_provider = PolygonWebSocketProvider(api_key=polygon_api_key)
+        self.polygon_client = PolygonWSClient(
+            self.polygon_provider,
+            use_delayed=self._use_delayed,
+        )
+
+        # Wire shared callback for all equity quotes
+        def _on_equity_quote(quote):
+            try:
+                if self.bar_accumulator is not None:
+                    ts_ns = int(quote.provenance.source_timestamp * 1_000_000_000) if quote.provenance else int(time.time() * 1_000_000_000)
+                    self.bar_accumulator.on_quote(
+                        quote.ticker, quote.bid, quote.ask,
+                        quote.bid_size, quote.ask_size, ts_ns,
+                    )
+                    if quote.last_trade and quote.last_trade > 0:
+                        self.bar_accumulator.on_trade(
+                            quote.ticker, quote.last_trade,
+                            quote.last_size or 1, ts_ns,
+                        )
+                    self.last_bar_update_ts = time.time()
+                if self.data_store is not None:
+                    self.data_store.update_equity_quote(quote.ticker, quote)
+            except Exception:
+                logger.debug("Error in shared equity quote callback", exc_info=True)
+
+        self._equity_callback = _on_equity_quote
+        self._started = True
+        logger.info("SharedPolygonInfra created (delayed=%s)", self._use_delayed)
+
+    def acquire(self, tickers: list[str]) -> None:
+        """Register a strategy's ticker needs. Starts WS thread on first acquire."""
+        with self._lock:
+            self._ref_count += 1
+            new_tickers = set(tickers) - self._subscribed_tickers
+            if new_tickers:
+                for t in new_tickers:
+                    _run_async_in_thread(
+                        self.polygon_provider.subscribe_equity(t, self._equity_callback)
+                    )
+                self._subscribed_tickers |= new_tickers
+
+            # Start WS thread on first acquire
+            if self._ws_thread is None or not self._ws_thread.is_alive():
+                self._start_ws_thread()
+
+            logger.info(
+                "SharedPolygonInfra.acquire: ref_count=%d, tickers=%s (new=%s)",
+                self._ref_count, sorted(self._subscribed_tickers), sorted(new_tickers),
+            )
+
+    def release(self) -> None:
+        """Decrement ref count. Shutdown WS when last strategy releases."""
+        with self._lock:
+            self._ref_count = max(0, self._ref_count - 1)
+            logger.info("SharedPolygonInfra.release: ref_count=%d", self._ref_count)
+            if self._ref_count == 0:
+                self._do_shutdown()
+
+    def shutdown(self) -> None:
+        """Force shutdown regardless of ref count (used by execution stop)."""
+        with self._lock:
+            self._ref_count = 0
+            self._do_shutdown()
+
+    def inject_bootstrap(self, shared_data: dict) -> None:
+        """Inject shared bootstrap data (daily features, regime, bars) into the data store."""
+        if not self.data_store or not shared_data:
+            return
+        from datetime import date as _date_mod
+        today_str = _date_mod.today().isoformat()
+        self.data_store.set_daily_features(today_str, shared_data["daily_features"])
+        self.data_store.set_regime(shared_data["regime"])
+        for store_key, bars in shared_data.get("intraday_bars", {}).items():
+            self.data_store.inject_bars(store_key, bars)
+        logger.info("SharedPolygonInfra: bootstrap data injected")
+
+    def get_status(self) -> dict:
+        """Status dict for telemetry."""
+        if self.polygon_client is not None:
+            status = self.polygon_client.get_status()
+        else:
+            status = {"connected": False}
+        status["shared"] = True
+        status["ref_count"] = self._ref_count
+        status["subscribed_tickers"] = sorted(self._subscribed_tickers)
+        return status
+
+    def _start_ws_thread(self) -> None:
+        """Start the Polygon WS background thread."""
+        self._shutdown_requested = False
+        channels = []
+        for t in sorted(self._subscribed_tickers):
+            channels.extend([f"T.{t}", f"Q.{t}"])
+
+        def _ws_thread_main():
+            MAX_RESTARTS = 10
+            restart_count = 0
+            while not self._shutdown_requested and restart_count < MAX_RESTARTS:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                self._ws_loop = loop
+                try:
+                    loop.run_until_complete(self.polygon_client.subscribe(channels))
+                    loop.run_until_complete(self.polygon_client.connect_and_run())
+                except Exception:
+                    restart_count += 1
+                    logger.exception(
+                        "Shared Polygon WS thread crashed (restart %d/%d)",
+                        restart_count, MAX_RESTARTS,
+                    )
+                    time.sleep(min(5.0 * restart_count, 30.0))
+                finally:
+                    loop.close()
+            if restart_count >= MAX_RESTARTS:
+                logger.error("Shared Polygon WS exhausted %d restarts — feed is DOWN", MAX_RESTARTS)
+                self._polygon_feed_dead = True
+
+        self._ws_thread = threading.Thread(
+            target=_ws_thread_main,
+            name="bmc-polygon-ws-shared",
+            daemon=True,
+        )
+        self._ws_thread.start()
+        logger.info("Shared Polygon WS thread started (%d channels)", len(channels))
+
+    def _do_shutdown(self) -> None:
+        """Internal shutdown — stop WS client and flush bars."""
+        self._shutdown_requested = True
+        if self.polygon_client is not None:
+            try:
+                if self._ws_loop is not None and self._ws_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        self.polygon_client.stop(), self._ws_loop
+                    )
+            except Exception:
+                logger.debug("Error stopping shared Polygon WS", exc_info=True)
+        if self.bar_accumulator is not None:
+            try:
+                self.bar_accumulator.flush_all()
+            except Exception:
+                logger.debug("Error flushing shared bars", exc_info=True)
+        self._started = False
+        logger.info("SharedPolygonInfra shutdown complete")
+
+
 class BigMoveConvexityStrategy(ExecutionStrategy):
     """Entry strategy for OTM 0DTE options on a configurable ticker.
 
@@ -325,6 +521,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._polygon_feed_dead: bool = False
         self._last_bar_update_ts: float = 0.0
 
+        # Shared Polygon infrastructure (set via config in on_start)
+        self._shared_polygon_infra: Optional[SharedPolygonInfra] = None
+
+    @property
+    def _effective_bar_update_ts(self) -> float:
+        """Last bar update timestamp — reads from shared infra if available."""
+        if self._shared_polygon_infra is not None:
+            return self._shared_polygon_infra.last_bar_update_ts
+        return self._last_bar_update_ts
+
     # ------------------------------------------------------------------
     # ExecutionStrategy interface
     # ------------------------------------------------------------------
@@ -371,6 +577,14 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         }
 
         try:
+            # Check for shared Polygon infrastructure (passed by agent for multi-strategy).
+            # Pop from ORIGINAL config dict (state.config) to avoid persisting non-serializable ref.
+            shared_infra = config.pop("_shared_polygon_infra", None)
+            if shared_infra is not None:
+                self._shared_polygon_infra = shared_infra
+            # Also remove from merged cfg (it was already spread in)
+            cfg.pop("_shared_polygon_infra", None)
+
             self._init_bmc_pipeline(cfg)
             self._start_polygon_ws(cfg)
             self._started = True
@@ -573,22 +787,27 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         logger.info("BigMoveConvexityStrategy[%s] stopping", self._ticker)
         self._shutdown_requested = True
 
-        # Stop Polygon WS
-        if self._polygon_client is not None:
-            try:
-                if self._ws_loop is not None and self._ws_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        self._polygon_client.stop(), self._ws_loop
-                    )
-            except Exception:
-                logger.debug("Error stopping Polygon WS", exc_info=True)
+        if self._shared_polygon_infra is not None:
+            # Shared mode: release ref count (WS shuts down when last strategy releases)
+            # Do NOT flush bars or stop WS — other strategies may still be reading
+            self._shared_polygon_infra.release()
+        else:
+            # Per-strategy mode: stop our own WS
+            if self._polygon_client is not None:
+                try:
+                    if self._ws_loop is not None and self._ws_loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            self._polygon_client.stop(), self._ws_loop
+                        )
+                except Exception:
+                    logger.debug("Error stopping Polygon WS", exc_info=True)
 
-        # Flush partial bars
-        if self._bar_accumulator is not None:
-            try:
-                self._bar_accumulator.flush_all()
-            except Exception:
-                logger.debug("Error flushing bars", exc_info=True)
+            # Flush partial bars (only safe when we own the bar accumulator)
+            if self._bar_accumulator is not None:
+                try:
+                    self._bar_accumulator.flush_all()
+                except Exception:
+                    logger.debug("Error flushing bars", exc_info=True)
 
         self._started = False
         logger.info(
@@ -656,9 +875,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         state["active_positions"] = self._active_positions
 
         # Polygon WS health (WS5)
-        state["polygon_feed_dead"] = self._polygon_feed_dead
-        state["polygon_data_age_s"] = round(time.time() - self._last_bar_update_ts, 1) if self._last_bar_update_ts > 0 else None
-        state["ws_thread_alive"] = self._ws_thread.is_alive() if self._ws_thread else False
+        if self._shared_polygon_infra is not None:
+            state["polygon_feed_dead"] = self._shared_polygon_infra._polygon_feed_dead
+            state["ws_thread_alive"] = (self._shared_polygon_infra._ws_thread.is_alive()
+                                        if self._shared_polygon_infra._ws_thread else False)
+            state["polygon_ws_shared"] = True
+        else:
+            state["polygon_feed_dead"] = self._polygon_feed_dead
+            state["ws_thread_alive"] = self._ws_thread.is_alive() if self._ws_thread else False
+            state["polygon_ws_shared"] = False
+        state["polygon_data_age_s"] = round(time.time() - self._effective_bar_update_ts, 1) if self._effective_bar_update_ts > 0 else None
 
         return state
 
@@ -880,14 +1106,18 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         from big_move_convexity.ml.model_registry import ModelRegistry
         from big_move_convexity.live.daily_bootstrap import DailyBootstrap
 
-        # Init data store
-        self._data_store = LiveDataStore(max_bars_per_type=10000)
-
-        # Init bar accumulator
-        self._bar_accumulator = BarAccumulator(
-            self._data_store,
-            resolutions=["time_5s", "time_15s", "time_1m"],
-        )
+        # Use shared data infrastructure if available (multi-strategy mode)
+        if self._shared_polygon_infra is not None and self._shared_polygon_infra.data_store is not None:
+            self._data_store = self._shared_polygon_infra.data_store
+            self._bar_accumulator = self._shared_polygon_infra.bar_accumulator
+            logger.info("BigMoveConvexityStrategy[%s] using shared data store + bar accumulator", self._ticker)
+        else:
+            # Per-strategy data store (fallback for add_ticker at runtime or single-strategy)
+            self._data_store = LiveDataStore(max_bars_per_type=10000)
+            self._bar_accumulator = BarAccumulator(
+                self._data_store,
+                resolutions=["time_5s", "time_15s", "time_1m"],
+            )
 
         # Load model from registry
         registry_path = cfg.get("model_registry_path", "")
@@ -984,11 +1214,16 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             self._top_feature_names = self._model.feature_names[:20]
 
         # -- Daily bootstrap + intraday backfill --
-        # If the agent pre-bootstrapped all tickers (parallel loading mode),
-        # inject the cached data directly. Otherwise fall back to per-strategy
-        # Polygon REST calls (sequential mode / add_ticker at runtime).
+        # If using shared infra, bootstrap is injected ONCE via SharedPolygonInfra
+        # (the agent handles this before strategy load). Skip per-strategy injection
+        # to avoid duplicate writes to the shared data store.
+        # If the agent pre-bootstrapped all tickers (parallel loading mode) WITHOUT
+        # shared infra, inject the cached data directly.
         shared = cfg.get("_shared_bootstrap")
-        if shared:
+        if self._shared_polygon_infra is not None:
+            # Shared infra mode: bootstrap already injected by agent
+            logger.info("BigMoveConvexityStrategy[%s] using shared bootstrap (via SharedPolygonInfra)", self._ticker)
+        elif shared:
             from datetime import date as _date_mod
             today_str = _date_mod.today().isoformat()
             self._data_store.set_daily_features(today_str, shared["daily_features"])
@@ -1023,7 +1258,26 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 logger.warning("Intraday backfill failed — will rely on WS bars only", exc_info=True)
 
     def _start_polygon_ws(self, cfg: dict) -> None:
-        """Start Polygon WS in a background thread."""
+        """Start Polygon WS in a background thread (or join shared infra)."""
+        # ── Shared mode: join the SharedPolygonInfra instead of creating our own ──
+        if self._shared_polygon_infra is not None:
+            infra = self._shared_polygon_infra
+            # Compute all tickers this strategy needs
+            all_ws_tickers = list(dict.fromkeys(
+                [self._ticker] + _CROSS_ASSET_TICKERS + (["SPY"] if "SPY" not in _CROSS_ASSET_TICKERS else [])
+            ))
+            # Acquire adds tickers + bumps ref count + starts WS if needed
+            infra.acquire(all_ws_tickers)
+            # Point strategy references to shared components for telemetry
+            self._polygon_client = infra.polygon_client
+            self._polygon_provider = infra.polygon_provider
+            logger.info(
+                "BigMoveConvexityStrategy[%s] joined shared Polygon WS (ref_count=%d)",
+                self._ticker, infra._ref_count,
+            )
+            return
+
+        # ── Per-strategy mode (fallback for add_ticker at runtime) ──
         from big_move_convexity.dpal.polygon_ws import PolygonWebSocketProvider
         from big_move_convexity.dpal.polygon_ws_client import PolygonWSClient
 
@@ -1038,54 +1292,41 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             try:
                 if self._bar_accumulator is not None:
                     ts_ns = int(quote.provenance.source_timestamp * 1_000_000_000) if quote.provenance else int(time.time() * 1_000_000_000)
-                    # Quotes carry bid/ask; feed as quote tick
                     self._bar_accumulator.on_quote(
                         quote.ticker, quote.bid, quote.ask,
                         quote.bid_size, quote.ask_size, ts_ns,
                     )
-                    # Also feed mid as trade tick for OHLCV (Polygon equity WS
-                    # dispatches both T and Q events through the same equity
-                    # callback; when the event is a trade the last_trade field
-                    # is populated)
                     if quote.last_trade and quote.last_trade > 0:
                         self._bar_accumulator.on_trade(
                             quote.ticker, quote.last_trade,
                             quote.last_size or 1, ts_ns,
                         )
-                    # Track last bar update for data freshness monitoring
                     self._last_bar_update_ts = time.time()
                 if self._data_store is not None:
                     self._data_store.update_equity_quote(quote.ticker, quote)
             except Exception:
                 logger.debug("Error in equity quote callback", exc_info=True)
 
-        # Subscribe primary ticker + all cross-asset tickers to the same
-        # callback. BarAccumulator handles multi-ticker natively via lazy
-        # per-(resolution, ticker) state.
         all_ws_tickers = list(dict.fromkeys([self._ticker] + _CROSS_ASSET_TICKERS))
         for ws_ticker in all_ws_tickers:
             _run_async_in_thread(
                 self._polygon_provider.subscribe_equity(ws_ticker, _on_equity_quote)
             )
 
-        # Build channel list: T (trades) + Q (quotes) for every subscribed ticker
         all_channels = []
         for ws_ticker in all_ws_tickers:
             all_channels.extend([f"T.{ws_ticker}", f"Q.{ws_ticker}"])
-        # Also include SPY if not already present
         if "SPY" not in all_ws_tickers:
             all_channels.extend(["T.SPY", "Q.SPY"])
             _run_async_in_thread(
                 self._polygon_provider.subscribe_equity("SPY", _on_equity_quote)
             )
 
-        # Create client
         self._polygon_client = PolygonWSClient(
             self._polygon_provider,
             use_delayed=cfg.get("use_delayed_data", False),
         )
 
-        # Start background thread with restart loop for resilience
         def _ws_thread_main():
             MAX_RESTARTS = 10
             restart_count = 0
@@ -1126,11 +1367,13 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
     ) -> List[OrderAction]:
         """Assemble features → predict → generate signal → maybe order."""
         # ── Data freshness gates (WS5) ──
-        if self._polygon_feed_dead:
+        _feed_dead = (self._shared_polygon_infra._polygon_feed_dead if self._shared_polygon_infra else self._polygon_feed_dead)
+        if _feed_dead:
             logger.warning("Polygon feed is dead — skipping decision cycle")
             return []
-        bar_age = time.time() - (self._last_bar_update_ts or 0)
-        if self._last_bar_update_ts > 0 and bar_age > 120:
+        _bar_ts = self._effective_bar_update_ts
+        bar_age = time.time() - (_bar_ts or 0)
+        if _bar_ts > 0 and bar_age > 120:
             logger.warning("Polygon data stale (%.0fs) — skipping decision cycle", bar_age)
             return []
 
