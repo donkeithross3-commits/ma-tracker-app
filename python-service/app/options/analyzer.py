@@ -232,18 +232,26 @@ class MergerArbAnalyzer:
 
         # --- Calculations ---
         premium = call_option.bid  # Use bid (what we'd actually receive)
+
+        # Net premium: the incremental gain vs just tendering at deal price.
+        # When strike < deal_price, getting called away means forfeiting
+        # (deal_price - strike) of deal proceeds, so subtract that from premium.
+        deal_price_gap = max(0, deal_price - call_option.strike)
+        net_premium = premium - deal_price_gap
+
         effective_basis = current_price - premium
         downside_cushion = (current_price - effective_basis) / current_price if current_price > 0 else 0
 
-        # Static return: premium / current_price (return if stock stays flat, option expires OTM)
-        static_return = premium / current_price if current_price > 0 else 0
+        # Static return: net premium / current_price
+        # This is the incremental return from selling the call vs simply holding to tender
+        static_return = net_premium / current_price if current_price > 0 else 0
 
         # If-called return: (strike - current_price + premium) / current_price
-        # This is the return if the stock is at or above the strike at expiry
+        # This is the total return if the stock is at or above the strike at expiry
         if_called_profit = (call_option.strike - current_price) + premium
         if_called_return = if_called_profit / current_price if current_price > 0 else 0
 
-        # Annualized premium yield (excludes stock appreciation already captured in deal IRR)
+        # Annualized premium yield (incremental yield over deal IRR)
         years_to_expiry = max(days_to_expiry, 1) / 365
         annualized_yield = static_return / years_to_expiry if years_to_expiry > 0 else 0
 
@@ -272,8 +280,9 @@ class MergerArbAnalyzer:
             probability_of_profit=prob_success,
             edge_vs_market=static_return,  # Use static return as edge metric
             notes=(
-                f"Sell {call_option.symbol} {call_option.strike} Call @ ${premium:.2f} bid | "
-                f"Static: {static_return:.2%}, If-called: {if_called_return:.2%}, "
+                f"Sell {call_option.symbol} {call_option.strike} Call @ ${premium:.2f} bid"
+                f"{f' (net ${net_premium:.2f} after ${deal_price_gap:.2f} gap)' if deal_price_gap > 0 else ''}"
+                f" | Static: {static_return:.2%}, If-called: {if_called_return:.2%}, "
                 f"Ann: {annualized_yield:.2%} | "
                 f"Basis: ${effective_basis:.2f}, Cushion: {downside_cushion:.2%}"
             ),

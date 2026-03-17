@@ -72,6 +72,30 @@ class TestAnalyzeCoveredCall:
         result = self.analyzer.analyze_covered_call(call, current_price=98.0)
         assert result is None
 
+    def test_net_premium_subtracts_deal_price_gap(self):
+        """When strike < deal_price, net premium = premium - (deal_price - strike)."""
+        # Deal price is $100, strike is $99 (within ±2% band)
+        call = make_option(strike=99, expiry="20260714", bid=3.0, ask=4.0,
+                           open_interest=50, symbol="ACME")
+        current_price = 95.0
+        result = self.analyzer.analyze_covered_call(call, current_price)
+        assert result is not None
+
+        # Net premium = 3.0 - (100 - 99) = 2.0
+        net_premium = call.bid - (100.0 - call.strike)
+        assert net_premium == pytest.approx(2.0)
+
+        # Static return (edge_vs_market) should use net premium
+        expected_static = net_premium / current_price
+        assert result.edge_vs_market == pytest.approx(expected_static, rel=1e-6)
+
+        # Annualized yield should also use net premium
+        expiry_date = datetime.strptime("20260714", "%Y%m%d")
+        days = (expiry_date - datetime.now()).days
+        years = max(days, 1) / 365
+        expected_ann = expected_static / years
+        assert result.annualized_return == pytest.approx(expected_ann, rel=1e-6)
+
     def test_rejects_strike_outside_band(self):
         """strike outside deal_price ± 2% should be rejected."""
         # Strike too high: 100 * 1.02 = 102, so 103 is outside
