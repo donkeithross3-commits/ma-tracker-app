@@ -498,12 +498,13 @@ class CompanyMetadataResolver:
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self.client is None:
+            # Do NOT set Host header — httpx sets it automatically from the URL.
+            # Hardcoding "data.sec.gov" breaks requests to www.sec.gov.
             self.client = httpx.AsyncClient(
                 timeout=30.0,
                 headers={
                     "User-Agent": SEC_USER_AGENT,
                     "Accept-Encoding": "gzip, deflate",
-                    "Host": "data.sec.gov",
                 },
                 follow_redirects=True,
             )
