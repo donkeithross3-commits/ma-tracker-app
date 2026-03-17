@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Link from "next/link";
 import * as Tabs from "@radix-ui/react-tabs";
 import { IBConnectionProvider } from "@/components/ma-options/IBConnectionContext";
 import type { ScannerDeal } from "@/types/ma-options";
@@ -45,6 +46,12 @@ export default function SheetPortfolioContent({ initialDeals }: SheetPortfolioCo
               >
                 Monitor
               </Tabs.Trigger>
+              <Link
+                href="/sheet-portfolio/covered-calls"
+                className="px-4 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-200 transition-colors border-b-2 border-transparent"
+              >
+                CC Screener
+              </Link>
             </Tabs.List>
           </div>
 
