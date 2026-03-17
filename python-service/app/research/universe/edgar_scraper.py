@@ -21,8 +21,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# SEC rate limit: 10 req/sec — we target 8 to be safe
-SEC_RATE_LIMIT_DELAY = 0.125  # 8 requests/sec
+# SEC rate limit: 10 req/sec — SEC enforces this strictly on data.sec.gov
+# Use 0.15s for master index (www.sec.gov) and 0.2s for submissions API (data.sec.gov)
+SEC_RATE_LIMIT_DELAY = 0.15
+SEC_DATA_API_DELAY = 0.2  # Slightly slower for data.sec.gov which is stricter
 
 # SEC requires a User-Agent with contact info
 SEC_USER_AGENT = os.environ.get(
@@ -55,9 +57,9 @@ MA_FORM_TYPES: Set[str] = {
     "S-4/A",
     "F-4",          # Foreign private issuer registration
     "F-4/A",
-    # Ownership / activist
-    "SC 13D",       # Beneficial ownership > 5% with intent
-    "SC 13D/A",
+    # NOTE: SC 13D excluded from initial scrape — too many filings (~100K+) that
+    # aren't directly M&A. They'll be linked later during enrichment for deals
+    # where activist ownership is relevant.
 }
 
 # Broader set for EFTS text search (includes 8-K which is too common for form-type filter)
@@ -560,39 +562,51 @@ class CompanyMetadataResolver:
 
         Returns dict with: name, tickers, sic, sicDescription, exchanges, stateOfIncorporation,
         ein, category, fiscalYearEnd, filings (recent + historical)
+
+        Includes retry logic for 429 Too Many Requests.
         """
         client = await self._get_client()
         padded = cik.zfill(10)
 
-        try:
-            await asyncio.sleep(SEC_RATE_LIMIT_DELAY)
-            response = await client.get(
-                f"https://data.sec.gov/submissions/CIK{padded}.json"
-            )
-            response.raise_for_status()
-            data = response.json()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await asyncio.sleep(SEC_DATA_API_DELAY)
+                response = await client.get(
+                    f"https://data.sec.gov/submissions/CIK{padded}.json"
+                )
+                response.raise_for_status()
+                data = response.json()
 
-            return {
-                "cik": padded,
-                "name": data.get("name", ""),
-                "tickers": data.get("tickers", []),
-                "sic": data.get("sic", ""),
-                "sic_description": data.get("sicDescription", ""),
-                "exchanges": data.get("exchanges", []),
-                "state": data.get("stateOfIncorporation", ""),
-                "category": data.get("category", ""),
-                "fiscal_year_end": data.get("fiscalYearEnd", ""),
-                "entity_type": data.get("entityType", ""),
-            }
+                return {
+                    "cik": padded,
+                    "name": data.get("name", ""),
+                    "tickers": data.get("tickers", []),
+                    "sic": data.get("sic", ""),
+                    "sic_description": data.get("sicDescription", ""),
+                    "exchanges": data.get("exchanges", []),
+                    "state": data.get("stateOfIncorporation", ""),
+                    "category": data.get("category", ""),
+                    "fiscal_year_end": data.get("fiscalYearEnd", ""),
+                    "entity_type": data.get("entityType", ""),
+                }
 
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                logger.warning(f"No SEC data for CIK {padded}")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    logger.warning(f"No SEC data for CIK {padded}")
+                    return None
+                if e.response.status_code == 429:
+                    backoff = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                    logger.warning(f"Rate limited on CIK {padded}, backing off {backoff}s")
+                    await asyncio.sleep(backoff)
+                    continue
+                raise
+            except Exception as e:
+                logger.error(f"Error fetching metadata for CIK {padded}: {e}")
                 return None
-            raise
-        except Exception as e:
-            logger.error(f"Error fetching metadata for CIK {padded}: {e}")
-            return None
+
+        logger.warning(f"Exhausted retries for CIK {padded}")
+        return None
 
     async def get_filings_for_cik(
         self,

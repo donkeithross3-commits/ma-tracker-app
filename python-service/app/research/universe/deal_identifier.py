@@ -288,7 +288,7 @@ class DealIdentifier:
         self,
         filings: List[RawFiling],
         resolve_metadata: bool = True,
-        batch_size: int = 20,
+        batch_size: int = 5,
     ) -> List[IdentifiedDeal]:
         """
         Main pipeline: group filings → cluster → classify → resolve → assign keys.
