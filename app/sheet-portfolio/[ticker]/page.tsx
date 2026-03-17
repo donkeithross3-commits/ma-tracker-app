@@ -482,13 +482,16 @@ export default function DealDetailPage() {
 
   if (!data) return null;
 
-  const { dashboard: dash, detail: d } = data;
+  const { dashboard: dash, detail: rawDetail } = data;
+  // Guard: if detail tab target doesn't match page ticker, its price data is for a different deal
+  const detailMatchesTicker = rawDetail?.target?.toUpperCase() === ticker.toUpperCase();
+  const d = rawDetail;
   const acquiror = d?.acquiror ?? dash?.acquiror ?? "";
   const category = d?.category ?? dash?.category ?? "";
-  const sheetTargetPrice = d?.target_current_price ?? dash?.current_price;
+  const sheetTargetPrice = (detailMatchesTicker ? d?.target_current_price : null) ?? dash?.current_price;
   const targetPrice = livePrice?.price ?? sheetTargetPrice;
   const targetPriceIsLive = livePrice?.price != null;
-  const dealPrice = d?.total_price_per_share ?? dash?.deal_price;
+  const dealPrice = (detailMatchesTicker ? d?.total_price_per_share : null) ?? dash?.deal_price;
   // Use paired sources: detail current_spread+spread_change, or dashboard gross_yield+price_change
   const spread = d?.current_spread ?? dash?.gross_yield ?? d?.deal_spread;
   const spreadChange = d?.current_spread != null ? d?.spread_change : dash?.price_change;
@@ -560,7 +563,7 @@ export default function DealDetailPage() {
                 <div className="text-xs text-gray-500">Deal Px</div>
                 <div className="font-mono font-semibold">{fmtPrice(dealPrice)}</div>
               </div>
-              {d?.acquiror_current_price != null && d.acquiror_current_price > 0 && (
+              {detailMatchesTicker && d?.acquiror_current_price != null && d.acquiror_current_price > 0 && (
                 <div>
                   <div className="text-xs text-gray-500">Acquiror Px</div>
                   <div className="font-mono font-semibold">{fmtPrice(d.acquiror_current_price)}</div>
