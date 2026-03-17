@@ -208,28 +208,38 @@ class DealIdentifier:
 
     # ---- Step 4: Resolve metadata ----
 
-    async def resolve_metadata(self, cik: str) -> dict:
-        """Resolve company metadata, with caching."""
+    async def resolve_metadata(self, cik: str, use_api: bool = False) -> dict:
+        """
+        Resolve company metadata, with caching.
+
+        When use_api=False (default), uses only the pre-loaded ticker map.
+        This avoids 429 rate limits from data.sec.gov. Full metadata
+        (SIC, exchange, entity type) can be enriched in a later pass.
+        """
         if cik in self._metadata_cache:
             return self._metadata_cache[cik]
 
-        metadata = await self.resolver.get_company_metadata(cik)
-        if metadata:
-            self._metadata_cache[cik] = metadata
-            return metadata
+        if use_api:
+            metadata = await self.resolver.get_company_metadata(cik)
+            if metadata:
+                self._metadata_cache[cik] = metadata
+                return metadata
 
-        # Fallback: try ticker map
-        ticker = await self.resolver.cik_to_ticker(cik)
-        fallback = {
-            "cik": cik,
-            "name": "",
-            "tickers": [ticker] if ticker else [],
+        # Use ticker map (pre-loaded, no API call)
+        ticker_map = await self.resolver.load_ticker_map()
+        padded = cik.zfill(10)
+        entry = ticker_map.get(padded)
+
+        result = {
+            "cik": padded,
+            "name": entry["name"] if entry else "",
+            "tickers": [entry["ticker"]] if entry and entry.get("ticker") else [],
             "sic": "",
             "sic_description": "",
             "exchanges": [],
         }
-        self._metadata_cache[cik] = fallback
-        return fallback
+        self._metadata_cache[padded] = result
+        return result
 
     # ---- Step 5: Generate deal_key ----
 
@@ -322,24 +332,28 @@ class DealIdentifier:
             f"(dropped {len(all_clusters) - len(strong_clusters)} weak clusters)"
         )
 
-        # Step 4: Resolve metadata SEQUENTIALLY to respect SEC rate limits.
-        # SEC's data.sec.gov enforces 10 req/sec strictly. asyncio.gather
-        # fires all requests simultaneously which causes 429s. Sequential
-        # with 0.2s delay = ~5 req/sec, safe margin.
+        # Step 4: Resolve metadata from the pre-loaded ticker map.
+        # The ticker map is a single GET to sec.gov/files/company_tickers.json
+        # that covers ~8K companies. Individual CIK lookups via data.sec.gov
+        # hit aggressive rate limits (429s even at 2 req/sec). Full metadata
+        # (SIC, exchange) can be enriched in a later pass.
         if resolve_metadata:
-            # First load the ticker map (one request, covers most CIKs)
+            # Load the ticker map (single request, covers most CIKs)
             await self.resolver.load_ticker_map()
 
             unique_ciks = {c.target_cik for c in strong_clusters}
-            logger.info(f"Resolving metadata for {len(unique_ciks)} unique CIKs (sequential)")
+            logger.info(f"Resolving metadata for {len(unique_ciks)} CIKs from ticker map")
 
-            cik_list = list(unique_ciks)
-            for i, cik in enumerate(cik_list):
-                await self.resolve_metadata(cik)
-                if (i + 1) % 100 == 0:
-                    logger.info(
-                        f"Metadata resolution: {i + 1}/{len(cik_list)} CIKs"
-                    )
+            resolved = 0
+            for cik in unique_ciks:
+                meta = await self.resolve_metadata(cik, use_api=False)
+                if meta.get("tickers"):
+                    resolved += 1
+
+            logger.info(
+                f"Ticker map resolution: {resolved}/{len(unique_ciks)} CIKs "
+                f"matched to tickers ({len(unique_ciks) - resolved} unmatched)"
+            )
 
         # Step 5: Build identified deals
         existing_keys: Set[str] = set()
