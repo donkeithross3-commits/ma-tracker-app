@@ -653,7 +653,13 @@ export default function PortfolioTab() {
                   Reset sort
                 </button>
               )}
-              <div className="ml-auto">
+              <div className="ml-auto flex items-center gap-2">
+                <Link
+                  href="/sheet-portfolio/covered-calls"
+                  className="text-xs px-2 py-1 rounded border border-cyan-700/50 text-cyan-400 hover:bg-cyan-400/10 transition-colors"
+                >
+                  CC Screener
+                </Link>
                 <input
                   type="text"
                   placeholder="Filter..."
