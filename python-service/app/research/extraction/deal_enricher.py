@@ -70,12 +70,72 @@ class DealEnricher:
         if self.http_client:
             await self.http_client.aclose()
 
-    async def fetch_filing_text(self, filing_url: str, max_chars: int = 60000) -> Optional[str]:
-        """Fetch and clean filing text from SEC.gov."""
+    async def resolve_primary_doc_url(self, accession: str, cik: str) -> Optional[str]:
+        """
+        Resolve the actual primary document URL from a filing's index page.
+
+        The master.idx .txt file is an SGML index — not the document itself.
+        We need to fetch the -index.htm page and parse it for the actual doc.
+        """
         client = await self._get_http()
+        acc_no_dash = accession.replace("-", "")
+        index_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dash}/{accession}-index.htm"
+
         try:
             await asyncio.sleep(SEC_RATE_DELAY)
-            resp = await client.get(filing_url)
+            resp = await client.get(index_url)
+            resp.raise_for_status()
+            html = resp.text
+
+            # Parse the index page for document links
+            # Look for the primary document — usually the largest .htm file
+            # Pattern: <a href="/Archives/edgar/data/CIK/ACCESSION/filename.htm">
+            doc_links = re.findall(
+                r'<a\s+href="(/Archives/edgar/data/[^"]+\.htm)"[^>]*>',
+                html, re.IGNORECASE
+            )
+
+            # Also look for table rows with document descriptions
+            # SEC index pages have: Type | Description | Document | Size
+            # The primary doc is usually the first .htm that isn't the index
+            for link in doc_links:
+                if "-index" not in link.lower():
+                    return f"https://www.sec.gov{link}"
+
+            # Fallback: try any .htm link
+            all_links = re.findall(r'href="(/Archives/edgar/data/[^"]+)"', html)
+            for link in all_links:
+                if link.endswith(('.htm', '.html')) and '-index' not in link.lower():
+                    return f"https://www.sec.gov{link}"
+
+            logger.warning(f"No primary doc found in {index_url}")
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch index {index_url}: {e}")
+            return None
+
+    async def fetch_filing_text(self, filing_url: str, accession: str = "",
+                                 cik: str = "", max_chars: int = 60000) -> Optional[str]:
+        """
+        Fetch and clean filing text from SEC.gov.
+
+        If the URL points to a .txt file (SGML index), resolves the actual
+        document URL first via the filing index page.
+        """
+        client = await self._get_http()
+
+        # If URL ends in .txt, it's an index file — resolve the real doc
+        actual_url = filing_url
+        if filing_url.endswith('.txt') and accession and cik:
+            resolved = await self.resolve_primary_doc_url(accession, cik)
+            if resolved:
+                actual_url = resolved
+                logger.debug(f"Resolved doc URL: {actual_url}")
+
+        try:
+            await asyncio.sleep(SEC_RATE_DELAY)
+            resp = await client.get(actual_url)
             resp.raise_for_status()
             raw = resp.text
 
@@ -88,7 +148,7 @@ class DealEnricher:
 
             return text[:max_chars]
         except Exception as e:
-            logger.warning(f"Failed to fetch {filing_url}: {e}")
+            logger.warning(f"Failed to fetch {actual_url}: {e}")
             return None
 
     def extract_via_cli(self, filing_text: str) -> Optional[dict]:
@@ -161,12 +221,17 @@ class DealEnricher:
             return False
 
         # Try each filing until extraction succeeds
+        target_cik = deal["target_cik"] or ""
         for filing in filings:
             url = filing["primary_doc_url"] or filing["filing_url"]
+            accession = filing["accession_number"]
             if not url:
                 continue
 
-            text = await self.fetch_filing_text(url)
+            # Resolve the actual document (not the SGML index)
+            text = await self.fetch_filing_text(
+                url, accession=accession, cik=target_cik.lstrip("0")
+            )
             if not text or len(text) < 500:
                 continue
 
