@@ -315,13 +315,58 @@ async def qa_coverage():
             ORDER BY count DESC
         """)
 
+        # Enrichment stats
+        enriched = await conn.fetchval(
+            "SELECT COUNT(*) FROM research_deals WHERE acquirer_name != 'Unknown'"
+        )
+
         return {
             "deals_without_filings": no_filings,
             "deals_without_events": no_events,
+            "deals_enriched": enriched,
             "clause_extraction_status": {r["clause_extraction_status"]: r["count"] for r in clause_status},
             "market_data_status": {r["market_data_status"]: r["count"] for r in market_status},
             "deals_by_year": {r["year"]: r["count"] for r in by_year},
             "deals_by_outcome": {r["outcome"]: r["count"] for r in by_outcome},
+        }
+    finally:
+        await conn.close()
+
+
+# ============================================================================
+# Enrichment + Market data triggers
+# ============================================================================
+
+@router.get("/enrichment/status")
+async def enrichment_status():
+    """Check how many deals are enriched vs pending."""
+    conn = await _get_conn()
+    try:
+        total = await conn.fetchval("SELECT COUNT(*) FROM research_deals")
+        enriched = await conn.fetchval(
+            "SELECT COUNT(*) FROM research_deals WHERE acquirer_name != 'Unknown'"
+        )
+        with_price = await conn.fetchval(
+            "SELECT COUNT(*) FROM research_deals WHERE initial_deal_value_mm IS NOT NULL"
+        )
+        with_ticker = await conn.fetchval(
+            "SELECT COUNT(*) FROM research_deals WHERE target_ticker IS NOT NULL AND target_ticker != 'UNK'"
+        )
+        with_options = await conn.fetchval(
+            "SELECT COUNT(DISTINCT deal_id) FROM research_options_daily"
+        )
+        with_market = await conn.fetchval(
+            "SELECT COUNT(*) FROM research_deals WHERE market_data_status = 'complete'"
+        )
+
+        return {
+            "total_deals": total,
+            "enriched_with_acquirer": enriched,
+            "with_deal_price": with_price,
+            "with_ticker": with_ticker,
+            "with_options_data": with_options,
+            "with_market_data": with_market,
+            "pct_enriched": round(enriched / total * 100, 1) if total else 0,
         }
     finally:
         await conn.close()
