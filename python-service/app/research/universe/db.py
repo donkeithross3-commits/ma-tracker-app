@@ -346,19 +346,26 @@ async def link_production_deals(conn: asyncpg.Connection) -> int:
     Cross-reference research deals with existing production deal_intelligence records.
     Links by matching target_ticker.
     Returns number of deals linked.
+
+    NOTE: deal_intelligence table may not exist in all environments (e.g.,
+    portfolio container). This is non-fatal — returns 0 on error.
     """
-    result = await conn.execute("""
-        UPDATE research_deals rd
-        SET production_deal_id = di.deal_id,
-            updated_at = NOW()
-        FROM deal_intelligence di
-        WHERE UPPER(rd.target_ticker) = UPPER(di.ticker)
-          AND rd.production_deal_id IS NULL
-          AND di.status IN ('active', 'closed')
-    """)
-    count = int(result.split()[-1]) if result else 0
-    logger.info(f"Linked {count} research deals to production deal_intelligence")
-    return count
+    try:
+        result = await conn.execute("""
+            UPDATE research_deals rd
+            SET production_deal_id = di.deal_id,
+                updated_at = NOW()
+            FROM deal_intelligence di
+            WHERE UPPER(rd.target_ticker) = UPPER(di.ticker)
+              AND rd.production_deal_id IS NULL
+              AND di.status IN ('active', 'closed')
+        """)
+        count = int(result.split()[-1]) if result else 0
+        logger.info(f"Linked {count} research deals to production deal_intelligence")
+        return count
+    except Exception as e:
+        logger.warning(f"Could not link production deals (table may not exist): {e}")
+        return 0
 
 
 async def link_canonical_deals(conn: asyncpg.Connection) -> int:
