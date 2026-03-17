@@ -2136,8 +2136,20 @@ Keep it actionable and direct."""
         }
 
     async def _store_change(self, assessment_id, run_date, ticker, change: dict):
-        """Insert a single risk factor change record."""
+        """Insert a single risk factor change record (deduplicated per ticker/factor/date/direction)."""
         async with self.pool.acquire() as conn:
+            # Skip if we already recorded this exact change today
+            existing = await conn.fetchval(
+                """SELECT id FROM risk_factor_changes
+                   WHERE ticker = $1 AND factor = $2 AND change_date = $3
+                     AND old_level = $4 AND new_level = $5 AND direction = $6
+                   LIMIT 1""",
+                ticker, change["factor"], run_date,
+                change["old_level"], change["new_level"], change["direction"],
+            )
+            if existing:
+                return
+
             await conn.execute(
                 """INSERT INTO risk_factor_changes (
                     assessment_id, ticker, change_date, factor,
