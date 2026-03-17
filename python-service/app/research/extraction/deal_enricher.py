@@ -156,8 +156,11 @@ class DealEnricher:
         prompt = f"{DEAL_TERMS_EXTRACTION_PROMPT}\n\nFiling text:\n{filing_text}"
 
         env = os.environ.copy()
-        env.pop("ANTHROPIC_API_KEY", None)  # Force OAuth
-        env["HOME"] = env.get("HOME", "/tmp/claude-cli-home")
+        env.pop("ANTHROPIC_API_KEY", None)  # Force OAuth, not API key
+        # Ensure OAuth token is available (loaded from .env by dotenv)
+        oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+        if oauth:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
 
         # Find claude CLI
         cli_path = self._find_cli()
