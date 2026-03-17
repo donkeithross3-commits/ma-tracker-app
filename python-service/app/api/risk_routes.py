@@ -948,6 +948,13 @@ async def scan_covered_calls(
     scanned = 0
     errors = []
 
+    # Fetch live prices from Polygon for all tickers upfront
+    live_prices: dict = {}
+    try:
+        live_prices = await client.get_batch_stock_quotes(tickers_to_scan)
+    except Exception as e:
+        logger.warning("Failed to fetch live prices for covered-call scan: %s", e)
+
     for t in tickers_to_scan:
         try:
             # Get deal info from DB
@@ -964,7 +971,9 @@ async def scan_covered_calls(
                 continue
 
             deal_price = float(row["deal_price"])
-            current_price = float(row["current_price"])
+            # Use live Polygon price if available, fall back to sheet snapshot
+            live = live_prices.get(t)
+            current_price = live["price"] if live and live.get("price") else float(row["current_price"])
             countdown_days = row["countdown_days"] if row["countdown_days"] else 90
 
             # Build close date from countdown or close_date field
@@ -1195,8 +1204,18 @@ async def scan_deal_options(ticker: str = Query(..., description="Ticker to scan
         }
 
     deal_price = float(row["deal_price"]) if row["deal_price"] else None
-    current_price = float(row["current_price"]) if row["current_price"] else None
+    sheet_price = float(row["current_price"]) if row["current_price"] else None
     countdown_days = row["countdown_days"] if row["countdown_days"] else 90
+
+    # Fetch live price from Polygon (fall back to sheet snapshot)
+    current_price = sheet_price
+    try:
+        live_quotes = await client.get_batch_stock_quotes([ticker])
+        live = live_quotes.get(ticker)
+        if live and live.get("price"):
+            current_price = live["price"]
+    except Exception:
+        pass  # Fall back to sheet price
 
     if row["close_date"]:
         close_dt = datetime.combine(row["close_date"], datetime.min.time())
