@@ -442,19 +442,20 @@ async def run_enrichment(
     enricher = DealEnricher()
 
     if not priority_types:
-        priority_types = ["DEFM14A", "SC TO-T", "PREM14A", "SC 14D9", "SC 14D-9"]
+        priority_types = ["DEFM14A", "SC TO-T", "PREM14A", "SC 14D9", "SC 14D-9", "SC 14D9/A"]
 
     type_list = "', '".join(priority_types)
 
-    # Find deals that haven't been enriched yet, with high-priority filings
+    # Find deals with high-quality M&A filings that still need enrichment.
+    # Include deals where previous attempt failed (acquirer still Unknown)
+    # as long as they have a high-priority filing we haven't tried yet.
     deals = await conn.fetch(f"""
-        SELECT DISTINCT rd.deal_id, rd.deal_key, rd.target_ticker
+        SELECT DISTINCT ON (rd.deal_id) rd.deal_id, rd.deal_key, rd.target_ticker
         FROM research_deals rd
         JOIN research_deal_filings rdf ON rd.deal_id = rdf.deal_id
         WHERE rd.acquirer_name = 'Unknown'
-          AND rd.last_enriched IS NULL
           AND rdf.filing_type IN ('{type_list}')
-        ORDER BY rd.deal_key
+        ORDER BY rd.deal_id, rd.deal_key
         LIMIT $1
     """, limit)
 
