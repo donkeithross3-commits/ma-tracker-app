@@ -746,41 +746,63 @@ class OptionsDataLoader:
         min_year: int = 2019,  # Polygon options data starts ~2019
     ) -> Dict[str, int]:
         """
-        Load options data for all deals that need it.
+        Load options data for ENRICHED deals only.
 
-        Only processes deals from 2019+ (Polygon options data availability).
-        Requires deal_price to be set (for above-deal-price analysis).
+        CRITICAL: Only processes deals that have been enriched with a deal price.
+        Without the deal price, the above-deal-price call analysis (the whole
+        point of this data) produces empty results. The covered-call yield
+        computation also requires knowing the deal price.
+
+        Also requires acquirer_name != 'Unknown' to filter out false-positive
+        "deals" that are actually routine corporate filings (DEFA14A for stock
+        splits, S-4 for spin-offs, etc.)
         """
         query = """
-            SELECT deal_id, target_ticker, announced_date, actual_close_date,
-                   terminated_date, initial_deal_value_mm
-            FROM research_deals
-            WHERE target_ticker IS NOT NULL
-              AND target_ticker != 'UNK'
-              AND announced_date >= $1
-              AND deal_id NOT IN (
+            SELECT rd.deal_id, rd.target_ticker, rd.announced_date,
+                   rd.actual_close_date, rd.terminated_date,
+                   rc.cash_per_share, rc.total_per_share
+            FROM research_deals rd
+            LEFT JOIN research_deal_consideration rc
+                ON rd.deal_id = rc.deal_id AND rc.version = 1
+            WHERE rd.target_ticker IS NOT NULL
+              AND rd.target_ticker != 'UNK'
+              AND rd.announced_date >= $1
+              AND rd.acquirer_name != 'Unknown'
+              AND rd.last_enriched IS NOT NULL
+              AND (rc.cash_per_share IS NOT NULL OR rc.total_per_share IS NOT NULL)
+              AND rd.deal_id NOT IN (
                   SELECT DISTINCT deal_id FROM research_options_daily
               )
-            ORDER BY announced_date DESC
+            ORDER BY rd.announced_date DESC
         """
         params = [date(min_year, 1, 1)]
         if limit:
             query += f" LIMIT {limit}"
 
         deals = await conn.fetch(query, *params)
-        logger.info(f"Loading options data for {len(deals)} deals")
+        logger.info(
+            f"Loading options for {len(deals)} enriched deals with deal prices "
+            f"(skipping unenriched and false-positive deals)"
+        )
 
-        results = {"loaded": 0, "failed": 0, "total_summaries": 0, "total_chains": 0}
+        results = {"loaded": 0, "failed": 0, "skipped_no_price": 0,
+                    "total_summaries": 0, "total_chains": 0}
 
         for deal in deals:
             try:
+                # Use per-share deal price (cash or total blended)
+                deal_price = float(deal["cash_per_share"] or deal["total_per_share"] or 0)
+                if deal_price <= 0:
+                    results["skipped_no_price"] += 1
+                    continue
+
                 end = deal["actual_close_date"] or deal["terminated_date"]
                 counts = await self.load_options_for_deal(
                     conn=conn,
                     deal_id=deal["deal_id"],
                     ticker=deal["target_ticker"],
                     announced_date=deal["announced_date"],
-                    deal_price=None,  # Will use from enrichment later
+                    deal_price=deal_price,
                     end_date=end,
                     weekly_snapshots=True,
                 )
