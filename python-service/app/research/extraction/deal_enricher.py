@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 SEC_USER_AGENT = os.environ.get(
     "SEC_USER_AGENT", "DR3 Research research@dr3-dashboard.com"
 )
-SEC_RATE_DELAY = 0.15
+SEC_RATE_DELAY = 0.3  # SEC enforces rate limits aggressively; 3 req/s is safe
 
 
 class DealEnricher:
@@ -82,9 +82,16 @@ class DealEnricher:
         index_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dash}/{accession}-index.htm"
 
         try:
-            await asyncio.sleep(SEC_RATE_DELAY)
-            resp = await client.get(index_url)
-            resp.raise_for_status()
+            for attempt in range(3):
+                await asyncio.sleep(SEC_RATE_DELAY + attempt * 2)
+                resp = await client.get(index_url)
+                if resp.status_code == 503:
+                    await asyncio.sleep(5 * (attempt + 1))
+                    continue
+                resp.raise_for_status()
+                break
+            else:
+                return None
             html = resp.text
 
             # Parse the index page for document links
@@ -122,6 +129,7 @@ class DealEnricher:
 
         If the URL points to a .txt file (SGML index), resolves the actual
         document URL first via the filing index page.
+        Retries on 503 Service Unavailable (SEC rate limiting).
         """
         client = await self._get_http()
 
@@ -133,11 +141,30 @@ class DealEnricher:
                 actual_url = resolved
                 logger.debug(f"Resolved doc URL: {actual_url}")
 
-        try:
-            await asyncio.sleep(SEC_RATE_DELAY)
-            resp = await client.get(actual_url)
-            resp.raise_for_status()
-            raw = resp.text
+        # Retry with backoff for 503s (SEC rate limiting)
+        for attempt in range(3):
+            try:
+                await asyncio.sleep(SEC_RATE_DELAY + attempt * 2)
+                resp = await client.get(actual_url)
+                if resp.status_code == 503:
+                    backoff = 5 * (attempt + 1)
+                    logger.warning(f"SEC 503, backing off {backoff}s (attempt {attempt+1})")
+                    await asyncio.sleep(backoff)
+                    continue
+                resp.raise_for_status()
+                raw = resp.text
+                break
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 503 and attempt < 2:
+                    await asyncio.sleep(5 * (attempt + 1))
+                    continue
+                logger.warning(f"Failed to fetch {actual_url}: {e}")
+                return None
+            except Exception as e:
+                logger.warning(f"Failed to fetch {actual_url}: {e}")
+                return None
+        else:
+            return None
 
             # Strip HTML
             text = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', raw, flags=re.DOTALL | re.IGNORECASE)
