@@ -35,9 +35,6 @@ export const authConfig: NextAuthConfig = {
       // Health check endpoint (used by Docker health checks, must not require auth)
       const isHealthCheck = pathname === "/api/health"
 
-      // Public content pages (no auth required)
-      const isPublicPage = pathname === "/research"
-
       // Internal API endpoints (called by Python service or agent, not browser)
       // Keep this list minimal; all read/control APIs should stay session-gated.
       const isFleetCheckinAPI = pathname === "/api/fleet/checkin"
@@ -49,7 +46,7 @@ export const authConfig: NextAuthConfig = {
       const isAdminEndpoint = pathname === "/api/admin/seed-whitelist"
       
       // Allow public paths
-      if (isLoginPage || isAuthAPI || isHealthCheck || isInternalAPI || isAdminEndpoint || isPublicPage) {
+      if (isLoginPage || isAuthAPI || isHealthCheck || isInternalAPI || isAdminEndpoint) {
         return true
       }
       
@@ -87,7 +84,8 @@ export const authConfig: NextAuthConfig = {
         pathname === "/edgar" || pathname.startsWith("/edgar/") ||
         pathname === "/intelligence" || pathname.startsWith("/intelligence/") ||
         pathname === "/staging" || pathname.startsWith("/staging/") ||
-        pathname === "/rumored-deals" || pathname.startsWith("/rumored-deals/")
+        pathname === "/rumored-deals" || pathname.startsWith("/rumored-deals/") ||
+        pathname === "/ma-research" || pathname.startsWith("/ma-research/")
       ) {
         projectKey = "ma-options"
       } else if (pathname === "/sheet-portfolio" || pathname.startsWith("/sheet-portfolio/")) {

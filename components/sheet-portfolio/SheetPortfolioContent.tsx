@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import Link from "next/link";
 import * as Tabs from "@radix-ui/react-tabs";
+import { Database } from "lucide-react";
 import { IBConnectionProvider } from "@/components/ma-options/IBConnectionContext";
 import type { ScannerDeal } from "@/types/ma-options";
 import PortfolioTab from "./PortfolioTab";
@@ -51,6 +52,13 @@ export default function SheetPortfolioContent({ initialDeals }: SheetPortfolioCo
                 className="px-4 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-200 transition-colors border-b-2 border-transparent"
               >
                 CC Screener
+              </Link>
+              <Link
+                href="/ma-research"
+                className="px-4 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-200 transition-colors border-b-2 border-transparent flex items-center gap-1.5"
+              >
+                <Database className="w-3.5 h-3.5" />
+                Research DB
               </Link>
             </Tabs.List>
           </div>
