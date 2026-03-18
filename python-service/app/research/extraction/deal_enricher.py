@@ -412,30 +412,24 @@ class DealEnricher:
         return None
 
     @staticmethod
-    def _extract_json(text: str) -> Optional[dict]:
-        """Extract JSON from Claude output."""
-        # Try parsing the output-format json wrapper
+    def _parse_json_string(s: str) -> Optional[dict]:
+        """Parse JSON with recovery for markdown fences and trailing commas."""
         try:
-            wrapper = json.loads(text)
-            if isinstance(wrapper, dict) and "result" in wrapper:
-                content = wrapper["result"]
-                if isinstance(content, str):
-                    return json.loads(content)
-                return content
+            result = json.loads(s)
+            if isinstance(result, dict):
+                return result
         except (json.JSONDecodeError, TypeError):
             pass
 
-        # Direct parse
+        cleaned = re.sub(r'```(?:json)?\s*', '', s)
+        cleaned = re.sub(r'```\s*$', '', cleaned)
         try:
-            return json.loads(text)
-        except json.JSONDecodeError:
+            result = json.loads(cleaned)
+            if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, TypeError):
             pass
 
-        # Strip markdown fences
-        cleaned = re.sub(r'```(?:json)?\s*', '', text)
-        cleaned = re.sub(r'```\s*$', '', cleaned)
-
-        # Find outermost braces
         match = re.search(r'\{.*\}', cleaned, re.DOTALL)
         if match:
             try:
@@ -446,8 +440,28 @@ class DealEnricher:
                     return json.loads(fixed)
                 except json.JSONDecodeError:
                     pass
-
         return None
+
+    @classmethod
+    def _extract_json(cls, text: str) -> Optional[dict]:
+        """Extract JSON from Claude CLI output, handling wrapper + markdown fences."""
+        # Try parsing the output-format json wrapper
+        try:
+            wrapper = json.loads(text)
+            if isinstance(wrapper, dict) and "result" in wrapper:
+                content = wrapper["result"]
+                if isinstance(content, dict):
+                    return content
+                if isinstance(content, str):
+                    # Apply full recovery to inner string (may have markdown fences)
+                    parsed = cls._parse_json_string(content)
+                    if parsed:
+                        return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Fallback: parse the entire text
+        return cls._parse_json_string(text)
 
 
 async def run_enrichment(
