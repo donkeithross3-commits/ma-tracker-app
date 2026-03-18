@@ -428,12 +428,14 @@ class DealEnricher:
 
 async def run_enrichment(
     limit: int = 50,
+    offset: int = 0,
     priority_types: Optional[List[str]] = None,
 ) -> Dict:
     """
     Run deal enrichment on priority deals.
 
     Prioritizes deals with DEFM14A filings (most complete data).
+    Use --offset to partition work across parallel workers.
     """
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parents[3] / ".env")
@@ -447,8 +449,7 @@ async def run_enrichment(
     type_list = "', '".join(priority_types)
 
     # Find deals with high-quality M&A filings that still need enrichment.
-    # Include deals where previous attempt failed (acquirer still Unknown)
-    # as long as they have a high-priority filing we haven't tried yet.
+    # Use OFFSET for parallel worker partitioning (each worker gets a different slice).
     deals = await conn.fetch(f"""
         SELECT DISTINCT ON (rd.deal_id) rd.deal_id, rd.deal_key, rd.target_ticker
         FROM research_deals rd
@@ -456,8 +457,8 @@ async def run_enrichment(
         WHERE rd.acquirer_name = 'Unknown'
           AND rdf.filing_type IN ('{type_list}')
         ORDER BY rd.deal_id, rd.deal_key
-        LIMIT $1
-    """, limit)
+        LIMIT $1 OFFSET $2
+    """, limit, offset)
 
     logger.info(f"Enriching {len(deals)} deals with priority filings")
     results = {"enriched": 0, "failed": 0, "skipped": 0}
@@ -488,6 +489,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Enrich research deals with filing data")
     parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--offset", type=int, default=0, help="Skip first N deals (for parallel workers)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -496,5 +498,5 @@ if __name__ == "__main__":
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    result = asyncio.run(run_enrichment(limit=args.limit))
+    result = asyncio.run(run_enrichment(limit=args.limit, offset=args.offset))
     print(f"Done: {result}")
