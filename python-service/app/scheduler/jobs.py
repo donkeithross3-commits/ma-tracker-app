@@ -236,7 +236,7 @@ async def job_seekingalpha_scan():
 
 @run_job("overnight_event_scan", "Overnight Event Scan")
 async def job_overnight_event_scan():
-    """Scan for overnight events (5:25 AM ET weekdays)."""
+    """Scan for overnight events (10:55 PM ET weekdays, before risk run)."""
     from app.risk.overnight import scan_overnight_events
 
     pool = _get_pool()
@@ -262,16 +262,21 @@ async def job_overnight_event_scan():
     return {"status": "success", "event_count": len(events), "tickers": len(tickers)}
 
 
-@run_job("morning_risk_assessment", "Morning AI Risk Assessment")
-async def job_morning_risk_assessment():
-    """Run AI risk assessment on all deals (5:30 AM ET weekdays)."""
+@run_job("overnight_risk_assessment", "Overnight AI Risk Assessment")
+async def job_overnight_risk_assessment():
+    """Run AI risk assessment on all deals (11:00 PM ET weekdays).
+
+    Moved from 5:30 AM to 11 PM to spread CLI calls across a 6-hour overnight
+    window (11 PM - 5 AM ET), avoiding the Max subscription's rolling 5h usage cap.
+    Inter-call pacing (RISK_CALL_SPACING_SEC) spaces out individual CLI calls.
+    """
     import os
     from app.risk.engine import RiskAssessmentEngine
     from app.risk.runner import is_running
 
     # Skip if a manual run is already in progress
     if is_running():
-        logger.info("[scheduler] Skipping morning_risk_assessment — manual run in progress")
+        logger.info("[scheduler] Skipping overnight_risk_assessment — manual run in progress")
         return {"status": "skipped", "reason": "manual run in progress"}
 
     pool = _get_pool()
@@ -297,7 +302,11 @@ async def job_morning_risk_assessment():
 
 @run_job("morning_report_compile", "Morning Report Compile")
 async def job_morning_report_compile():
-    """Compile the morning report from assessment results (5:55 AM ET weekdays)."""
+    """Compile the morning report from assessment results (5:30 AM ET weekdays).
+
+    Runs after the overnight risk assessment completes (started at 11 PM, finishes ~1-2 AM).
+    Picks up the latest completed run for the current date.
+    """
     import json
     from app.risk.report_formatter import format_morning_report
 
@@ -306,12 +315,16 @@ async def job_morning_report_compile():
     overnight_events = getattr(core, "_overnight_events", [])
 
     async with pool.acquire() as conn:
-        # Get the latest run
+        # Get the latest completed run from today or yesterday (overnight run starts
+        # at 11 PM ET the prior calendar day, so run_date may be yesterday).
         run = await conn.fetchrow(
-            "SELECT * FROM risk_assessment_runs WHERE run_date = CURRENT_DATE ORDER BY started_at DESC LIMIT 1"
+            """SELECT * FROM risk_assessment_runs
+               WHERE run_date >= CURRENT_DATE - INTERVAL '1 day'
+                 AND status = 'completed'
+               ORDER BY started_at DESC LIMIT 1"""
         )
         if not run:
-            return {"status": "skipped", "reason": "no assessment run today"}
+            return {"status": "skipped", "reason": "no assessment run in last 24h"}
 
         # Get all assessments for this run
         assessments = await conn.fetch(
@@ -761,17 +774,17 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         "cron",
         id="overnight_event_scan",
         day_of_week="mon-fri",
-        hour=5, minute=25,
+        hour=22, minute=55,
         replace_existing=True,
         **_SAFE,
     )
 
     scheduler.add_job(
-        job_morning_risk_assessment,
+        job_overnight_risk_assessment,
         "cron",
-        id="morning_risk_assessment",
+        id="overnight_risk_assessment",
         day_of_week="mon-fri",
-        hour=5, minute=30,
+        hour=23, minute=0,
         replace_existing=True,
         **_SAFE,
     )
@@ -794,7 +807,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         "cron",
         id="morning_report_compile",
         day_of_week="mon-fri",
-        hour=5, minute=55,
+        hour=5, minute=30,
         replace_existing=True,
         **_SAFE,
     )

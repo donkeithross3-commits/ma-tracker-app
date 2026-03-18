@@ -5,19 +5,22 @@ so the engine can swap models without code changes.
 
 Smart routing: ChangeSignificance -> model selection
   MAJOR  / first assessment -> Opus 4.6  (highest quality)
-  MODERATE                  -> Sonnet 4.6 (balanced)
-  MINOR                     -> Haiku 4.5  (fast, cheap)
+  MODERATE                  -> Opus 4.6  (was Sonnet — unified for consistency)
+  MINOR                     -> skip       (reclassified as reuse in engine.py)
   NO_CHANGE                 -> reuse      (no API call)
 """
 
 import os
 
 # Task -> model mapping with environment variable overrides
+# All assessment tasks now route to Opus for consistent quality.
+# MINOR changes are skipped (treated as reuse) in engine.py.
+# Summary (1 call/run) stays Sonnet — it's just a summary, not a deal assessment.
 MODEL_REGISTRY = {
     "full_assessment": os.environ.get("RISK_MODEL_FULL", "claude-opus-4-6"),
-    "delta_assessment": os.environ.get("RISK_MODEL_DELTA", "claude-sonnet-4-6"),
-    "delta_minor": os.environ.get("RISK_MODEL_MINOR", "claude-haiku-4-5-20251001"),
-    "run_summary": os.environ.get("RISK_MODEL_SUMMARY", "claude-haiku-4-5-20251001"),
+    "delta_assessment": os.environ.get("RISK_MODEL_DELTA", "claude-opus-4-6"),
+    "delta_minor": os.environ.get("RISK_MODEL_MINOR", "claude-opus-4-6"),
+    "run_summary": os.environ.get("RISK_MODEL_SUMMARY", "claude-sonnet-4-6"),
 }
 
 # Per-million token pricing: (input_cost, output_cost)

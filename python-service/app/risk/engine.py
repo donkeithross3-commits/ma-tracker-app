@@ -4,6 +4,7 @@ Grade-based system: Low/Medium/High for 5 sheet-aligned factors,
 0-10 supplemental scores for 3 factors the sheet does not assess.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -126,6 +127,15 @@ USE_CLI_ASSESSMENT = os.environ.get("USE_CLI_ASSESSMENT", "false").lower() == "t
 CLI_EFFORT_LEVEL = os.environ.get("CLI_EFFORT_LEVEL", "medium")  # medium|high|max
 CLI_MODEL = os.environ.get("CLI_MODEL", "opus")  # Use best model since $0/call
 CLI_TIMEOUT = int(os.environ.get("CLI_TIMEOUT", "300"))  # 5 min default
+
+# Inter-call pacing: spread CLI calls across the overnight window to avoid
+# hitting the Max subscription's rolling 5-hour usage allocation.
+# Default 120s (2 min) → ~35 calls × 2 min = ~70 min of pacing + ~60 min processing ≈ 2.1 hours.
+RISK_CALL_SPACING_SEC = int(os.environ.get("RISK_CALL_SPACING_SEC", "120"))
+
+# Skip MINOR changes (treat as reuse). MINOR = mostly just price drift >0.1%,
+# not worth re-assessing. Eliminates ~19 formerly-Haiku calls per run.
+RISK_SKIP_MINOR = os.environ.get("RISK_SKIP_MINOR", "true").lower() == "true"
 
 # Resolve claude CLI binary path (may be in nvm, homebrew, or system PATH)
 _CLI_BINARY = None
@@ -256,20 +266,31 @@ def _call_claude_cli(
             usage = cli_json.get("usage", {})
             input_tokens = usage.get("input_tokens", len(full_prompt) // 4)
             output_tokens = usage.get("output_tokens", len(text) // 4)
+            cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
+            cache_read_tokens = usage.get("cache_read_input_tokens", 0)
         except json.JSONDecodeError:
             text = raw_output
             input_tokens = len(full_prompt) // 4
             output_tokens = len(text) // 4
+            cache_creation_tokens = 0
+            cache_read_tokens = 0
+
+        # Total input = uncached + cache_creation + cache_read (input_tokens from API is uncached only)
+        total_input = input_tokens + cache_creation_tokens + cache_read_tokens
 
         logger.info(
-            "CLI call for %s: cli-%s, effort=%s, ~%d in / ~%d out, $0 (subscription), %dms",
-            ticker, cli_model, cli_effort, input_tokens, output_tokens, elapsed_ms,
+            "CLI call for %s: cli-%s, effort=%s, %d total_in (%d uncached + %d cache_create + %d cache_read) / %d out, $0 (subscription), %dms",
+            ticker, cli_model, cli_effort, total_input, input_tokens,
+            cache_creation_tokens, cache_read_tokens, output_tokens, elapsed_ms,
         )
 
         return {
             "text": text,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "cache_creation_tokens": cache_creation_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            "total_input_tokens": total_input,
             "elapsed_ms": elapsed_ms,
             "model": f"cli-{cli_model}",
         }
@@ -1245,7 +1266,15 @@ class RiskAssessmentEngine:
                     "change_list": change_list,
                 }
 
+                # Reuse if: exact hash match + NO_CHANGE, or MINOR when skip-minor enabled
                 if prev_hash and ctx_hash == prev_hash and significance == ChangeSignificance.NO_CHANGE:
+                    reuse_bucket.append(ticker)
+                elif RISK_SKIP_MINOR and significance == ChangeSignificance.MINOR and prev:
+                    # MINOR changes (mostly price drift >0.1%) are trivial — reuse previous assessment
+                    logger.info(
+                        "Skipping MINOR change for %s (RISK_SKIP_MINOR=true): %s",
+                        ticker, ", ".join(change_list) if change_list else "no details",
+                    )
                     reuse_bucket.append(ticker)
                 else:
                     api_bucket.append(ticker)
@@ -1415,6 +1444,15 @@ class RiskAssessmentEngine:
                         assessment = await self.assess_single_deal(
                             context, model=routed_model,
                         )
+
+                    # Pacing delay: spread CLI calls across the overnight window
+                    # to avoid hitting the Max subscription's rolling 5h usage allocation.
+                    if RISK_CALL_SPACING_SEC > 0 and ticker != api_bucket[-1]:
+                        logger.info(
+                            "Pacing: waiting %ds before next assessment...",
+                            RISK_CALL_SPACING_SEC,
+                        )
+                        await asyncio.sleep(RISK_CALL_SPACING_SEC)
 
                 proc_stats = await self._process_assessment_result(
                     run_id, run_date, ticker, assessment, context,

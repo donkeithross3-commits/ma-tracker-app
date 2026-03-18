@@ -56,7 +56,7 @@ if [[ ${#expected_jobs[@]} -eq 0 ]]; then
     morning_sheet_ingest
     morning_detail_refresh
     overnight_event_scan
-    morning_risk_assessment
+    overnight_risk_assessment
     morning_report_compile
     morning_report_deliver
     edgar_filing_check
