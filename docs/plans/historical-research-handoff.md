@@ -26,6 +26,20 @@ filing coverage, deal flags. Validated against Betton/Eckbo/Thorburn benchmarks.
 ### Enrichment Resumed
 SEC EDGAR 503 resolved. Single worker running on droplet, ~17s/deal.
 ~2,800 deals remaining, estimated ~13 hours.
+Progress (as of 17:05 UTC): 80/2,818 enriched in this run (~418 total).
+
+### JSON Extraction Bug Fixed
+**Critical fix:** Both `deal_enricher.py` and `clause_extractor.py` had a bug where
+Claude CLI responses wrapped in `{"result": "```json\n{...}\n```"}` were not parsed
+correctly. The markdown fences in the inner result string caused json.loads() to fail,
+and the fallback recovery operated on the outer wrapper instead.
+Fix: `_parse_json_string()` recovery pipeline now applied to the inner result string.
+
+### Clause Extraction Validated
+Pipeline tested on 3 deals with correct results:
+- Ultimate Software (2019): go_shop=True, 50d, term_fee=$331M (3.15%), match=5d ✅
+- Lexmark (2016): go_shop=False, term_fee=$95M, fiduciary_out=True ✅
+- Ready to run at scale after enrichment completes
 
 ---
 
@@ -221,12 +235,15 @@ ssh droplet 'cd ~/apps/ma-tracker-app/python-service && \
   > /tmp/options_production.log 2>&1 &'
 ```
 
-### 3. Build Clause Extraction Pipeline
-`clause_extractor.py` is scaffolded but not yet run at scale. Extracts go-shop
-provisions, match rights, termination fees — core data for the higher-bid study.
-Same bottleneck as enrichment (Claude CLI + SEC filing downloads).
-**This is the next critical piece** — the study can't answer its core question
-without clause data.
+### ~~3. Build Clause Extraction Pipeline~~ ✅ VALIDATED
+`clause_extractor.py` is complete, tested, and ready for batch run.
+Run after enrichment completes (shares SEC rate limits and Claude CLI):
+```bash
+ssh droplet 'cd ~/apps/ma-tracker-app/python-service && \
+  nohup python3 -m app.research.extraction.clause_extractor --limit 500 \
+  > /tmp/clause_extraction.log 2>&1 &'
+```
+Estimated: ~25s/deal (SEC fetch + CLI extraction), ~3.5 hours for 500 deals.
 
 ### 4. Build Market Features + Models
 - `features/market_features.py` — spread, IV, above-deal-call metrics
