@@ -35,7 +35,7 @@ from .prompts import (
 logger = logging.getLogger(__name__)
 
 # SEC rate limit
-SEC_RATE_LIMIT_DELAY = 0.125
+SEC_RATE_LIMIT_DELAY = 0.3  # Conservative — SEC is aggressive about blocking
 SEC_USER_AGENT = os.environ.get(
     "SEC_USER_AGENT",
     "DR3 Research research@dr3-dashboard.com"
@@ -66,57 +66,138 @@ class FilingFetcher:
         self,
         filing_url: str,
         conn: Optional[asyncpg.Connection] = None,
+        accession: Optional[str] = None,
+        cik: Optional[str] = None,
+        max_chars: int = 80000,
     ) -> Optional[str]:
         """
         Fetch filing text, using database cache if available.
 
+        If the URL points to a .txt file (SGML index), resolves the actual
+        document URL first via the filing index page.
         Strips HTML tags to get raw text for LLM processing.
         """
         # Check cache first
-        accession = self._url_to_accession(filing_url)
+        if not accession:
+            accession = self._url_to_accession(filing_url)
         if conn and accession:
             cached = await conn.fetchrow(
                 "SELECT content_text FROM research_filing_cache WHERE accession_number = $1",
                 accession,
             )
             if cached and cached["content_text"]:
-                return cached["content_text"]
+                return cached["content_text"][:max_chars]
 
-        # Fetch from SEC
+        # Resolve .txt index URLs to actual HTML document
+        actual_url = filing_url
+        if filing_url.endswith('.txt') and accession:
+            resolved = await self._resolve_primary_doc_url(accession, cik or "")
+            if resolved:
+                actual_url = resolved
+                logger.debug(f"Resolved doc URL: {actual_url}")
+
+        # Fetch from SEC with retry
         client = await self._get_client()
-        try:
-            await asyncio.sleep(SEC_RATE_LIMIT_DELAY)
-            response = await client.get(filing_url)
-            response.raise_for_status()
-
-            raw_html = response.text
-            text = self._strip_html(raw_html)
-
-            # Cache it
-            if conn and accession:
-                try:
-                    await conn.execute(
-                        """
-                        INSERT INTO research_filing_cache
-                            (accession_number, filing_type, filing_url, content_text, content_length)
-                        VALUES ($1, $2, $3, $4, $5)
-                        ON CONFLICT (accession_number) DO UPDATE SET
-                            content_text = $4, content_length = $5, fetched_at = NOW()
-                        """,
-                        accession,
-                        self._guess_filing_type(filing_url),
-                        filing_url,
-                        text,
-                        len(text),
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to cache filing {accession}: {e}")
-
-            return text
-
-        except Exception as e:
-            logger.error(f"Error fetching filing {filing_url}: {e}")
+        for attempt in range(3):
+            try:
+                await asyncio.sleep(SEC_RATE_LIMIT_DELAY + attempt * 2)
+                response = await client.get(actual_url)
+                if response.status_code == 503:
+                    backoff = 5 * (attempt + 1)
+                    logger.warning(f"SEC 503, backing off {backoff}s (attempt {attempt+1})")
+                    await asyncio.sleep(backoff)
+                    continue
+                response.raise_for_status()
+                raw_html = response.text
+                break
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 503 and attempt < 2:
+                    await asyncio.sleep(5 * (attempt + 1))
+                    continue
+                logger.error(f"Error fetching {actual_url}: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Error fetching {actual_url}: {e}")
+                return None
+        else:
             return None
+
+        text = self._strip_html(raw_html)[:max_chars]
+
+        # Cache it
+        if conn and accession:
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO research_filing_cache
+                        (accession_number, filing_type, filing_url, content_text, content_length)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (accession_number) DO UPDATE SET
+                        content_text = $4, content_length = $5, fetched_at = NOW()
+                    """,
+                    accession,
+                    self._guess_filing_type(actual_url),
+                    actual_url,
+                    text,
+                    len(text),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to cache filing {accession}: {e}")
+
+        return text
+
+    async def _resolve_primary_doc_url(self, accession: str, cik: str) -> Optional[str]:
+        """
+        Resolve the actual primary document URL from a filing's index page.
+
+        Same logic as DealEnricher.resolve_primary_doc_url — the .txt URL from
+        master.idx is an SGML index, not the actual document.
+        """
+        client = await self._get_client()
+        acc_no_dash = accession.replace("-", "")
+        cik_clean = cik.lstrip("0") if cik else ""
+
+        # Try both CIK-based and accession-based index URLs
+        index_urls = []
+        if cik_clean:
+            index_urls.append(
+                f"https://www.sec.gov/Archives/edgar/data/{cik_clean}/{acc_no_dash}/{accession}-index.htm"
+            )
+        # Also try the accession-only URL pattern
+        index_urls.append(
+            f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&accession={accession}&type=&dateb=&owner=include&count=40"
+        )
+
+        for index_url in index_urls[:1]:  # Just try the first pattern
+            try:
+                await asyncio.sleep(SEC_RATE_LIMIT_DELAY)
+                resp = await client.get(index_url)
+                if resp.status_code == 503:
+                    await asyncio.sleep(5)
+                    resp = await client.get(index_url)
+                if resp.status_code != 200:
+                    continue
+                html = resp.text
+
+                # Find the primary document link
+                doc_links = re.findall(
+                    r'<a\s+href="(/Archives/edgar/data/[^"]+\.htm)"[^>]*>',
+                    html, re.IGNORECASE,
+                )
+                for link in doc_links:
+                    if "-index" not in link.lower():
+                        return f"https://www.sec.gov{link}"
+
+                # Fallback: any .htm/.html link
+                all_links = re.findall(r'href="(/Archives/edgar/data/[^"]+)"', html)
+                for link in all_links:
+                    if link.endswith(('.htm', '.html')) and '-index' not in link.lower():
+                        return f"https://www.sec.gov{link}"
+
+            except Exception as e:
+                logger.warning(f"Failed to resolve {index_url}: {e}")
+
+        return None
 
     @staticmethod
     def _strip_html(html: str) -> str:
@@ -171,7 +252,8 @@ class ClaudeExtractor:
     """
 
     def __init__(self):
-        self.use_cli = os.environ.get("USE_CLI_ASSESSMENT", "false").lower() == "true"
+        # Default to CLI (free via Max subscription) — only fall back to API if CLI not found
+        self.use_cli = os.environ.get("USE_CLI_EXTRACTION", "true").lower() == "true"
         self.cli_model = os.environ.get("CLI_MODEL", "opus")
         self.cli_effort = os.environ.get("CLI_EFFORT_LEVEL", "medium")
 
@@ -408,6 +490,12 @@ class ClauseExtractionPipeline:
             logger.warning(f"No filings found for deal {deal_id}")
             return None
 
+        # Get target CIK for URL resolution
+        deal = await conn.fetchrow(
+            "SELECT target_cik FROM research_deals WHERE deal_id = $1", deal_uuid
+        )
+        target_cik = (deal["target_cik"] or "") if deal else ""
+
         # Try each filing until we get a successful extraction
         for filing_row in filings[:3]:  # Try top 3 priority filings
             filing_url = filing_row["primary_doc_url"] or filing_row["filing_url"]
@@ -419,7 +507,11 @@ class ClauseExtractionPipeline:
                 f"({filing_row['accession_number']})"
             )
 
-            text = await self.fetcher.fetch_filing_text(filing_url, conn)
+            text = await self.fetcher.fetch_filing_text(
+                filing_url, conn,
+                accession=filing_row["accession_number"],
+                cik=target_cik,
+            )
             if not text or len(text) < 500:
                 continue
 
@@ -606,3 +698,96 @@ class ClauseExtractionPipeline:
             return datetime.strptime(date_str, "%Y-%m-%d").date()
         except (ValueError, TypeError):
             return None
+
+
+async def run_clause_extraction(
+    limit: int = 50,
+    offset: int = 0,
+    verbose: bool = False,
+) -> Dict:
+    """
+    Run clause extraction on enriched deals.
+
+    Targets deals that have:
+    1. Been enriched (acquirer known)
+    2. Have DEFM14A, PREM14A, or SC TO-T filings (most likely to contain clauses)
+    3. Haven't already had clauses extracted
+
+    Rate-limits SEC requests to avoid 503s.
+
+    Args:
+        limit: Max deals to process
+        offset: Skip first N deals (for parallel workers)
+        verbose: Enable debug logging
+    """
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parents[3] / ".env")
+
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+    pipeline = ClauseExtractionPipeline()
+
+    # Find enriched deals that need clause extraction
+    deals = await conn.fetch(
+        """
+        SELECT DISTINCT ON (d.deal_id) d.deal_id, d.deal_key, d.target_ticker
+        FROM research_deals d
+        JOIN research_deal_filings f ON d.deal_id = f.deal_id
+        WHERE d.acquirer_name IS NOT NULL AND d.acquirer_name != 'Unknown'
+          AND f.filing_type IN ('DEFM14A', 'PREM14A', 'SC TO-T', 'SC 14D9')
+          AND (d.clause_extraction_status IS NULL OR d.clause_extraction_status = 'pending')
+        ORDER BY d.deal_id, d.deal_key
+        LIMIT $1 OFFSET $2
+        """,
+        limit, offset,
+    )
+
+    logger.info(f"Extracting clauses for {len(deals)} deals")
+    results = {"extracted": 0, "failed": 0, "skipped": 0}
+
+    for i, deal in enumerate(deals):
+        try:
+            result = await pipeline.extract_clauses_for_deal(conn, deal["deal_id"])
+            if result:
+                results["extracted"] += 1
+                go_shop = result.get("go_shop", {})
+                logger.info(
+                    f"[{i+1}/{len(deals)}] {deal['deal_key']}: "
+                    f"go_shop={go_shop.get('has_go_shop')}, "
+                    f"match={result.get('match_rights', {}).get('has_match_right')}"
+                )
+            else:
+                results["failed"] += 1
+        except Exception as e:
+            logger.error(f"Error extracting clauses for {deal['deal_key']}: {e}")
+            results["failed"] += 1
+
+        if (i + 1) % 10 == 0:
+            logger.info(f"Progress: {i+1}/{len(deals)} ({results})")
+
+    await pipeline.close()
+    await conn.close()
+
+    logger.info(f"Clause extraction complete: {results}")
+    return results
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Extract deal protection clauses from SEC filings")
+    parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    result = asyncio.run(run_clause_extraction(
+        limit=args.limit,
+        offset=args.offset,
+        verbose=args.verbose,
+    ))
+    print(f"Done: {result}")
