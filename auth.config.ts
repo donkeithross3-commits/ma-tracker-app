@@ -35,6 +35,9 @@ export const authConfig: NextAuthConfig = {
       // Health check endpoint (used by Docker health checks, must not require auth)
       const isHealthCheck = pathname === "/api/health"
 
+      // Public content pages (no auth required)
+      const isPublicPage = pathname === "/research"
+
       // Internal API endpoints (called by Python service or agent, not browser)
       // Keep this list minimal; all read/control APIs should stay session-gated.
       const isFleetCheckinAPI = pathname === "/api/fleet/checkin"
@@ -46,7 +49,7 @@ export const authConfig: NextAuthConfig = {
       const isAdminEndpoint = pathname === "/api/admin/seed-whitelist"
       
       // Allow public paths
-      if (isLoginPage || isAuthAPI || isHealthCheck || isInternalAPI || isAdminEndpoint) {
+      if (isLoginPage || isAuthAPI || isHealthCheck || isInternalAPI || isAdminEndpoint || isPublicPage) {
         return true
       }
       
