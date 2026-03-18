@@ -314,6 +314,24 @@ class DealEnricher:
         if buyer_type not in valid_buyer_types:
             buyer_type = 'other'
 
+        # Validate target_listing_status
+        valid_listing = {'us_domestic', 'us_foreign_private', 'otc', None}
+        target_listing = data.get("target_listing_status")
+        if target_listing not in valid_listing:
+            target_listing = None
+
+        # Validate tax_treatment
+        valid_tax = {'taxable', 'tax_free', 'mixed', None}
+        tax_treatment = data.get("tax_treatment")
+        if tax_treatment not in valid_tax:
+            tax_treatment = None
+
+        # Validate shareholder_approval_threshold
+        valid_approval = {'simple_majority', 'supermajority', 'tender_majority', 'written_consent', 'not_required', None}
+        approval_threshold = data.get("shareholder_approval_threshold")
+        if approval_threshold not in valid_approval:
+            approval_threshold = None
+
         await conn.execute(
             """
             UPDATE research_deals SET
@@ -330,6 +348,16 @@ class DealEnricher:
                 outside_date = $12,
                 signing_date = $13,
                 has_cvr = $14,
+                target_listing_status = COALESCE($15, target_listing_status),
+                target_incorporation = COALESCE($16, target_incorporation),
+                is_non_binding_offer = $17,
+                is_cash_distribution = $18,
+                is_bankruptcy_363 = $19,
+                has_earnout = $20,
+                acquirer_toehold_pct = $21,
+                tax_treatment = COALESCE($22, tax_treatment),
+                shareholder_approval_threshold = COALESCE($23, shareholder_approval_threshold),
+                target_exchange = COALESCE($24, target_exchange),
                 last_enriched = NOW(),
                 updated_at = NOW()
             WHERE deal_id = $1
@@ -348,6 +376,16 @@ class DealEnricher:
             outside_date,
             signing_date,
             consideration.get("type", "") in ("cash_and_cvr", "stock_and_cvr"),
+            target_listing,
+            data.get("target_incorporation"),
+            data.get("is_non_binding_offer", False) or False,
+            data.get("is_cash_distribution", False) or False,
+            data.get("is_bankruptcy_363", False) or False,
+            consideration.get("has_earnout", False) or False,
+            data.get("acquirer_toehold_pct"),
+            tax_treatment,
+            approval_threshold,
+            data.get("target_exchange"),
         )
 
         # Also insert initial consideration record
@@ -365,10 +403,12 @@ class DealEnricher:
                     deal_id, version, bidder_name, is_original_bidder,
                     cash_per_share, stock_ratio, total_per_share,
                     total_deal_value_mm, premium_to_prior_close,
+                    cvr_value_est,
                     effective_date, announced_date
-                ) VALUES ($1, 1, $2, true, $3, $4, $5, $6, $7, $8, $8)
+                ) VALUES ($1, 1, $2, true, $3, $4, $5, $6, $7, $8, $9, $9)
                 ON CONFLICT (deal_id, version) DO UPDATE SET
-                    cash_per_share = $3, total_per_share = $5
+                    cash_per_share = $3, total_per_share = $5,
+                    cvr_value_est = COALESCE($8, research_deal_consideration.cvr_value_est)
                 """,
                 deal_id, acquirer_name,
                 cash,
@@ -376,6 +416,7 @@ class DealEnricher:
                 total_ps,
                 deal_value,
                 premium,
+                consideration.get("cvr_value_est"),
                 ann_date,
             )
 

@@ -709,6 +709,38 @@ class ClauseExtractionPipeline:
             accession_number,
         )
 
+        # Store new clause fields (added in migration 057) via UPDATE
+        specific_perf = data.get("specific_performance", {}) or {}
+        golden = data.get("golden_parachute", {}) or {}
+        appraisal = data.get("appraisal_rights", {}) or {}
+
+        try:
+            await conn.execute(
+                """
+                UPDATE research_deal_clauses SET
+                    target_has_specific_performance = COALESCE($2, target_has_specific_performance),
+                    acquirer_has_specific_performance = COALESCE($3, acquirer_has_specific_performance),
+                    has_golden_parachute = COALESCE($4, has_golden_parachute),
+                    management_retention_agreements = COALESCE($5, management_retention_agreements),
+                    golden_parachute_total_mm = COALESCE($6, golden_parachute_total_mm),
+                    appraisal_rights_available = COALESCE($7, appraisal_rights_available),
+                    appraisal_state = COALESCE($8, appraisal_state),
+                    updated_at = NOW()
+                WHERE deal_id = $1
+                """,
+                deal_id,
+                specific_perf.get("target_has_specific_performance"),
+                specific_perf.get("acquirer_has_specific_performance"),
+                golden.get("has_golden_parachute"),
+                golden.get("management_retention_agreements"),
+                golden.get("golden_parachute_total_mm"),
+                appraisal.get("available"),
+                appraisal.get("state"),
+            )
+        except Exception as e:
+            # New columns may not exist yet (migration 057 not applied)
+            logger.debug(f"Could not update new clause fields (migration 057?): {e}")
+
         # Update deal status
         status = "complete" if avg_confidence >= 0.7 else "partial"
         await conn.execute(

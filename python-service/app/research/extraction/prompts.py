@@ -84,6 +84,22 @@ Output schema:
         "industry_carveout": bool | null,
         "confidence": float
     },
+    "specific_performance": {
+        "target_has_specific_performance": bool | null,
+        "acquirer_has_specific_performance": bool | null,
+        "confidence": float
+    },
+    "golden_parachute": {
+        "has_golden_parachute": bool | null,
+        "management_retention_agreements": bool | null,
+        "golden_parachute_total_mm": float | null,
+        "confidence": float
+    },
+    "appraisal_rights": {
+        "available": bool | null,
+        "state": str | null,
+        "confidence": float
+    },
     "extraction_notes": str
 }"""
 
@@ -97,6 +113,12 @@ RULES:
 2. Use null for any field not found in the text. Do NOT guess.
 3. Dollar amounts in millions (MM). Percentages as numbers (3.5% = 3.5).
 4. For consideration type, determine if it's cash, stock, mixed, or includes CVRs.
+5. For target listing, look for: ADR mentions, F-20 filer references, foreign registration,
+   OTC/Pink Sheet references, or standard NYSE/NASDAQ listing.
+6. For non-binding offers, look for: "non-binding indication of interest", "preliminary proposal",
+   "indicative offer" — these precede definitive agreements.
+7. For cash distribution deals, look for: situations where a majority of assets are sold and
+   cash is returned to shareholders via special dividend, liquidating distribution, or similar.
 
 Output schema:
 {
@@ -110,6 +132,12 @@ Output schema:
         "stock_ratio": float | null,
         "stock_reference_ticker": str | null,
         "cvr_value_est": float | null,
+        "cvr_trigger_type": "regulatory_approval" | "milestone" | "revenue" | "litigation" | "other" | null,
+        "cvr_max_value": float | null,
+        "cvr_description": str | null,
+        "has_earnout": bool | null,
+        "earnout_max_value_mm": float | null,
+        "earnout_description": str | null,
         "total_per_share": float | null,
         "total_deal_value_mm": float | null,
         "premium_to_prior_close_pct": float | null
@@ -118,7 +146,16 @@ Output schema:
     "is_hostile": bool,
     "is_going_private": bool,
     "is_mbo": bool,
-    "buyer_type": "strategic_public" | "strategic_private" | "financial_sponsor" | "consortium" | "management" | "other",
+    "is_non_binding_offer": bool,
+    "is_cash_distribution": bool,
+    "is_bankruptcy_363": bool,
+    "buyer_type": "strategic_public" | "strategic_private" | "financial_sponsor" | "consortium" | "management" | "government" | "spac" | "other",
+    "target_listing_status": "us_domestic" | "us_foreign_private" | "otc" | null,
+    "target_incorporation": str | null,
+    "target_exchange": "NYSE" | "NASDAQ" | "NYSE_AMER" | "OTC" | null,
+    "acquirer_toehold_pct": float | null,
+    "tax_treatment": "taxable" | "tax_free" | "mixed" | null,
+    "shareholder_approval_threshold": "simple_majority" | "supermajority" | "tender_majority" | "written_consent" | "not_required" | null,
     "expected_close_date": "YYYY-MM-DD" | null,
     "outside_date": "YYYY-MM-DD" | null,
     "signing_date": "YYYY-MM-DD" | null,
@@ -131,13 +168,16 @@ EVENT_EXTRACTION_PROMPT = """You are an M&A event extraction specialist.
 Your JOB is to extract key deal events from this SEC filing and return valid JSON.
 
 For each event, classify it using this taxonomy:
-- ANNOUNCEMENT: initial_announcement, formal_agreement, hostile_approach
+- ANNOUNCEMENT: initial_announcement, formal_agreement, hostile_approach, non_binding_proposal
 - PRICE_CHANGE: price_increase, price_decrease, consideration_change, topping_bid, matching_bid
 - COMPETING_BID: competing_bid_announced, competing_bid_withdrawn, competing_bid_increased, white_knight
 - REGULATORY: hsr_filing, hsr_clearance, hsr_second_request, doj_challenge, ftc_challenge, cfius_filing, cfius_clearance, eu_phase1_clearance, eu_phase2_investigation, regulatory_remedy, regulatory_block
 - SHAREHOLDER: proxy_filed, definitive_proxy, vote_scheduled, vote_approved, vote_rejected, recommendation_change
 - FINANCING: financing_committed, financing_updated, financing_concern, financing_failed
-- LEGAL: litigation_filed, preliminary_injunction, injunction_granted, injunction_denied, litigation_settled
+- LEGAL: shareholder_litigation, regulatory_litigation, counterparty_litigation, preliminary_injunction, injunction_granted, injunction_denied, litigation_settled, appraisal_petition
+- ACTIVIST: activist_stake_disclosed, activist_opposition, activist_campaign, activist_settlement, activist_board_seats
+- WALKAWAY: mac_invocation, buyer_walkaway_attempt, buyer_walkaway_litigation, specific_performance_suit
+- ARBITRATION: arbitration_filed, arbitration_ruling, arbitration_settlement
 - GO_SHOP: go_shop_started, go_shop_bidder_emerged, go_shop_expired, go_shop_extended
 - TIMELINE: expected_close_updated, outside_date_extended, closing_condition_waived
 - TERMINATION: mutual_termination, target_termination, acquirer_termination, regulatory_termination, vote_failure_termination
@@ -161,7 +201,10 @@ Output schema:
             "new_price": float | null,
             "old_price": float | null,
             "competing_bidder": str | null,
-            "is_competing_bid": bool
+            "is_competing_bid": bool,
+            "litigation_party_type": "shareholder" | "regulator_doj" | "regulator_ftc" | "regulator_state_ag" | "regulator_sec" | "counterparty" | "acquirer" | null,
+            "is_arbitration": bool,
+            "activist_name": str | null
         }
     ],
     "extraction_notes": str
