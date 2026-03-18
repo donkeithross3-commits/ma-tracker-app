@@ -166,17 +166,14 @@ class DealEnricher:
         else:
             return None
 
-            # Strip HTML
-            text = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', raw, flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r'<[^>]+>', ' ', text)
-            text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
-            text = text.replace('&nbsp;', ' ').replace('&#160;', ' ')
-            text = re.sub(r'\s+', ' ', text)
+        # Strip HTML
+        text = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', raw, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+        text = text.replace('&nbsp;', ' ').replace('&#160;', ' ')
+        text = re.sub(r'\s+', ' ', text)
 
-            return text[:max_chars]
-        except Exception as e:
-            logger.warning(f"Failed to fetch {actual_url}: {e}")
-            return None
+        return text[:max_chars]
 
     def extract_via_cli(self, filing_text: str) -> Optional[dict]:
         """Call Claude CLI for deal terms extraction. Synchronous (blocking)."""
