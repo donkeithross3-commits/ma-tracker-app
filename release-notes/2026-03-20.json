@@ -1,0 +1,17 @@
+{
+  "date": "2026-03-20",
+  "title": "Mar 20, 2026",
+  "summary": "Live enrichment progress dashboard on the M&A Research Database page.",
+  "features": [
+    {
+      "id": "live-enrichment-progress",
+      "title": "Live Enrichment Progress Dashboard",
+      "summary": "The /ma-research page now shows real-time database build progress from the enrichment API",
+      "description": "Replaced the hardcoded stats bar on the M&A Research Database page with live data from the enrichment progress API.\n\nThe new Enrichment Progress section includes:\n- Live stats bar showing total deals, enriched count, retriable failures, and data coverage (price, stock, options, clauses)\n- A stacked horizontal bar showing deal status composition (enriched/SEC failed/extraction failed/not M&A) with color-coded legend\n- Nested progress bars showing data coverage depth for enriched deals\n- Year-by-year enrichment breakdown table with inline coverage bars\n- Top retriable deals table showing high-filing-count deals worth retrying (e.g., Beacon Roofing, US Steel)\n\nThe section is collapsible (open by default) and fetches data on mount from GET /api/research/enrichment/progress. Includes loading skeleton and error fallback states. All existing content (Data Model, Pipeline, Research Study) remains below unchanged.",
+      "category": "intel",
+      "project": "ma-options",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}

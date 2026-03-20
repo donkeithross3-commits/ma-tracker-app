@@ -1,20 +1,10 @@
 import Link from "next/link";
 import { Database, ArrowLeft, FlaskConical, GitBranch } from "lucide-react";
+import EnrichmentProgress from "@/components/ma-research/EnrichmentProgress";
 
 export const metadata = {
   title: "Historical M&A Research Database — DR3 Dashboard",
 };
-
-// ── stat card ───────────────────────────────────────────────────────────────
-function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-center min-w-[110px]">
-      <div className="text-xl font-bold font-mono text-gray-100">{value}</div>
-      <div className="text-[11px] text-gray-500 uppercase tracking-wider mt-0.5">{label}</div>
-      {note && <div className="text-[10px] text-gray-600 mt-0.5">{note}</div>}
-    </div>
-  );
-}
 
 // ── column row ──────────────────────────────────────────────────────────────
 function Col({ name, desc }: { name: string; desc?: string }) {
@@ -166,15 +156,8 @@ export default function ResearchPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-        {/* Stats bar */}
-        <div className="flex flex-wrap gap-2">
-          <Stat label="Total Deals" value="6,127" />
-          <Stat label="Enriched" value="433" note="acquirer, price, structure" />
-          <Stat label="Outcomes Classified" value="5,500" />
-          <Stat label="With Stock Data" value="2,247" note="daily OHLCV + spreads" />
-          <Stat label="With Options Data" value="0" note="pending enrichment" />
-          <Stat label="With Clause Data" value="3" note="growing" />
-        </div>
+        {/* Live enrichment stats + progress */}
+        <EnrichmentProgress />
 
         {/* Data Model */}
         <section>
