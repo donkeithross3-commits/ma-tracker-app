@@ -509,12 +509,17 @@ async def run_enrichment(
     limit: int = 50,
     offset: int = 0,
     priority_types: Optional[List[str]] = None,
+    retry_mode: bool = False,
 ) -> Dict:
     """
     Run deal enrichment on priority deals.
 
-    Prioritizes deals with DEFM14A filings (most complete data).
-    Use --offset to partition work across parallel workers.
+    Args:
+        limit: Max deals to process
+        offset: Skip first N deals (for parallel workers)
+        priority_types: Filing types to filter on
+        retry_mode: If True, only retry sec_failed and extraction_failed deals
+                    (skips not_ma false positives)
     """
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parents[3] / ".env")
@@ -527,19 +532,32 @@ async def run_enrichment(
 
     type_list = "', '".join(priority_types)
 
-    # Find deals with high-quality M&A filings that still need enrichment.
-    # Use OFFSET for parallel worker partitioning (each worker gets a different slice).
-    deals = await conn.fetch(f"""
-        SELECT DISTINCT ON (rd.deal_id) rd.deal_id, rd.deal_key, rd.target_ticker
-        FROM research_deals rd
-        JOIN research_deal_filings rdf ON rd.deal_id = rdf.deal_id
-        WHERE rd.acquirer_name = 'Unknown'
-          AND rdf.filing_type IN ('{type_list}')
-        ORDER BY rd.deal_id, rd.deal_key
-        LIMIT $1 OFFSET $2
-    """, limit, offset)
+    if retry_mode:
+        # Only retry deals classified as retriable failures
+        deals = await conn.fetch(f"""
+            SELECT DISTINCT ON (rd.deal_id) rd.deal_id, rd.deal_key, rd.target_ticker,
+                   rd.enrichment_status, rd.enrichment_attempts
+            FROM research_deals rd
+            JOIN research_deal_filings rdf ON rd.deal_id = rdf.deal_id
+            WHERE rd.enrichment_status IN ('sec_failed', 'extraction_failed')
+              AND rdf.filing_type IN ('{type_list}')
+            ORDER BY rd.deal_id, rd.deal_key
+            LIMIT $1 OFFSET $2
+        """, limit, offset)
+        logger.info(f"RETRY MODE: {len(deals)} retriable deals (sec_failed + extraction_failed)")
+    else:
+        # Standard mode: all Unknown deals with priority filings
+        deals = await conn.fetch(f"""
+            SELECT DISTINCT ON (rd.deal_id) rd.deal_id, rd.deal_key, rd.target_ticker
+            FROM research_deals rd
+            JOIN research_deal_filings rdf ON rd.deal_id = rdf.deal_id
+            WHERE rd.acquirer_name = 'Unknown'
+              AND rdf.filing_type IN ('{type_list}')
+            ORDER BY rd.deal_id, rd.deal_key
+            LIMIT $1 OFFSET $2
+        """, limit, offset)
+        logger.info(f"Enriching {len(deals)} deals with priority filings")
 
-    logger.info(f"Enriching {len(deals)} deals with priority filings")
     results = {"enriched": 0, "failed": 0, "skipped": 0}
 
     for i, deal in enumerate(deals):
@@ -547,8 +565,23 @@ async def run_enrichment(
             success = await enricher.enrich_deal(conn, deal["deal_id"])
             if success:
                 results["enriched"] += 1
+                # Update enrichment tracking
+                await conn.execute(
+                    """UPDATE research_deals SET
+                        enrichment_status = 'enriched',
+                        enrichment_failure_reason = NULL,
+                        enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1
+                       WHERE deal_id = $1""",
+                    deal["deal_id"],
+                )
             else:
                 results["failed"] += 1
+                await conn.execute(
+                    """UPDATE research_deals SET
+                        enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1
+                       WHERE deal_id = $1""",
+                    deal["deal_id"],
+                )
         except Exception as e:
             logger.error(f"Error enriching {deal['deal_key']}: {e}")
             results["failed"] += 1
@@ -569,6 +602,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Enrich research deals with filing data")
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--offset", type=int, default=0, help="Skip first N deals (for parallel workers)")
+    parser.add_argument("--retry", action="store_true", help="Retry only sec_failed and extraction_failed deals")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -577,5 +611,7 @@ if __name__ == "__main__":
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    result = asyncio.run(run_enrichment(limit=args.limit, offset=args.offset))
+    result = asyncio.run(run_enrichment(
+        limit=args.limit, offset=args.offset, retry_mode=args.retry
+    ))
     print(f"Done: {result}")
