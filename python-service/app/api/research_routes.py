@@ -356,17 +356,129 @@ async def enrichment_status():
             "SELECT COUNT(DISTINCT deal_id) FROM research_options_daily"
         )
         with_market = await conn.fetchval(
-            "SELECT COUNT(*) FROM research_deals WHERE market_data_status = 'complete'"
+            "SELECT COUNT(DISTINCT deal_id) FROM research_market_daily"
+        )
+        with_clauses = await conn.fetchval(
+            "SELECT COUNT(*) FROM research_deal_clauses"
+        )
+        with_consideration = await conn.fetchval(
+            "SELECT COUNT(DISTINCT deal_id) FROM research_deal_consideration"
         )
 
         return {
             "total_deals": total,
             "enriched_with_acquirer": enriched,
-            "with_deal_price": with_price,
+            "with_deal_price": with_consideration,
             "with_ticker": with_ticker,
             "with_options_data": with_options,
-            "with_market_data": with_market,
+            "with_stock_data": with_market,
+            "with_clauses": with_clauses,
             "pct_enriched": round(enriched / total * 100, 1) if total else 0,
+        }
+    finally:
+        await conn.close()
+
+
+@router.get("/enrichment/progress")
+async def enrichment_progress():
+    """
+    Detailed enrichment progress breakdown.
+
+    Returns counts by enrichment_status so the dashboard can show
+    where we stand and what's actionable.
+    """
+    conn = await _get_conn()
+    try:
+        # Overall enrichment status breakdown
+        status_rows = await conn.fetch("""
+            SELECT enrichment_status, count(*) as cnt
+            FROM research_deals
+            GROUP BY enrichment_status
+            ORDER BY cnt DESC
+        """)
+        by_status = {r["enrichment_status"] or "unknown": r["cnt"] for r in status_rows}
+
+        # Enriched deals breakdown
+        enriched_total = by_status.get("enriched", 0)
+
+        # Data coverage for enriched deals
+        enriched_with_price = await conn.fetchval("""
+            SELECT count(DISTINCT d.deal_id)
+            FROM research_deals d
+            JOIN research_deal_consideration c ON d.deal_id = c.deal_id
+            WHERE d.enrichment_status = 'enriched'
+        """) or 0
+
+        enriched_with_stock = await conn.fetchval("""
+            SELECT count(DISTINCT d.deal_id)
+            FROM research_deals d
+            JOIN research_market_daily m ON d.deal_id = m.deal_id
+            WHERE d.enrichment_status = 'enriched'
+        """) or 0
+
+        enriched_with_clauses = await conn.fetchval("""
+            SELECT count(DISTINCT d.deal_id)
+            FROM research_deals d
+            JOIN research_deal_clauses c ON d.deal_id = c.deal_id
+            WHERE d.enrichment_status = 'enriched'
+        """) or 0
+
+        enriched_with_options = await conn.fetchval("""
+            SELECT count(DISTINCT d.deal_id)
+            FROM research_deals d
+            JOIN research_options_daily o ON d.deal_id = o.deal_id
+            WHERE d.enrichment_status = 'enriched'
+        """) or 0
+
+        # Deals by year for enriched only
+        year_rows = await conn.fetch("""
+            SELECT extract(year from announced_date)::int as yr,
+                   count(*) as total,
+                   count(*) FILTER (WHERE enrichment_status = 'enriched') as enriched
+            FROM research_deals
+            GROUP BY yr ORDER BY yr
+        """)
+        by_year = {r["yr"]: {"total": r["total"], "enriched": r["enriched"]} for r in year_rows}
+
+        # Top retriable deals (real deals that failed)
+        retriable_samples = await conn.fetch("""
+            SELECT d.deal_key, d.target_name, d.enrichment_status,
+                   d.enrichment_failure_reason, d.enrichment_attempts,
+                   count(f.id) as filing_count
+            FROM research_deals d
+            LEFT JOIN research_deal_filings f ON d.deal_id = f.deal_id
+            WHERE d.enrichment_status IN ('sec_failed', 'extraction_failed')
+            GROUP BY d.deal_id, d.deal_key, d.target_name, d.enrichment_status,
+                     d.enrichment_failure_reason, d.enrichment_attempts
+            ORDER BY filing_count DESC
+            LIMIT 20
+        """)
+
+        total = sum(by_status.values())
+        actionable = by_status.get("sec_failed", 0) + by_status.get("extraction_failed", 0)
+
+        return {
+            "total_deals": total,
+            "by_status": by_status,
+            "enriched_detail": {
+                "total": enriched_total,
+                "with_price": enriched_with_price,
+                "with_stock_data": enriched_with_stock,
+                "with_clauses": enriched_with_clauses,
+                "with_options": enriched_with_options,
+            },
+            "actionable_retries": actionable,
+            "by_year": by_year,
+            "retriable_samples": [
+                {
+                    "deal_key": r["deal_key"],
+                    "target": r["target_name"][:50],
+                    "status": r["enrichment_status"],
+                    "reason": (r["enrichment_failure_reason"] or "")[:100],
+                    "filings": r["filing_count"],
+                }
+                for r in retriable_samples
+            ],
         }
     finally:
         await conn.close()
