@@ -169,9 +169,10 @@ export default function ResearchPage() {
         {/* Stats bar */}
         <div className="flex flex-wrap gap-2">
           <Stat label="Total Deals" value="6,127" />
-          <Stat label="Enriched" value="342+" note="acquirer, price, structure" />
+          <Stat label="Enriched" value="433" note="acquirer, price, structure" />
           <Stat label="Outcomes Classified" value="5,500" />
           <Stat label="With Stock Data" value="2,247" note="daily OHLCV + spreads" />
+          <Stat label="With Options Data" value="0" note="pending enrichment" />
           <Stat label="With Clause Data" value="3" note="growing" />
         </div>
 
