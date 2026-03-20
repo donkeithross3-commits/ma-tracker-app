@@ -18,7 +18,7 @@ ALTER TABLE research_deals ADD COLUMN IF NOT EXISTS target_listing_status VARCHA
         'other',
         NULL
     ));
-ALTER TABLE research_deals ADD COLUMN IF NOT EXISTS target_incorporation VARCHAR(5);  -- State/country: DE, NY, CA, UK, IL, etc.
+ALTER TABLE research_deals ADD COLUMN IF NOT EXISTS target_incorporation VARCHAR(30);  -- State/country: Delaware, New York, etc.
 ALTER TABLE research_deals ADD COLUMN IF NOT EXISTS is_foreign_private_issuer BOOLEAN;
 
 -- Deal dynamics
