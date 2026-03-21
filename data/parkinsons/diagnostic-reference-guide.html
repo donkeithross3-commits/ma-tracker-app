@@ -370,7 +370,22 @@ Triggers: aging, oxidative stress, genetic variants (SNCA, GBA), environmental t
 <h3>Prion-Like Spread</h3>
 <p>One of the most important discoveries of the last decade: misfolded alpha-synuclein can <strong>spread from cell to cell</strong>, like a contagion. A misfolded copy can be released from one neuron, taken up by a neighboring neuron, and then cause the normal alpha-synuclein in that neuron to misfold too. This is called <strong>"prion-like" templating</strong> &mdash; the bad copy serves as a template, forcing good copies to adopt its abnormal shape.</p>
 
-<p>This explains why Parkinson's disease is progressive: the misfolding starts in one region and gradually spreads through connected brain circuits. There are two proposed patterns:</p>
+<p>The mechanism works like this: (1) Misfolded fibrils in one neuron act as <strong>seeds</strong>. (2) Seeds are released through exosomes (small membrane vesicles), direct secretion, or when the neuron dies. (3) Neighboring or connected neurons take up the seeds via endocytosis. (4) Inside the new neuron, the seed <strong>recruits and converts</strong> normal alpha-synuclein into the misfolded form &mdash; one seed can convert many normal molecules. (5) Critically, spread follows <strong>neuronal connectivity</strong>, not simple proximity &mdash; it travels along axons from one connected brain region to the next.</p>
+
+<p>The strongest evidence came from studies of patients who received fetal dopaminergic neuron transplants &mdash; years later, the healthy transplanted neurons had developed Lewy body pathology, proving misfolded alpha-synuclein had spread from the host's diseased neurons into the grafted ones.</p>
+
+<h4>Braak Staging: The Predictable Path of Spread</h4>
+<p>Alpha-synuclein pathology spreads through the brain in a <strong>stereotyped, predictable pattern</strong> described by the Braak staging system:</p>
+
+<table>
+  <tr><th>Stage</th><th>Brain Regions Affected</th><th>Clinical Correlation</th></tr>
+  <tr><td>1-2</td><td>Olfactory bulb, dorsal motor nucleus of vagus (brainstem)</td><td>Loss of smell, constipation &mdash; years BEFORE motor symptoms</td></tr>
+  <tr><td>3</td><td>Substantia nigra, other midbrain/pontine nuclei</td><td>Motor symptoms appear (tremor, rigidity, bradykinesia) &mdash; typically after 50-70% of dopamine neurons are already lost</td></tr>
+  <tr><td>4</td><td>Temporal mesocortex, amygdala</td><td>Mood changes, anxiety, mild cognitive effects</td></tr>
+  <tr><td>5-6</td><td>Neocortex (widespread)</td><td>Cognitive decline, dementia (PDD/DLB)</td></tr>
+</table>
+
+<p>There are two proposed propagation patterns:</p>
 
 <ul>
   <li><strong>Body-first (bottom-up):</strong> Misfolding starts in the gut nervous system or peripheral nerves, travels up the vagus nerve to the brainstem, then to the midbrain and cortex. These patients often have early constipation, REM sleep behavior disorder, and reduced sense of smell BEFORE motor symptoms.</li>
@@ -962,13 +977,23 @@ Triggers: aging, oxidative stress, genetic variants (SNCA, GBA), environmental t
 <p>Misfolded alpha-synuclein and tau proteins accumulate in the brain. The brain's own immune cells (microglia) try to clear them but are overwhelmed. The proteins spread faster than the brain can remove them. Immunotherapy aims to tip the balance by providing the immune system with targeted weapons.</p>
 
 <h3>Active Immunotherapy (Vaccines)</h3>
-<p>A vaccine presents a piece of the target protein (an "epitope") to the immune system. The immune system recognizes it as foreign, generates antibodies against it, and maintains an immune "memory." When those antibodies encounter misfolded protein in the body, they bind to it and flag it for removal.</p>
+<p>A vaccine presents a piece of the target protein (an "epitope") to the immune system. Here is what happens step by step after a vaccine like ACI-7104.056 is injected:</p>
+
+<ol>
+  <li><strong>Injection:</strong> The vaccine peptide (mimicking oligomerized alpha-synuclein), conjugated to a carrier protein and mixed with an adjuvant, is injected intramuscularly.</li>
+  <li><strong>Antigen presentation:</strong> Dendritic cells at the injection site engulf the vaccine antigen, break it into peptide fragments, and display them on their surface bound to <strong>HLA class II molecules</strong>. (This is why HLA typing matters &mdash; the patient's HLA molecules must be able to bind and present the specific vaccine peptide.)</li>
+  <li><strong>T cell activation:</strong> In the lymph node, dendritic cells present the antigen-HLA complex to <strong>CD4+ helper T cells</strong> whose receptors recognize that specific combination.</li>
+  <li><strong>B cell activation:</strong> B cells whose surface antibodies can bind the vaccine antigen are activated, with critical co-stimulatory help from the activated T cells.</li>
+  <li><strong>Germinal center reaction:</strong> In lymph node germinal centers, B cells undergo <strong>somatic hypermutation</strong> (random antibody gene mutations), <strong>affinity maturation</strong> (selection of the best binders), and <strong>class switching</strong> (IgM to IgG).</li>
+  <li><strong>Antibody production:</strong> Selected B cells become plasma cells that move to bone marrow and secrete high-affinity IgG antibodies into the bloodstream for months to years.</li>
+  <li><strong>Memory:</strong> Some B cells become long-lived memory cells, ready to rapidly reactivate upon booster doses.</li>
+</ol>
 
 <ul>
-  <li><strong>Advantage:</strong> A single vaccination course can generate long-lasting antibody production (months to years)</li>
-  <li><strong>Advantage:</strong> The body produces its own antibodies &mdash; ongoing, self-sustaining</li>
-  <li><strong>Disadvantage:</strong> Response depends on the patient's immune system (HLA type matters!)</li>
-  <li><strong>Disadvantage:</strong> Takes weeks to months to generate antibodies</li>
+  <li><strong>Advantage:</strong> A single vaccination course generates long-lasting, self-sustaining antibody production. The body produces a <strong>polyclonal</strong> response (many different antibody species), providing broader coverage than a single monoclonal antibody.</li>
+  <li><strong>Advantage:</strong> Cost-effective for chronic disease (boosters every 3-6 months vs monthly antibody infusions at $30,000-50,000/year)</li>
+  <li><strong>Disadvantage:</strong> Response depends on the patient's immune system (HLA type, age, immune health)</li>
+  <li><strong>Disadvantage:</strong> Takes weeks to months to generate antibodies; harder to stop if there's an adverse reaction</li>
   <li><strong>Examples for this patient:</strong> VacSYn (α-syn vaccine), AADvac1 (tau vaccine), UB-312 (α-syn vaccine)</li>
 </ul>
 
@@ -983,13 +1008,25 @@ Triggers: aging, oxidative stress, genetic variants (SNCA, GBA), environmental t
   <li><strong>Examples for this patient:</strong> Prasinezumab (anti-α-syn), bepranemab (anti-tau)</li>
 </ul>
 
+<h3>How Antibodies Clear Misfolded Proteins</h3>
+<p>Once antibodies against alpha-synuclein or tau are circulating, they can clear pathological protein through several mechanisms:</p>
+
+<ol>
+  <li><strong>Peripheral sink hypothesis:</strong> Antibodies in the blood bind target protein in the blood and peripheral tissues, shifting the equilibrium. This draws the target protein out of the brain (down the concentration gradient), where it is cleared by the liver and kidneys. This mechanism doesn't require antibodies to enter the brain.</li>
+  <li><strong>Direct neutralization:</strong> The small fraction of antibodies that cross the BBB can bind to extracellular protein aggregates and seeds, preventing them from seeding further aggregation or being taken up by neighboring neurons &mdash; blocking cell-to-cell spread.</li>
+  <li><strong>Microglial phagocytosis:</strong> When antibodies bind to aggregates, their Fc region (the "tail" of the Y-shaped antibody) is recognized by Fc receptors on <strong>microglia</strong> (brain immune cells), which engulf and digest the antibody-aggregate complex. This is one of the most important clearance mechanisms.</li>
+  <li><strong>Prevention of cross-seeding:</strong> Critically for dual proteinopathy, antibodies that neutralize alpha-synuclein oligomers could prevent those oligomers from cross-seeding tau (and vice versa), breaking the amplification cycle at either point.</li>
+</ol>
+
 <h3>The Blood-Brain Barrier Problem</h3>
-<p>Antibodies are large molecules. The blood-brain barrier (BBB) &mdash; a tight layer of cells lining brain blood vessels &mdash; blocks most antibodies from entering the brain. Only about 0.1% of circulating antibodies reach the brain. This is a major limitation for all immunotherapy in neurodegeneration.</p>
+<p>Antibodies are large molecules. The blood-brain barrier (BBB) &mdash; a tight layer of endothelial cells lining brain blood vessels, connected by tight junctions &mdash; blocks most antibodies from entering the brain. Only about <strong>0.1%</strong> of circulating antibodies reach the brain (crossing via the FcRn receptor on endothelial cells). This is a major limitation for all immunotherapy in neurodegeneration &mdash; to get therapeutic brain levels, very high blood levels are needed.</p>
 
 <p>Solutions being developed:</p>
 <ul>
-  <li><strong>Brain-shuttled antibodies:</strong> Engineered with a transferrin receptor binding domain that "rides" the natural transport system across the BBB. Achieves 10-40x higher brain concentrations. (Tier 3 &mdash; preclinical)</li>
-  <li><strong>Focused ultrasound BBB opening:</strong> MRI-guided ultrasound temporarily opens the BBB, allowing antibodies to enter. Shown safe in Phase 1 PD dementia trial. (Tier 2)</li>
+  <li><strong>Brain-shuttled antibodies:</strong> Engineered with a second binding arm targeting the transferrin receptor (TfR) on brain endothelial cells. TfR undergoes constant transcytosis (shuttling iron into the brain), and the antibody hitchhikes across. Achieves 5-40x higher brain concentrations. (Tier 3 &mdash; preclinical, npj Parkinson's 2025)</li>
+  <li><strong>Focused ultrasound BBB opening:</strong> Low-intensity focused ultrasound combined with IV microbubbles (tiny gas-filled spheres) causes the microbubbles to oscillate, mechanically loosening tight junctions for a window of several hours. During this window, antibodies pass into targeted brain regions at 10-100x higher concentrations. Shown safe in Phase 1 PD dementia trial. (Tier 2)</li>
+  <li><strong>Intrathecal delivery:</strong> Injecting antibodies directly into the CSF via lumbar puncture, bypassing the BBB entirely. More invasive but guarantees CNS exposure. Used by some ASO programs.</li>
+  <li><strong>Nasal delivery:</strong> The olfactory epithelium has a direct path to the brain via the olfactory nerve (bypasses the BBB). The anti-pT181 mucosal vaccine uses this approach.</li>
 </ul>
 
 
