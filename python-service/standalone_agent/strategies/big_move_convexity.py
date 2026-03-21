@@ -118,6 +118,16 @@ _DEFAULTS: dict[str, Any] = {
     # Set conviction_required_fires=1 to disable (default, backward compatible).
     "conviction_required_fires": 1,       # 1 = disabled (enter on first signal)
     "conviction_window_minutes": 60,      # window to accumulate N fires
+    # Regime-adaptive exits: VIX-conditional trailing stop parameters.
+    # Research (2026-03-21): regime_split20 PF=7.46 (+17%). Combined with conviction: PF=11.10.
+    # When VIX is below the threshold, use tighter stops. Above, use wider stops.
+    # Set regime_exit_enabled=False to disable (default, backward compatible).
+    "regime_exit_enabled": False,
+    "regime_exit_vix_threshold": 20,      # VIX boundary
+    "regime_exit_low_activation": 12,     # trail activation % when VIX < threshold
+    "regime_exit_low_trail": 8,           # trail % when VIX < threshold
+    "regime_exit_high_activation": 25,    # trail activation % when VIX >= threshold
+    "regime_exit_high_trail": 15,         # trail % when VIX >= threshold
 }
 
 # Cross-asset tickers for correlation features (Group C) and backfill.
@@ -146,12 +156,22 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         # shows vix_min=12 gives ALL 5 folds profitable including fold 0 at PF=1.25,
         # +28% more signals (1575 vs 1230). vix_min=14 was killing profitable low-vol signals.)
         "vix_gate_min": 12,
-        "vix_gate_max": 25,
+        # VIX upper: 25→30 (2026-03-21: gate sweep on gaming-pc confirms
+        # vix_max=30 gives PF=2.64 vs 2.61, +7 signals. Free improvement.
+        # vix_max=100 degrades to 2.54 — don't remove entirely.)
+        "vix_gate_max": 30,
         "options_gate_enabled": True,     # enable for SPY (validated 2026-03-09)
         # Conviction gate: require 2 signal fires in 60 min before entering.
         # Research (2026-03-21): conv2x60 + regime_split20 → holdout PF 11.10 (+74%).
         "conviction_required_fires": 2,
         "conviction_window_minutes": 60,
+        # Regime-adaptive exits: tighter stops in calm, wider in elevated VIX.
+        "regime_exit_enabled": True,
+        "regime_exit_vix_threshold": 20,
+        "regime_exit_low_activation": 12,
+        "regime_exit_low_trail": 8,
+        "regime_exit_high_activation": 25,
+        "regime_exit_high_trail": 15,
     },
     "SLV": {
         "strike_increment": 1.00,         # IB lists $1 increments for SLV options
@@ -472,6 +492,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Conviction gate: rolling window of recent signal fire timestamps
         self._conviction_fire_times: list[float] = []
 
+        # VIX at last signal fire (for regime-adaptive exits at fill time)
+        self._signal_vix_level: Optional[float] = None
+
         # Polygon WS background thread
         self._ws_thread: Optional[threading.Thread] = None
         self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -716,6 +739,25 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "profit_targets_enabled": config.get("risk_profit_targets_enabled", self._risk_config.get("profit_targets_enabled", True)),
             "profit_targets": config.get("risk_profit_targets", self._risk_config.get("profit_targets", [])),
         }
+
+        # Regime-adaptive exits: override trailing params based on VIX at signal time.
+        # Research (2026-03-21): regime_split20 combined with conviction → PF 11.10.
+        if cfg.get("regime_exit_enabled", False) and self._signal_vix_level is not None:
+            vix_thresh = cfg.get("regime_exit_vix_threshold", 20)
+            if self._signal_vix_level < vix_thresh:
+                act = cfg.get("regime_exit_low_activation", 12)
+                trail = cfg.get("regime_exit_low_trail", 8)
+                regime_label = f"low_vix({self._signal_vix_level:.1f}<{vix_thresh})"
+            else:
+                act = cfg.get("regime_exit_high_activation", 25)
+                trail = cfg.get("regime_exit_high_trail", 15)
+                regime_label = f"high_vix({self._signal_vix_level:.1f}>={vix_thresh})"
+            self._risk_config["trailing_activation_pct"] = act
+            self._risk_config["trailing_trail_pct"] = trail
+            logger.info(
+                "Regime-adaptive exit: %s → activation=%d%%, trail=%d%%",
+                regime_label, act, trail,
+            )
 
         # Spawn risk manager if callback is wired
         if self._spawn_risk_manager is not None and self._last_signal:
@@ -1715,6 +1757,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             )
             # Reset fire times after entry to require fresh conviction for next trade
             self._conviction_fire_times.clear()
+
+        # Store VIX at signal time for regime-adaptive exits at fill time
+        self._signal_vix_level = _vix_level
 
         # Build lineage snapshot on signal fire (WS2) — consumed by on_fill
         # Pass snapshot metadata for thread-safe lineage attribution
