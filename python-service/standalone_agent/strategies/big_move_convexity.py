@@ -112,6 +112,12 @@ _DEFAULTS: dict[str, Any] = {
     # Richness source: "feature_vector" (extract e_straddle_richness from model features)
     # or "strangle_pct" (use daily bootstrap strangle_pct:{ticker} from Polygon options).
     "richness_source": "feature_vector",
+    # Conviction gate: require N signal fires within M minutes before entering.
+    # Research (2026-03-21): conv_2x60m improves holdout PF from 6.38 to 9.53 (+49%).
+    # Combined with regime-adaptive exits: PF 11.10 (+74% vs baseline).
+    # Set conviction_required_fires=1 to disable (default, backward compatible).
+    "conviction_required_fires": 1,       # 1 = disabled (enter on first signal)
+    "conviction_window_minutes": 60,      # window to accumulate N fires
 }
 
 # Cross-asset tickers for correlation features (Group C) and backfill.
@@ -142,6 +148,10 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "vix_gate_min": 12,
         "vix_gate_max": 25,
         "options_gate_enabled": True,     # enable for SPY (validated 2026-03-09)
+        # Conviction gate: require 2 signal fires in 60 min before entering.
+        # Research (2026-03-21): conv2x60 + regime_split20 → holdout PF 11.10 (+74%).
+        "conviction_required_fires": 2,
+        "conviction_window_minutes": 60,
     },
     "SLV": {
         "strike_increment": 1.00,         # IB lists $1 increments for SLV options
@@ -458,6 +468,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         self._signal_history: list[dict] = []
         self._signals_generated: int = 0
         self._decisions_run: int = 0
+
+        # Conviction gate: rolling window of recent signal fire timestamps
+        self._conviction_fire_times: list[float] = []
 
         # Polygon WS background thread
         self._ws_thread: Optional[threading.Thread] = None
@@ -852,6 +865,23 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
 
         # Signal history (last 20)
         state["signal_history"] = self._signal_history[-20:]
+
+        # Conviction gate state
+        required = cfg.get("conviction_required_fires", 1) if cfg else 1
+        window = cfg.get("conviction_window_minutes", 60) if cfg else 60
+        if required > 1:
+            now_ts = time.time()
+            cutoff = now_ts - (window * 60)
+            active_fires = [t for t in self._conviction_fire_times if t >= cutoff]
+            state["conviction_gate"] = {
+                "enabled": True,
+                "required_fires": required,
+                "window_minutes": window,
+                "current_fires": len(active_fires),
+                "ready": len(active_fires) >= required,
+            }
+        else:
+            state["conviction_gate"] = {"enabled": False}
 
         # Polygon WS status
         if self._polygon_client is not None:
@@ -1657,6 +1687,34 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "SIGNAL [%s]: direction=%s, probability=%.4f, strength=%.4f",
             signal_id, signal.direction, probability, signal.strength,
         )
+
+        # Conviction gate: require N fires within M minutes before entering.
+        # Research (2026-03-21): conv_2x60m → holdout PF 9.53 (+49% vs baseline).
+        required_fires = cfg.get("conviction_required_fires", 1)
+        window_min = cfg.get("conviction_window_minutes", 60)
+        if required_fires > 1:
+            now_ts = time.time()
+            self._conviction_fire_times.append(now_ts)
+            # Evict fires outside the window
+            cutoff = now_ts - (window_min * 60)
+            self._conviction_fire_times = [
+                t for t in self._conviction_fire_times if t >= cutoff
+            ]
+            n_fires = len(self._conviction_fire_times)
+            if n_fires < required_fires:
+                logger.info(
+                    "Signal suppressed by conviction gate (%d/%d fires in %d min window)",
+                    n_fires, required_fires, window_min,
+                )
+                signal_record["suppressed"] = f"conviction_gate ({n_fires}/{required_fires})"
+                self._signal_history.append(signal_record)
+                return []
+            logger.info(
+                "Conviction gate PASSED (%d/%d fires in %d min window)",
+                n_fires, required_fires, window_min,
+            )
+            # Reset fire times after entry to require fresh conviction for next trade
+            self._conviction_fire_times.clear()
 
         # Build lineage snapshot on signal fire (WS2) — consumed by on_fill
         # Pass snapshot metadata for thread-safe lineage attribution
