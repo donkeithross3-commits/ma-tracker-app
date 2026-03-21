@@ -769,14 +769,15 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         **_SAFE,
     )
 
-    # Overnight pair runs sun-thu: the night BEFORE each trading day.
+    # Overnight pair runs sun,mon-thu: the night BEFORE each trading day.
     # Sun night → Mon morning report, ..., Thu night → Fri morning report.
     # Fri/Sat nights skipped — no new market data over the weekend.
+    # Note: APScheduler requires sun,mon-thu (not sun-thu) because sun=6 > thu=3.
     scheduler.add_job(
         job_overnight_event_scan,
         "cron",
         id="overnight_event_scan",
-        day_of_week="sun-thu",
+        day_of_week="sun,mon-thu",
         hour=22, minute=55,
         replace_existing=True,
         **_SAFE,
@@ -786,7 +787,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         job_overnight_risk_assessment,
         "cron",
         id="overnight_risk_assessment",
-        day_of_week="sun-thu",
+        day_of_week="sun,mon-thu",
         hour=23, minute=0,
         replace_existing=True,
         **_SAFE,
