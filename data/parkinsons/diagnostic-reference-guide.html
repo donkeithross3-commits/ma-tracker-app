@@ -1,0 +1,1235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dual Proteinopathy Diagnostic &amp; Disease Reference Guide</title>
+<style>
+  @page {
+    size: letter;
+    margin: 0.75in 0.85in;
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 9pt;
+      color: #666;
+    }
+    @top-right {
+      content: "CONFIDENTIAL — For Family &amp; Clinical Team Use Only";
+      font-size: 8pt;
+      color: #999;
+    }
+  }
+
+  @page :first {
+    @top-right { content: none; }
+    @bottom-center { content: none; }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 11pt;
+    line-height: 1.55;
+    color: #1a1a1a;
+    max-width: 100%;
+  }
+
+  /* ─── Cover Page ─── */
+  .cover {
+    page-break-after: always;
+    text-align: center;
+    padding-top: 2.5in;
+  }
+  .cover h1 {
+    font-size: 28pt;
+    color: #1a365d;
+    margin-bottom: 0.3in;
+    line-height: 1.2;
+  }
+  .cover .subtitle {
+    font-size: 14pt;
+    color: #4a5568;
+    margin-bottom: 0.8in;
+  }
+  .cover .patient-box {
+    border: 2px solid #c53030;
+    border-radius: 8px;
+    padding: 20px 30px;
+    display: inline-block;
+    text-align: left;
+    background: #fff5f5;
+    max-width: 5.5in;
+  }
+  .cover .patient-box h3 {
+    color: #c53030;
+    margin: 0 0 8px 0;
+    font-size: 13pt;
+  }
+  .cover .patient-box ul {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 10.5pt;
+  }
+  .cover .patient-box li { margin-bottom: 4px; }
+  .cover .date {
+    margin-top: 1in;
+    font-size: 11pt;
+    color: #718096;
+  }
+  .cover .disclaimer-box {
+    margin-top: 0.5in;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 12px 20px;
+    font-size: 9pt;
+    color: #718096;
+    text-align: left;
+    max-width: 5.5in;
+    display: inline-block;
+  }
+
+  /* ─── Table of Contents ─── */
+  .toc {
+    page-break-after: always;
+  }
+  .toc h2 {
+    font-size: 20pt;
+    color: #1a365d;
+    border-bottom: 3px solid #1a365d;
+    padding-bottom: 8px;
+    margin-bottom: 20px;
+  }
+  .toc-section {
+    margin-bottom: 6px;
+    font-size: 12pt;
+  }
+  .toc-section a {
+    color: #2b6cb0;
+    text-decoration: none;
+  }
+  .toc-sub {
+    margin-left: 24px;
+    margin-bottom: 4px;
+    font-size: 10.5pt;
+    color: #4a5568;
+  }
+
+  /* ─── Headings ─── */
+  h1 {
+    font-size: 22pt;
+    color: #1a365d;
+    border-bottom: 3px solid #1a365d;
+    padding-bottom: 6px;
+    margin-top: 0.4in;
+    margin-bottom: 16px;
+    page-break-after: avoid;
+  }
+  h2 {
+    font-size: 16pt;
+    color: #2c5282;
+    border-bottom: 1.5px solid #bee3f8;
+    padding-bottom: 4px;
+    margin-top: 24px;
+    margin-bottom: 12px;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 13pt;
+    color: #2d3748;
+    margin-top: 18px;
+    margin-bottom: 8px;
+    page-break-after: avoid;
+  }
+  h4 {
+    font-size: 11.5pt;
+    color: #4a5568;
+    margin-top: 14px;
+    margin-bottom: 6px;
+    font-style: italic;
+    page-break-after: avoid;
+  }
+
+  /* ─── Content ─── */
+  p { margin: 0 0 10px 0; }
+
+  .key-insight {
+    background: #ebf8ff;
+    border-left: 4px solid #3182ce;
+    padding: 10px 14px;
+    margin: 14px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 10.5pt;
+    page-break-inside: avoid;
+  }
+  .key-insight strong { color: #2b6cb0; }
+
+  .warning-box {
+    background: #fffaf0;
+    border-left: 4px solid #dd6b20;
+    padding: 10px 14px;
+    margin: 14px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 10.5pt;
+    page-break-inside: avoid;
+  }
+  .warning-box strong { color: #c05621; }
+
+  .action-box {
+    background: #f0fff4;
+    border-left: 4px solid #38a169;
+    padding: 10px 14px;
+    margin: 14px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 10.5pt;
+    page-break-inside: avoid;
+  }
+  .action-box strong { color: #276749; }
+
+  .urgent-box {
+    background: #fff5f5;
+    border-left: 4px solid #e53e3e;
+    padding: 10px 14px;
+    margin: 14px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 10.5pt;
+    page-break-inside: avoid;
+  }
+  .urgent-box strong { color: #c53030; }
+
+  /* ─── Tables ─── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 16px 0;
+    font-size: 10pt;
+    page-break-inside: avoid;
+  }
+  th {
+    background: #1a365d;
+    color: white;
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 9.5pt;
+    font-weight: 600;
+  }
+  td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #e2e8f0;
+    vertical-align: top;
+  }
+  tr:nth-child(even) { background: #f7fafc; }
+  tr:hover { background: #edf2f7; }
+
+  /* ─── Lists ─── */
+  ul, ol { margin: 6px 0 12px 0; padding-left: 22px; }
+  li { margin-bottom: 5px; }
+
+  /* ─── Evidence Badges ─── */
+  .tier { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 8.5pt; font-weight: 600; margin-left: 6px; vertical-align: middle; }
+  .tier-1 { background: #c6f6d5; color: #22543d; }
+  .tier-2 { background: #bee3f8; color: #1a365d; }
+  .tier-3 { background: #fefcbf; color: #744210; }
+  .tier-4 { background: #feebc8; color: #7b341e; }
+  .tier-5 { background: #e2e8f0; color: #4a5568; }
+
+  /* ─── Section dividers ─── */
+  .section-start {
+    page-break-before: always;
+  }
+
+  /* ─── Diagrams ─── */
+  .diagram {
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 16px;
+    margin: 14px 0;
+    font-family: 'Courier New', monospace;
+    font-size: 9.5pt;
+    line-height: 1.4;
+    white-space: pre;
+    page-break-inside: avoid;
+  }
+
+  .footnote {
+    font-size: 9pt;
+    color: #718096;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 8px;
+    margin-top: 20px;
+  }
+
+  /* Page break helpers */
+  .no-break { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- COVER PAGE                                                            -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="cover">
+  <h1>Understanding Dual Proteinopathy:<br>A Complete Disease &amp; Diagnostic Reference</h1>
+  <div class="subtitle">
+    Parkinson's Disease with PSP-Richardson's Features<br>
+    Alpha-Synuclein + Tau Proteinopathy
+  </div>
+
+  <div class="patient-box">
+    <h3>Patient Profile (De-identified)</h3>
+    <ul>
+      <li><strong>Confirmed pathology:</strong> Phosphorylated alpha-synuclein (positive skin biopsy, 92.7% PD sensitivity per Synuclein-One/JAMA 2024)</li>
+      <li><strong>Clinical features:</strong> Right-hand tremor (levodopa-responsive), backward (retropulsive) falls, eye movement abnormalities</li>
+      <li><strong>Suspected pathology:</strong> 4-repeat tau (PSP-Richardson's pattern)</li>
+      <li><strong>Diagnosis:</strong> Dual proteinopathy &mdash; confirmed synucleinopathy with clinical tauopathy</li>
+      <li><strong>Key insight:</strong> Cross-seeding between alpha-synuclein and tau means MORE therapeutic targets, not fewer</li>
+    </ul>
+  </div>
+
+  <div class="date">
+    Compiled March 21, 2026<br>
+    Based on literature through March 2026
+  </div>
+
+  <div class="disclaimer-box">
+    <strong>Medical Disclaimer:</strong> This document is an informational reference compiled from published research and clinical guidelines.
+    It does NOT constitute medical advice. All diagnostic and treatment decisions must be made in consultation with qualified physicians.
+    No action should be taken based solely on this document without professional medical guidance.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- TABLE OF CONTENTS                                                     -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="toc">
+  <h2>Table of Contents</h2>
+
+  <div class="toc-section"><strong>Part I: The Diseases</strong></div>
+  <div class="toc-sub">1. What Is Alpha-Synuclein &amp; How It Causes Disease</div>
+  <div class="toc-sub">2. What Is Tau &amp; Why PSP Is Different from Alzheimer's</div>
+  <div class="toc-sub">3. Cross-Seeding: How the Two Proteins Interact</div>
+  <div class="toc-sub">4. PSP-Richardson's Syndrome: The Clinical Picture</div>
+  <div class="toc-sub">5. How Dual Proteinopathy Changes the Equation</div>
+
+  <div class="toc-section" style="margin-top: 16px;"><strong>Part II: The Complete Diagnostic Roadmap</strong></div>
+  <div class="toc-sub">6. Understanding the Diagnostic Tree</div>
+  <div class="toc-sub">7. Tests Already Completed</div>
+  <div class="toc-sub">8. Priority Tier A &mdash; Critical Tests (Do Now)</div>
+  <div class="toc-sub">9. Priority Tier B &mdash; Important Tests (Schedule Soon)</div>
+  <div class="toc-sub">10. Priority Tier C &mdash; Supplementary Tests</div>
+  <div class="toc-sub">11. How Each Test Works (Deep Dives)</div>
+
+  <div class="toc-section" style="margin-top: 16px;"><strong>Part III: Personalized Genomic Medicine</strong></div>
+  <div class="toc-sub">12. Phase 1: Getting the Genetic Data</div>
+  <div class="toc-sub">13. Phase 2: Computational Analysis</div>
+  <div class="toc-sub">14. Phase 3: Personalized Treatment Ranking</div>
+
+  <div class="toc-section" style="margin-top: 16px;"><strong>Part IV: The Treatment Landscape</strong></div>
+  <div class="toc-sub">15. How Immunotherapy Works in Neurodegeneration</div>
+  <div class="toc-sub">16. Active Clinical Trials &amp; Therapies</div>
+  <div class="toc-sub">17. Neuroprotection (GLP-1 Agonists)</div>
+  <div class="toc-sub">18. Emerging Approaches</div>
+
+  <div class="toc-section" style="margin-top: 16px;"><strong>Appendices</strong></div>
+  <div class="toc-sub">A. Evidence Tier Definitions</div>
+  <div class="toc-sub">B. Key Genes and What They Do</div>
+  <div class="toc-sub">C. Glossary of Medical Terms</div>
+  <div class="toc-sub">D. Source References</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!--  PART I: THE DISEASES                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h1 class="section-start">Part I: The Diseases</h1>
+
+<h2>1. What Is Alpha-Synuclein &amp; How It Causes Disease</h2>
+
+<h3>The Normal Protein</h3>
+<p>Alpha-synuclein is a small protein (140 amino acids) found abundantly at the tips of nerve cells (presynaptic terminals) throughout the brain. In its healthy state, it is a flexible, unstructured protein &mdash; like a loose piece of string. Its normal job is to help regulate the release of neurotransmitters, particularly dopamine, by interacting with the membranes of synaptic vesicles (the tiny packages that carry chemical signals between neurons).</p>
+
+<p>Think of it this way: neurons communicate by releasing chemical messengers across tiny gaps (synapses). Alpha-synuclein helps manage the packaging and delivery of these messengers. It's a traffic controller at the neural communication junction.</p>
+
+<h3>When It Goes Wrong: Misfolding and Aggregation</h3>
+<p>Under certain conditions &mdash; which can include genetic mutations, aging, oxidative stress, or environmental toxins &mdash; alpha-synuclein changes shape. Instead of staying loose and flexible, it folds into rigid, stacked structures called <strong>beta-sheets</strong>. These misfolded copies stick together like Velcro, first forming small clumps (oligomers), then longer chains (fibrils), and eventually large, dense deposits visible under a microscope.</p>
+
+<div class="diagram">Normal α-synuclein          Misfolded α-synuclein          Aggregates
+
+  ~~~~~ (flexible)    →    ═══╗ (rigid β-sheet)    →    ═══╗═══╗═══╗
+                               ╚═══                       ╚═══╚═══╚═══
+                                                          (fibrils/Lewy bodies)
+
+Triggers: aging, oxidative stress, genetic variants (SNCA, GBA), environmental toxins</div>
+
+<h3>What Are Lewy Bodies?</h3>
+<p>When enough misfolded alpha-synuclein accumulates inside a neuron, it forms a large, round inclusion called a <strong>Lewy body</strong>. Lewy bodies are the pathological hallmark of Parkinson's disease and Dementia with Lewy Bodies (DLB). They are like garbage dumps inside the cell &mdash; the neuron's waste disposal system has been overwhelmed.</p>
+
+<p>Neurons containing Lewy bodies are sick and dysfunctional. Eventually, they die. When the dying neurons are in the substantia nigra (the brain's dopamine factory), the result is the motor symptoms of Parkinson's: tremor, stiffness, slowness of movement.</p>
+
+<h3>Prion-Like Spread</h3>
+<p>One of the most important discoveries of the last decade: misfolded alpha-synuclein can <strong>spread from cell to cell</strong>, like a contagion. A misfolded copy can be released from one neuron, taken up by a neighboring neuron, and then cause the normal alpha-synuclein in that neuron to misfold too. This is called <strong>"prion-like" templating</strong> &mdash; the bad copy serves as a template, forcing good copies to adopt its abnormal shape.</p>
+
+<p>This explains why Parkinson's disease is progressive: the misfolding starts in one region and gradually spreads through connected brain circuits. There are two proposed patterns:</p>
+
+<ul>
+  <li><strong>Body-first (bottom-up):</strong> Misfolding starts in the gut nervous system or peripheral nerves, travels up the vagus nerve to the brainstem, then to the midbrain and cortex. These patients often have early constipation, REM sleep behavior disorder, and reduced sense of smell BEFORE motor symptoms.</li>
+  <li><strong>Brain-first (top-down):</strong> Misfolding starts in the brain itself (amygdala or cortex), then spreads down. These patients may develop motor symptoms without the early autonomic or sleep disturbances.</li>
+</ul>
+
+<div class="key-insight">
+  <strong>What the positive skin biopsy means:</strong> The skin biopsy found phosphorylated alpha-synuclein in peripheral nerve fibers. This confirms that the misfolded protein is present OUTSIDE the brain &mdash; in the peripheral nervous system. This is consistent with the synucleinopathy diagnosis and suggests the disease involves the body's nerve network, not just the brain. The Synuclein-One skin biopsy has 92.7% sensitivity for detecting PD (JAMA 2024).
+</div>
+
+<h3>Brain Regions Affected in Synucleinopathies</h3>
+<table>
+  <tr><th>Brain Region</th><th>Normal Function</th><th>Symptom When Affected</th></tr>
+  <tr><td>Substantia nigra</td><td>Dopamine production for movement</td><td>Tremor, rigidity, slow movement</td></tr>
+  <tr><td>Locus coeruleus</td><td>Norepinephrine for alertness</td><td>Attention problems, mood changes</td></tr>
+  <tr><td>Dorsal motor nucleus of vagus</td><td>Gut motility control</td><td>Constipation, GI dysfunction</td></tr>
+  <tr><td>Olfactory bulb</td><td>Sense of smell</td><td>Reduced/lost smell (hyposmia)</td></tr>
+  <tr><td>Cortex (late stage)</td><td>Cognition, memory</td><td>Dementia (PDD/DLB)</td></tr>
+  <tr><td>Peripheral autonomic nerves</td><td>Heart rate, blood pressure control</td><td>Orthostatic hypotension, cardiac denervation</td></tr>
+</table>
+
+
+<h2>2. What Is Tau &amp; Why PSP Is Different from Alzheimer's</h2>
+
+<h3>The Normal Protein</h3>
+<p>Tau is a protein that stabilizes <strong>microtubules</strong> &mdash; the internal scaffolding of neurons. Think of microtubules as the railroad tracks inside a nerve cell: they provide structure and serve as highways for transporting nutrients and signals from the cell body all the way down long axons to distant synapses. Tau proteins are the railroad ties that hold these tracks together and in proper shape.</p>
+
+<h3>Tau Isoforms: 3R vs. 4R</h3>
+<p>The human brain produces six different versions (isoforms) of tau, which differ in how many "repeat" domains they have for binding to microtubules. The two important categories are:</p>
+
+<ul>
+  <li><strong>3-repeat tau (3R):</strong> Has three microtubule-binding domains. More common in fetal brain.</li>
+  <li><strong>4-repeat tau (4R):</strong> Has four microtubule-binding domains. Binds microtubules more tightly.</li>
+</ul>
+
+<p>In a healthy adult brain, the ratio of 3R to 4R tau is roughly 1:1. Different diseases disturb this balance in different ways &mdash; and this distinction is <em>critical</em> for diagnosis and treatment:</p>
+
+<table>
+  <tr><th>Disease</th><th>Tau Type</th><th>Implications</th></tr>
+  <tr><td><strong>Alzheimer's Disease</strong></td><td>Mixed 3R + 4R</td><td>Both isoforms aggregate together</td></tr>
+  <tr><td><strong>PSP (all variants)</strong></td><td><strong>4R only</strong></td><td>Only 4R tau aggregates; requires different treatments and imaging tracers</td></tr>
+  <tr><td><strong>CBD (Corticobasal Degeneration)</strong></td><td>4R only</td><td>Similar to PSP; different brain distribution</td></tr>
+  <tr><td><strong>Pick's Disease</strong></td><td>3R only</td><td>Different from both PSP and AD</td></tr>
+</table>
+
+<div class="warning-box">
+  <strong>Critical implication for this patient:</strong> PSP is a <strong>4R-only tauopathy</strong>. This means the tau PET imaging tracer matters enormously. The commonly used tracer flortaucipir (AV-1451) was designed for Alzheimer's mixed 3R/4R tau and binds POORLY to 4R-only tau deposits. For PSP, newer tracers like <strong>PI-2620</strong> (85% sensitivity for PSP-RS) or <strong>florzolotau/PM-PBB3</strong> (AUC 0.87) should be used instead. Using the wrong tracer could produce a false negative.
+</div>
+
+<h3>How Tau Becomes Pathological</h3>
+<p>When tau is <strong>hyperphosphorylated</strong> (too many phosphate groups are attached to it by enzymes called kinases), it loses its ability to bind microtubules. The detached, hyperphosphorylated tau then misfolds and aggregates, forming <strong>neurofibrillary tangles</strong> (NFTs). These tangles clog the neuron's interior, disrupting transport and eventually killing the cell.</p>
+
+<p>The key phosphorylation sites that researchers measure as biomarkers:</p>
+<ul>
+  <li><strong>p-tau 181:</strong> An early phosphorylation event; elevated in Alzheimer's but may be lower in PSP (useful for differential diagnosis)</li>
+  <li><strong>p-tau 217:</strong> The most specific marker for tau aggregation; primarily reflects Alzheimer's-type pathology, so LOW p-tau 217 with HIGH neurofilament light is a pattern that SUPPORTS a 4R-tauopathy diagnosis (PSP)</li>
+  <li><strong>p-tau 231:</strong> Reflects an early stage of tau pathology; may change before clinical symptoms</li>
+</ul>
+
+<h3>How Tau Spreads</h3>
+<p>Like alpha-synuclein, tau can spread from neuron to neuron in a prion-like fashion. Misfolded tau is released from one cell, taken up by another, and templates the misfolding of normal tau in the recipient cell. In PSP, the spread follows a distinctive pattern affecting subcortical structures (basal ganglia, brainstem, cerebellum) rather than the cortical pattern seen in Alzheimer's.</p>
+
+
+<h2>3. Cross-Seeding: How the Two Proteins Interact</h2>
+
+<p>This section describes the single most important concept for understanding this patient's disease.</p>
+
+<h3>What Is Cross-Seeding?</h3>
+<p>Cross-seeding is the process by which one misfolded protein <strong>promotes the misfolding of a different protein</strong>. In this patient's case:</p>
+
+<ul>
+  <li>Misfolded alpha-synuclein fibrils can serve as templates that cause normal tau to misfold</li>
+  <li>Misfolded tau can likewise promote alpha-synuclein misfolding</li>
+  <li>The process is <strong>bidirectional</strong> &mdash; each protein accelerates the other's pathology</li>
+</ul>
+
+<div class="diagram">
+    Alpha-Synuclein                    Tau
+    (confirmed ✓)                (suspected, PSP features)
+
+         ═══╗                         ╔═══
+         ╚═══  ──── cross-seeds ───→  ═══╗
+         ═══╗  ←─── cross-seeds ────  ╚═══
+         ╚═══                         ═══╗
+
+    Result: ACCELERATED neurodegeneration
+    when both proteins are present
+
+    BUT ALSO: Therapies targeting EITHER
+    protein may reduce BOTH via the same
+    cross-seeding mechanism in reverse
+</div>
+
+<h3>The Science Behind Cross-Seeding</h3>
+<p>A landmark 2025 Frontiers in Neuroscience review established that synucleinopathies should be redefined as "complex proteinopathies" because they almost always involve multiple misfolded proteins. Key findings:</p>
+
+<ul>
+  <li><strong>Alpha-synuclein fibrils template tau misfolding:</strong> When alpha-synuclein aggregates form in a neuron, they create a cellular environment that promotes tau hyperphosphorylation and aggregation. The mechanisms include: disrupting kinase/phosphatase balance (more tau phosphorylation), impairing protein degradation pathways (less tau clearance), and direct physical interaction between the two proteins.</li>
+  <li><strong>Tau oligomers promote alpha-synuclein aggregation:</strong> Tau oligomers (the small, toxic clumps before tangles form) can directly interact with alpha-synuclein and accelerate its aggregation.</li>
+  <li><strong>Co-aggregation is synergistic:</strong> When both proteins are present and misfolding, the neuronal dysfunction is GREATER than what either protein alone would cause. This is not additive &mdash; it's multiplicative.</li>
+</ul>
+
+<div class="key-insight">
+  <strong>The TOMA Discovery &mdash; Why This Matters for Treatment:</strong> Tau Oligomer-specific Monoclonal Antibodies (TOMAs) were developed to target only the toxic tau oligomers (not the normal, functional tau or the inert tangles). In mouse models, these antibodies decreased not only tau oligomers but also <strong>insoluble alpha-synuclein oligomers</strong>. This is profound: targeting tau reduced alpha-synuclein pathology too. It means the cross-seeding mechanism is a therapeutic LEVER &mdash; reduce one protein's toxicity, and the other's toxicity decreases as a secondary benefit.
+</div>
+
+<h3>Implications for This Patient</h3>
+<p>The dual proteinopathy is not a worst-case scenario &mdash; it is actually an <strong>opportunity</strong>:</p>
+<ol>
+  <li><strong>More targets = more options.</strong> A patient with only alpha-synuclein pathology can only benefit from alpha-synuclein therapies. A patient with both pathologies can benefit from alpha-synuclein therapies AND tau therapies AND cross-seeding interventions.</li>
+  <li><strong>Cross-seeding means dual benefit.</strong> An effective alpha-synuclein vaccine may also reduce tau pathology (and vice versa), because disrupting the cross-seeding cycle at either point should slow both processes.</li>
+  <li><strong>More trial eligibility.</strong> This patient may qualify for BOTH alpha-synuclein trials (prasinezumab, VacSYn) AND tau trials (AADvac1 PSP Platform Trial).</li>
+</ol>
+
+
+<h2>4. PSP-Richardson's Syndrome: The Clinical Picture</h2>
+
+<h3>What Is PSP?</h3>
+<p>Progressive Supranuclear Palsy (PSP) is a neurodegenerative disease caused by the accumulation of 4-repeat tau in specific brain regions: the basal ganglia, brainstem, and cerebellum. It is the most common atypical parkinsonian disorder, but still rare &mdash; affecting about 6 per 100,000 people.</p>
+
+<p>"Supranuclear" refers to the location of the damage: ABOVE (supra) the cranial nerve NUCLEI in the brainstem. The nuclei that directly control eye muscles still work &mdash; but the brain regions that COMMAND those nuclei to move are damaged. This is why PSP patients can't voluntarily look up or down, but their eyes still move reflexively (for example, the doll's eye maneuver, where the doctor turns the patient's head, still produces eye movement).</p>
+
+<h3>PSP-Richardson's vs. Other PSP Variants</h3>
+<p>PSP is not a single disease &mdash; it comes in several clinical variants. PSP-Richardson's syndrome (PSP-RS) is the "classic" and most common form:</p>
+
+<table>
+  <tr><th>Feature</th><th>PSP-Richardson's (PSP-RS)</th><th>PSP-Parkinsonism (PSP-P)</th></tr>
+  <tr><td>Eye movement</td><td><strong>Early vertical gaze palsy</strong></td><td>May be delayed</td></tr>
+  <tr><td>Falls</td><td><strong>Early backward falls (first year)</strong></td><td>Later in course</td></tr>
+  <tr><td>Symmetry</td><td>Symmetric from start</td><td>May be asymmetric initially</td></tr>
+  <tr><td>Levodopa response</td><td>Poor or absent</td><td>Partial initial response</td></tr>
+  <tr><td>Progression</td><td>Faster (median survival 6-7 years)</td><td>Slower</td></tr>
+  <tr><td>Cognition</td><td>Early frontal/executive dysfunction</td><td>Later cognitive involvement</td></tr>
+</table>
+
+<h3>The Eye Movement Problem Explained</h3>
+<p><strong>Supranuclear gaze palsy</strong> is the hallmark of PSP-RS. Here's what happens:</p>
+<ol>
+  <li><strong>Vertical saccades slow first:</strong> The quick, darting eye movements (saccades) that we use to look up and down become slow. The patient is asked to look at the examiner's finger above, then below &mdash; the eyes move sluggishly.</li>
+  <li><strong>Downward gaze affected next:</strong> The inability to look down is particularly disabling. Patients trip on curbs, can't see their food, and have trouble reading.</li>
+  <li><strong>Eventually, voluntary gaze is lost:</strong> The eyes become "locked" in midposition. Importantly, reflexive eye movements (e.g., rotating the head) still work because the lower brainstem nuclei are intact.</li>
+</ol>
+
+<p>The brain regions damaged are the rostral interstitial nucleus of the medial longitudinal fasciculus (riMLF) and the interstitial nucleus of Cajal &mdash; brainstem structures that control vertical gaze commands.</p>
+
+<h3>Why Backward Falls Happen</h3>
+<p>The retropulsive (backward) falls in PSP result from damage to multiple systems simultaneously:</p>
+<ul>
+  <li><strong>Postural instability:</strong> Damage to the pedunculopontine nucleus (a brainstem locomotor center) disrupts the ability to make corrective postural adjustments.</li>
+  <li><strong>Axial rigidity:</strong> Stiffness in the trunk muscles (more than the limbs) prevents the normal compensatory bending and swaying that keeps us upright.</li>
+  <li><strong>Impaired visual feedback:</strong> With eye movement problems, the patient can't quickly scan the environment to orient themselves.</li>
+  <li><strong>Frontal lobe dysfunction:</strong> Impaired judgment about risk (stepping backward without checking, rising from a chair too quickly).</li>
+</ul>
+
+<h3>Typical Progression Timeline for PSP-Richardson's</h3>
+<table>
+  <tr><th>Year</th><th>Typical Milestones</th><th>Key Symptoms</th></tr>
+  <tr><td>Year 1-2</td><td>Falls begin; subtle eye movement slowing</td><td>Unexplained falls (often backward), personality changes, slight speech slurring</td></tr>
+  <tr><td>Year 2-4</td><td>Gaze palsy becomes obvious; increasing falls</td><td>Can't look down easily, reading difficulty, need assistance walking</td></tr>
+  <tr><td>Year 4-6</td><td>Wheelchair use; dysphagia develops</td><td>Swallowing difficulty, aspiration risk, significant speech impairment</td></tr>
+  <tr><td>Year 6-8</td><td>Severe disability; aspiration risk high</td><td>Dependent for most activities, PEG tube may be needed</td></tr>
+</table>
+
+<div class="warning-box">
+  <strong>Important nuance for this patient:</strong> This patient has features of BOTH PD and PSP-RS. The levodopa-responsive tremor is a PD feature, while the backward falls and eye movement abnormalities are PSP features. This overlap is consistent with a dual proteinopathy where both alpha-synuclein and tau are contributing to the clinical picture. The progression timeline may not follow a "pure" PSP-RS course &mdash; it could be slower or different in pattern.
+</div>
+
+
+<h2>5. How Dual Proteinopathy Changes the Equation</h2>
+
+<p>Having both alpha-synuclein and tau pathology is not simply "two diseases at once." The interaction between the proteins creates a unique clinical entity:</p>
+
+<h3>What's Different About Dual Proteinopathy</h3>
+<table>
+  <tr><th>Aspect</th><th>Single Proteinopathy (PD alone or PSP alone)</th><th>Dual Proteinopathy</th></tr>
+  <tr><td>Clinical presentation</td><td>Fits one diagnostic category neatly</td><td>Overlapping features; may confuse diagnosis</td></tr>
+  <tr><td>Progression</td><td>Follows known disease pattern</td><td>Less predictable; cross-seeding may accelerate</td></tr>
+  <tr><td>Treatment targets</td><td>One protein pathway</td><td><strong>Two protein pathways + cross-seeding mechanism</strong></td></tr>
+  <tr><td>Clinical trial eligibility</td><td>Eligible for one category of trials</td><td><strong>Potentially eligible for BOTH PD and PSP trials</strong></td></tr>
+  <tr><td>Biomarker complexity</td><td>Standard biomarker profiles apply</td><td>Mixed biomarker profiles; need comprehensive panel</td></tr>
+  <tr><td>Prognosis</td><td>Based on single disease natural history</td><td>Must monitor both pathologies independently</td></tr>
+</table>
+
+<div class="key-insight">
+  <strong>The Strategic View:</strong> The comprehensive diagnostic workup described in Part II of this document is designed to characterize BOTH proteinopathies independently &mdash; quantify the alpha-synuclein burden AND the tau burden separately. This enables treatment decisions that target the leading pathology while monitoring the other, and creates the richest possible baseline against which to measure any therapeutic intervention.
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!--  PART II: THE COMPLETE DIAGNOSTIC ROADMAP                             -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h1 class="section-start">Part II: The Complete Diagnostic Roadmap</h1>
+
+<h2>6. Understanding the Diagnostic Tree</h2>
+
+<p>The diagnostic workup for dual proteinopathy has four branches, each answering a different question:</p>
+
+<div class="diagram">
+                    ┌─────────────────────────────────────┐
+                    │   COMPREHENSIVE DIAGNOSTIC PICTURE   │
+                    └──────────────────┬──────────────────┘
+           ┌──────────────┬───────────┴──────────┬───────────────┐
+    ┌──────┴──────┐ ┌─────┴──────┐ ┌─────────┴──────┐ ┌────────┴────────┐
+    │  PATHOLOGY  │ │  IMAGING   │ │  FLUID         │ │  FUNCTIONAL     │
+    │ CONFIRMATION│ │  (Brain)   │ │  BIOMARKERS    │ │  ASSESSMENTS    │
+    └──────┬──────┘ └─────┬──────┘ └─────────┬──────┘ └────────┬────────┘
+           │              │                  │                  │
+    Skin biopsy ✓   PSP-MRI protocol   Blood panel (NfL,    Oculomotor (VOG)
+    Genetic testing  Tau PET (PI-2620)   pTau217, GFAP)     Swallowing (VFSS)
+    HLA typing       DaT-SPECT          CSF SAA             Neuropsych battery
+                     Cardiac MIBG        CSF phospho-tau     Speech assessment
+                     Retinal OCT         panel               Olfactory test
+                                                             Autonomic testing</div>
+
+<p>Each test answers specific questions. Together, they create a multi-dimensional portrait of the disease state that no single test can provide.</p>
+
+
+<h2>7. Tests Already Completed</h2>
+
+<table>
+  <tr><th>Test</th><th>Result</th><th>What It Told Us</th></tr>
+  <tr>
+    <td><strong>Skin Biopsy</strong><br>(Synuclein-One)</td>
+    <td>POSITIVE for phosphorylated alpha-synuclein</td>
+    <td>Confirms synucleinopathy with 92.7% sensitivity for PD (JAMA 2024). Misfolded alpha-synuclein is present in peripheral nerves. This is a definitive biomarker &mdash; the diagnosis is not based solely on clinical symptoms.</td>
+  </tr>
+  <tr>
+    <td><strong>Brain MRI</strong></td>
+    <td>Performed (details in neurologist records)</td>
+    <td>Standard brain MRI was done. Key question: Was it read with PSP-specific measurements? If not, the existing images should be RE-READ by a neuroradiologist using PSP protocol (see Section 8 below).</td>
+  </tr>
+  <tr>
+    <td><strong>Clinical Neurological Examination</strong></td>
+    <td>PSP-Richardson's diagnosis added to chart</td>
+    <td>Movement disorder specialist has identified the PSP features (backward falls, eye movement abnormalities) and formally documented this diagnosis, enabling trial eligibility.</td>
+  </tr>
+</table>
+
+
+<h2>8. Priority Tier A &mdash; Critical Tests (Do Now)</h2>
+
+<p>These tests should be discussed with the neurologist at the earliest opportunity. Each provides information that is either <strong>safety-critical</strong>, <strong>prognostically important</strong>, or <strong>required for clinical trial enrollment</strong>.</p>
+
+<h3>A1. Videofluoroscopic Swallow Study (VFSS)</h3>
+
+<div class="urgent-box">
+  <strong>SAFETY PRIORITY:</strong> Aspiration pneumonia is the leading cause of death in PSP. Dysphagia (swallowing difficulty) occurs in 78-89% of PSP patients and can be SILENT &mdash; patients may not realize they are aspirating. A baseline swallowing assessment can identify risk early and guide dietary modifications that are genuinely life-prolonging.
+</div>
+
+<table>
+  <tr><th>Aspect</th><th>Details</th></tr>
+  <tr><td><strong>What it is</strong></td><td>The patient swallows barium-coated foods and liquids of different consistencies while being imaged by fluoroscopy (real-time X-ray). Also called a modified barium swallow study.</td></tr>
+  <tr><td><strong>What it reveals</strong></td><td>Oral phase problems (food pooling in the mouth, difficulty initiating swallow), pharyngeal residue (food remaining after swallow), silent aspiration (food/liquid entering the airway without coughing), swallow timing and coordination.</td></tr>
+  <tr><td><strong>Why it matters in PSP</strong></td><td>PSP dysphagia has a distinctive pattern: oral phase predominance (98% of studies show oral residue; 77% show bolus transfer difficulties), pharyngeal residue (70%), and delayed swallow initiation (68%). Even if the patient does not report swallowing difficulty, silent aspiration is common.</td></tr>
+  <tr><td><strong>Where to get it</strong></td><td>Speech-language pathology department at any hospital. Outpatient procedure. Often can be bundled with speech assessment.</td></tr>
+  <tr><td><strong>Evidence</strong></td><td><span class="tier tier-1">Tier 1</span> Systematic review and meta-analysis (2024); scoping review (December 2024).</td></tr>
+  <tr><td><strong>Action</strong></td><td>Request at next neurology visit: "Given the PSP diagnosis, can we get a baseline videofluoroscopic swallow study to assess aspiration risk?"</td></tr>
+</table>
+
+<h3>A2. Blood-Based Biomarker Panel</h3>
+<p>A single blood draw can now provide three powerful biomarkers. This is one of the highest-value, lowest-burden tests available.</p>
+
+<table>
+  <tr><th>Biomarker</th><th>What It Measures</th><th>What It Means for This Patient</th></tr>
+  <tr>
+    <td><strong>Neurofilament Light Chain (NfL)</strong></td>
+    <td>A structural protein released when neurons are damaged. Think of it as a "neuronal damage meter" &mdash; more damage = higher NfL.</td>
+    <td>NfL is the strongest prognostic biomarker in PSP. Levels run ~2x healthy controls. Higher levels predict worse motor/cognitive outcomes AND shorter survival. It's the closest thing to a "speedometer" showing how fast the disease is progressing. It also differentiates PSP from PD (PSP has higher NfL).</td>
+  </tr>
+  <tr>
+    <td><strong>Plasma GFAP</strong></td>
+    <td>Glial Fibrillary Acidic Protein &mdash; a marker of astrocyte activation (brain inflammation). Astrocytes are the brain's support cells; when neurons are dying, astrocytes become reactive.</td>
+    <td>Predicts cognitive decline and conversion to dementia (AUC 0.90 for MCI-to-dementia conversion). Given PSP involves frontal cognitive dysfunction, GFAP provides a baseline for tracking this dimension. Also helps characterize the inflammatory component of the disease.</td>
+  </tr>
+  <tr>
+    <td><strong>Plasma p-tau 217</strong></td>
+    <td>Phosphorylated tau at position 217. The most specific blood-based marker for tau aggregation.</td>
+    <td>Here's the nuance: p-tau 217 primarily reflects Alzheimer's-type (mixed 3R/4R) tau, NOT the 4R-only tau found in PSP. So for this patient, a LOW p-tau 217 with HIGH NfL actually SUPPORTS the PSP diagnosis (4R-tauopathy, not Alzheimer's). A high p-tau 217 would suggest Alzheimer's co-pathology, which would change the clinical picture.</td>
+  </tr>
+</table>
+
+<div class="action-box">
+  <strong>Where to get it:</strong> Available through Quest Diagnostics (NfL), C2N Diagnostics (PrecivityAD2 for p-tau217), Quanterix-partnered labs. Major academic centers can order all three. Request at next neurology visit: "Can we get baseline plasma neurofilament light, GFAP, and p-tau 217 levels? These would help track disease progression and differentiate the tau phenotype."
+  <br><span class="tier tier-1">Tier 1</span> Multiple large cohort studies, including Neurology December 2025 (275 participants).
+</div>
+
+<h3>A3. Cardiac MIBG Scintigraphy</h3>
+
+<table>
+  <tr><th>Aspect</th><th>Details</th></tr>
+  <tr><td><strong>What it is</strong></td><td>Nuclear medicine scan using iodine-123 meta-iodobenzylguanidine (MIBG), which is taken up by cardiac sympathetic nerves. Images are taken at 15 minutes (early) and 4 hours (delayed). The heart-to-mediastinum (H/M) ratio is calculated.</td></tr>
+  <tr><td><strong>What it reveals</strong></td><td>Whether the heart's sympathetic nerves are intact or damaged. In PD, alpha-synuclein deposits damage these nerves early in the disease. In PSP, cardiac sympathetic innervation is typically PRESERVED.</td></tr>
+  <tr><td><strong>Why it matters for this patient</strong></td><td>This directly addresses the diagnostic tension: <strong>reduced H/M ratio</strong> = synuclein-driven cardiac denervation (PD pattern, "body-first"); <strong>normal H/M ratio</strong> = cardiac nerves spared (more consistent with PSP-dominant or "brain-first" disease). Specificity for differentiating PD from PSP is 90%. Combined with midbrain-to-pontine ratio, AUC reaches 0.80.</td></tr>
+  <tr><td><strong>Where to get it</strong></td><td>Nuclear medicine departments at major medical centers. Widely available. Outpatient procedure.</td></tr>
+  <tr><td><strong>Evidence</strong></td><td><span class="tier tier-1">Tier 1</span> Extensive published data, systematic reviews, meta-analyses.</td></tr>
+</table>
+
+<h3>A4. PSP-Protocol Brain MRI (Re-read or New)</h3>
+<p>A routine brain MRI read by a general radiologist often does NOT evaluate PSP-specific features. This is a specialized reading that looks for:</p>
+
+<table>
+  <tr><th>Finding</th><th>What It Looks Like</th><th>Diagnostic Value</th></tr>
+  <tr><td><strong>Hummingbird Sign</strong></td><td>On midsagittal T1 image, the midbrain looks like the body of a hummingbird (atrophied) and the pons looks like the bill</td><td>99.5% specificity for PSP (but only 51.6% sensitivity &mdash; may not be present early)</td></tr>
+  <tr><td><strong>Morning Glory Sign</strong></td><td>On axial T2, the lateral margins of the midbrain show concavity</td><td>Highly specific for PSP</td></tr>
+  <tr><td><strong>Midbrain Area</strong></td><td>Quantitative measurement of midbrain cross-section on midsagittal image</td><td>AUC 0.946 &mdash; the single most reliable MRI metric</td></tr>
+  <tr><td><strong>Midbrain-to-Pons Ratio</strong></td><td>Ratio of midbrain to pons area (controls for head size)</td><td>Ratio below 0.52 is diagnostic for PSP</td></tr>
+  <tr><td><strong>Superior Cerebellar Peduncle</strong></td><td>Atrophy of the fiber tract connecting cerebellum to midbrain</td><td>Characteristic of PSP-RS</td></tr>
+  <tr><td><strong>Third Ventricle Width</strong></td><td>Widening due to surrounding brain atrophy</td><td>Reflects disease progression</td></tr>
+</table>
+
+<div class="action-box">
+  <strong>Action:</strong> If a brain MRI was already performed, ask the neurologist: "Can the existing MRI be re-read by a neuroradiologist using PSP-specific measurements &mdash; midbrain area, midbrain-to-pons ratio, hummingbird sign?" If the MRI is old or the images are unavailable, order a new MRI with PSP protocol at a movement disorders center.
+  <br><span class="tier tier-1">Tier 1</span> Decades of validation; 2025 studies continue refining visual rating scales.
+</div>
+
+<h3>A5. Quantitative Oculomotor Assessment (Video-Oculography)</h3>
+
+<table>
+  <tr><th>Aspect</th><th>Details</th></tr>
+  <tr><td><strong>What it is</strong></td><td>Infrared cameras track eye movements while the patient follows targets. Measures saccadic velocity (speed), amplitude (distance), and latency (delay) in both vertical and horizontal planes.</td></tr>
+  <tr><td><strong>What it reveals</strong></td><td>Quantitative numbers where clinical exam gives only qualitative impressions. The AxV product (amplitude × velocity) distinguishes PSP from PD with 91.5% accuracy (94.7% specificity, 84.3% sensitivity). Vertical-to-horizontal gain ratio achieves 77% sensitivity, 93% specificity.</td></tr>
+  <tr><td><strong>Why it matters</strong></td><td>Eye movement slowing is already documented clinically, but numbers provide: (1) an objective baseline for tracking progression, (2) the most reliable PSP progression marker for clinical trials, (3) quantitative evidence for trial eligibility documentation.</td></tr>
+  <tr><td><strong>Where to get it</strong></td><td>Neuro-ophthalmology clinics at academic centers (UCSF, Mayo, Mass General, Emory). Equipment includes EyeLink systems or Interacoustics VNG systems.</td></tr>
+  <tr><td><strong>Evidence</strong></td><td><span class="tier tier-1">Tier 1</span> Multiple controlled studies with high diagnostic accuracy.</td></tr>
+</table>
+
+<h3>A6. Genetic Testing (PD Panel + WGS + HLA Typing)</h3>
+<p><em>Already on the dashboard roadmap. Referral to genetic specialist has been initiated.</em></p>
+
+<p>This test is covered in detail in Part III (Personalized Genomic Medicine). In brief: comprehensive genetic testing is the <strong>single key</strong> that unlocks personalized treatment selection. It reveals druggable genetic variants, vaccine compatibility via HLA typing, clinical trial eligibility based on genotype, and pharmacogenomic interactions.</p>
+
+<div class="action-box">
+  <strong>Status:</strong> Referral to genetics specialist has been requested through the neurologist. Next step: confirm the referral was sent and schedule the appointment. Bring this document to the genetics appointment.
+</div>
+
+<h3>A7. Tau PET Imaging &mdash; CORRECTED TRACER</h3>
+
+<div class="warning-box">
+  <strong>CRITICAL CORRECTION:</strong> The original roadmap specified flortaucipir for tau PET imaging. This tracer was designed for Alzheimer's-type mixed 3R/4R tau and binds POORLY to the 4R-only tau found in PSP. The correct tracers for PSP are:
+  <ul style="margin-top: 8px;">
+    <li><strong>First choice: [18F]PI-2620</strong> &mdash; autopsy-validated binding to 4R tau deposits; 85% sensitivity, 77% specificity for PSP-RS</li>
+    <li><strong>Second choice: [18F]Florzolotau (PM-PBB3)</strong> &mdash; AUC 0.87 for 4R tauopathy pattern; 84.3% sensitivity, 88.4% specificity</li>
+    <li><strong>Third line: Flortaucipir</strong> &mdash; may partially bind 4R tau but sensitivity is lower</li>
+  </ul>
+</div>
+
+<table>
+  <tr><th>Aspect</th><th>Details</th></tr>
+  <tr><td><strong>What it is</strong></td><td>PET scan using a radiotracer that binds specifically to misfolded tau protein. The scan produces a 3D map of where tau has accumulated in the brain.</td></tr>
+  <tr><td><strong>What it reveals</strong></td><td>In PSP, tau accumulates in subcortical structures (basal ganglia, brainstem nuclei, subthalamic nucleus, cerebellum). This is distinctly different from Alzheimer's (where tau is cortical). The pattern confirms PSP diagnosis and shows disease extent.</td></tr>
+  <tr><td><strong>Availability</strong></td><td>PI-2620 and florzolotau are currently available at major research centers (UCSF, Mayo Clinic, Mass General). May require enrollment in a research protocol. Availability is expanding.</td></tr>
+  <tr><td><strong>Evidence</strong></td><td><span class="tier tier-1">Tier 1</span> PI-2620 autopsy-confirmed; multiple clinical studies. Florzolotau published in J Nuclear Medicine 2025.</td></tr>
+</table>
+
+<h3>A8. DaT-SPECT (Dopamine Transporter Scan)</h3>
+<p><em>Already on the dashboard roadmap.</em></p>
+
+<table>
+  <tr><th>Aspect</th><th>Details</th></tr>
+  <tr><td><strong>What it is</strong></td><td>Nuclear medicine scan using ioflupane I-123 (DaTscan) that binds to dopamine transporters in the striatum. Shows the density and distribution of dopaminergic nerve terminals.</td></tr>
+  <tr><td><strong>What it reveals</strong></td><td>Confirms and quantifies dopaminergic neurodegeneration. Normal scan = dopamine system intact (rules out PD). Abnormal scan = dopamine loss. The PATTERN of loss differs: PD typically shows asymmetric putaminal loss; PSP may show more symmetric loss.</td></tr>
+  <tr><td><strong>Why it matters</strong></td><td>May be REQUIRED for clinical trial eligibility. The prasinezumab Phase 3 PADOVA trial requires DaT-SPECT confirmation of dopaminergic deficit. Also provides baseline for measuring any future neuroprotective effect.</td></tr>
+  <tr><td><strong>Where to get it</strong></td><td>Nuclear medicine departments at most hospitals. Outpatient procedure. FDA-approved and covered by insurance when medically indicated.</td></tr>
+  <tr><td><strong>Evidence</strong></td><td><span class="tier tier-1">Tier 1</span> FDA-approved diagnostic. Widely validated.</td></tr>
+</table>
+
+<h3>A9. CSF Biomarker Panel</h3>
+<p><em>Already on the dashboard roadmap.</em></p>
+
+<table>
+  <tr><th>Biomarker</th><th>What It Measures</th><th>Value for This Patient</th></tr>
+  <tr>
+    <td><strong>CSF SAA (Seed Amplification Assay)</strong></td>
+    <td>Takes a CSF sample and tests whether the alpha-synuclein in it can cause normal synuclein to misfold (seed). Quantifies seeding activity.</td>
+    <td>Complements the positive skin biopsy. Measures how ACTIVELY synuclein is misfolding. Faster seeding kinetics predict cognitive decline (Lancet Neurology 2025). Provides baseline for therapy monitoring.</td>
+  </tr>
+  <tr>
+    <td><strong>CSF p-tau 181, 217, 231</strong></td>
+    <td>Measures phosphorylated tau at three key sites in cerebrospinal fluid.</td>
+    <td>Quantifies the "tau side" of the dual proteinopathy. In PSP, the ratio of these phospho-tau species differs from Alzheimer's pattern. A CSF profile consistent with 4R-tauopathy (rather than AD) confirms the PSP pathology at a molecular level.</td>
+  </tr>
+</table>
+
+<div class="key-insight">
+  <strong>Note on the lumbar puncture:</strong> Both CSF SAA and the phospho-tau panel require a lumbar puncture (spinal tap). This is an outpatient procedure that takes about 30 minutes. Modern techniques use very thin needles, and serious complications are rare. If the patient will have one lumbar puncture, both tests should be ordered together to avoid a second procedure. Some centers also bank CSF for future biomarker studies &mdash; ask about this option.
+</div>
+
+
+<h2>9. Priority Tier B &mdash; Important Tests (Schedule Soon)</h2>
+
+<h3>B1. Neuropsychological Assessment Battery</h3>
+<p>PSP-Richardson's causes a distinctive pattern of <strong>frontal-subcortical cognitive decline</strong> that differs from PD-related dementia and Alzheimer's. Establishing a cognitive baseline enables tracking progression and is often required for clinical trial enrollment.</p>
+
+<table>
+  <tr><th>Assessment</th><th>What It Tests</th><th>Time</th></tr>
+  <tr><td><strong>Frontal Assessment Battery (FAB)</strong></td><td>6 subtests of frontal/executive function: similarities, lexical fluency, motor programming, conflicting instructions, go/no-go, prehension behavior</td><td>~10 min</td></tr>
+  <tr><td><strong>RBANS</strong></td><td>Broader cognitive screening validated specifically in 220 PSP-RS patients. Covers immediate memory, visuospatial/constructional, language, attention, delayed memory. Has validated alternate forms for 6-month and 12-month retesting.</td><td>~30 min</td></tr>
+  <tr><td><strong>PSP Rating Scale (PSPRS)</strong></td><td>28-item clinician-rated scale covering history (6 items), mentation (4 items), bulbar (2 items), ocular (4 items), limb motor (6 items), gait/midline (6 items). A newer 15-item modified version (mPSPRS-15, Nature Communications Jan 2025) is more sensitive to 12-month change.</td><td>~20 min</td></tr>
+</table>
+
+<div class="action-box">
+  <strong>Where to get it:</strong> Neuropsychology departments at academic medical centers. The PSPRS can be administered by a movement disorder neurologist. Ask: "Can we get a baseline neuropsychological assessment including the Frontal Assessment Battery and PSPRS? This will establish baseline cognition and create a standardized metric for tracking."
+</div>
+
+<h3>B2. Speech and Language Assessment</h3>
+<p>Dysarthria (slurred speech) occurs in the majority of PSP patients, with hypokinetic dysarthria being most common (52%). Apraxia of speech co-occurs in 19%. A speech assessment complements the swallowing assessment because the same brainstem circuits control both functions.</p>
+
+<p>Can typically be done at the same visit as the swallowing study (same department). Request the Apraxia of Speech Rating Scale (ASRS-3) and Motor Speech Disorders Severity Rating Scale.</p>
+
+<h3>B3. Olfactory Testing</h3>
+<p>A simple scratch-and-sniff test (UPSIT, 40 items, 15 minutes) that helps differentiate PD from PSP:</p>
+<ul>
+  <li><strong>PD:</strong> Causes severe olfactory loss (hyposmia/anosmia)</li>
+  <li><strong>PSP:</strong> Causes moderate, less severe olfactory loss</li>
+  <li>A 2025 simplified 7-item test distinguishes PD/DLB from PSP/MSA with AUC 0.73</li>
+</ul>
+<p>For a patient with both PD and PSP features, severe loss favors synuclein-dominant pathology; moderate loss favors tau-dominant.</p>
+
+<h3>B4. Autonomic Function Assessment</h3>
+<p>Start with the <strong>COMPASS-31 questionnaire</strong> (31 questions, self-administered, validated in parkinsonism with 92.6% sensitivity for autonomic dysfunction). Covers: orthostatic intolerance, vasomotor, secretomotor, gastrointestinal, bladder, and pupillomotor domains.</p>
+
+<p>If the questionnaire shows significant autonomic dysfunction, formal testing (QSART, heart rate variability, tilt table test) can be done at an autonomic lab (Mayo Clinic is the gold standard; Cleveland Clinic, Beth Israel, Pitt also have excellent labs).</p>
+
+<div class="key-insight">
+  <strong>Why this matters for falls:</strong> The patient's backward falls may be purely retropulsive (postural instability from PSP) OR may have an orthostatic hypotension component (from synuclein-driven autonomic dysfunction). Orthostatic hypotension is TREATABLE (midodrine, compression stockings, hydration, salt supplementation). If autonomic testing reveals an orthostatic component, addressing it could reduce falls immediately.
+</div>
+
+<h3>B5. Retinal OCT (Optical Coherence Tomography)</h3>
+<p>Non-invasive retinal imaging (done at any ophthalmology office, takes 5 minutes) that can differentiate PD from PSP:</p>
+<ul>
+  <li><strong>PD:</strong> Shows parafoveal ganglion cell-inner plexiform layer (GCIPL) thinning</li>
+  <li><strong>PSP:</strong> Shows BOTH GCIPL AND outer nuclear layer (ONL) reduction &mdash; more extensive retinal involvement</li>
+</ul>
+<p>The retina is essentially exposed brain tissue, providing a non-invasive window into neurodegeneration. Quick, painless, and provides baseline for longitudinal tracking.</p>
+
+
+<h2>10. Priority Tier C &mdash; Supplementary Tests</h2>
+
+<h3>C1. REM Sleep Behavior Disorder Screening</h3>
+<p>Ask about acting out dreams during sleep (punching, kicking, yelling). Present in >90% of prodromal synucleinopathies. Since alpha-synuclein is already confirmed, this adds safety information (injury risk during sleep) rather than diagnostic value. Use the RBD Screening Questionnaire (single page, validated).</p>
+
+<h3>C2. Digital/Wearable Monitoring</h3>
+<p>An Apple Watch with fall detection provides immediate safety value. Research-grade inertial measurement units can continuously monitor gait speed, stride length, arm swing asymmetry, and fall patterns &mdash; but standardized clinical protocols don't exist yet.</p>
+
+
+<h2 class="section-start">11. How Each Test Works (Deep Dives)</h2>
+
+<h3>Skin Biopsy for Alpha-Synuclein (Already Done)</h3>
+<p>The Synuclein-One test takes 3mm punch biopsies from specific body sites (typically posterior cervical region, above the knee, and above the ankle). The tissue is stained with antibodies that specifically bind to phosphorylated alpha-synuclein (p-Ser129). Positive staining means misfolded, phosphorylated alpha-synuclein is present in the cutaneous nerve fibers.</p>
+
+<p>The test detects a peripheral manifestation of a central nervous system disease. Alpha-synuclein pathology extends beyond the brain into the peripheral nervous system via the autonomic nerves. This is why the skin biopsy works &mdash; the peripheral nerves running through skin are part of the same nervous system being attacked by the disease.</p>
+
+<h3>Seed Amplification Assay (SAA / RT-QuIC)</h3>
+<p>This test exploits the prion-like property of alpha-synuclein. Here's how it works:</p>
+<ol>
+  <li>A CSF sample is placed in a well with a large excess of normal, recombinant alpha-synuclein protein</li>
+  <li>A fluorescent dye (Thioflavin T) is added that only fluoresces when bound to fibrillar (misfolded) protein</li>
+  <li>The plate is subjected to cycles of shaking and resting at 37°C</li>
+  <li>If the CSF contains even tiny amounts of misfolded alpha-synuclein "seeds," they will recruit the normal protein to misfold, forming fibrils</li>
+  <li>The fluorescence signal increases exponentially as fibrils form</li>
+  <li>The speed of this amplification (kinetics) correlates with disease characteristics</li>
+</ol>
+<p>Faster seeding kinetics are associated with more aggressive disease and predict cognitive decline, especially in patients with GBA1 variants (Lancet Neurology 2025).</p>
+
+<h3>DaT-SPECT (Dopamine Transporter Scan)</h3>
+<p>Dopamine-producing neurons have transporter proteins on their surface that recycle dopamine from the synapse. When these neurons die (as in PD and PSP), the transporter density decreases. The DaTscan radiotracer binds to these transporters, producing an image of surviving dopamine neurons.</p>
+<ul>
+  <li><strong>Normal scan:</strong> Two comma-shaped regions of bright uptake in the striatum (caudate + putamen) &mdash; looks like two commas or a pair of quotation marks</li>
+  <li><strong>Abnormal scan (PD):</strong> The "tail" of the comma (putamen) loses signal first, leaving just dots (caudate only) &mdash; called "period sign" or "egg-shaped" pattern</li>
+  <li><strong>Abnormal scan (PSP):</strong> May show more symmetric loss than PD</li>
+</ul>
+
+<h3>Tau PET Imaging (PI-2620)</h3>
+<p>The PI-2620 radiotracer is injected intravenously. Over 60-90 minutes, it crosses the blood-brain barrier and binds to misfolded tau aggregates in the brain. PET scanning then produces a 3D map of tau deposition.</p>
+<p>In PSP, the characteristic pattern shows uptake in:</p>
+<ul>
+  <li>Globus pallidus (part of basal ganglia)</li>
+  <li>Subthalamic nucleus</li>
+  <li>Midbrain (substantia nigra, red nucleus, periaqueductal gray)</li>
+  <li>Pons and cerebellum (dentate nucleus)</li>
+</ul>
+<p>This subcortical pattern is distinctly different from Alzheimer's, where tau PET shows cortical uptake (temporal and parietal lobes).</p>
+
+<h3>Cardiac MIBG Scan</h3>
+<p>MIBG (meta-iodobenzylguanidine) is a norepinephrine analog. Cardiac sympathetic nerve endings take it up just like they take up norepinephrine. In PD, alpha-synuclein deposits damage these nerve endings early, so they can't take up MIBG properly &mdash; resulting in a low heart-to-mediastinum (H/M) ratio. In PSP, these nerves are preserved (normal H/M ratio).</p>
+
+<h3>Genetic Testing</h3>
+<p>Covered in detail in Part III. In brief, the key genes and what they reveal:</p>
+
+<table>
+  <tr><th>Gene</th><th>Normal Function</th><th>If Mutated</th><th>Therapeutic Implication</th></tr>
+  <tr><td><strong>GBA</strong></td><td>Encodes glucocerebrosidase enzyme; breaks down cellular waste in lysosomes</td><td>Reduces lysosomal function; alpha-synuclein clearance impaired</td><td>Ambroxol, venglustat (substrate reduction therapy), gene therapy trials</td></tr>
+  <tr><td><strong>LRRK2</strong></td><td>Encodes a kinase that regulates autophagy and inflammation</td><td>Overactive kinase; excess protein phosphorylation</td><td>LRRK2 kinase inhibitors (multiple in clinical trials)</td></tr>
+  <tr><td><strong>SNCA</strong></td><td>Encodes alpha-synuclein itself</td><td>Gene duplications/triplications increase alpha-synuclein production; certain variants change aggregation propensity</td><td>Antisense oligonucleotides (BIIB101) to reduce production</td></tr>
+  <tr><td><strong>MAPT</strong></td><td>Encodes tau protein</td><td>Certain haplotypes (H1/H1) increase PSP risk; mutations cause frontotemporal dementia</td><td>Tau-targeted therapies; trial stratification</td></tr>
+  <tr><td><strong>GRN</strong></td><td>Encodes progranulin (neurotrophic factor)</td><td>Reduced progranulin leads to lysosomal dysfunction and TDP-43 pathology</td><td>Progranulin-boosting therapies</td></tr>
+  <tr><td><strong>PARK2 (Parkin)</strong></td><td>E3 ubiquitin ligase; tags damaged mitochondria for removal</td><td>Impaired mitophagy; damaged mitochondria accumulate</td><td>Mitochondria-targeted therapies</td></tr>
+  <tr><td><strong>PINK1</strong></td><td>Kinase that detects damaged mitochondria</td><td>Damaged mitochondria not recognized; accumulate and produce toxic oxidative stress</td><td>Similar mitochondrial approaches</td></tr>
+</table>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!--  PART III: PERSONALIZED GENOMIC MEDICINE                              -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h1 class="section-start">Part III: Personalized Genomic Medicine</h1>
+
+<p>This section describes the 3-phase roadmap for moving from generic treatment landscape to <strong>personalized therapy selection</strong> based on the patient's own genetic and immune profile. This is the most novel and forward-looking aspect of the research program.</p>
+
+<h2>12. Phase 1: Getting the Genetic Data</h2>
+
+<div class="action-box">
+  <strong>Current Status:</strong> Referral to genetics specialist has been requested through the neurologist. This phase is the foundation &mdash; everything in Phases 2 and 3 depends on obtaining genetic data.
+</div>
+
+<h3>Step 1a: Genetic Counseling Referral</h3>
+<p>A genetic counselor specializing in neurodegeneration will explain what tests are available, what results might mean, help navigate insurance coverage, and provide emotional support for genetic findings that may affect other family members.</p>
+<p><strong>What to say:</strong> "I'd like a referral to a genetic counselor to discuss comprehensive genetic testing. We want to identify any variants that could affect treatment selection or qualify for gene-targeted clinical trials."</p>
+
+<h3>Step 1b: Invitae PD Panel (Clinical-Grade)</h3>
+<p>The Invitae Parkinson's Disease genetic panel covers the major PD-associated genes: GBA, LRRK2, SNCA, PARK2/Parkin, PINK1, DJ-1, VPS35, and others. For patients with a PD diagnosis, copay is often $0 through their patient assistance program. Results arrive in 2-3 weeks as a clinical report with variant interpretation.</p>
+
+<h3>Step 1c: Whole Genome Sequencing (GP2 or Commercial)</h3>
+<p>The Global Parkinson's Genetics Program (GP2) offers <strong>free</strong> whole genome sequencing to PD patients at participating sites. WGS provides far more data than a panel test &mdash; it captures the entire genome, enabling all computational analyses including HLA typing, polygenic risk scoring, and discovery of novel variants.</p>
+<p>Alternative commercial WGS: Nebula Genomics (~$299) or Dante Labs (~$199) for 30x coverage.</p>
+
+<h3>Step 1d: HLA Typing</h3>
+<p>HLA (Human Leukocyte Antigen) molecules determine which peptide fragments the immune system can "present" to T cells. This is critical for predicting vaccine response:</p>
+<ul>
+  <li>Each person has a unique set of HLA molecules (inherited from both parents)</li>
+  <li>Each HLA molecule can only present peptides of certain shapes and chemical properties</li>
+  <li>Vaccines work by presenting specific peptide epitopes to the immune system via HLA molecules</li>
+  <li>If the patient's HLA molecules can't bind the vaccine's peptide epitopes, the vaccine may not generate a strong immune response</li>
+</ul>
+<p>HLA type can be extracted computationally from WGS/WES data, or ordered separately via clinical labs.</p>
+
+
+<h2>13. Phase 2: Computational Analysis</h2>
+
+<p>Once genetic data is obtained, four computational analyses become possible. These pipelines will be built on the DR3 dashboard:</p>
+
+<h3>Step 2a: Variant Interpretation Pipeline</h3>
+<p>Upload the VCF (Variant Call Format) file. Filter for neurodegeneration-relevant genes. Annotate each variant with ClinVar pathogenicity classification, gnomAD population frequency, CADD score (predicted deleteriousness), and protein impact prediction (SIFT, PolyPhen-2).</p>
+<p><strong>Output:</strong> Prioritized list of clinically relevant variants with drug interaction annotations.</p>
+
+<h3>Step 2b: Drug-Gene Interaction Screening</h3>
+<p>Cross-reference the patient's variants against the Drug-Gene Interaction Database (DGIdb), PharmGKB, and ClinicalTrials.gov to identify: FDA-approved drugs targeting the patient's variant pathways (repurposing candidates), clinical trials recruiting for specific genotypes, and pharmacogenomic interactions affecting drug metabolism.</p>
+
+<h3>Step 2c: HLA-Epitope Vaccine Compatibility Prediction</h3>
+<p>This is the <strong>novel analysis</strong>. Using NetMHCpan 4.1 or MHCflurry 2.0, predict how strongly the patient's specific HLA molecules will bind to the peptide epitopes used in each trial vaccine:</p>
+<ul>
+  <li>VacSYn (ACI-7104.056) &mdash; alpha-synuclein oligomer-mimicking peptide</li>
+  <li>UB-312 &mdash; C-terminal alpha-synuclein peptide</li>
+  <li>AADvac1 &mdash; tau peptide (mis-disordered tau region)</li>
+  <li>Anti-pT181 mucosal vaccine &mdash; phospho-tau 181 epitope</li>
+</ul>
+<p><strong>Output:</strong> A vaccine compatibility matrix showing predicted binding affinity (IC50) for each vaccine × HLA combination. This tells us which vaccines the patient's immune system is best equipped to respond to.</p>
+
+<div class="key-insight">
+  <strong>Why this is novel:</strong> HLA-epitope prediction is standard in cancer immunotherapy (it's how personalized cancer vaccines are designed). Applying it to neurodegenerative disease vaccines is a new idea. It hasn't been done clinically because (a) the vaccines are new, and (b) nobody has connected the oncology immunoinformatics tools to the PD/PSP field. We are bridging that gap computationally.
+</div>
+
+<h3>Step 2d: Structural Variant Modeling (AlphaFold3)</h3>
+<p>If the patient has any missense variants in SNCA, MAPT, or GBA, predict how these variants affect protein structure using AlphaFold3. Overlay with known drug binding sites and vaccine epitope locations. Visualize using interactive 3D protein viewer on the dashboard.</p>
+
+
+<h2>14. Phase 3: Personalized Treatment Ranking</h2>
+
+<h3>Step 3a: Re-rank All Therapies by Patient-Specific Relevance</h3>
+<p>Using genetic data + HLA compatibility + drug-gene interactions, compute a composite score for every tracked therapy. A therapy targeting a pathway affected by the patient's specific variants ranks higher. A vaccine whose epitopes bind strongly to the patient's HLA ranks higher. Display as a personalized therapy ranking, replacing the generic evidence-tier sort.</p>
+
+<h3>Step 3b: Genetic Trial Eligibility Report</h3>
+<p>Many trials have genetic inclusion/exclusion criteria. With genetic data, automatically filter to show only trials the patient is genetically eligible for.</p>
+
+<h3>Step 3c: Neurologist Discussion</h3>
+<p>Bring the personalized report to the neurologist. Walk through genetic variants found, trial eligibility, vaccine compatibility predictions, and drug repurposing candidates. The computational findings INFORM the clinical conversation; they do not replace it.</p>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!--  PART IV: THE TREATMENT LANDSCAPE                                     -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h1 class="section-start">Part IV: The Treatment Landscape</h1>
+
+<h2>15. How Immunotherapy Works in Neurodegeneration</h2>
+
+<h3>The Basic Problem</h3>
+<p>Misfolded alpha-synuclein and tau proteins accumulate in the brain. The brain's own immune cells (microglia) try to clear them but are overwhelmed. The proteins spread faster than the brain can remove them. Immunotherapy aims to tip the balance by providing the immune system with targeted weapons.</p>
+
+<h3>Active Immunotherapy (Vaccines)</h3>
+<p>A vaccine presents a piece of the target protein (an "epitope") to the immune system. The immune system recognizes it as foreign, generates antibodies against it, and maintains an immune "memory." When those antibodies encounter misfolded protein in the body, they bind to it and flag it for removal.</p>
+
+<ul>
+  <li><strong>Advantage:</strong> A single vaccination course can generate long-lasting antibody production (months to years)</li>
+  <li><strong>Advantage:</strong> The body produces its own antibodies &mdash; ongoing, self-sustaining</li>
+  <li><strong>Disadvantage:</strong> Response depends on the patient's immune system (HLA type matters!)</li>
+  <li><strong>Disadvantage:</strong> Takes weeks to months to generate antibodies</li>
+  <li><strong>Examples for this patient:</strong> VacSYn (α-syn vaccine), AADvac1 (tau vaccine), UB-312 (α-syn vaccine)</li>
+</ul>
+
+<h3>Passive Immunotherapy (Monoclonal Antibodies)</h3>
+<p>Pre-made antibodies are infused directly into the bloodstream. They immediately begin binding to misfolded protein.</p>
+
+<ul>
+  <li><strong>Advantage:</strong> Immediate effect &mdash; no waiting for immune response</li>
+  <li><strong>Advantage:</strong> Consistent dosing &mdash; doesn't depend on patient's immune system</li>
+  <li><strong>Disadvantage:</strong> Requires regular infusions (typically every 4 weeks)</li>
+  <li><strong>Disadvantage:</strong> Expensive to manufacture</li>
+  <li><strong>Examples for this patient:</strong> Prasinezumab (anti-α-syn), bepranemab (anti-tau)</li>
+</ul>
+
+<h3>The Blood-Brain Barrier Problem</h3>
+<p>Antibodies are large molecules. The blood-brain barrier (BBB) &mdash; a tight layer of cells lining brain blood vessels &mdash; blocks most antibodies from entering the brain. Only about 0.1% of circulating antibodies reach the brain. This is a major limitation for all immunotherapy in neurodegeneration.</p>
+
+<p>Solutions being developed:</p>
+<ul>
+  <li><strong>Brain-shuttled antibodies:</strong> Engineered with a transferrin receptor binding domain that "rides" the natural transport system across the BBB. Achieves 10-40x higher brain concentrations. (Tier 3 &mdash; preclinical)</li>
+  <li><strong>Focused ultrasound BBB opening:</strong> MRI-guided ultrasound temporarily opens the BBB, allowing antibodies to enter. Shown safe in Phase 1 PD dementia trial. (Tier 2)</li>
+</ul>
+
+
+<h2>16. Active Clinical Trials &amp; Therapies</h2>
+
+<h3>Alpha-Synuclein Targeting (for confirmed α-syn pathology)</h3>
+
+<table>
+  <tr><th>Therapy</th><th>Type</th><th>Status</th><th>Evidence</th><th>Relevance</th></tr>
+  <tr>
+    <td><strong>ACI-7104.056 (VacSYn)</strong></td>
+    <td>Vaccine</td>
+    <td>Phase 2 positive interim</td>
+    <td><span class="tier tier-1">Tier 1</span></td>
+    <td>HIGH. >20x antibody levels, 100% seroconversion, no motor progression at 74 wk. Stage 2 expansion (150 pts) expected.</td>
+  </tr>
+  <tr>
+    <td><strong>Prasinezumab</strong></td>
+    <td>Monoclonal Ab</td>
+    <td>Phase 3 PADOVA (900 pts)</td>
+    <td><span class="tier tier-1">Tier 1</span></td>
+    <td>HIGH. Largest α-syn immunotherapy trial. Phase 2b showed 28% slowing in rapid progressors. Enrolling NOW.</td>
+  </tr>
+  <tr>
+    <td><strong>UB-312</strong></td>
+    <td>Vaccine</td>
+    <td>Phase 1b completing</td>
+    <td><span class="tier tier-2">Tier 2</span></td>
+    <td>MODERATE. Different α-syn epitope than VacSYn. Results pending.</td>
+  </tr>
+  <tr>
+    <td><strong>BIIB101</strong></td>
+    <td>Antisense oligo</td>
+    <td>Phase 1 in MSA</td>
+    <td><span class="tier tier-2">Tier 2</span></td>
+    <td>MODERATE. Reduces α-syn PRODUCTION (upstream). PD expansion possible if MSA trial succeeds.</td>
+  </tr>
+</table>
+
+<h3>Tau Targeting (for PSP features)</h3>
+
+<table>
+  <tr><th>Therapy</th><th>Type</th><th>Status</th><th>Evidence</th><th>Relevance</th></tr>
+  <tr>
+    <td><strong>AADvac1</strong></td>
+    <td>Vaccine</td>
+    <td>PSP Platform Trial Phase 2a &mdash; ENROLLING</td>
+    <td><span class="tier tier-2">Tier 2</span></td>
+    <td>HIGHEST. Directly targets tau in PSP. Enrolling at UCSF, UCSD, Mass General. 75% chance of active drug.</td>
+  </tr>
+  <tr>
+    <td><strong>AZP2006</strong></td>
+    <td>Small molecule</td>
+    <td>PSP Platform Trial &mdash; enrolling</td>
+    <td><span class="tier tier-2">Tier 2</span></td>
+    <td>HIGH. Different mechanism (lysosomal/progranulin). Same trial, different arm.</td>
+  </tr>
+  <tr>
+    <td><strong>Bepranemab</strong></td>
+    <td>Monoclonal Ab</td>
+    <td>Open-label extension in PSP, completing Nov 2026</td>
+    <td><span class="tier tier-2">Tier 2</span></td>
+    <td>MODERATE. Results expected Nov 2026. Targets both 3R and 4R tau.</td>
+  </tr>
+  <tr>
+    <td><strong>Anti-pT181 mucosal vaccine</strong></td>
+    <td>Nasal vaccine</td>
+    <td>Enrollment expected early 2026</td>
+    <td><span class="tier tier-3">Tier 3</span></td>
+    <td>MODERATE. Non-invasive nasal delivery targeting phospho-tau 181.</td>
+  </tr>
+</table>
+
+
+<h2>17. Neuroprotection (GLP-1 Agonists)</h2>
+
+<p>GLP-1 receptor agonists (originally developed for diabetes) have shown neuroprotective effects. They activate neuronal survival pathways, reduce neuroinflammation, and promote neurotrophic factor release.</p>
+
+<table>
+  <tr><th>Drug</th><th>Evidence</th><th>Status</th><th>Actionability</th></tr>
+  <tr>
+    <td><strong>Lixisenatide</strong></td>
+    <td><span class="tier tier-1">Tier 1</span> NEJM 2024: reduced motor disability progression in Phase 2</td>
+    <td>Positive Phase 2; further trials planned</td>
+    <td>Available now as diabetes medication (off-label use). Discuss with neurologist.</td>
+  </tr>
+  <tr>
+    <td><strong>Exenatide</strong></td>
+    <td><span class="tier tier-1">Tier 1</span> Lancet 2025: Phase 3 NEGATIVE</td>
+    <td>Did not slow progression in Phase 3</td>
+    <td>Not recommended. But other GLP-1RAs may differ.</td>
+  </tr>
+  <tr>
+    <td><strong>Next-gen GLP-1 agonists</strong></td>
+    <td><span class="tier tier-2">Tier 2</span></td>
+    <td>5 ongoing trials with newer agents</td>
+    <td>Monitor. Class is not dead despite exenatide failure.</td>
+  </tr>
+</table>
+
+<div class="key-insight">
+  <strong>Why GLP-1 agonists matter for dual proteinopathy:</strong> Unlike immunotherapies that target one specific protein, GLP-1 agonists provide neuroprotection regardless of the protein pathology. They protect neurons from dying, regardless of whether the damage is driven by alpha-synuclein, tau, or both. This makes them particularly relevant for dual proteinopathy.
+</div>
+
+
+<h2>18. Emerging Approaches</h2>
+
+<h3>Focused Ultrasound + Immunotherapy</h3>
+<p>MRI-guided focused ultrasound temporarily opens the blood-brain barrier, potentially allowing antibodies to reach brain tissue at much higher concentrations. Phase 1 demonstrated safety in PD dementia. Combining FUS with immunotherapy is the next frontier. Particularly relevant for dual proteinopathy &mdash; could deliver both α-syn and tau antibodies in the same session.</p>
+
+<h3>Brain-Shuttled Antibodies</h3>
+<p>Engineered antibodies with a transferrin receptor binding domain that crosses the BBB at 10-40x higher concentrations than standard antibodies. Published in npj Parkinson's Disease 2025. Could solve the BBB problem for both α-syn and tau antibodies.</p>
+
+<h3>Dendritic Cell Vaccines</h3>
+<p>Preclinical research shows dendritic cell vaccines can be dual-loaded with both alpha-synuclein AND tau antigens &mdash; potentially addressing both pathologies simultaneously with a single vaccine. This is still early-stage (Tier 3) but uniquely relevant for dual proteinopathy.</p>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!--  APPENDICES                                                           -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h1 class="section-start">Appendices</h1>
+
+<h2>Appendix A: Evidence Tier Definitions</h2>
+
+<table>
+  <tr><th>Tier</th><th>Label</th><th>Meaning</th><th>What to Do With It</th></tr>
+  <tr><td><span class="tier tier-1">1</span></td><td>Published Phase 2/3</td><td>Peer-reviewed human trial data</td><td>Discuss with neurologist; may be actionable now</td></tr>
+  <tr><td><span class="tier tier-2">2</span></td><td>Active Clinical Trial</td><td>Registered on ClinicalTrials.gov, enrolling or completed</td><td>Inquire about enrollment if relevant</td></tr>
+  <tr><td><span class="tier tier-3">3</span></td><td>Peer-Reviewed Preclinical</td><td>Published animal/in-vitro data</td><td>Monitor; not ready for clinical action</td></tr>
+  <tr><td><span class="tier tier-4">4</span></td><td>Conference/Preprint</td><td>Presented but not peer-reviewed</td><td>Note with caution; may not replicate</td></tr>
+  <tr><td><span class="tier tier-5">5</span></td><td>Theoretical/Emerging</td><td>Plausible mechanism, no direct evidence</td><td>Interesting but speculative</td></tr>
+</table>
+
+
+<h2>Appendix B: Key Genes and What They Do</h2>
+
+<table>
+  <tr><th>Gene</th><th>Protein</th><th>Normal Role</th><th>Disease Link</th><th>Therapeutic Target</th></tr>
+  <tr><td>GBA (GBA1)</td><td>Glucocerebrosidase</td><td>Lysosomal enzyme; breaks down glucocerebroside</td><td>Most common genetic risk factor for PD; carriers have 5-10x risk. Impairs α-syn clearance.</td><td>Ambroxol (chaperone), venglustat (substrate reduction), gene therapy</td></tr>
+  <tr><td>LRRK2</td><td>Leucine-Rich Repeat Kinase 2</td><td>Kinase regulating autophagy, vesicle trafficking, inflammation</td><td>Most common familial PD cause (G2019S). Gain-of-function mutations increase kinase activity.</td><td>LRRK2 kinase inhibitors (DNL201, BIIB122)</td></tr>
+  <tr><td>SNCA</td><td>Alpha-synuclein</td><td>Synaptic vesicle regulation, neurotransmitter release</td><td>Duplications/triplications cause early-onset PD. Point mutations (A53T, A30P) increase aggregation.</td><td>ASOs (BIIB101), vaccines, antibodies</td></tr>
+  <tr><td>MAPT</td><td>Tau</td><td>Microtubule stabilization in neurons</td><td>H1 haplotype increases PSP risk 5-fold. Mutations cause frontotemporal dementia.</td><td>Tau vaccines (AADvac1), antibodies, ASOs</td></tr>
+  <tr><td>GRN</td><td>Progranulin</td><td>Neurotrophic factor; lysosomal function</td><td>Haploinsufficiency causes FTD; low levels linked to neuroinflammation.</td><td>Progranulin-boosting agents (AZP2006 modulates progranulin)</td></tr>
+  <tr><td>PARK2</td><td>Parkin</td><td>E3 ubiquitin ligase; mitochondrial quality control</td><td>Biallelic mutations cause early-onset PD. Impairs removal of damaged mitochondria.</td><td>Mitochondria-targeted therapies</td></tr>
+  <tr><td>PINK1</td><td>PTEN-Induced Kinase 1</td><td>Detects damaged mitochondria; recruits Parkin</td><td>Biallelic mutations cause early-onset PD. Same pathway as Parkin.</td><td>USP30 inhibitors, kinetin (PINK1 activators)</td></tr>
+  <tr><td>CYP2D6</td><td>Cytochrome P450 2D6</td><td>Drug metabolism enzyme in liver</td><td>Variants affect how quickly drugs are metabolized. "Poor metabolizers" may have higher drug levels.</td><td>Pharmacogenomic dosing guidance</td></tr>
+</table>
+
+
+<h2>Appendix C: Glossary of Medical Terms</h2>
+
+<table>
+  <tr><th>Term</th><th>Definition</th></tr>
+  <tr><td>Aggregation</td><td>The process of misfolded proteins clumping together into larger structures</td></tr>
+  <tr><td>Amyloid</td><td>A specific type of protein aggregate with a cross-beta-sheet structure; generic term for many misfolded protein deposits</td></tr>
+  <tr><td>Antisense oligonucleotide (ASO)</td><td>A short synthetic DNA/RNA strand that binds to a gene's messenger RNA and blocks protein production</td></tr>
+  <tr><td>Atypical parkinsonism</td><td>Parkinsonian syndromes other than idiopathic PD: PSP, MSA, CBD, DLB</td></tr>
+  <tr><td>Autophagy</td><td>The cell's self-cleaning process; breaks down and recycles damaged proteins and organelles</td></tr>
+  <tr><td>Blood-brain barrier (BBB)</td><td>Tight layer of cells lining brain blood vessels that prevents most molecules from entering the brain</td></tr>
+  <tr><td>Biomarker</td><td>A measurable indicator of a biological process; used for diagnosis, prognosis, or monitoring treatment</td></tr>
+  <tr><td>Cross-seeding</td><td>When one misfolded protein promotes the misfolding of a DIFFERENT protein</td></tr>
+  <tr><td>CSF</td><td>Cerebrospinal fluid &mdash; the fluid surrounding the brain and spinal cord; obtained via lumbar puncture</td></tr>
+  <tr><td>Dopamine</td><td>A neurotransmitter critical for movement control, motivation, and reward</td></tr>
+  <tr><td>Dysarthria</td><td>Difficulty speaking due to weakness or poor coordination of speech muscles</td></tr>
+  <tr><td>Dysphagia</td><td>Difficulty swallowing</td></tr>
+  <tr><td>Epitope</td><td>The specific piece of a protein that the immune system recognizes; the "target" in a vaccine</td></tr>
+  <tr><td>Fibril</td><td>A long, thread-like aggregate of misfolded protein</td></tr>
+  <tr><td>HLA</td><td>Human Leukocyte Antigen &mdash; immune system molecules that present protein fragments to T cells</td></tr>
+  <tr><td>Hyperphosphorylation</td><td>Excessive addition of phosphate groups to a protein, changing its function and promoting misfolding</td></tr>
+  <tr><td>Kinase</td><td>An enzyme that adds phosphate groups to proteins (phosphorylation)</td></tr>
+  <tr><td>Lewy body</td><td>A dense, round aggregate of misfolded alpha-synuclein inside a neuron</td></tr>
+  <tr><td>Lumbar puncture</td><td>Procedure to collect cerebrospinal fluid by inserting a needle into the lower spine</td></tr>
+  <tr><td>Lysosome</td><td>A cellular organelle that breaks down waste; the cell's "recycling center"</td></tr>
+  <tr><td>Microglia</td><td>The brain's resident immune cells; clear debris and fight infection</td></tr>
+  <tr><td>Microtubule</td><td>Internal structural scaffolding of cells; the "railroad tracks" for transporting cargo</td></tr>
+  <tr><td>Neurofibrillary tangle (NFT)</td><td>Aggregates of hyperphosphorylated tau inside neurons</td></tr>
+  <tr><td>Neuroprotection</td><td>Strategies to prevent neuron death, regardless of the cause</td></tr>
+  <tr><td>Oligomer</td><td>Small, soluble cluster of a few misfolded proteins; often the most toxic form</td></tr>
+  <tr><td>Prion-like</td><td>Behaving like prions: misfolded proteins that template the misfolding of normal copies and spread between cells</td></tr>
+  <tr><td>Proteinopathy</td><td>Disease caused by the accumulation of misfolded proteins</td></tr>
+  <tr><td>Retropulsion</td><td>Involuntary backward movement/falling; characteristic of PSP</td></tr>
+  <tr><td>Saccade</td><td>Quick, darting eye movement used to shift gaze from one point to another</td></tr>
+  <tr><td>Seed amplification assay (SAA)</td><td>Lab test that detects misfolded proteins by exploiting their ability to template normal protein misfolding</td></tr>
+  <tr><td>Substantia nigra</td><td>Midbrain region that produces dopamine; its degeneration causes parkinsonian motor symptoms</td></tr>
+  <tr><td>Supranuclear</td><td>Above (supra) the brainstem nuclei that control eye muscles; refers to the brain regions COMMANDING eye movement</td></tr>
+  <tr><td>Synucleinopathy</td><td>Disease caused by alpha-synuclein aggregation (PD, DLB, MSA)</td></tr>
+  <tr><td>Tauopathy</td><td>Disease caused by tau aggregation (PSP, CBD, AD, Pick's disease)</td></tr>
+  <tr><td>UPDRS</td><td>Unified Parkinson's Disease Rating Scale &mdash; standardized clinical scoring system</td></tr>
+</table>
+
+
+<h2>Appendix D: Source References</h2>
+
+<p>Key publications and databases referenced in this guide:</p>
+
+<h4>Disease Biology &amp; Cross-Seeding</h4>
+<ul>
+  <li>2025 Frontiers in Neuroscience: "Synucleinopathies should be redefined as complex proteinopathies"</li>
+  <li>JAMA 2024: Synuclein-One skin biopsy validation (92.7% sensitivity)</li>
+  <li>TOMA antibodies reducing α-syn oligomers: JCI Insight</li>
+</ul>
+
+<h4>Clinical Trials</h4>
+<ul>
+  <li>ClinicalTrials.gov: NCT07173803 (PSP Platform Trial), NCT04777331 (prasinezumab PADOVA)</li>
+  <li>CurePSP: PSP Platform Trial announcements</li>
+  <li>AC Immune: VacSYn Phase 2 interim data</li>
+</ul>
+
+<h4>Diagnostic Biomarkers</h4>
+<ul>
+  <li>Neurology December 2025: Plasma pTau217 + NfL differentiates PSP from PD (275 participants)</li>
+  <li>Lancet Neurology 2025: SAA kinetic parameters predict cognitive decline</li>
+  <li>Nature Communications January 2025: Modified PSPRS-15 validation</li>
+  <li>J Nuclear Medicine 2025: Florzolotau PET for 4R tauopathy (AUC 0.87)</li>
+  <li>Alzforum: PI-2620 autopsy confirmation of 4R tau binding</li>
+</ul>
+
+<h4>Treatment Landscape</h4>
+<ul>
+  <li>NEJM 2024: Lixisenatide Phase 2 (LixiPark trial)</li>
+  <li>Lancet 2025: Exenatide Phase 3 (negative)</li>
+  <li>npj Parkinson's Disease 2025: Brain-shuttled α-syn antibody</li>
+  <li>Roche: Prasinezumab Phase 3 PADOVA trial</li>
+</ul>
+
+<h4>Functional Assessments</h4>
+<ul>
+  <li>Dysphagia 2024: Systematic review and meta-analysis of PSP swallowing</li>
+  <li>J Movement Disorders: Video-oculography diagnostic accuracy in PSP</li>
+  <li>PLOS ONE 2017: COMPASS-31 validation in parkinsonism</li>
+</ul>
+
+
+<div class="footnote" style="margin-top: 40px;">
+  <p><strong>Document compiled:</strong> March 21, 2026</p>
+  <p><strong>Next update due:</strong> Upon receipt of genetic testing results, new trial enrollment windows, or significant research publications.</p>
+  <p><strong>Medical Disclaimer:</strong> This document is an informational reference compiled from published research, clinical guidelines, and publicly available trial registrations. It does NOT constitute medical advice. All diagnostic decisions, treatment choices, and clinical trial enrollment must be made in consultation with the patient's neurologist and care team. No action should be taken based solely on this document without professional medical guidance.</p>
+</div>
+
+</body>
+</html>

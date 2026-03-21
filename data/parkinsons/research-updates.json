@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-15T12:00:00Z",
+  "last_updated": "2026-03-21T15:30:00Z",
   "patient_profile": {
     "diagnosis": "PD with PSP-Richardson's features (dual proteinopathy)",
     "confirmed_pathology": ["alpha-synuclein (skin biopsy+)"],
@@ -402,6 +402,24 @@
   ],
   "research_updates": [
     {
+      "id": "update-003",
+      "date": "2026-03-21",
+      "title": "Comprehensive Diagnostic Gap Analysis — 8 New Tests Added, Critical Tau PET Tracer Correction",
+      "summary": "Thorough research review identified significant gaps in the diagnostic roadmap. CRITICAL CORRECTION: Flortaucipir (the originally specified tau PET tracer) binds POORLY to PSP's 4R-only tau — must use PI-2620 (85% sensitivity) or florzolotau (AUC 0.87) instead. SAFETY ADDITION: Videofluoroscopic swallow study added as urgent priority (aspiration pneumonia is #1 cause of death in PSP, dysphagia prevalence 78-89%). NEW ADDITIONS: blood biomarker panel (NfL/GFAP/pTau217 as disease 'speedometer'), cardiac MIBG scan (90% specificity for PD-vs-PSP), PSP-protocol MRI re-read, quantitative oculomotor testing (91.5% accuracy), neuropsych battery (FAB/RBANS/PSPRS), olfactory testing, autonomic assessment (COMPASS-31). Total diagnostic recommendations now 14 (up from 6). Compiled 43-page comprehensive PDF reference guide covering disease biology, all diagnostics, genomic medicine roadmap, and treatment landscape.",
+      "evidence_tier": null,
+      "category": "diagnostic_review",
+      "source_urls": [
+        "https://www.neurology.org/doi/10.1212/WNL.0000000000214406",
+        "https://link.springer.com/article/10.1007/s00702-025-03070-3",
+        "https://www.frontiersin.org/journals/neurology/articles/10.3389/fneur.2025.1638852/full",
+        "https://link.springer.com/article/10.1007/s00455-024-10681-7",
+        "https://www.alzforum.org/news/research-news/autopsies-confirm-pi-2620-binds-4r-tau-deposits",
+        "https://jnm.snmjournals.org/content/66/6/926",
+        "https://www.nature.com/articles/s41467-024-55442-0"
+      ],
+      "implications_for_patient": "Immediate actions: (1) Request swallowing assessment at next neurology visit — this is a safety issue. (2) Ensure any tau PET ordered uses PI-2620 or florzolotau, NOT flortaucipir. (3) Request blood draw for NfL/GFAP/pTau217 — simple, high-value prognostic baseline. (4) Ask if existing MRI can be re-read with PSP-specific measurements. (5) Continue genetics specialist referral process."
+    },
+    {
       "id": "update-002",
       "date": "2026-03-15",
       "title": "Personalized Genomic Medicine Roadmap — From Generic to Patient-Specific Therapy Selection",
@@ -567,9 +585,9 @@
   "diagnostic_recommendations": [
     {
       "id": "diag-001",
-      "test": "Tau PET Imaging (Flortaucipir)",
-      "purpose": "Visualize tau protein distribution in the brain. Can confirm PSP pattern (subcortical tau in basal ganglia, brainstem, cerebellum) vs Alzheimer's pattern (cortical tau). Critical for trial eligibility and treatment planning.",
-      "availability": "Major academic medical centers with PET imaging capability. May require referral from neurologist.",
+      "test": "Tau PET Imaging — PI-2620 or Florzolotau (NOT Flortaucipir)",
+      "purpose": "CORRECTED TRACER: Flortaucipir was designed for Alzheimer's mixed 3R/4R tau and binds POORLY to PSP's 4R-only tau. Use [18F]PI-2620 (autopsy-validated for 4R tau, 85% sensitivity for PSP-RS) or [18F]Florzolotau/PM-PBB3 (AUC 0.87 for 4R tauopathy, 84.3% sensitivity). Visualizes tau distribution — PSP shows subcortical pattern (basal ganglia, brainstem, cerebellum) vs Alzheimer's cortical pattern.",
+      "availability": "PI-2620 and florzolotau available at major research centers (UCSF, Mayo, Mass General). May require research protocol enrollment. Availability expanding.",
       "status": "recommended",
       "date_recommended": "2026-03-15"
     },
@@ -612,6 +630,70 @@
       "availability": "Nuclear medicine departments at most hospitals. Outpatient procedure.",
       "status": "recommended",
       "date_recommended": "2026-03-15"
+    },
+    {
+      "id": "diag-007",
+      "test": "Videofluoroscopic Swallow Study (VFSS)",
+      "purpose": "SAFETY PRIORITY: Aspiration pneumonia is the #1 cause of death in PSP. Dysphagia occurs in 78-89% of PSP patients and can be SILENT. Baseline VFSS identifies aspiration risk early and guides dietary modifications that are genuinely life-prolonging. PSP dysphagia has distinctive pattern: oral phase predominance (98%), pharyngeal residue (70%), delayed swallow initiation (68%).",
+      "availability": "Speech-language pathology department at any hospital. Outpatient procedure. Can be bundled with speech assessment.",
+      "status": "recommended",
+      "date_recommended": "2026-03-21"
+    },
+    {
+      "id": "diag-008",
+      "test": "Blood Biomarker Panel (Plasma NfL + GFAP + pTau217)",
+      "purpose": "Simple blood draw providing three powerful biomarkers. NfL is the strongest prognostic biomarker in PSP (~2x healthy controls; predicts outcomes and survival). GFAP predicts cognitive decline (AUC 0.90 for MCI-to-dementia). pTau217 helps differentiate: LOW pTau217 + HIGH NfL supports 4R-tauopathy (PSP) over Alzheimer's. Together they create a 'disease speedometer' for tracking progression.",
+      "availability": "Quest Diagnostics (NfL), C2N Diagnostics PrecivityAD2 (pTau217), Quanterix-partnered labs. Major academic centers can order all three.",
+      "status": "recommended",
+      "date_recommended": "2026-03-21"
+    },
+    {
+      "id": "diag-009",
+      "test": "Cardiac MIBG Scintigraphy",
+      "purpose": "Directly resolves PD-vs-PSP diagnostic tension. In PD, alpha-synuclein damages cardiac sympathetic nerves (reduced H/M ratio). In PSP, cardiac innervation is PRESERVED (normal H/M ratio). 90% specificity for differentiation. For this patient with features of both: reduced H/M = synuclein-driven cardiac denervation (body-first PD pattern); normal H/M = cardiac system spared (PSP-dominant or brain-first).",
+      "availability": "Nuclear medicine departments at major medical centers. Widely available. Outpatient procedure.",
+      "status": "recommended",
+      "date_recommended": "2026-03-21"
+    },
+    {
+      "id": "diag-010",
+      "test": "PSP-Protocol Brain MRI (Re-read or New)",
+      "purpose": "Standard MRI reads often miss PSP-specific findings. Requires evaluation for: hummingbird sign (99.5% specificity), morning glory sign, midbrain area (AUC 0.946), midbrain-to-pons ratio (<0.52 diagnostic), superior cerebellar peduncle atrophy, third ventricle width. If prior MRI exists, request RE-READ by a neuroradiologist using PSP-specific measurements.",
+      "availability": "Any MRI center, but reading must be by a neuroradiologist familiar with PSP. Academic movement disorders centers (UCSF, Mayo, Mass General) ideal.",
+      "status": "recommended",
+      "date_recommended": "2026-03-21"
+    },
+    {
+      "id": "diag-011",
+      "test": "Quantitative Oculomotor Assessment (Video-Oculography)",
+      "purpose": "Quantifies the eye movement abnormalities already documented clinically. The AxV product (amplitude × velocity) distinguishes PSP from PD with 91.5% accuracy (94.7% specificity). Creates objective baseline for tracking progression — vertical saccade velocity decline is one of the most reliable PSP progression markers. Critical for clinical trial readiness.",
+      "availability": "Neuro-ophthalmology clinics at academic centers (UCSF, Mayo, Mass General, Emory). Equipment: EyeLink or Interacoustics VNG systems.",
+      "status": "recommended",
+      "date_recommended": "2026-03-21"
+    },
+    {
+      "id": "diag-012",
+      "test": "Neuropsychological Assessment (FAB + RBANS + PSPRS)",
+      "purpose": "PSP-Richardson's causes distinctive frontal-subcortical cognitive decline. Baseline cognitive assessment enables progression tracking and is often required for clinical trial enrollment. FAB (5 min, executive function), RBANS (30 min, validated in 220 PSP-RS patients with 6/12-month alternate forms), PSPRS (28-item clinician scale, or newer 15-item mPSPRS-15 from Nature Comms Jan 2025).",
+      "availability": "Neuropsychology departments at academic medical centers. PSPRS can be administered by movement disorder neurologists.",
+      "status": "recommended",
+      "date_recommended": "2026-03-21"
+    },
+    {
+      "id": "diag-013",
+      "test": "Olfactory Testing (UPSIT)",
+      "purpose": "Quick (15 min) scratch-and-sniff test that helps differentiate PD (severe olfactory loss) from PSP (moderate loss). For a patient with features of both, severe loss favors synuclein-dominant pathology; moderate loss favors tau-dominant. 2025 simplified 7-item test distinguishes PD/DLB from PSP/MSA with AUC 0.73.",
+      "availability": "Any neurology clinic. UPSIT is a scratch-and-sniff booklet. Inexpensive.",
+      "status": "recommended",
+      "date_recommended": "2026-03-21"
+    },
+    {
+      "id": "diag-014",
+      "test": "Autonomic Function Assessment (COMPASS-31 + Formal Testing)",
+      "purpose": "Start with COMPASS-31 questionnaire (self-administered, 92.6% sensitivity). Determines if backward falls have an orthostatic hypotension component — which is TREATABLE (midodrine, compression, hydration). Autonomic patterns differ: PD has early autonomic failure, PSP has milder dysfunction. If screening abnormal, formal testing (QSART, tilt table) at autonomic lab.",
+      "availability": "COMPASS-31 questionnaire can be done immediately. Formal testing at autonomic labs (Mayo, Cleveland Clinic, Beth Israel).",
+      "status": "recommended",
+      "date_recommended": "2026-03-21"
     }
   ]
 }
