@@ -13,6 +13,7 @@ import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
+from dateutil.parser import isoparse
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -118,6 +119,15 @@ async def ingest_usage(
     sessions_upserted = 0
     calls_inserted = 0
 
+    def _parse_ts(val: str | None) -> datetime | None:
+        """Parse ISO timestamp string to datetime, or None."""
+        if not val:
+            return None
+        try:
+            return isoparse(val)
+        except (ValueError, TypeError):
+            return None
+
     async with pool.acquire() as conn:
         # Upsert sessions
         for s in payload.sessions:
@@ -130,7 +140,7 @@ async def ingest_usage(
                         cache_read_tokens, cost_equivalent, message_count,
                         subagent_count, model_breakdown)
                        VALUES ($1, $2, $3, $4, $5, $6, $7,
-                               $8::timestamptz, $9::timestamptz,
+                               $8, $9,
                                $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
                        ON CONFLICT (session_id) DO UPDATE SET
                            ended_at = EXCLUDED.ended_at,
@@ -145,7 +155,7 @@ async def ingest_usage(
                            collected_at = NOW()""",
                     s.session_id, s.machine, s.provider, s.account_id,
                     s.project, s.agent_persona, s.model_primary,
-                    s.started_at, s.ended_at,
+                    _parse_ts(s.started_at), _parse_ts(s.ended_at),
                     s.input_tokens, s.output_tokens,
                     s.cache_creation_tokens, s.cache_read_tokens,
                     s.cost_equivalent, s.message_count, s.subagent_count,

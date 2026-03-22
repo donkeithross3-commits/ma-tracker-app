@@ -279,7 +279,11 @@ def _infer_agent_persona(project: str, raw: dict) -> str | None:
 # ---------------------------------------------------------------------------
 
 def push_sessions(sessions: list[dict]) -> bool:
-    """POST session data to the central ingest endpoint."""
+    """POST session data to the central ingest endpoint.
+
+    Uses curl subprocess to bypass Cloudflare TLS fingerprint blocking
+    (Python urllib gets error 1010). Same pattern as fleet_collector.py.
+    """
     if not sessions:
         logger.info("No sessions to push")
         return True
@@ -288,9 +292,52 @@ def push_sessions(sessions: list[dict]) -> bool:
         logger.error("FLEET_API_KEY not set — cannot push to central DB")
         return False
 
-    payload = json.dumps({"sessions": sessions}).encode()
+    payload = json.dumps({"sessions": sessions})
     logger.info("Pushing %d sessions to %s (%d bytes)", len(sessions), INGEST_URL, len(payload))
 
+    try:
+        result = subprocess.run(
+            [
+                "curl", "-s", "-X", "POST",
+                INGEST_URL,
+                "-H", "Content-Type: application/json",
+                "-H", f"X-Fleet-Key: {FLEET_KEY}",
+                "-d", payload,
+                "--max-time", "30",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=35,
+        )
+
+        if result.returncode != 0:
+            logger.error("curl failed (exit %d): %s", result.returncode, result.stderr[:500])
+            return False
+
+        try:
+            body = json.loads(result.stdout)
+            logger.info("Ingest response: %s", body)
+            return True
+        except json.JSONDecodeError:
+            # Non-JSON response — could be Cloudflare error page
+            logger.error("Non-JSON response: %s", result.stdout[:500])
+            return False
+
+    except subprocess.TimeoutExpired:
+        logger.error("curl timed out after 35s")
+        return False
+    except FileNotFoundError:
+        logger.error("curl not found — falling back to urllib")
+        # Fallback to urllib (works on droplet where there's no Cloudflare)
+        return _push_urllib(sessions)
+    except Exception as e:
+        logger.error("Push failed: %s", e)
+        return False
+
+
+def _push_urllib(sessions: list[dict]) -> bool:
+    """Fallback push using urllib (for droplet where Cloudflare isn't in the path)."""
+    payload = json.dumps({"sessions": sessions}).encode()
     try:
         req = urllib.request.Request(
             INGEST_URL,
@@ -303,13 +350,10 @@ def push_sessions(sessions: list[dict]) -> bool:
         )
         resp = urllib.request.urlopen(req, timeout=30)
         body = json.loads(resp.read().decode())
-        logger.info("Ingest response: %s", body)
+        logger.info("Ingest response (urllib): %s", body)
         return True
-    except urllib.error.HTTPError as e:
-        logger.error("Ingest HTTP error %d: %s", e.code, e.read().decode()[:500])
-        return False
     except Exception as e:
-        logger.error("Ingest failed: %s", e)
+        logger.error("urllib push failed: %s", e)
         return False
 
 
