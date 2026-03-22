@@ -128,6 +128,15 @@ _DEFAULTS: dict[str, Any] = {
     "regime_exit_low_trail": 8,           # trail % when VIX < threshold
     "regime_exit_high_activation": 25,    # trail activation % when VIX >= threshold
     "regime_exit_high_trail": 15,         # trail % when VIX >= threshold
+    # Momentum gate: defer entry when short-term price action is adverse to signal direction.
+    # Prevents buying into a waterfall decline or shorting into a rip.
+    # The gate checks whether the underlying's return over the lookback window
+    # conflicts with the signal direction beyond the threshold.
+    # Set momentum_gate_enabled=False to disable (default, backward compatible).
+    "momentum_gate_enabled": False,
+    "momentum_gate_lookback_seconds": 20,    # window to measure short-term momentum
+    "momentum_gate_adverse_bps": 8.0,        # adverse return threshold in bps to defer
+    "momentum_gate_max_defer_seconds": 180,  # give up after this many seconds of deferral
 }
 
 # Cross-asset tickers for correlation features (Group C) and backfill.
@@ -172,6 +181,12 @@ _TICKER_PROFILES: dict[str, dict[str, Any]] = {
         "regime_exit_low_trail": 8,
         "regime_exit_high_activation": 25,
         "regime_exit_high_trail": 15,
+        # Momentum gate: don't buy into a waterfall, don't short into a rip.
+        # 20s lookback, 8 bps adverse threshold, 3 min max deferral.
+        "momentum_gate_enabled": True,
+        "momentum_gate_lookback_seconds": 20,
+        "momentum_gate_adverse_bps": 8.0,
+        "momentum_gate_max_defer_seconds": 180,
     },
     "SLV": {
         "strike_increment": 1.00,         # IB lists $1 increments for SLV options
@@ -492,6 +507,18 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Conviction gate: rolling window of recent signal fire timestamps
         self._conviction_fire_times: list[float] = []
 
+        # Momentum gate: rolling price history for short-term momentum check.
+        # Updated every eval tick (100ms) from IB quote cache.
+        # Each entry: (wall_clock_time, mid_price)
+        from collections import deque
+        self._price_history: deque[tuple[float, float]] = deque(maxlen=600)  # ~60s at 100ms ticks
+        # Deferred signal awaiting momentum alignment
+        self._deferred_signal: Optional[dict] = None
+        self._deferred_signal_time: float = 0.0  # when we started deferring
+        self._deferred_signal_direction: str = ""  # "long" or "short"
+        self._deferred_cfg: Optional[dict] = None
+        self._deferred_underlying_price: Optional[float] = None
+
         # VIX at last signal fire (for regime-adaptive exits at fill time)
         self._signal_vix_level: Optional[float] = None
 
@@ -662,6 +689,15 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         cfg = {**_DEFAULTS, **profile, **config}
         now = time.time()
 
+        # ── Track underlying price on every tick (for momentum gate) ──
+        # This runs before all other checks so the price history is always
+        # populated regardless of scan window or decision interval.
+        ticker_quote = quotes.get(self._ticker)
+        if ticker_quote is not None:
+            _mid = getattr(ticker_quote, 'mid', None)
+            if _mid and _mid > 0:
+                self._price_history.append((now, _mid))
+
         # Detect execution profile changes (segment tracking)
         # Runs before scan window check so config changes are detected even outside trading window
         new_profile_id, new_profile_label = self._compute_execution_profile(cfg)
@@ -678,6 +714,15 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Check scan window
         if not self._is_in_scan_window(cfg):
             return []
+
+        # ── Check deferred signal (momentum gate re-check every tick) ──
+        # A signal that was deferred due to adverse momentum gets re-checked
+        # every 100ms. This runs BEFORE the decision interval gate so we
+        # don't wait another 60s just to re-check momentum.
+        if self._deferred_signal is not None:
+            result = self._check_deferred_momentum(quotes, cfg, now)
+            if result is not None:
+                return result  # either the order (momentum cleared) or [] (still deferred / expired)
 
         # Check decision interval
         interval = cfg.get("decision_interval_seconds", 300)
@@ -908,9 +953,13 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         # Signal history (last 20)
         state["signal_history"] = self._signal_history[-20:]
 
+        # Build cfg for gate telemetry (same merge as evaluate())
+        profile = _get_ticker_profile(self._ticker)
+        cfg = {**_DEFAULTS, **profile}
+
         # Conviction gate state
-        required = cfg.get("conviction_required_fires", 1) if cfg else 1
-        window = cfg.get("conviction_window_minutes", 60) if cfg else 60
+        required = cfg.get("conviction_required_fires", 1)
+        window = cfg.get("conviction_window_minutes", 60)
         if required > 1:
             now_ts = time.time()
             cutoff = now_ts - (window * 60)
@@ -924,6 +973,25 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             }
         else:
             state["conviction_gate"] = {"enabled": False}
+
+        # Momentum gate state
+        mom_enabled = cfg.get("momentum_gate_enabled", False)
+        if mom_enabled:
+            return_bps = self._get_short_term_return_bps(
+                cfg.get("momentum_gate_lookback_seconds", 20)
+            )
+            state["momentum_gate"] = {
+                "enabled": True,
+                "lookback_seconds": cfg.get("momentum_gate_lookback_seconds", 20),
+                "adverse_threshold_bps": cfg.get("momentum_gate_adverse_bps", 8.0),
+                "max_defer_seconds": cfg.get("momentum_gate_max_defer_seconds", 180),
+                "current_return_bps": round(return_bps, 2) if return_bps is not None else None,
+                "deferred": self._deferred_signal is not None,
+                "defer_elapsed_s": round(time.time() - self._deferred_signal_time, 1) if self._deferred_signal is not None else None,
+                "price_history_length": len(self._price_history),
+            }
+        else:
+            state["momentum_gate"] = {"enabled": False}
 
         # Polygon WS status
         if self._polygon_client is not None:
@@ -1432,6 +1500,153 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
     # Internal — decision cycle
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Momentum gate — short-term price velocity check
+    # ------------------------------------------------------------------
+
+    def _get_short_term_return_bps(self, lookback_seconds: float) -> Optional[float]:
+        """Compute return in bps over the last `lookback_seconds` from price history.
+
+        Returns None if insufficient data in the window.
+        """
+        if len(self._price_history) < 2:
+            return None
+
+        now = self._price_history[-1][0]
+        cutoff = now - lookback_seconds
+        current_price = self._price_history[-1][1]
+
+        # Find the oldest price within the lookback window
+        oldest_price = None
+        for ts, price in self._price_history:
+            if ts >= cutoff:
+                oldest_price = price
+                break
+
+        if oldest_price is None or oldest_price <= 0:
+            return None
+
+        return_bps = ((current_price - oldest_price) / oldest_price) * 10_000
+        return return_bps
+
+    def _is_momentum_adverse(
+        self, direction: str, cfg: dict,
+    ) -> tuple[bool, Optional[float]]:
+        """Check if short-term momentum is adverse to the signal direction.
+
+        Returns (is_adverse, return_bps). is_adverse=True means we should defer.
+        """
+        lookback = cfg.get("momentum_gate_lookback_seconds", 20)
+        threshold_bps = cfg.get("momentum_gate_adverse_bps", 8.0)
+
+        return_bps = self._get_short_term_return_bps(lookback)
+        if return_bps is None:
+            # Not enough data — don't block the signal
+            return False, None
+
+        if direction == "long" and return_bps < -threshold_bps:
+            # Signal is bullish but price is dropping hard
+            return True, return_bps
+        elif direction == "short" and return_bps > threshold_bps:
+            # Signal is bearish but price is ripping up
+            return True, return_bps
+
+        return False, return_bps
+
+    def _defer_signal(
+        self, signal, signal_record: dict, cfg: dict,
+        underlying_price: Optional[float], return_bps: float,
+    ) -> List[OrderAction]:
+        """Defer order submission until momentum aligns. Returns []."""
+        self._deferred_signal = {
+            "signal": signal,
+            "signal_record": signal_record,
+        }
+        self._deferred_signal_time = time.time()
+        self._deferred_signal_direction = signal.direction
+        self._deferred_cfg = cfg
+        self._deferred_underlying_price = underlying_price
+
+        logger.info(
+            "MOMENTUM GATE: deferring %s entry (%.1f bps adverse over %ds, threshold=%.1f bps)",
+            signal.direction,
+            return_bps,
+            cfg.get("momentum_gate_lookback_seconds", 20),
+            cfg.get("momentum_gate_adverse_bps", 8.0),
+        )
+        signal_record["momentum_deferred"] = True
+        signal_record["momentum_return_bps"] = round(return_bps, 2)
+        return []
+
+    def _check_deferred_momentum(
+        self, quotes: Dict[str, "Quote"], cfg: dict, now: float,
+    ) -> Optional[List[OrderAction]]:
+        """Re-check momentum for a deferred signal. Called every 100ms.
+
+        Returns:
+            List[OrderAction] if momentum cleared (order submitted) or max deferral expired.
+            None if we should fall through to normal evaluate() logic (shouldn't happen
+            when deferred_signal is set, but defensive).
+        """
+        if self._deferred_signal is None:
+            return None
+
+        max_defer = cfg.get("momentum_gate_max_defer_seconds", 180)
+        elapsed = now - self._deferred_signal_time
+
+        # Check timeout
+        if elapsed >= max_defer:
+            logger.warning(
+                "MOMENTUM GATE: max deferral reached (%.0fs) — abandoning %s signal",
+                elapsed, self._deferred_signal_direction,
+            )
+            sig_rec = self._deferred_signal.get("signal_record", {})
+            sig_rec["suppressed"] = f"momentum_timeout ({elapsed:.0f}s)"
+            self._signal_history.append(sig_rec)
+            self._deferred_signal = None
+            self._deferred_cfg = None
+            return []
+
+        # Re-check momentum
+        is_adverse, return_bps = self._is_momentum_adverse(
+            self._deferred_signal_direction, cfg,
+        )
+
+        if is_adverse:
+            # Still adverse — keep deferring (log every 5s to avoid spam)
+            if int(elapsed) % 5 == 0 and elapsed > 0:
+                logger.debug(
+                    "MOMENTUM GATE: still adverse (%.1f bps, %.0fs deferred)",
+                    return_bps or 0, elapsed,
+                )
+            return []
+
+        # Momentum has cleared! Submit the order.
+        logger.info(
+            "MOMENTUM GATE: momentum cleared after %.1fs deferral (%.1f bps), submitting %s order",
+            elapsed, return_bps or 0, self._deferred_signal_direction,
+        )
+        sig = self._deferred_signal["signal"]
+        sig_rec = self._deferred_signal.get("signal_record", {})
+        sig_rec["momentum_defer_seconds"] = round(elapsed, 1)
+        sig_rec["momentum_cleared_bps"] = round(return_bps, 2) if return_bps is not None else None
+        use_cfg = self._deferred_cfg or cfg
+
+        # Get fresh underlying price from current quotes
+        underlying_price = self._deferred_underlying_price
+        ticker_quote = quotes.get(self._ticker)
+        if ticker_quote is not None:
+            _mid = getattr(ticker_quote, 'mid', None)
+            if _mid and _mid > 0:
+                underlying_price = _mid
+
+        # Clear deferred state before building order
+        self._deferred_signal = None
+        self._deferred_cfg = None
+        self._deferred_underlying_price = None
+
+        return self._build_entry_order(sig, use_cfg, underlying_price)
+
     def _run_decision_cycle(
         self,
         quotes: Dict[str, "Quote"],
@@ -1799,6 +2014,22 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             logger.info("Signal recorded but auto_entry=False; no order placed")
             signal_record["suppressed"] = "auto_entry_disabled"
             return []
+
+        # Momentum gate: defer entry if short-term momentum is adverse.
+        # This is the LAST gate before order submission — runs after conviction,
+        # cooldown, and auto_entry checks have all passed.
+        if cfg.get("momentum_gate_enabled", False):
+            is_adverse, return_bps = self._is_momentum_adverse(signal.direction, cfg)
+            if is_adverse and return_bps is not None:
+                return self._defer_signal(
+                    signal, signal_record, cfg, underlying_price, return_bps,
+                )
+            elif return_bps is not None:
+                logger.info(
+                    "MOMENTUM GATE: clear (%.1f bps over %ds), proceeding with entry",
+                    return_bps, cfg.get("momentum_gate_lookback_seconds", 20),
+                )
+                signal_record["momentum_return_bps"] = round(return_bps, 2)
 
         # Select option contract and build order
         return self._build_entry_order(signal, cfg, underlying_price)
