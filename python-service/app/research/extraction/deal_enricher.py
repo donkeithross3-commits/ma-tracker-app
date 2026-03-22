@@ -193,23 +193,82 @@ class DealEnricher:
             return None
 
         try:
+            import time as _time
+            t0 = _time.monotonic()
             result = subprocess.run(
                 [cli_path, "-p", prompt, "--output-format", "json",
                  "--model", self.cli_model],
                 capture_output=True, text=True, timeout=180, env=env,
             )
+            elapsed_ms = int((_time.monotonic() - t0) * 1000)
 
             if result.returncode != 0:
                 logger.warning(f"CLI failed: {result.stdout[:300]}")
                 return None
 
-            return self._extract_json(result.stdout)
+            parsed = self._extract_json(result.stdout)
+
+            # Log to central telemetry (non-fatal, best-effort)
+            try:
+                raw_output = result.stdout.strip()
+                cli_json = json.loads(raw_output) if raw_output.startswith("{") else {}
+                usage = cli_json.get("usage", {})
+                input_tokens = usage.get("input_tokens", len(prompt) // 4)
+                output_tokens = usage.get("output_tokens", len(raw_output) // 4)
+                cache_c = usage.get("cache_creation_input_tokens", 0)
+                cache_r = usage.get("cache_read_input_tokens", 0)
+                logger.info(
+                    "Deal enricher CLI: model=%s, %d in/%d out, %dms",
+                    self.cli_model, input_tokens, output_tokens, elapsed_ms,
+                )
+                # Fire-and-forget POST to central telemetry (if running in async context)
+                self._report_usage(
+                    input_tokens=input_tokens, output_tokens=output_tokens,
+                    cache_creation_tokens=cache_c, cache_read_tokens=cache_r,
+                    model=f"cli-{self.cli_model}", elapsed_ms=elapsed_ms,
+                )
+            except Exception:
+                pass  # Telemetry must never break enrichment
+
+            return parsed
         except subprocess.TimeoutExpired:
             logger.warning("CLI timed out (180s)")
             return None
         except Exception as e:
             logger.error(f"CLI error: {e}")
             return None
+
+    def _report_usage(self, *, input_tokens: int, output_tokens: int,
+                      cache_creation_tokens: int, cache_read_tokens: int,
+                      model: str, elapsed_ms: int) -> None:
+        """Best-effort POST to the central AI usage ingest endpoint."""
+        try:
+            import urllib.request
+            payload = json.dumps({"calls": [{
+                "source": "deal_enricher",
+                "model": model,
+                "auth_method": "cli_oauth",
+                "machine": "droplet",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cache_creation_tokens": cache_creation_tokens,
+                "cache_read_tokens": cache_read_tokens,
+                "cost_usd": 0.0,
+                "metadata": {"elapsed_ms": elapsed_ms},
+            }]}).encode()
+            fleet_key = os.environ.get("FLEET_API_KEY", "")
+            req = urllib.request.Request(
+                "http://localhost:8000/ai-usage/ingest",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Fleet-Key": fleet_key,
+                },
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            pass  # Non-fatal
 
     async def enrich_deal(self, conn: asyncpg.Connection, deal_id: UUID) -> bool:
         """Enrich a single deal with extracted terms."""

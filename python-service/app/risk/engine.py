@@ -904,6 +904,8 @@ class RiskAssessmentEngine:
                         output_tokens=cli_result["output_tokens"],
                         cost_usd=0.0,
                         metadata={"via": "cli", "effort": CLI_EFFORT_LEVEL},
+                        auth_method="cli_oauth",
+                        machine="droplet",
                     )
                 except Exception:
                     pass  # Non-fatal
@@ -1726,6 +1728,8 @@ Keep it actionable and direct."""
                         output_tokens=cli_result["output_tokens"],
                         cost_usd=0.0,
                         metadata={"run_id": str(run_id), "via": "cli"},
+                        auth_method="cli_oauth",
+                        machine="droplet",
                     )
                 except Exception:
                     pass

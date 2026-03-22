@@ -33,6 +33,7 @@ from .api.ws_relay import router as ws_relay_router
 from .api.krj_routes import router as krj_router
 from .api.fleet_routes import router as fleet_router
 from .api.cos_routes import router as cos_router
+from .api.ai_usage_routes import router as ai_usage_router
 from .edgar.database import EdgarDatabase
 from .trade_history.database import init_trade_db, shutdown_trade_db
 
@@ -81,6 +82,9 @@ app.include_router(fleet_router)
 
 # Include Chief of Staff orchestrator (DeepSeek-R1 + Opus escalation)
 app.include_router(cos_router)
+
+# Include AI usage telemetry (token tracking for subscription + API)
+app.include_router(ai_usage_router)
 
 # Portfolio routes live exclusively in the portfolio container (port 8001).
 # All dashboard traffic already routes via PORTFOLIO_SERVICE_URL → python-portfolio.

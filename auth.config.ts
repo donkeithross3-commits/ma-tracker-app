@@ -38,10 +38,12 @@ export const authConfig: NextAuthConfig = {
       // Internal API endpoints (called by Python service or agent, not browser)
       // Keep this list minimal; all read/control APIs should stay session-gated.
       const isFleetCheckinAPI = pathname === "/api/fleet/checkin"
+      const isAiUsageIngestAPI = pathname === "/api/ai-usage/ingest"
       const isInternalAPI = pathname === "/api/ma-options/validate-agent-key" ||
                             pathname === "/api/ma-options/agent-version" ||
                             pathname === "/api/ma-options/download-agent-update" ||
-                            isFleetCheckinAPI
+                            isFleetCheckinAPI ||
+                            isAiUsageIngestAPI
       // Admin seed (protected by query secret, not session)
       const isAdminEndpoint = pathname === "/api/admin/seed-whitelist"
       
