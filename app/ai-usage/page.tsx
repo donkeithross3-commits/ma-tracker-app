@@ -208,11 +208,9 @@ function aggregateByDay(summary: SummaryResponse | null): DailyAggregate[] {
   for (const row of summary.interactive_sessions) {
     const agg = getOrCreate(row.day);
     agg.interactive_cost += row.cost_equivalent;
-    agg.total_tokens +=
-      row.input_tokens +
-      row.output_tokens +
-      row.cache_creation_tokens +
-      row.cache_read_tokens;
+    // Only count input + output tokens. Cache tokens describe how input
+    // was served (from cache vs fresh), not additional tokens consumed.
+    agg.total_tokens += row.input_tokens + row.output_tokens;
     agg.sessions += row.session_count;
     agg.messages += row.message_count;
   }
@@ -220,11 +218,7 @@ function aggregateByDay(summary: SummaryResponse | null): DailyAggregate[] {
   for (const row of summary.programmatic_calls) {
     const agg = getOrCreate(row.day);
     agg.programmatic_cost += row.cost_usd;
-    agg.total_tokens +=
-      row.input_tokens +
-      row.output_tokens +
-      row.cache_creation_tokens +
-      row.cache_read_tokens;
+    agg.total_tokens += row.input_tokens + row.output_tokens;
     agg.calls += row.call_count;
   }
 
@@ -253,8 +247,7 @@ function aggregateByAgent(summary: SummaryResponse | null): AgentAggregate[] {
       map.set(agent, agg);
     }
     agg.cost += row.cost_equivalent;
-    agg.tokens +=
-      row.input_tokens + row.output_tokens + row.cache_creation_tokens + row.cache_read_tokens;
+    agg.tokens += row.input_tokens + row.output_tokens;
     agg.sessions += row.session_count;
     agg.messages += row.message_count;
   }
@@ -281,8 +274,7 @@ function aggregateByMachine(summary: SummaryResponse | null): MachineAggregate[]
       map.set(machine, agg);
     }
     agg.cost += row.cost_equivalent;
-    agg.tokens +=
-      row.input_tokens + row.output_tokens + row.cache_creation_tokens + row.cache_read_tokens;
+    agg.tokens += row.input_tokens + row.output_tokens;
     agg.sessions += row.session_count;
   }
 
@@ -416,12 +408,9 @@ export default function AIUsagePage() {
     const n = (v: number | null | undefined) => v ?? 0;
     const i = summary.totals.interactive ?? {};
     const p = summary.totals.programmatic ?? {};
-    return (
-      n(i.input_tokens) + n(i.output_tokens) +
-      n(i.cache_creation_tokens) + n(i.cache_read_tokens) +
-      n(p.input_tokens) + n(p.output_tokens) +
-      n(p.cache_creation_tokens) + n(p.cache_read_tokens)
-    );
+    // Only input + output. Cache tokens are not additive — they describe
+    // how input tokens were served (from prompt cache vs fresh compute).
+    return n(i.input_tokens) + n(i.output_tokens) + n(p.input_tokens) + n(p.output_tokens);
   }, [summary]);
 
   if (loading && !summary) {
@@ -481,7 +470,7 @@ export default function AIUsagePage() {
         {burnRate && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
             <div className="bg-gray-900 rounded-lg px-3 py-2 border border-gray-800">
-              <div className="text-xs text-gray-500 mb-0.5">Today</div>
+              <div className="text-xs text-gray-500 mb-0.5">Today (API Equivalent)</div>
               <div className="text-2xl font-bold font-mono text-blue-400">
                 {fmtCost(burnRate.today.cost_equivalent)}
               </div>
@@ -494,7 +483,7 @@ export default function AIUsagePage() {
               if (!rate) return null;
               return (
                 <div key={window} className="bg-gray-900 rounded-lg px-3 py-2 border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-0.5">{window} Burn Rate</div>
+                  <div className="text-xs text-gray-500 mb-0.5">{window} Equiv. Rate</div>
                   <div className="text-xl font-bold font-mono text-gray-100">
                     {fmtCost(rate.cost_per_hour)}
                     <span className="text-xs text-gray-500 font-normal">/hr</span>
@@ -509,14 +498,25 @@ export default function AIUsagePage() {
         )}
 
         {/* Period Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-1">
           <div className="bg-gray-900 rounded-lg px-3 py-2 border border-gray-800">
-            <div className="text-xs text-gray-500 mb-0.5">{days}d Total Cost</div>
-            <div className="text-xl font-bold font-mono">{fmtCost(totalCost)}</div>
+            <div className="text-xs text-gray-500 mb-0.5">{days}d API Equivalent</div>
+            <div className="text-xl font-bold font-mono text-blue-400">
+              {fmtCost(summary?.totals.interactive?.cost_equivalent ?? 0)}
+            </div>
+            <div className="text-[10px] text-gray-600">what API pricing would charge</div>
           </div>
           <div className="bg-gray-900 rounded-lg px-3 py-2 border border-gray-800">
-            <div className="text-xs text-gray-500 mb-0.5">{days}d Total Tokens</div>
+            <div className="text-xs text-gray-500 mb-0.5">{days}d API Spend</div>
+            <div className="text-xl font-bold font-mono text-amber-400">
+              {fmtCost(summary?.totals.programmatic?.cost_usd ?? 0)}
+            </div>
+            <div className="text-[10px] text-gray-600">actual billed API usage</div>
+          </div>
+          <div className="bg-gray-900 rounded-lg px-3 py-2 border border-gray-800">
+            <div className="text-xs text-gray-500 mb-0.5">{days}d Tokens</div>
             <div className="text-xl font-bold font-mono">{fmtTokens(totalTokens)}</div>
+            <div className="text-[10px] text-gray-600">input + output</div>
           </div>
           <div className="bg-gray-900 rounded-lg px-3 py-2 border border-gray-800">
             <div className="text-xs text-gray-500 mb-0.5">Sessions</div>
@@ -525,17 +525,15 @@ export default function AIUsagePage() {
             </div>
           </div>
           <div className="bg-gray-900 rounded-lg px-3 py-2 border border-gray-800">
-            <div className="text-xs text-gray-500 mb-0.5">Messages</div>
-            <div className="text-xl font-bold font-mono">
-              {(summary?.totals.interactive?.message_count ?? 0).toLocaleString()}
-            </div>
-          </div>
-          <div className="bg-gray-900 rounded-lg px-3 py-2 border border-gray-800">
             <div className="text-xs text-gray-500 mb-0.5">API Calls</div>
             <div className="text-xl font-bold font-mono">
               {summary?.totals.programmatic?.call_count ?? 0}
             </div>
           </div>
+        </div>
+        <div className="text-[10px] text-gray-600 mb-3 px-1">
+          <span className="text-blue-400/70">API Equivalent</span> = value of tokens consumed via Max subscription at API rates ·{" "}
+          <span className="text-amber-400/70">API Spend</span> = actual $ charged to API key
         </div>
 
         {/* Tab Bar */}
@@ -595,11 +593,11 @@ function OverviewTab({
           <div className="flex items-center gap-3 text-[10px]">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-sm bg-blue-500 inline-block" />
-              Interactive
+              API Equivalent (subscription)
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-sm bg-amber-500 inline-block" />
-              Programmatic
+              API Spend (billed)
             </span>
           </div>
         </div>
@@ -608,7 +606,7 @@ function OverviewTab({
 
       {/* Cost by Agent */}
       <div className="bg-gray-900 rounded-lg border border-gray-800 px-3 py-2">
-        <h2 className="text-sm font-semibold text-gray-200 mb-2">Cost by Agent</h2>
+        <h2 className="text-sm font-semibold text-gray-200 mb-2">API Equivalent by Agent</h2>
         {agentData.length === 0 ? (
           <p className="text-gray-500 text-sm">No agent data.</p>
         ) : (
@@ -648,18 +646,19 @@ function OverviewTab({
             <thead>
               <tr className="text-xs text-gray-500 border-b border-gray-800">
                 <th className="text-left py-1 pr-3">Date</th>
-                <th className="text-right py-1 px-2">Interactive</th>
-                <th className="text-right py-1 px-2">API</th>
-                <th className="text-right py-1 px-2">Total</th>
+                <th className="text-right py-1 px-2">
+                  <span className="text-blue-400/70">Equivalent</span>
+                </th>
+                <th className="text-right py-1 px-2">
+                  <span className="text-amber-400/70">API Spend</span>
+                </th>
                 <th className="text-right py-1 px-2">Tokens</th>
                 <th className="text-right py-1 px-2">Sessions</th>
                 <th className="text-right py-1 pl-2">Messages</th>
               </tr>
             </thead>
             <tbody>
-              {dailyData.map((d) => {
-                const total = d.interactive_cost + d.programmatic_cost;
-                return (
+              {dailyData.map((d) => (
                   <tr
                     key={d.day}
                     className="border-b border-gray-800/50 hover:bg-gray-800/40"
@@ -673,9 +672,6 @@ function OverviewTab({
                     <td className="py-1 px-2 text-right font-mono text-amber-400">
                       {d.programmatic_cost > 0 ? fmtCost(d.programmatic_cost) : "—"}
                     </td>
-                    <td className="py-1 px-2 text-right font-mono font-medium text-gray-100">
-                      {fmtCost(total)}
-                    </td>
                     <td className="py-1 px-2 text-right font-mono text-gray-400">
                       {fmtTokens(d.total_tokens)}
                     </td>
@@ -686,8 +682,7 @@ function OverviewTab({
                       {d.messages.toLocaleString()}
                     </td>
                   </tr>
-                );
-              })}
+                ))}
             </tbody>
           </table>
         </div>
@@ -695,7 +690,7 @@ function OverviewTab({
 
       {/* Cost by Machine */}
       <div className="bg-gray-900 rounded-lg border border-gray-800 px-3 py-2">
-        <h2 className="text-sm font-semibold text-gray-200 mb-2">Cost by Machine</h2>
+        <h2 className="text-sm font-semibold text-gray-200 mb-2">API Equivalent by Machine</h2>
         {machineData.length === 0 ? (
           <p className="text-gray-500 text-sm">No machine data.</p>
         ) : (
@@ -789,17 +784,13 @@ function SessionsTab({ sessions }: { sessions: SessionsResponse | null }) {
               <th className="text-right py-1.5 px-2">Duration</th>
               <th className="text-right py-1.5 px-2">Messages</th>
               <th className="text-right py-1.5 px-2">Tokens</th>
-              <th className="text-right py-1.5 px-2">Cost</th>
+              <th className="text-right py-1.5 px-2">API Equiv.</th>
               <th className="text-right py-1.5 px-3">Subagents</th>
             </tr>
           </thead>
           <tbody>
             {sessions.sessions.map((s) => {
-              const totalTokens =
-                s.input_tokens +
-                s.output_tokens +
-                s.cache_creation_tokens +
-                s.cache_read_tokens;
+              const totalTokens = s.input_tokens + s.output_tokens;
 
               return (
                 <tr

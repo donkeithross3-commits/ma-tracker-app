@@ -395,21 +395,23 @@ async def burn_rate():
         for label, hours in windows.items():
             since = now - timedelta(hours=hours)
 
-            # Programmatic calls
+            # Programmatic calls — only count input + output tokens.
+            # Cache tokens describe how input was served, not additional tokens.
             call_row = await conn.fetchrow(
-                """SELECT COALESCE(SUM(input_tokens + cache_creation_tokens + cache_read_tokens), 0) AS total_in,
+                """SELECT COALESCE(SUM(input_tokens), 0) AS total_in,
                           COALESCE(SUM(output_tokens), 0) AS total_out,
                           COALESCE(SUM(cost_usd), 0) AS cost
                    FROM api_call_log WHERE called_at >= $1""",
                 since,
             )
 
-            # Interactive sessions (prorate sessions that overlap the window)
+            # Interactive sessions
             session_row = await conn.fetchrow(
-                """SELECT COALESCE(SUM(input_tokens + cache_creation_tokens + cache_read_tokens), 0) AS total_in,
+                """SELECT COALESCE(SUM(input_tokens), 0) AS total_in,
                           COALESCE(SUM(output_tokens), 0) AS total_out,
                           COALESCE(SUM(cost_equivalent), 0) AS cost
-                   FROM ai_usage_sessions WHERE started_at >= $1 OR ended_at >= $1""",
+                   FROM ai_usage_sessions
+                   WHERE COALESCE(started_at, ended_at) >= $1""",
                 since,
             )
 
