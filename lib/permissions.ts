@@ -75,6 +75,8 @@ export function getProjectKeyFromPath(pathname: string): string | null {
     return "ma-options"
   if (pathname === "/staging" || pathname.startsWith("/staging/"))
     return "ma-options"
+  if (pathname === "/ai-usage" || pathname.startsWith("/ai-usage/"))
+    return "ma-options"
   if (pathname === "/rumored-deals" || pathname.startsWith("/rumored-deals/"))
     return "ma-options"
 

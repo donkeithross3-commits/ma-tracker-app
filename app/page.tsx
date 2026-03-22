@@ -85,6 +85,15 @@ export default async function Home() {
     },
     {
       key: "ma-options",
+      href: "/ai-usage",
+      title: "AI Usage",
+      description: "Token consumption, burn rates, and cost tracking across all agents and machines",
+      badge: "Ops",
+      badgeClasses: "bg-indigo-500/20 text-indigo-400",
+      hoverBorder: "hover:border-indigo-500",
+    },
+    {
+      key: "ma-options",
       href: "/town-wall",
       title: "Town Wall",
       description: "Unified activity timeline — all agent research in one append-only feed",

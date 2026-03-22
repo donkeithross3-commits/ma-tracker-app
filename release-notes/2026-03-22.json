@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-22",
+  "title": "Week of Mar 16-22, 2026",
+  "summary": "New AI Usage dashboard for tracking token consumption and costs across all agents and machines.",
+  "features": [
+    {
+      "id": "ai-usage-dashboard",
+      "title": "AI Usage Dashboard",
+      "summary": "New /ai-usage page with burn rates, daily cost charts, per-agent and per-machine breakdowns, and session history",
+      "description": "A comprehensive AI usage tracking dashboard that visualizes token consumption and costs across all Claude agents and machines.\n\nThe page features real-time burn rate cards (1h, 6h, 24h windows), a daily cost bar chart with interactive/programmatic split, cost breakdowns by agent persona and machine, a daily summary table, and a detailed session list with duration, model, token counts, and subagent usage.\n\nData refreshes automatically every 60 seconds (skipping when tab is backgrounded). Period selector supports 7, 14, and 30-day windows.",
+      "category": "general",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
