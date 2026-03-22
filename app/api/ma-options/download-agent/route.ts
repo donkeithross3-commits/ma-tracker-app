@@ -83,6 +83,7 @@ export async function GET() {
       "position_store.py",
       "engine_config_store.py",
       "trade_attribution.py",
+      "execution_experiment_logger.py",
       "install.py",
       "requirements.txt",
       "README.md",

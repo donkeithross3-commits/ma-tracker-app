@@ -99,6 +99,8 @@ class OrderAction:
     reason: str = ""  # human-readable explanation for logging/audit
     is_exit: bool = False  # True for risk manager exits — bypasses entry budget
     estimated_notional: Optional[float] = None  # pre-computed $ cost for MKT orders (qty × price × multiplier)
+    pre_trade_snapshot: Optional[dict] = None  # market state at order creation (Phase 0 instrumentation)
+    routing_exchange: str = "SMART"  # target exchange for directed routing experiments
 
 
 @dataclass
@@ -115,6 +117,9 @@ class ActiveOrder:
     last_update: float = 0.0  # time.time() of last status update
     error: str = ""
     is_entry: bool = True  # budget refund on IB-side rejection (Inactive status)
+    pre_trade_snapshot: Optional[dict] = None  # Phase 0: market state at order creation
+    contract_dict: Optional[dict] = None  # Phase 0: for post-fill quote lookups
+    routing_exchange: str = "SMART"  # Phase 0: target exchange for this order
 
 
 @dataclass
@@ -304,6 +309,13 @@ class ExecutionEngine:
         #   exec_id → strategy_id (for routing commission reports)
         self._order_exec_ids: Dict[int, str] = {}
         self._exec_id_to_position: Dict[str, str] = {}
+
+        # Phase 0 execution instrumentation: pre-trade snapshots keyed by order_id.
+        # Set in pre_submit_callback (before IB can send fills) to survive the
+        # race where fills arrive before _on_order_complete.
+        self._order_pre_trade_snapshots: Dict[int, dict] = {}
+        self._order_contract_dicts: Dict[int, dict] = {}
+        self._order_routing_exchanges: Dict[int, str] = {}
 
         # Non-blocking order placement: single-worker executor + inflight counter
         self._order_executor = ThreadPoolExecutor(
@@ -728,6 +740,10 @@ class ExecutionEngine:
         self._order_timestamps.clear()
         self._order_exec_ids.clear()
         self._exec_id_to_position.clear()
+        # Phase 0 instrumentation maps
+        self._order_pre_trade_snapshots.clear()
+        self._order_contract_dicts.clear()
+        self._order_routing_exchanges.clear()
 
         # 6. Drain event queue
         while not self._order_event_queue.empty():
@@ -1365,30 +1381,54 @@ class ExecutionEngine:
         future = self._order_executor.submit(
             self._place_order_worker,
             state.strategy_id, action.contract_dict, order_dict,
+            action.pre_trade_snapshot, action.routing_exchange,
         )
         _is_entry = is_entry  # capture for closure
+        _pre_trade_snapshot = action.pre_trade_snapshot  # Phase 0
+        _contract_dict = action.contract_dict  # Phase 0: for post-fill quote lookups
+        _routing_exchange = action.routing_exchange  # Phase 0
         future.add_done_callback(
-            lambda f: self._on_order_complete(f, state.strategy_id, _is_entry)
+            lambda f: self._on_order_complete(
+                f, state.strategy_id, _is_entry,
+                pre_trade_snapshot=_pre_trade_snapshot,
+                contract_dict=_contract_dict,
+                routing_exchange=_routing_exchange,
+            )
         )
 
     def _place_order_worker(
         self, strategy_id: str, contract_dict: dict, order_dict: dict,
+        pre_trade_snapshot: Optional[dict] = None,
+        routing_exchange: str = "SMART",
     ) -> dict:
         """Run on the order-exec thread.  Places order and blocks until TWS ack.
 
         Uses pre_submit_callback to register _order_strategy_map BEFORE IB can
         fire callbacks (closes the race where fills arrive before the future's
         done-callback registers the order for event routing).
+
+        Phase 0: Also registers pre_trade_snapshot and contract_dict in the
+        pre_submit_callback so they're available for early-arriving fills.
         """
         def _pre_register(order_id):
             self._order_strategy_map[order_id] = strategy_id
+            # Phase 0: register snapshot before IB can fire fill callbacks
+            if pre_trade_snapshot:
+                self._order_pre_trade_snapshots[order_id] = pre_trade_snapshot
+            self._order_contract_dicts[order_id] = contract_dict
+            self._order_routing_exchanges[order_id] = routing_exchange
 
         return self._scanner.place_order_sync(
             contract_dict, order_dict, timeout_sec=self.ORDER_TIMEOUT_SEC,
             pre_submit_callback=_pre_register,
         )
 
-    def _on_order_complete(self, future: Future, strategy_id: str, is_entry: bool = False):
+    def _on_order_complete(
+        self, future: Future, strategy_id: str, is_entry: bool = False,
+        pre_trade_snapshot: Optional[dict] = None,
+        contract_dict: Optional[dict] = None,
+        routing_exchange: str = "SMART",
+    ):
         """Callback when order placement finishes (runs on order-exec thread).
 
         Decrements in-flight counters, registers in active orders, logs results,
@@ -1471,6 +1511,9 @@ class ExecutionEngine:
                                 placed_at=time.time(),
                                 last_update=time.time(),
                                 is_entry=is_entry,
+                                pre_trade_snapshot=pre_trade_snapshot,
+                                contract_dict=contract_dict,
+                                routing_exchange=routing_exchange,
                             )
                         else:
                             # Already processed and cleaned up — skip
@@ -1519,23 +1562,44 @@ class ExecutionEngine:
             order_id = fill_data.get("orderId", 0)
             # orderStatus doesn't carry execId — check our execDetails map
             exec_id = fill_data.get("execId", "") or self._order_exec_ids.get(order_id, "")
+
+            # Phase 0: retrieve pre-trade snapshot for slippage computation
+            pre_trade_snapshot = self._order_pre_trade_snapshots.get(order_id)
+            routing_exchange = self._order_routing_exchanges.get(order_id, "SMART")
+            fill_price = fill_data.get("avgFillPrice", 0)
+            fill_time = time.time()
+
+            # Compute slippage and effective spread from pre-trade snapshot
+            slippage = None
+            effective_spread = None
+            if pre_trade_snapshot and fill_price > 0:
+                opt_ask = pre_trade_snapshot.get("option_ask")
+                opt_mid = pre_trade_snapshot.get("option_mid")
+                if opt_ask and opt_ask > 0:
+                    slippage = round(fill_price - opt_ask, 6)  # negative = better than ask
+                if opt_mid and opt_mid > 0:
+                    effective_spread = round(2 * abs(fill_price - opt_mid), 6)
+
             # Build fill dict for the ledger
             fill_dict = {
-                "time": time.time(),
+                "time": fill_time,
                 "order_id": order_id,
                 "exec_id": exec_id,
                 "level": "exit",
                 "qty_filled": int(fill_data.get("filled", 0)),
-                "avg_price": fill_data.get("avgFillPrice", 0),
+                "avg_price": fill_price,
                 "remaining_qty": 0,
                 "pnl_pct": 0.0,
-                # Execution analytics (WS3)
+                # Execution analytics (WS3 + Phase 0 instrumentation)
                 "execution_analytics": {
                     "exchange": fill_data.get("exchange", ""),
                     "last_liquidity": fill_data.get("lastLiquidity", 0),
                     "commission": None,      # filled async from commissionReport
                     "realized_pnl_ib": None, # IB's realized P&L calculation
-                    "slippage": None,        # computed from order intent
+                    "slippage": slippage,
+                    "effective_spread": effective_spread,
+                    "routing_exchange": routing_exchange,
+                    "pre_trade_snapshot": pre_trade_snapshot,
                 },
             }
             # Try to get richer data from the strategy's fill log
@@ -1570,8 +1634,156 @@ class ExecutionEngine:
             remaining = getattr(state.strategy, "remaining_qty", None)
             if remaining is not None and remaining <= 0:
                 self._position_store.mark_closed(strategy_id, exit_reason="risk_exit")
+
+            # Phase 0: schedule post-fill adverse selection capture
+            contract_d = self._order_contract_dicts.get(order_id)
+            if contract_d and pre_trade_snapshot:
+                self._schedule_post_fill_capture(
+                    strategy_id, order_id, contract_d,
+                    fill_price, fill_time, pre_trade_snapshot,
+                    routing_exchange, fill_dict,
+                )
+
         except Exception as e:
             logger.error("Error persisting fill for %s: %s", strategy_id, e)
+
+    # ── Phase 0: Post-fill adverse selection measurement ──
+
+    _POST_FILL_DELAYS = [5, 30, 60]  # seconds after fill
+
+    def _schedule_post_fill_capture(
+        self,
+        strategy_id: str,
+        order_id: int,
+        contract_dict: dict,
+        fill_price: float,
+        fill_time: float,
+        pre_trade_snapshot: dict,
+        routing_exchange: str,
+        fill_dict: dict,
+    ):
+        """Schedule timer-based quote captures at +5s/+30s/+60s after fill.
+
+        Each timer fires on its own thread (lightweight — just a cache read +
+        dict update). The 60s timer also writes the complete experiment record.
+
+        Runs on the order-exec thread at scheduling time. Timer callbacks are
+        independent threads that don't block anything.
+        """
+        post_fill_data = {}  # shared mutable dict — timers write, logger reads
+        for delay in self._POST_FILL_DELAYS:
+            t = threading.Timer(
+                delay,
+                self._capture_post_fill_quote,
+                args=[strategy_id, order_id, contract_dict, delay, post_fill_data],
+            )
+            t.daemon = True
+            t.name = f"post-fill-{order_id}-{delay}s"
+            t.start()
+
+        # Schedule experiment logger after the last capture (60s + 1s buffer)
+        max_delay = max(self._POST_FILL_DELAYS)
+        t_log = threading.Timer(
+            max_delay + 1,
+            self._write_experiment_record,
+            args=[
+                strategy_id, order_id, fill_price, fill_time,
+                pre_trade_snapshot, routing_exchange, fill_dict, post_fill_data,
+            ],
+        )
+        t_log.daemon = True
+        t_log.name = f"experiment-log-{order_id}"
+        t_log.start()
+
+    def _capture_post_fill_quote(
+        self,
+        strategy_id: str,
+        order_id: int,
+        contract_dict: dict,
+        delay_seconds: int,
+        post_fill_data: dict,
+    ):
+        """Capture option midpoint at a fixed delay after fill.
+
+        Reads from the streaming quote cache (zero latency, no IB request).
+        Falls back gracefully if the option is no longer streaming.
+        """
+        try:
+            # Build cache key for this option contract
+            # The streaming cache keys options by conId or by
+            # "OPT:{symbol}:{expiry}:{strike}:{right}"
+            con_id = contract_dict.get("conId")
+            cache_key = None
+            if con_id:
+                cache_key = f"OPT:{con_id}"
+            if not cache_key:
+                sym = contract_dict.get("symbol", "")
+                exp = contract_dict.get("lastTradeDateOrContractMonth", "")
+                strike = contract_dict.get("strike", "")
+                right = contract_dict.get("right", "")
+                cache_key = f"OPT:{sym}:{exp}:{strike}:{right}"
+
+            quote = self._cache.get(cache_key) if self._cache else None
+
+            if quote and quote.bid > 0 and quote.ask > 0:
+                mid = round((quote.bid + quote.ask) / 2, 6)
+                post_fill_data[f"mid_{delay_seconds}s"] = mid
+                post_fill_data[f"bid_{delay_seconds}s"] = quote.bid
+                post_fill_data[f"ask_{delay_seconds}s"] = quote.ask
+                post_fill_data[f"spread_{delay_seconds}s"] = round(quote.ask - quote.bid, 6)
+                logger.debug(
+                    "Post-fill +%ds capture for order %d: mid=$%.4f (bid=$%.4f ask=$%.4f)",
+                    delay_seconds, order_id, mid, quote.bid, quote.ask,
+                )
+            else:
+                logger.debug(
+                    "Post-fill +%ds capture for order %d: no valid quote (key=%s)",
+                    delay_seconds, order_id, cache_key,
+                )
+                post_fill_data[f"mid_{delay_seconds}s"] = None
+
+            # Update position store with post-fill data
+            if self._position_store:
+                self._position_store.update_fill_post_trade(
+                    strategy_id, order_id, delay_seconds, post_fill_data,
+                )
+        except Exception as e:
+            logger.error(
+                "Post-fill +%ds capture error for order %d: %s",
+                delay_seconds, order_id, e,
+            )
+
+    def _write_experiment_record(
+        self,
+        strategy_id: str,
+        order_id: int,
+        fill_price: float,
+        fill_time: float,
+        pre_trade_snapshot: dict,
+        routing_exchange: str,
+        fill_dict: dict,
+        post_fill_data: dict,
+    ):
+        """Write complete execution experiment record after all post-fill captures."""
+        try:
+            from execution_experiment_logger import write_experiment_record
+            write_experiment_record(
+                strategy_id=strategy_id,
+                order_id=order_id,
+                fill_price=fill_price,
+                fill_time=fill_time,
+                pre_trade_snapshot=pre_trade_snapshot,
+                routing_exchange=routing_exchange,
+                fill_dict=fill_dict,
+                post_fill_data=post_fill_data,
+            )
+        except Exception as e:
+            logger.error("Experiment logger error for order %d: %s", order_id, e)
+
+        # Cleanup Phase 0 maps for this order (prevent memory leak)
+        self._order_pre_trade_snapshots.pop(order_id, None)
+        self._order_contract_dicts.pop(order_id, None)
+        self._order_routing_exchanges.pop(order_id, None)
 
     def _deferred_commission_update(self, position_id: str, exec_id: str, timeout: float = 5.0):
         """Wait briefly for IB commissionReport, then update fill record.

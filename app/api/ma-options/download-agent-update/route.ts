@@ -75,6 +75,7 @@ export async function GET(request: NextRequest) {
       "position_store.py",
       "engine_config_store.py",
       "trade_attribution.py",
+      "execution_experiment_logger.py",
       "install.py",
       "requirements.txt",
       "README.md",

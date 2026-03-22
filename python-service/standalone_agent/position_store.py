@@ -250,6 +250,41 @@ class PositionStore:
                     break
             self._save()
 
+    def update_fill_post_trade(
+        self, position_id: str, order_id: int, delay_seconds: int, post_fill_data: dict,
+    ) -> None:
+        """Update a fill's execution_analytics with post-fill quote data.
+
+        Phase 0 instrumentation: adds mid/bid/ask at +Ns after fill for
+        adverse selection measurement.
+        """
+        with self._lock:
+            pos = self._positions.get(position_id)
+            if not pos:
+                return
+            for fill in pos.get("fill_log", []):
+                if fill.get("order_id") == order_id:
+                    if "execution_analytics" not in fill:
+                        fill["execution_analytics"] = {}
+                    if "post_fill" not in fill["execution_analytics"]:
+                        fill["execution_analytics"]["post_fill"] = {}
+                    # Merge in the latest capture
+                    fill["execution_analytics"]["post_fill"].update({
+                        k: v for k, v in post_fill_data.items()
+                        if k.endswith(f"_{delay_seconds}s")
+                    })
+                    # Compute adverse selection at 30s mark
+                    if delay_seconds == 30:
+                        mid_30 = post_fill_data.get("mid_30s")
+                        avg_price = fill.get("avg_price", 0)
+                        if mid_30 is not None and avg_price > 0:
+                            fill["execution_analytics"]["post_fill"]["adverse_selection_30s"] = (
+                                round(mid_30 - avg_price, 6)
+                            )
+                    self._dirty_ids.add(position_id)
+                    break
+            self._save()
+
     # ── Sync / Dirty Tracking ──
 
     def drain_dirty(self) -> List[dict]:

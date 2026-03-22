@@ -2349,6 +2349,36 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             }
 
         multiplier = float(contract_dict.get("multiplier", 100))
+
+        # ── Pre-trade snapshot (Phase 0 execution instrumentation) ──
+        # Captures market state at order creation for slippage/adverse selection analysis.
+        pre_trade_snapshot = {
+            "snapshot_time": time.time(),
+            "option_bid": opt_bid,
+            "option_ask": opt_ask,
+            "option_mid": (opt_bid + opt_ask) / 2 if opt_bid and opt_ask else None,
+            "option_spread": (opt_ask - opt_bid) if opt_bid and opt_ask else None,
+            "option_spread_pct": (
+                (opt_ask - opt_bid) / ((opt_bid + opt_ask) / 2)
+                if opt_bid and opt_ask and (opt_bid + opt_ask) > 0
+                else None
+            ),
+            "underlying_price": underlying_price,
+            "vix_level": self._signal_vix_level,
+            "limit_price_used": limit_price,
+            "order_type": "LMT",
+            "routing": "SMART",
+            "signal_direction": signal.direction,
+            "signal_probability": signal.probability,
+            "strike": strike,
+            "right": right,
+            "expiry": expiry_str,
+            "dte": actual_dte,
+        }
+
+        # Select routing exchange (stub — always SMART for Phase 0)
+        routing_exchange = self._select_routing_exchange(opt_bid, opt_ask)
+
         order = OrderAction(
             strategy_id="",  # filled by engine
             side=OrderSide.BUY,
@@ -2359,6 +2389,8 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             estimated_notional=limit_price * qty * multiplier,
             reason=f"BMC[{self._ticker}] signal: {signal.direction} p={signal.probability:.3f} "
                    f"strike={strike} {right} {dte_label} limit=${limit_price:.2f} x{qty}",
+            pre_trade_snapshot=pre_trade_snapshot,
+            routing_exchange=routing_exchange,
         )
 
         logger.info(
@@ -2369,6 +2401,28 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             budget,
         )
         return [order]
+
+    # ------------------------------------------------------------------
+    # Internal — routing exchange selection (Phase 0 stub)
+    # ------------------------------------------------------------------
+
+    def _select_routing_exchange(
+        self,
+        opt_bid: Optional[float],
+        opt_ask: Optional[float],
+    ) -> str:
+        """Select the target exchange for order routing.
+
+        Phase 0: always returns "SMART" (IB's default best-execution algo).
+        Phase 1 will add A/B randomization between SMART and directed venues
+        (e.g. SAPPHIRE for taker-maker rebates on wide spreads).
+
+        The spread_pct is available for future routing logic — taker-maker
+        venues may be advantageous when spreads are wide (rebate > price
+        improvement lost).
+        """
+        # Future: use spread_pct, VIX, time-of-day to select venue
+        return "SMART"
 
     # ------------------------------------------------------------------
     # Internal — scan window check
