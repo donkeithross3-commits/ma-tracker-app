@@ -34,15 +34,15 @@ type InteractiveRow = {
 };
 
 type Totals = {
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_tokens: number;
-  cache_read_tokens: number;
-  cost_usd?: number;
-  cost_equivalent?: number;
-  call_count?: number;
-  session_count?: number;
-  message_count?: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_creation_tokens: number | null;
+  cache_read_tokens: number | null;
+  cost_usd?: number | null;
+  cost_equivalent?: number | null;
+  call_count?: number | null;
+  session_count?: number | null;
+  message_count?: number | null;
 };
 
 type SummaryResponse = {
@@ -404,6 +404,7 @@ export default function AIUsagePage() {
 
   const totalCost = useMemo(() => {
     if (!summary) return 0;
+    // Backend may return null for aggregate fields when no rows match
     return (
       (summary.totals.interactive?.cost_equivalent ?? 0) +
       (summary.totals.programmatic?.cost_usd ?? 0)
@@ -412,17 +413,14 @@ export default function AIUsagePage() {
 
   const totalTokens = useMemo(() => {
     if (!summary) return 0;
+    const n = (v: number | null | undefined) => v ?? 0;
     const i = summary.totals.interactive ?? {};
     const p = summary.totals.programmatic ?? {};
     return (
-      (i.input_tokens ?? 0) +
-      (i.output_tokens ?? 0) +
-      (i.cache_creation_tokens ?? 0) +
-      (i.cache_read_tokens ?? 0) +
-      (p.input_tokens ?? 0) +
-      (p.output_tokens ?? 0) +
-      (p.cache_creation_tokens ?? 0) +
-      (p.cache_read_tokens ?? 0)
+      n(i.input_tokens) + n(i.output_tokens) +
+      n(i.cache_creation_tokens) + n(i.cache_read_tokens) +
+      n(p.input_tokens) + n(p.output_tokens) +
+      n(p.cache_creation_tokens) + n(p.cache_read_tokens)
     );
   }, [summary]);
 
@@ -809,7 +807,7 @@ function SessionsTab({ sessions }: { sessions: SessionsResponse | null }) {
                   className="border-b border-gray-800/50 hover:bg-gray-800/40"
                 >
                   <td className="py-1.5 px-3 font-mono text-xs text-gray-300">
-                    {fmtDateTime(s.started_at)}
+                    {fmtDateTime(s.started_at ?? s.ended_at)}
                   </td>
                   <td className="py-1.5 px-2">
                     <span

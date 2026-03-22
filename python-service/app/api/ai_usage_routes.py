@@ -231,8 +231,10 @@ async def usage_summary(
         )
 
         # Per-day interactive sessions
+        # Use COALESCE(started_at, ended_at) because the collector may
+        # not populate started_at (ccusage daily aggregates only have ended_at).
         session_rows = await conn.fetch(
-            """SELECT started_at::date AS day,
+            """SELECT COALESCE(started_at, ended_at)::date AS day,
                       machine,
                       agent_persona,
                       SUM(input_tokens) AS input_tokens,
@@ -243,7 +245,7 @@ async def usage_summary(
                       COUNT(*) AS session_count,
                       SUM(message_count) AS message_count
                FROM ai_usage_sessions
-               WHERE started_at >= $1
+               WHERE COALESCE(started_at, ended_at) >= $1
                GROUP BY day, machine, agent_persona
                ORDER BY day DESC""",
             since,
@@ -269,7 +271,7 @@ async def usage_summary(
                       SUM(cost_equivalent) AS cost_equivalent,
                       COUNT(*) AS session_count,
                       SUM(message_count) AS message_count
-               FROM ai_usage_sessions WHERE started_at >= $1""",
+               FROM ai_usage_sessions WHERE COALESCE(started_at, ended_at) >= $1""",
             since,
         )
 
@@ -312,7 +314,7 @@ async def list_sessions(
         raise HTTPException(status_code=503, detail="Database not ready")
 
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    conditions = ["started_at >= $1"]
+    conditions = ["COALESCE(started_at, ended_at) >= $1"]
     params: list[Any] = [since]
     idx = 2
 
@@ -336,7 +338,7 @@ async def list_sessions(
                        subagent_count, model_breakdown
                 FROM ai_usage_sessions
                 WHERE {where}
-                ORDER BY started_at DESC
+                ORDER BY COALESCE(started_at, ended_at) DESC
                 LIMIT ${idx} OFFSET ${idx + 1}""",
             *params, limit, offset,
         )
