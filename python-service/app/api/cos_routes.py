@@ -29,6 +29,19 @@ class ChatResponse(BaseModel):
 @router.post("/chat", response_model=ChatResponse)
 async def cos_chat(req: ChatRequest):
     """Send a message to the Chief of Staff brain (non-streaming)."""
+    import os
+    if os.environ.get("COS_DISABLED", "").lower() in ("true", "1", "yes"):
+        return ChatResponse(
+            response="COS is currently offline. The GPU backend (RunPod) is shut down.",
+            specialist="cos",
+            escalated=False,
+            thinking=None,
+            message_id="disabled",
+            latency_ms=0,
+            model="disabled",
+            confidence=0.0,
+            token_usage=None,
+        )
     from ..services.cos_service import get_cos_service
 
     svc = get_cos_service()
@@ -39,6 +52,16 @@ async def cos_chat(req: ChatRequest):
 @router.post("/chat/stream")
 async def cos_chat_stream(req: ChatRequest):
     """Streaming version — returns SSE events as Sancho thinks."""
+    import os
+    if os.environ.get("COS_DISABLED", "").lower() in ("true", "1", "yes"):
+        async def _disabled():
+            yield 'data: {"type":"text","content":"COS is currently offline. The GPU backend (RunPod) is shut down."}\n\n'
+            yield 'data: {"type":"done"}\n\n'
+        return StreamingResponse(
+            _disabled(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
     from ..services.cos_service import get_cos_service
 
     svc = get_cos_service()
