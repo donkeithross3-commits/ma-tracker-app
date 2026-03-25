@@ -101,6 +101,52 @@ type ResearchProcesses = {
   system_cpu_pct?: number;
 };
 
+type HeartbeatEntry = {
+  stream?: string;
+  state?: string;
+  current_job?: string | null;
+  timestamp?: string;
+  elapsed_minutes?: number;
+  started_at?: string;
+  job_index?: number;
+  jobs_total?: number;
+  jobs_completed?: number;
+  jobs_remaining?: number;
+};
+
+type QueueJobEntry = {
+  name?: string;
+  status?: string;
+  started?: string;
+  ended?: string;
+  failure_class?: string;
+  error?: string;
+};
+
+type QueueEntry = {
+  jobs?: QueueJobEntry[];
+  stream?: string;
+  queue_file?: string;
+  started_at?: string;
+};
+
+type StreamSummary = {
+  key: string | null;
+  type: "GPU" | "CPU";
+  state: "running" | "polling" | "queued" | "stale" | "unknown";
+  displayJob: string | null;
+  progressLabel: string | null;
+  runningElapsed: string | null;
+  queueTotal: number;
+  queueCompleted: number;
+  queueFailed: number;
+  queuePending: number;
+  heartbeatAgeSeconds: number | null;
+  heartbeatStale: boolean;
+  needsAttention: boolean;
+  warning: string | null;
+};
+
 type RunningExperiment = {
   name?: string;
   machine?: string;
@@ -175,8 +221,8 @@ type StatusMachine = {
     clock_mhz?: number;
     power_w?: number;
   };
-  heartbeats?: Record<string, { state?: string; current_job?: string; timestamp?: string; elapsed_minutes?: number; started_at?: string }>;
-  queues?: Record<string, { jobs?: Array<{ status?: string; name?: string }> }>;
+  heartbeats?: Record<string, HeartbeatEntry>;
+  queues?: Record<string, QueueEntry>;
   orchestrator?: OrchestratorStatus;
 };
 
@@ -193,7 +239,8 @@ type MachineCard = {
   gpuTemp: number | null;
   vramUsedGb: number | null;
   vramTotalGb: number | null;
-  gpuJob: string | null;
+  gpuStream: StreamSummary | null;
+  cpuStream: StreamSummary | null;
   activeCores: number;
   significantJobs: ResearchJob[];
   orchState: string | undefined;
@@ -223,6 +270,7 @@ const CPU_TOTAL_CORES = Object.values(MACHINE_SPECS).reduce((sum, s) => sum + s.
 
 // Preferred display order
 const MACHINE_ORDER = ["gaming-pc", "garage-pc", "droplet", "mac"];
+const STREAM_STALE_SECONDS = 120;
 
 // ---------------------------------------------------------------------------
 // Formatters
@@ -279,36 +327,6 @@ function parseIsoMillis(raw?: string): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
-function machineRunState(machine: StatusMachine): string {
-  const heartbeats = machine.heartbeats || {};
-  let hasPolling = false;
-  let newestRunningTs = -1;
-  let runningLabel: string | null = null;
-
-  for (const hb of Object.values(heartbeats)) {
-    if (hb?.state === "running") {
-      const ts = parseIsoMillis(hb.timestamp);
-      if (runningLabel === null || (ts != null && ts >= newestRunningTs)) {
-        runningLabel = hb.current_job || "running";
-        newestRunningTs = ts ?? newestRunningTs;
-      }
-    }
-    if (hb?.state === "polling") hasPolling = true;
-  }
-
-  if (runningLabel) return runningLabel;
-
-  const queues = machine.queues || {};
-  for (const qs of Object.values(queues)) {
-    const jobs = qs?.jobs || [];
-    const running = jobs.find((j) => j?.status === "running");
-    if (running) return running.name || "running";
-  }
-
-  if (hasPolling) return "polling";
-  return "unknown";
-}
-
 function timeAgo(isoStr?: string | null): string {
   if (!isoStr) return "--";
   const ms = Date.now() - Date.parse(isoStr);
@@ -318,6 +336,187 @@ function timeAgo(isoStr?: string | null): string {
   if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
   return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function formatMinutes(minutes?: number | null): string | null {
+  if (minutes == null || Number.isNaN(minutes)) return null;
+  const mins = Math.max(0, Math.round(minutes));
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h}h ${m}m`;
+  }
+  return `${mins}m`;
+}
+
+function elapsedFromIso(isoStr?: string | null): string | null {
+  if (!isoStr) return null;
+  const ts = parseIsoMillis(isoStr);
+  if (ts == null) return null;
+  const mins = (Date.now() - ts) / 60000;
+  if (!Number.isFinite(mins) || mins < 0) return null;
+  return formatMinutes(mins);
+}
+
+function inferStreamType(
+  key: string,
+  heartbeat?: HeartbeatEntry,
+  queue?: QueueEntry,
+): "GPU" | "CPU" | "unknown" {
+  const hbStream = heartbeat?.stream?.toLowerCase();
+  if (hbStream === "gpu") return "GPU";
+  if (hbStream === "cpu") return "CPU";
+  const qStream = queue?.stream?.toLowerCase();
+  if (qStream === "gpu") return "GPU";
+  if (qStream === "cpu") return "CPU";
+  if (key.includes("gpu_queue")) return "GPU";
+  if (key.includes("cpu_queue")) return "CPU";
+  return "unknown";
+}
+
+function deriveStreamSummary(
+  machine: StatusMachine | undefined,
+  type: "GPU" | "CPU",
+): StreamSummary | null {
+  if (!machine) return null;
+
+  const heartbeatEntries = Object.entries(machine.heartbeats || {})
+    .filter(([key, hb]) => inferStreamType(key, hb, undefined) === type);
+  const queueEntries = Object.entries(machine.queues || {})
+    .filter(([key, q]) => inferStreamType(key, undefined, q) === type);
+
+  const pickNewestHeartbeat = (): [string, HeartbeatEntry] | null => {
+    let best: [string, HeartbeatEntry] | null = null;
+    let bestTs = -Infinity;
+    for (const entry of heartbeatEntries) {
+      const ts = parseIsoMillis(entry[1]?.timestamp) ?? -Infinity;
+      if (!best || ts >= bestTs) {
+        best = entry;
+        bestTs = ts;
+      }
+    }
+    return best;
+  };
+
+  const pickQueue = (preferredKey: string | null): [string, QueueEntry] | null => {
+    if (preferredKey) {
+      const exact = queueEntries.find(([key]) => key === preferredKey);
+      if (exact) return exact;
+    }
+    const running = queueEntries.find(([, q]) => (q?.jobs || []).some((job) => job?.status === "running"));
+    if (running) return running;
+    return queueEntries[0] ?? null;
+  };
+
+  const freshestHeartbeat = pickNewestHeartbeat();
+  const hbKey = freshestHeartbeat?.[0] ?? null;
+  const heartbeat = freshestHeartbeat?.[1];
+  const heartbeatAgeSeconds = (() => {
+    const ts = parseIsoMillis(heartbeat?.timestamp);
+    if (ts == null) return null;
+    const age = (Date.now() - ts) / 1000;
+    return Number.isFinite(age) ? age : null;
+  })();
+  const heartbeatStale = machine.stale === true || (
+    heartbeatAgeSeconds != null && heartbeatAgeSeconds > STREAM_STALE_SECONDS
+  );
+
+  const queueEntry = pickQueue(hbKey);
+  const queue = queueEntry?.[1];
+  const jobs = queue?.jobs || [];
+  const runningJob = jobs.find((job) => job?.status === "running");
+  const queueCompleted = jobs.filter((job) => job?.status === "completed").length;
+  const queueFailed = jobs.filter((job) => ["failed", "timeout", "interrupted"].includes(job?.status || "")).length;
+  const queuePending = jobs.filter((job) => job?.status === "pending").length;
+  const queueTotal = jobs.length || heartbeat?.jobs_total || 0;
+
+  let state: StreamSummary["state"] = "unknown";
+  let displayJob: string | null = null;
+  let runningElapsed: string | null = null;
+  let warning: string | null = null;
+
+  if (machine.stale) {
+    state = "stale";
+    displayJob = runningJob?.name || heartbeat?.current_job || null;
+    runningElapsed = elapsedFromIso(runningJob?.started) || formatMinutes(heartbeat?.elapsed_minutes);
+    warning = "machine checkin stale";
+  } else if (runningJob) {
+    state = "running";
+    displayJob = runningJob.name || heartbeat?.current_job || null;
+    runningElapsed = elapsedFromIso(runningJob.started) || formatMinutes(heartbeat?.elapsed_minutes);
+    if (heartbeatStale) {
+      warning = "queue active but heartbeat stale";
+    }
+  } else if (!heartbeatStale && heartbeat?.state === "running") {
+    state = "running";
+    displayJob = heartbeat.current_job || null;
+    runningElapsed = formatMinutes(heartbeat.elapsed_minutes);
+  } else if (!heartbeatStale && heartbeat?.state === "polling") {
+    state = "polling";
+  } else if (queuePending > 0) {
+    state = "queued";
+  } else if (queueTotal > 0 && queueCompleted + queueFailed >= queueTotal) {
+    state = "polling";
+  } else if (heartbeatStale && (heartbeat?.current_job || queueFailed > 0 || queueTotal > 0)) {
+    state = "stale";
+    displayJob = heartbeat?.current_job || null;
+    warning = "stream heartbeat stale";
+  }
+
+  if (!warning && queueFailed > 0) {
+    warning = `${queueFailed} failed`;
+  }
+
+  const completedFromHeartbeat = heartbeat?.jobs_completed ?? 0;
+  const remainingFromHeartbeat = heartbeat?.jobs_remaining;
+  const progressCompleted = jobs.length > 0 ? queueCompleted : completedFromHeartbeat;
+  const progressRemaining = jobs.length > 0
+    ? (runningJob ? queuePending + 1 : queuePending)
+    : (remainingFromHeartbeat ?? 0);
+  const progressLabel = queueTotal > 0
+    ? `${progressCompleted}/${queueTotal}${progressRemaining > 0 ? ` done · ${progressRemaining} left` : " done"}`
+    : null;
+
+  const needsAttention = !machine.stale && (
+    heartbeatStale ||
+    queueFailed > 0 ||
+    (!!runningJob && !!heartbeat?.current_job && heartbeat.current_job !== runningJob.name)
+  );
+
+  return {
+    key: queueEntry?.[0] ?? hbKey,
+    type,
+    state,
+    displayJob,
+    progressLabel,
+    runningElapsed,
+    queueTotal,
+    queueCompleted,
+    queueFailed,
+    queuePending,
+    heartbeatAgeSeconds,
+    heartbeatStale,
+    needsAttention,
+    warning,
+  };
+}
+
+function streamDotClass(stream: StreamSummary | null): string {
+  if (!stream) return "bg-gray-600";
+  if (stream.state === "running") return stream.needsAttention ? "bg-amber-400" : "bg-emerald-400";
+  if (stream.state === "polling") return "bg-cyan-400";
+  if (stream.state === "queued") return "bg-amber-400";
+  if (stream.state === "stale") return "bg-red-400";
+  return "bg-gray-600";
+}
+
+function streamTextClass(stream: StreamSummary | null): string {
+  if (!stream) return "text-gray-500";
+  if (stream.state === "running") return stream.needsAttention ? "text-amber-300" : "text-emerald-300";
+  if (stream.state === "polling") return "text-cyan-300";
+  if (stream.state === "queued") return "text-amber-300";
+  if (stream.state === "stale") return "text-red-300";
+  return "text-gray-500";
 }
 
 // ---------------------------------------------------------------------------
@@ -479,7 +678,8 @@ export default function FleetUtilizationPage() {
       const gpuTemp = gpu?.temp ?? null;
       const vramUsedGb = gpu?.mem_used_mb != null ? gpu.mem_used_mb / 1024 : null;
       const vramTotalGb = spec.gpuVram ?? null;
-      const gpuJob = machineRunState(row || { machine: name });
+      const gpuStream = spec.gpu ? deriveStreamSummary(row, "GPU") : null;
+      const cpuStream = deriveStreamSummary(row, "CPU");
 
       // CPU active cores: use ONLY detected research process CPU%.
       // system_cpu_pct includes user apps (browser, Claude Code, Spotlight)
@@ -487,7 +687,10 @@ export default function FleetUtilizationPage() {
       // Process-sum may undercount n_jobs child workers, but it's honest:
       // if we detect 0 research processes, we show 0 cores.
       const rp = orch?.research_processes;
-      const activeCores = isStale ? 0 : ((rp?.total_cpu_pct ?? 0) / 100);
+      const activeCoresDetected = isStale ? 0 : ((rp?.total_cpu_pct ?? 0) / 100);
+      const activeCores = activeCoresDetected > 0
+        ? activeCoresDetected
+        : (cpuStream?.state === "running" ? 1 : 0);
 
       // Processes (filter out < 1% CPU)
       const rpJobs = isStale ? [] : (orch?.research_processes?.jobs ?? []);
@@ -509,7 +712,8 @@ export default function FleetUtilizationPage() {
         gpuTemp,
         vramUsedGb,
         vramTotalGb,
-        gpuJob: spec.gpu ? gpuJob : null,
+        gpuStream,
+        cpuStream,
         activeCores,
         significantJobs,
         orchState,
@@ -557,47 +761,28 @@ export default function FleetUtilizationPage() {
     }> = [];
 
     for (const card of machineCards) {
-      // GPU job — extract elapsed from heartbeat data
-      if (card.spec.gpu && card.gpuJob && card.gpuJob !== "polling" && card.gpuJob !== "unknown") {
-        let gpuElapsed = "--";
-        const heartbeats = card.row?.heartbeats || {};
-        for (const hb of Object.values(heartbeats)) {
-          if (hb?.state === "running") {
-            // Use elapsed_minutes from heartbeat if available (written by sweep_queue.py)
-            if (hb.elapsed_minutes != null) {
-              const mins = Math.round(hb.elapsed_minutes);
-              if (mins >= 60) {
-                const h = Math.floor(mins / 60);
-                const m = mins % 60;
-                gpuElapsed = `${h}h ${m}m`;
-              } else {
-                gpuElapsed = `${mins}m`;
-              }
-            } else if (hb.timestamp) {
-              // Fallback: compute from heartbeat timestamp vs now
-              const hbTs = Date.parse(hb.timestamp);
-              if (Number.isFinite(hbTs)) {
-                const ageSec = (Date.now() - hbTs) / 1000;
-                // The heartbeat timestamp is "when last updated", not "when started".
-                // If it's recent (< 5min old), the job is still running but we
-                // don't know total elapsed. Show "running" instead of misleading time.
-                gpuElapsed = ageSec < 300 ? "running" : "--";
-              }
-            }
-            break;
-          }
-        }
+      if (card.spec.gpu && card.gpuStream?.state === "running" && card.gpuStream.displayJob) {
         jobs.push({
-          name: card.gpuJob,
+          name: card.gpuStream.displayJob,
           machine: card.name,
           type: "GPU",
           cpuPct: null,
-          elapsed: gpuElapsed,
+          elapsed: card.gpuStream.runningElapsed || "running",
           isGpu: true,
+        });
+      }
+      if (card.cpuStream?.state === "running" && card.cpuStream.displayJob) {
+        jobs.push({
+          name: card.cpuStream.displayJob,
+          machine: card.name,
+          type: "CPU",
+          cpuPct: card.activeCores * 100,
+          elapsed: card.cpuStream.runningElapsed || "running",
         });
       }
       // CPU jobs (already filtered to >= 1%)
       for (const j of card.significantJobs) {
+        if (card.cpuStream?.displayJob && j.script === card.cpuStream.displayJob) continue;
         jobs.push({
           name: j.script || "unknown",
           machine: card.name,
@@ -822,9 +1007,35 @@ export default function FleetUtilizationPage() {
                           }}
                         />
                       </div>
-                      {card.gpuJob && card.gpuJob !== "polling" && card.gpuJob !== "unknown" && (
-                        <div className="text-[10px] text-cyan-400 mt-0.5 truncate font-mono" title={card.gpuJob}>
-                          {card.gpuJob}
+                      {card.gpuStream && (
+                        <div className="mt-1 space-y-0.5">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className={`flex items-center gap-1.5 ${streamTextClass(card.gpuStream)}`}>
+                              <span className={`inline-block w-1 h-1 rounded-full ${streamDotClass(card.gpuStream)}`} />
+                              {card.gpuStream.state.toUpperCase()}
+                              {card.gpuStream.runningElapsed && (
+                                <span className="text-gray-500">{card.gpuStream.runningElapsed}</span>
+                              )}
+                            </span>
+                            {card.gpuStream.heartbeatAgeSeconds != null && (
+                              <span className={ageClass(card.gpuStream.heartbeatAgeSeconds)}>
+                                hb {fmtAge(card.gpuStream.heartbeatAgeSeconds)}
+                              </span>
+                            )}
+                          </div>
+                          {card.gpuStream.displayJob && (
+                            <div className="text-[10px] text-cyan-400 truncate font-mono" title={card.gpuStream.displayJob}>
+                              {card.gpuStream.displayJob}
+                            </div>
+                          )}
+                          {(card.gpuStream.progressLabel || card.gpuStream.warning) && (
+                            <div className="text-[10px] text-gray-500">
+                              {card.gpuStream.progressLabel}
+                              {card.gpuStream.warning && (
+                                <span className="text-amber-300 ml-2">{card.gpuStream.warning}</span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -849,6 +1060,37 @@ export default function FleetUtilizationPage() {
                         }}
                       />
                     </div>
+                    {card.cpuStream && (
+                      <div className="mt-1 space-y-0.5">
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className={`flex items-center gap-1.5 ${streamTextClass(card.cpuStream)}`}>
+                            <span className={`inline-block w-1 h-1 rounded-full ${streamDotClass(card.cpuStream)}`} />
+                            {card.cpuStream.state.toUpperCase()}
+                            {card.cpuStream.runningElapsed && (
+                              <span className="text-gray-500">{card.cpuStream.runningElapsed}</span>
+                            )}
+                          </span>
+                          {card.cpuStream.heartbeatAgeSeconds != null && (
+                            <span className={ageClass(card.cpuStream.heartbeatAgeSeconds)}>
+                              hb {fmtAge(card.cpuStream.heartbeatAgeSeconds)}
+                            </span>
+                          )}
+                        </div>
+                        {card.cpuStream.displayJob && (
+                          <div className="text-[10px] text-emerald-300 truncate font-mono" title={card.cpuStream.displayJob}>
+                            {card.cpuStream.displayJob}
+                          </div>
+                        )}
+                        {(card.cpuStream.progressLabel || card.cpuStream.warning) && (
+                          <div className="text-[10px] text-gray-500">
+                            {card.cpuStream.progressLabel}
+                            {card.cpuStream.warning && (
+                              <span className="text-amber-300 ml-2">{card.cpuStream.warning}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Process list (only > 1% CPU) */}
@@ -911,7 +1153,11 @@ export default function FleetUtilizationPage() {
                   )}
 
                   {/* Empty state */}
-                  {card.significantJobs.length === 0 && !card.isStale && (card.gpuJob === "polling" || card.gpuJob === "unknown" || !card.gpuJob) && card.activeCores < 1 && (
+                  {card.significantJobs.length === 0
+                    && !card.isStale
+                    && (!card.gpuStream || card.gpuStream.state === "polling" || card.gpuStream.state === "unknown")
+                    && (!card.cpuStream || card.cpuStream.state === "polling" || card.cpuStream.state === "unknown")
+                    && card.activeCores < 1 && (
                     <div className="text-[10px] text-gray-600">idle</div>
                   )}
                 </div>

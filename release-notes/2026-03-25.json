@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-25",
+  "title": "Fleet Dashboard Reliability Improvements",
+  "summary": "The fleet dashboard now distinguishes live queue activity from stale heartbeats so GPU and CPU status is less misleading during long-running overnight research.",
+  "features": [
+    {
+      "id": "fleet-dashboard-stream-freshness",
+      "title": "Queue-Aware Fleet Status",
+      "summary": "GPU and CPU cards now prefer live queue state, show heartbeat age, and flag stale or failed streams directly on the machine card.",
+      "description": "The fleet dashboard now derives separate GPU and CPU stream summaries from queue state plus heartbeats instead of over-trusting a single last-seen label. Machine cards surface running, polling, queued, and stale states, show heartbeat age, and display queue progress or failure warnings when a stream needs attention.\n\nThis makes the dashboard much more robust during overnight runs, especially when a queue is still active but a heartbeat is stale, or when a machine has finished a CPU wave and is polling for the next batch.",
+      "category": "general",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
