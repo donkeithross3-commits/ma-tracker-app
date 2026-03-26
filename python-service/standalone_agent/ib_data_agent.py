@@ -27,11 +27,12 @@ Environment variables:
 import asyncio
 import json
 import logging
+import math
 import os
 import signal
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import List, Optional
@@ -91,6 +92,24 @@ _BMC_RISK_FIELDS = frozenset({
     "risk_profit_taking_enabled", "risk_profit_targets_enabled", "risk_profit_targets",
     "risk_preset", "risk_eod_exit_time", "risk_eod_min_bid",
 })
+
+
+def _sanitize_for_json(obj):
+    """Recursively coerce websocket payloads into JSON-safe primitives."""
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if hasattr(obj, "item") and callable(obj.item):
+        try:
+            return _sanitize_for_json(obj.item())
+        except Exception:
+            pass
+    return obj
 
 
 def _translate_bmc_to_risk_config(bmc_config: dict) -> dict:
@@ -447,10 +466,10 @@ class IBDataAgent:
                         # Notify frontend to refetch positions and open orders (orders may have filled while disconnected)
                         try:
                             if self.websocket:
-                                await self.websocket.send(json.dumps({
+                                await self._send_ws_json({
                                     "type": "account_event",
                                     "event": {"event": "tws_reconnected", "ts": time.time()},
-                                }))
+                                })
                                 logger.info("Pushed tws_reconnected event for UI sync")
                         except Exception as e:
                             logger.error("Failed to push tws_reconnected: %s", e)
@@ -566,6 +585,12 @@ class IBDataAgent:
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor() as pool:
             return await loop.run_in_executor(pool, func, *args)
+
+    async def _send_ws_json(self, payload: dict) -> None:
+        """Serialize and send a websocket payload after JSON sanitization."""
+        if not self.websocket:
+            return
+        await self.websocket.send(json.dumps(_sanitize_for_json(payload)))
     
     async def _handle_ib_status(self) -> dict:
         """Check IB connection status, including reconnection and farm health."""
@@ -702,10 +727,10 @@ class IBDataAgent:
             # Notify frontend
             try:
                 if self.websocket:
-                    await self.websocket.send(json.dumps({
+                    await self._send_ws_json({
                         "type": "account_event",
                         "event": {"event": "tws_reconnected", "ts": time.time()},
-                    }))
+                    })
             except Exception as e:
                 logger.error("Failed to push tws_reconnected: %s", e)
 
@@ -1710,6 +1735,135 @@ class IBDataAgent:
 
         return result
 
+    def _recover_persisted_risk_managers(self) -> int:
+        """Recover active risk managers from the persistent position store."""
+        if not self.execution_engine:
+            return 0
+
+        recovered = 0
+        active_positions = self.position_store.get_active_positions()
+        if not active_positions:
+            return 0
+
+        from strategies.risk_manager import RiskManagerStrategy
+
+        for pos in active_positions:
+            pos_id = pos.get("id", "")
+            if not pos_id or pos_id in self.execution_engine._strategies:
+                continue  # already loaded or invalid
+            stored_config = pos.get("risk_config", {})
+            if not stored_config:
+                logger.warning("Skipping recovery of %s: no risk_config in store", pos_id)
+                continue
+            try:
+                rm = RiskManagerStrategy()
+                parent_sid = pos.get("parent_strategy", "")
+                rm._parent_strategy_id = parent_sid
+                load_result = self.execution_engine.load_strategy(pos_id, rm, stored_config)
+                if "error" in load_result:
+                    logger.error("Recovery of %s failed: %s", pos_id, load_result["error"])
+                    continue
+
+                # Restore fill log before runtime state so per-lot recovery can
+                # reconstruct lot ownership from realized exits if needed.
+                fill_log = pos.get("fill_log", [])
+                if fill_log:
+                    rm._fill_log = fill_log
+
+                # Restore runtime state over fresh on_start defaults
+                runtime = pos.get("runtime_state", {})
+                if runtime:
+                    rm.restore_runtime_state(runtime)
+
+                # Set ticker on StrategyState so Gate 0 (ticker mode) applies
+                rm_state = self.execution_engine._strategies.get(pos_id)
+                if rm_state:
+                    rm_state.ticker = resolve_rm_ticker(
+                        stored_config.get("instrument", {}),
+                        parent_sid,
+                    )
+
+                recovered += 1
+                logger.info(
+                    "Recovered risk manager %s (remaining=%d, ticker=%s)",
+                    pos_id,
+                    rm.remaining_qty,
+                    rm_state.ticker if rm_state else "?",
+                )
+
+                # Populate parent BMC strategy's _active_positions list + counter.
+                # Aggregate positions have multiple lot_entries -- expand each
+                # into its own _active_positions entry so cooldown and spawn
+                # counts reflect the actual number of fills.
+                parent = pos.get("parent_strategy", "")
+                parent_state = self.execution_engine._strategies.get(parent)
+                if not parent_state and parent:
+                    # Try directional variants (e.g. parent="bmc_spy" -> "bmc_spy_up", "bmc_spy_down")
+                    for suffix in ("_up", "_down"):
+                        alt_key = parent + suffix
+                        alt_state = self.execution_engine._strategies.get(alt_key)
+                        if alt_state and hasattr(alt_state.strategy, "_active_positions"):
+                            parent_state = alt_state
+                            logger.info(
+                                "Recovery: matched parent %s to directional variant %s",
+                                parent, alt_key,
+                            )
+                            break
+                if parent_state and hasattr(parent_state.strategy, "_active_positions"):
+                    instrument = pos.get("instrument", {})
+                    option_contract = {
+                        "symbol": instrument.get("symbol", ""),
+                        "strike": instrument.get("strike", 0),
+                        "expiry": instrument.get("expiry", ""),
+                        "right": instrument.get("right", ""),
+                    }
+                    # Use lot_entries from runtime state if available (aggregated),
+                    # else fall back to the single entry record (pre-aggregation compat)
+                    runtime = pos.get("runtime_state", {})
+                    lot_entries = runtime.get("lot_entries", [])
+                    if not lot_entries:
+                        entry_info = pos.get("entry", {})
+                        lot_entries = [{
+                            "order_id": entry_info.get("order_id", 0),
+                            "entry_price": entry_info.get("price", 0),
+                            "quantity": entry_info.get("quantity", 0),
+                            "fill_time": entry_info.get("fill_time", 0),
+                            "perm_id": entry_info.get("perm_id", 0),
+                        }]
+                    for lot in lot_entries:
+                        parent_state.strategy._active_positions.append({
+                            "order_id": lot.get("order_id", 0),
+                            "entry_price": lot.get("entry_price", 0),
+                            "quantity": lot.get("quantity", 0),
+                            "fill_time": lot.get("fill_time", 0),
+                            "perm_id": lot.get("perm_id", 0),
+                            "signal": {"option_contract": option_contract},
+                        })
+                        if hasattr(parent_state.strategy, "_positions_spawned"):
+                            parent_state.strategy._positions_spawned += 1
+                    # Restore cooldown tracker from the most recent fill time
+                    ticker = instrument.get("symbol", "").upper()
+                    max_fill_time = max(
+                        (lot.get("fill_time", 0) for lot in lot_entries), default=0
+                    )
+                    if (
+                        ticker
+                        and max_fill_time
+                        and hasattr(parent_state.strategy, "_cooldown_tracker")
+                        and max_fill_time > parent_state.strategy._cooldown_tracker.get(ticker, 0)
+                    ):
+                        parent_state.strategy._cooldown_tracker[ticker] = max_fill_time
+                        logger.info(
+                            "Restored cooldown for %s (last fill %.0fs ago)",
+                            ticker, time.time() - max_fill_time,
+                        )
+            except Exception as e:
+                logger.error("Error recovering position %s: %s", pos_id, e)
+
+        if recovered > 0:
+            logger.info("Recovered %d risk manager position(s) from store", recovered)
+        return recovered
+
     async def _handle_execution_start(self, payload: dict) -> dict:
         """Start execution engine with strategy configuration.
 
@@ -1805,114 +1959,7 @@ class IBDataAgent:
 
         if not already_running:
             # ── Recover persisted risk manager positions ──
-            recovered = 0
-            active_positions = self.position_store.get_active_positions()
-            if active_positions:
-                from strategies.risk_manager import RiskManagerStrategy
-                for pos in active_positions:
-                    pos_id = pos.get("id", "")
-                    if not pos_id or pos_id in self.execution_engine._strategies:
-                        continue  # already loaded or invalid
-                    stored_config = pos.get("risk_config", {})
-                    if not stored_config:
-                        logger.warning("Skipping recovery of %s: no risk_config in store", pos_id)
-                        continue
-                    try:
-                        rm = RiskManagerStrategy()
-                        parent_sid = pos.get("parent_strategy", "")
-                        rm._parent_strategy_id = parent_sid
-                        load_result = self.execution_engine.load_strategy(pos_id, rm, stored_config)
-                        if "error" in load_result:
-                            logger.error("Recovery of %s failed: %s", pos_id, load_result["error"])
-                            continue
-                        # Restore runtime state over fresh on_start defaults
-                        runtime = pos.get("runtime_state", {})
-                        if runtime:
-                            rm.restore_runtime_state(runtime)
-                        # Restore fill log for telemetry display
-                        fill_log = pos.get("fill_log", [])
-                        if fill_log:
-                            rm._fill_log = fill_log
-                        # Set ticker on StrategyState so Gate 0 (ticker mode) applies
-                        rm_state = self.execution_engine._strategies.get(pos_id)
-                        if rm_state:
-                            rm_state.ticker = resolve_rm_ticker(
-                                stored_config.get("instrument", {}),
-                                parent_sid,
-                            )
-
-                        recovered += 1
-                        logger.info("Recovered risk manager %s (remaining=%d, ticker=%s)",
-                                    pos_id, rm.remaining_qty, rm_state.ticker if rm_state else "?")
-
-                        # Populate parent BMC strategy's _active_positions list + counter.
-                        # Aggregate positions have multiple lot_entries -- expand each
-                        # into its own _active_positions entry so cooldown and spawn
-                        # counts reflect the actual number of fills.
-                        parent = pos.get("parent_strategy", "")
-                        parent_state = self.execution_engine._strategies.get(parent)
-                        if not parent_state and parent:
-                            # Try directional variants (e.g. parent="bmc_spy" -> "bmc_spy_up", "bmc_spy_down")
-                            for suffix in ("_up", "_down"):
-                                alt_key = parent + suffix
-                                alt_state = self.execution_engine._strategies.get(alt_key)
-                                if alt_state and hasattr(alt_state.strategy, "_active_positions"):
-                                    parent_state = alt_state
-                                    logger.info(
-                                        "Recovery: matched parent %s to directional variant %s",
-                                        parent, alt_key,
-                                    )
-                                    break
-                        if parent_state and hasattr(parent_state.strategy, "_active_positions"):
-                            instrument = pos.get("instrument", {})
-                            option_contract = {
-                                "symbol": instrument.get("symbol", ""),
-                                "strike": instrument.get("strike", 0),
-                                "expiry": instrument.get("expiry", ""),
-                                "right": instrument.get("right", ""),
-                            }
-                            # Use lot_entries from runtime state if available (aggregated),
-                            # else fall back to the single entry record (pre-aggregation compat)
-                            runtime = pos.get("runtime_state", {})
-                            lot_entries = runtime.get("lot_entries", [])
-                            if not lot_entries:
-                                entry_info = pos.get("entry", {})
-                                lot_entries = [{
-                                    "order_id": entry_info.get("order_id", 0),
-                                    "entry_price": entry_info.get("price", 0),
-                                    "quantity": entry_info.get("quantity", 0),
-                                    "fill_time": entry_info.get("fill_time", 0),
-                                    "perm_id": entry_info.get("perm_id", 0),
-                                }]
-                            for lot in lot_entries:
-                                parent_state.strategy._active_positions.append({
-                                    "order_id": lot.get("order_id", 0),
-                                    "entry_price": lot.get("entry_price", 0),
-                                    "quantity": lot.get("quantity", 0),
-                                    "fill_time": lot.get("fill_time", 0),
-                                    "perm_id": lot.get("perm_id", 0),
-                                    "signal": {"option_contract": option_contract},
-                                })
-                                if hasattr(parent_state.strategy, "_positions_spawned"):
-                                    parent_state.strategy._positions_spawned += 1
-                            # Restore cooldown tracker from the most recent fill time
-                            ticker = instrument.get("symbol", "").upper()
-                            max_fill_time = max(
-                                (lot.get("fill_time", 0) for lot in lot_entries), default=0
-                            )
-                            if (
-                                ticker
-                                and max_fill_time
-                                and hasattr(parent_state.strategy, "_cooldown_tracker")
-                                and max_fill_time > parent_state.strategy._cooldown_tracker.get(ticker, 0)
-                            ):
-                                parent_state.strategy._cooldown_tracker[ticker] = max_fill_time
-                                logger.info("Restored cooldown for %s (last fill %.0fs ago)",
-                                            ticker, time.time() - max_fill_time)
-                    except Exception as e:
-                        logger.error("Error recovering position %s: %s", pos_id, e)
-                if recovered > 0:
-                    logger.info("Recovered %d risk manager position(s) from store", recovered)
+            recovered = self._recover_persisted_risk_managers()
 
             # ── IB Reconciliation on startup (WS4) ──
             try:
@@ -1946,10 +1993,10 @@ class IBDataAgent:
             if self.websocket and self.execution_engine.is_running:
                 try:
                     telemetry = self.execution_engine.get_telemetry()
-                    await self.websocket.send(json.dumps({
+                    await self._send_ws_json({
                         "type": "execution_telemetry",
                         **telemetry
-                    }))
+                    })
                 except Exception:
                     pass  # best-effort, heartbeat will catch up
         else:
@@ -2004,7 +2051,7 @@ class IBDataAgent:
         # when the engine is stopped.
         try:
             if self.websocket:
-                await self.websocket.send(json.dumps({
+                await self._send_ws_json({
                     "type": "execution_telemetry",
                     "running": False,
                     "strategy_count": 0,
@@ -2017,7 +2064,7 @@ class IBDataAgent:
                     "budget_status": {},
                     "position_ledger": self.execution_engine._get_position_ledger(),
                     "engine_mode": "running",
-                }))
+                })
         except Exception as e:
             logger.warning("Failed to push final telemetry on stop: %s", e)
 
@@ -2101,10 +2148,10 @@ class IBDataAgent:
         try:
             if self.execution_engine.is_running and self.websocket:
                 telemetry = self.execution_engine.get_telemetry()
-                await self.websocket.send(json.dumps({
+                await self._send_ws_json({
                     "type": "execution_telemetry",
                     **telemetry
-                }))
+                })
         except Exception:
             logger.debug("Failed to push immediate telemetry after config change", exc_info=True)
 
@@ -2492,10 +2539,10 @@ class IBDataAgent:
         try:
             if self.execution_engine.is_running and self.websocket:
                 telemetry = self.execution_engine.get_telemetry()
-                await self.websocket.send(json.dumps({
+                await self._send_ws_json({
                     "type": "execution_telemetry",
                     **telemetry
-                }))
+                })
         except Exception:
             logger.debug("Failed to push telemetry after model swap", exc_info=True)
 
@@ -2903,38 +2950,9 @@ class IBDataAgent:
             # creating phantom Trade Log rows for non-real entries.
             if record_fill:
                 entry_order_id = pos_info.get("order_id", 0)
-                # Look up exec_id from the engine's order→exec mapping
-                entry_exec_id = ""
-                if self.execution_engine and entry_order_id:
-                    entry_exec_id = self.execution_engine._order_exec_ids.get(
-                        entry_order_id, ""
-                    )
-                self.position_store.add_fill(strategy_id, {
-                    "time": time.time(),
-                    "order_id": entry_order_id,
-                    "exec_id": entry_exec_id,
-                    "level": "entry",
-                    "qty_filled": pos_info.get("quantity", 0),
-                    "avg_price": pos_info.get("entry_price", 0),
-                    "remaining_qty": pos_info.get("quantity", 0),
-                    "pnl_pct": 0.0,
-                    "execution_analytics": {
-                        "commission": None,
-                        "realized_pnl_ib": None,
-                        "slippage": None,
-                    },
-                })
-                # Remap exec_id → RM position_id so commission reports route
-                # correctly.  The parent BMC strategy owns the order, but the
-                # RM position_id is what position_store uses.
-                if entry_exec_id and self.execution_engine:
-                    self.execution_engine._exec_id_to_position[entry_exec_id] = strategy_id
-                    # Fire deferred commission pickup — commission may already
-                    # be in the scanner's cache from the IB callback.
-                    self.execution_engine._order_executor.submit(
-                        self.execution_engine._deferred_commission_update,
-                        strategy_id, entry_exec_id,
-                    )
+                entry_fill = self._build_entry_fill_record(pos_info)
+                self.position_store.add_fill(strategy_id, entry_fill)
+                self._attach_entry_execution_tracking(strategy_id, entry_fill)
             # Persist initial runtime state (ARMED) so it survives restarts
             if hasattr(strategy, "get_runtime_snapshot"):
                 self.position_store.update_runtime_state(
@@ -3173,15 +3191,18 @@ class IBDataAgent:
         })
 
         # Record the new entry fill in the ledger
-        self.position_store.add_fill(strategy_id, {
-            "time": fill_time if fill_time else time.time(),
-            "order_id": order_id,
-            "level": "entry",
-            "qty_filled": quantity,
-            "avg_price": entry_price,
-            "remaining_qty": rm.remaining_qty,
-            "pnl_pct": 0.0,
-        })
+        entry_fill = self._build_entry_fill_record(
+            {
+                "order_id": order_id,
+                "perm_id": perm_id,
+                "fill_time": fill_time,
+                "quantity": quantity,
+                "entry_price": entry_price,
+            },
+            remaining_qty=rm.remaining_qty,
+        )
+        self.position_store.add_fill(strategy_id, entry_fill)
+        self._attach_entry_execution_tracking(strategy_id, entry_fill)
 
         # Persist updated runtime state (lot_entries, qty, entry_price)
         self.position_store.update_runtime_state(
@@ -3196,6 +3217,83 @@ class IBDataAgent:
             "Aggregated lot into %s: now %d lots (%d qty) @ avg %.4f",
             strategy_id, len(rm._lot_entries), rm.initial_qty, rm.entry_price,
         )
+
+    def _build_entry_fill_record(
+        self,
+        pos_info: dict,
+        remaining_qty: Optional[int] = None,
+    ) -> dict:
+        """Build a risk-manager entry fill record with available analytics."""
+        entry_order_id = int(pos_info.get("order_id", 0) or 0)
+        fill_time = pos_info.get("fill_time", time.time()) or time.time()
+        qty = int(pos_info.get("quantity", 0) or 0)
+        fill_price = float(pos_info.get("entry_price", 0) or 0.0)
+
+        exec_id = ""
+        analytics = {
+            "commission": None,
+            "realized_pnl_ib": None,
+            "slippage": None,
+        }
+        if self.execution_engine and entry_order_id:
+            exec_id = self.execution_engine._order_exec_ids.get(entry_order_id, "")
+            pre_trade_snapshot = self.execution_engine._order_pre_trade_snapshots.get(entry_order_id)
+            routing_exchange = self.execution_engine._order_routing_exchanges.get(entry_order_id, "SMART")
+            if pre_trade_snapshot and fill_price > 0:
+                opt_ask = pre_trade_snapshot.get("option_ask")
+                opt_mid = pre_trade_snapshot.get("option_mid")
+                if opt_ask and opt_ask > 0:
+                    analytics["slippage"] = round(fill_price - opt_ask, 6)
+                if opt_mid and opt_mid > 0:
+                    analytics["effective_spread"] = round(2 * abs(fill_price - opt_mid), 6)
+                analytics["pre_trade_snapshot"] = pre_trade_snapshot
+            analytics["routing_exchange"] = routing_exchange
+
+        return {
+            "time": fill_time,
+            "order_id": entry_order_id,
+            "exec_id": exec_id,
+            "level": "entry",
+            "qty_filled": qty,
+            "avg_price": fill_price,
+            "remaining_qty": qty if remaining_qty is None else remaining_qty,
+            "pnl_pct": 0.0,
+            "execution_analytics": analytics,
+        }
+
+    def _attach_entry_execution_tracking(self, strategy_id: str, entry_fill: dict) -> None:
+        """Wire post-fill analytics and commission routing for a BMC entry fill."""
+        if not self.execution_engine:
+            return
+
+        order_id = int(entry_fill.get("order_id", 0) or 0)
+        exec_id = entry_fill.get("exec_id", "") or ""
+
+        # Route future commission reports to the RM position.
+        if exec_id:
+            self.execution_engine._exec_id_to_position[exec_id] = strategy_id
+            self.execution_engine._order_executor.submit(
+                self.execution_engine._deferred_commission_update,
+                strategy_id, exec_id,
+            )
+
+        if order_id <= 0:
+            return
+
+        contract_d = self.execution_engine._order_contract_dicts.get(order_id)
+        pre_trade_snapshot = self.execution_engine._order_pre_trade_snapshots.get(order_id)
+        routing_exchange = self.execution_engine._order_routing_exchanges.get(order_id, "SMART")
+        if contract_d and pre_trade_snapshot:
+            self.execution_engine._schedule_post_fill_capture(
+                strategy_id,
+                order_id,
+                contract_d,
+                float(entry_fill.get("avg_price", 0.0) or 0.0),
+                float(entry_fill.get("time", time.time()) or time.time()),
+                pre_trade_snapshot,
+                routing_exchange,
+                entry_fill,
+            )
 
     # ── Periodic runtime state persistence ──
 
@@ -3381,10 +3479,10 @@ class IBDataAgent:
             if self.websocket and self.execution_engine and self.execution_engine.is_running:
                 try:
                     telemetry = self.execution_engine.get_telemetry()
-                    await self.websocket.send(json.dumps({
+                    await self._send_ws_json({
                         "type": "execution_telemetry",
                         **telemetry
-                    }))
+                    })
                     logger.info("Auto-restart: sent immediate execution telemetry")
                 except Exception as e:
                     logger.warning("Auto-restart: failed to send immediate telemetry: %s", e)
@@ -3527,7 +3625,7 @@ class IBDataAgent:
         telemetry_counter = 0  # send telemetry every 2nd heartbeat (~20s)
         while self.running and self.websocket:
             try:
-                await self.websocket.send(json.dumps({"type": "heartbeat"}))
+                await self._send_ws_json({"type": "heartbeat"})
                 # Piggyback agent resource state on every heartbeat cycle
                 state = self.resource_manager.get_state_report()
                 # Include IB connection status so relay can answer status
@@ -3542,10 +3640,10 @@ class IBDataAgent:
                 if self.scanner:
                     state["ib_farms"] = self.scanner.get_farm_status()
                     state["ib_data_available"] = self.scanner.is_data_available()
-                await self.websocket.send(json.dumps({
+                await self._send_ws_json({
                     "type": "agent_state",
                     **state
-                }))
+                })
                 # Send execution telemetry when engine is running (every ~20s)
                 telemetry_counter += 1
                 if (
@@ -3554,10 +3652,10 @@ class IBDataAgent:
                     and self.execution_engine.is_running
                 ):
                     telemetry = self.execution_engine.get_telemetry()
-                    await self.websocket.send(json.dumps({
+                    await self._send_ws_json({
                         "type": "execution_telemetry",
                         **telemetry
-                    }))
+                    })
                     # Persist risk manager runtime states (~20s cadence)
                     self._persist_runtime_states()
                     # Persist engine config for auto-restart
@@ -3607,10 +3705,10 @@ class IBDataAgent:
                 dirty_positions = self.position_store.drain_dirty()
                 if dirty_positions and self.websocket:
                     try:
-                        await self.websocket.send(json.dumps({
+                        await self._send_ws_json({
                             "type": "position_sync",
                             "positions": dirty_positions,
-                        }))
+                        })
                         logger.info("Position sync: pushed %d dirty positions", len(dirty_positions))
                     except Exception as sync_err:
                         logger.warning("Position sync failed: %s — re-dirtying", sync_err)
@@ -3637,11 +3735,11 @@ class IBDataAgent:
                 ):
                     snapshot = self.execution_engine._cache.get_all_serialized()
                     if snapshot:
-                        await self.websocket.send(json.dumps({
+                        await self._send_ws_json({
                             "type": "execution_quotes",
                             "quote_snapshot": snapshot,
                             "timestamp": time.time(),
-                        }))
+                        })
                 await asyncio.sleep(QUOTE_PUSH_INTERVAL)
             except Exception as e:
                 logger.debug("Quote push error: %s", e)
@@ -3659,10 +3757,10 @@ class IBDataAgent:
                 if self.scanner:
                     events = self.scanner.drain_account_events()
                     for event in events:
-                        await self.websocket.send(json.dumps({
+                        await self._send_ws_json({
                             "type": "account_event",
                             "event": event,
-                        }))
+                        })
                         logger.info("Fallback push: %s (orderId=%s)",
                                     event.get("event"), event.get("orderId"))
                 await asyncio.sleep(10.0)
@@ -3705,7 +3803,7 @@ class IBDataAgent:
             }
 
             if self.websocket:
-                resp_json = json.dumps(response)
+                resp_json = json.dumps(_sanitize_for_json(response))
                 t_serialize = time.monotonic() - t_start - t_handler
                 await self.websocket.send(resp_json)
                 t_total = time.monotonic() - t_start
@@ -3731,12 +3829,12 @@ class IBDataAgent:
             t_total = time.monotonic() - t_start
             logger.error(f"Error processing request {request_id} ({t_total:.3f}s): {e}")
             if self.websocket:
-                await self.websocket.send(json.dumps({
+                await self._send_ws_json({
                     "type": "response",
                     "request_id": request_id,
                     "success": False,
                     "error": str(e)
-                }))
+                })
 
     async def message_handler(self):
         """Handle incoming messages"""
@@ -3770,13 +3868,13 @@ class IBDataAgent:
         """Send boot progress to relay for dashboard display."""
         if self.websocket:
             try:
-                await self.websocket.send(json.dumps({
+                await self._send_ws_json({
                     "type": "boot_phase",
                     "phase": phase,
                     "detail": detail,
                     "progress": progress,
                     "timestamp": time.time(),
-                }))
+                })
             except Exception:
                 pass  # WS may not be ready during early boot
 
@@ -3838,10 +3936,10 @@ class IBDataAgent:
                 return
             async def _push():
                 try:
-                    await ws.send(json.dumps({
+                    await ws.send(json.dumps(_sanitize_for_json({
                         "type": "account_event",
                         "event": event,
-                    }))
+                    })))
                     logger.info("Instant push: %s (orderId=%s)",
                                 event.get("event"), event.get("orderId"))
                 except Exception:

@@ -552,6 +552,20 @@ interface PositionLedgerEntry {
   };
 }
 
+interface ManagedContractStatus {
+  contract_key: string;
+  instrument: { symbol: string; strike?: number; expiry?: string; right?: string };
+  active_position_ids: string[];
+  active_position_count: number;
+  broker_qty: number | null;
+  broker_accounts?: string[];
+  broker_snapshot_age_ms: number | null;
+  reserved_exit_qty: number;
+  status: string;
+  message?: string;
+  position_ids?: string[];
+}
+
 interface FullExecutionStatus {
   running: boolean;
   eval_interval: number;
@@ -567,6 +581,7 @@ interface FullExecutionStatus {
   order_budget: number;
   total_algo_orders: number;
   position_ledger?: PositionLedgerEntry[];
+  managed_contracts?: ManagedContractStatus[];
   engine_mode?: "running" | "paused";
 }
 
@@ -2473,6 +2488,28 @@ export default function SignalsTab() {
     };
   }, [executionStatus?.position_ledger, positionDetails, signal?.active_positions]);
 
+  const managedContractSummary = useMemo(() => {
+    const contracts = executionStatus?.managed_contracts || [];
+    if (contracts.length === 0) return null;
+    const duplicateContracts = contracts.filter(c => c.status === "duplicate_active_positions");
+    const awaitingBrokerSnapshot = contracts.filter(c => c.broker_qty == null);
+    const oldestBrokerSnapshotMs = contracts.reduce(
+      (maxAge, contract) => Math.max(maxAge, contract.broker_snapshot_age_ms ?? 0),
+      0
+    );
+    const reservedExitQty = contracts.reduce(
+      (sum, contract) => sum + Math.max(0, contract.reserved_exit_qty || 0),
+      0
+    );
+    return {
+      contractCount: contracts.length,
+      duplicateContracts,
+      awaitingBrokerSnapshotCount: awaitingBrokerSnapshot.length,
+      oldestBrokerSnapshotMs,
+      reservedExitQty,
+    };
+  }, [executionStatus?.managed_contracts]);
+
   // ── Model attribution badge — shows which model name spawned this position ──
   // Uses lineage from position store; falls back to running strategy model info via parent_strategy.
   const renderModelBadge = (lineage?: PositionLedgerEntry["lineage"], parentStrategy?: string) => {
@@ -2813,6 +2850,26 @@ export default function SignalsTab() {
           >
             {resuming ? "Resuming…" : "Resume"}
           </button>
+        </div>
+      )}
+
+      {running && managedContractSummary && (
+        <div className={`text-sm px-3 py-2 rounded border ${
+          managedContractSummary.duplicateContracts.length > 0
+            ? "bg-red-900/25 border-red-700 text-red-200"
+            : "bg-sky-950/40 border-sky-800 text-sky-200"
+        }`}>
+          <span className="font-medium">Broker Truth</span>{" "}
+          {managedContractSummary.awaitingBrokerSnapshotCount > 0
+            ? `Awaiting first IB reconciliation for ${managedContractSummary.awaitingBrokerSnapshotCount} contract${managedContractSummary.awaitingBrokerSnapshotCount === 1 ? "" : "s"}. `
+            : `Last IB snapshot ${Math.round(managedContractSummary.oldestBrokerSnapshotMs / 1000)}s ago across ${managedContractSummary.contractCount} managed contract${managedContractSummary.contractCount === 1 ? "" : "s"}. `}
+          <span className="font-medium">Engine Ownership</span>{" "}
+          {managedContractSummary.duplicateContracts.length > 0
+            ? `${managedContractSummary.duplicateContracts.length} duplicate contract${managedContractSummary.duplicateContracts.length === 1 ? "" : "s"} blocked fail-closed.`
+            : "Single-owner invariant currently holds."}
+          {managedContractSummary.reservedExitQty > 0 && (
+            <span>{` Working exit reservations: ${managedContractSummary.reservedExitQty}.`}</span>
+          )}
         </div>
       )}
 

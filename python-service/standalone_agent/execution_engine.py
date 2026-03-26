@@ -116,10 +116,49 @@ class ActiveOrder:
     placed_at: float = 0.0  # time.time() when submitted
     last_update: float = 0.0  # time.time() of last status update
     error: str = ""
+    warning_text: str = ""
+    why_held: str = ""
+    error_code: Optional[int] = None
+    error_string: str = ""
+    advanced_order_reject_json: str = ""
     is_entry: bool = True  # budget refund on IB-side rejection (Inactive status)
     pre_trade_snapshot: Optional[dict] = None  # Phase 0: market state at order creation
     contract_dict: Optional[dict] = None  # Phase 0: for post-fill quote lookups
     routing_exchange: str = "SMART"  # Phase 0: target exchange for this order
+
+
+@dataclass
+class DeadOrderRecord:
+    """Recent terminal order outcome retained for UI visibility/debugging."""
+    order_id: int
+    strategy_id: str
+    ticker: str
+    status: str
+    reason: str
+    error_code: Optional[int] = None
+    error_string: str = ""
+    warning_text: str = ""
+    why_held: str = ""
+    advanced_order_reject_json: str = ""
+    perm_id: int = 0
+    filled: float = 0.0
+    remaining: float = 0.0
+    is_entry: bool = True
+    placed_at: float = 0.0
+    dead_at: float = 0.0
+
+
+@dataclass
+class ExitReservation:
+    """Contract-level reservation for a working exit order."""
+    token: int
+    strategy_id: str
+    contract_key: tuple
+    reserved_qty: int
+    order_id: Optional[int] = None
+    source: str = ""
+    created_at: float = 0.0
+    updated_at: float = 0.0
 
 
 @dataclass
@@ -274,6 +313,7 @@ class ExecutionEngine:
     STALE_ORDER_WARN_SEC = 60.0  # warn if order has no update for this long
     STALE_ORDER_CANCEL_SEC = 120.0  # auto-cancel after 2 minutes with no update
     STALE_ORDER_GC_SEC = 300.0     # force-remove after 5 min if cancel got no response
+    RECENT_TERMINAL_ORDER_TTL_SEC = 900.0  # guard against late callbacks re-registering filled orders
     FLIPFLOP_MAX_ORDERS = 5      # max orders per strategy in the flip-flop window
     FLIPFLOP_WINDOW_SEC = 10.0   # flip-flop detection window
     FLIPFLOP_COOLDOWN_SEC = 60.0 # resume after cooldown instead of permanent pause
@@ -300,6 +340,17 @@ class ExecutionEngine:
         # Active orders: full lifecycle tracking after placement
         self._active_orders: Dict[int, ActiveOrder] = {}
         self._active_orders_lock = threading.Lock()
+        self._recent_dead_orders: List[DeadOrderRecord] = []
+        self._recent_dead_orders_lock = threading.Lock()
+        self._recent_terminal_orders: Dict[int, float] = {}
+        self._recent_terminal_orders_lock = threading.Lock()
+        self._broker_positions: Dict[tuple, dict] = {}
+        self._broker_positions_lock = threading.Lock()
+        self._managed_contract_issues: Dict[tuple, dict] = {}
+        self._managed_contract_issues_lock = threading.Lock()
+        self._exit_reservations: Dict[int, ExitReservation] = {}
+        self._exit_reservations_lock = threading.Lock()
+        self._next_exit_reservation_token = 1
 
         # Order event queue: filled by scanner callbacks, drained by eval loop
         self._order_event_queue: queue.Queue = queue.Queue()
@@ -351,6 +402,386 @@ class ExecutionEngine:
         self._tick_count = 0
 
     # ── Entry Budget (two-tier) ──
+
+    @staticmethod
+    def _detail_suffix(label: str, value: str) -> str:
+        value = (value or "").strip()
+        return f"{label}: {value}" if value else ""
+
+    def _build_dead_order_reason(self, order_id: int, status: str, active: Optional[ActiveOrder]) -> str:
+        if active is None:
+            return f"Order {order_id} terminal: {status}"
+
+        details = []
+        if active.error_code is not None:
+            details.append(f"IB {active.error_code}")
+        if active.error_string:
+            details.append(active.error_string.strip())
+        if active.warning_text:
+            details.append(self._detail_suffix("warning", active.warning_text))
+        if active.why_held:
+            details.append(self._detail_suffix("whyHeld", active.why_held))
+        if active.advanced_order_reject_json:
+            details.append(self._detail_suffix("advancedReject", active.advanced_order_reject_json))
+
+        detail_text = " | ".join(part for part in details if part)
+        if detail_text:
+            return f"Order {order_id} terminal: {status} ({detail_text})"
+        return f"Order {order_id} terminal: {status}"
+
+    @staticmethod
+    def _should_surface_dead_order(status: str, active: Optional[ActiveOrder]) -> bool:
+        if status == "Inactive":
+            return True
+        if active is None:
+            return False
+        return any(
+            value not in (None, "")
+            for value in (
+                active.error_code,
+                active.error_string,
+                active.warning_text,
+                active.why_held,
+                active.advanced_order_reject_json,
+            )
+        )
+
+    @staticmethod
+    def _normalize_contract_key(instr: dict) -> tuple:
+        symbol = str(instr.get("symbol") or "").upper()
+        expiry = (
+            instr.get("expiry")
+            or instr.get("lastTradeDateOrContractMonth")
+            or ""
+        )
+        right = str(instr.get("right") or "").upper()
+        try:
+            strike = round(float(instr.get("strike") or 0.0), 6)
+        except (TypeError, ValueError):
+            strike = 0.0
+        return (symbol, strike, str(expiry), right)
+
+    @staticmethod
+    def _format_contract_key(contract_key: tuple) -> str:
+        symbol, strike, expiry, right = contract_key
+        if strike or expiry or right:
+            return f"{symbol}:{strike}:{expiry}:{right}"
+        return symbol or "UNKNOWN"
+
+    def _active_store_positions_by_contract(self) -> Dict[tuple, list]:
+        positions: Dict[tuple, list] = {}
+        if not self._position_store:
+            return positions
+        for pos in self._position_store.get_all_positions():
+            if pos.get("status") != "active":
+                continue
+            key = self._normalize_contract_key(pos.get("instrument", {}))
+            positions.setdefault(key, []).append(pos)
+        return positions
+
+    def _update_broker_position_book(self, ib_positions: list) -> None:
+        now = time.time()
+        snapshot: Dict[tuple, dict] = {}
+        for ib_pos in ib_positions or []:
+            contract = ib_pos.get("contract", {}) or {}
+            symbol = contract.get("symbol")
+            if symbol in IB_IGNORE_TICKERS:
+                continue
+            qty = int(round(float(ib_pos.get("position", 0) or 0)))
+            key = self._normalize_contract_key(contract)
+            entry = snapshot.setdefault(key, {
+                "contract_key": key,
+                "accounts": set(),
+                "qty": 0,
+                "avg_cost": 0.0,
+                "updated_at": now,
+            })
+            entry["qty"] += qty
+            if ib_pos.get("account"):
+                entry["accounts"].add(ib_pos["account"])
+            if ib_pos.get("avgCost") is not None:
+                entry["avg_cost"] = float(ib_pos.get("avgCost") or 0.0)
+        for entry in snapshot.values():
+            entry["accounts"] = sorted(entry["accounts"])
+        with self._broker_positions_lock:
+            self._broker_positions = snapshot
+
+    def _get_broker_position(self, contract_key: tuple) -> Optional[dict]:
+        with self._broker_positions_lock:
+            broker = self._broker_positions.get(contract_key)
+            return dict(broker) if broker else None
+
+    def _set_managed_contract_issues(self, report: dict) -> None:
+        issues = {}
+        for duplicate in report.get("duplicate_agent", []):
+            key = tuple(duplicate.get("instrument", ()))
+            if not key:
+                continue
+            issues[key] = {
+                "contract_key": key,
+                "status": "duplicate_active_positions",
+                "message": (
+                    "Multiple active managed positions own the same contract. "
+                    "Automated exits are blocked fail-closed until resolved."
+                ),
+                "position_ids": duplicate.get("position_ids", []),
+                "ib_qty": duplicate.get("ib_qty"),
+                "updated_at": time.time(),
+            }
+        with self._managed_contract_issues_lock:
+            self._managed_contract_issues = issues
+
+    def _get_managed_contract_issue(self, contract_key: tuple) -> Optional[dict]:
+        with self._managed_contract_issues_lock:
+            issue = self._managed_contract_issues.get(contract_key)
+            return dict(issue) if issue else None
+
+    def _reserved_exit_qty(self, contract_key: tuple) -> int:
+        with self._exit_reservations_lock:
+            return sum(
+                max(0, reservation.reserved_qty)
+                for reservation in self._exit_reservations.values()
+                if reservation.contract_key == contract_key
+            )
+
+    def _create_exit_reservation(
+        self,
+        strategy_id: str,
+        contract_key: tuple,
+        reserved_qty: int,
+        source: str,
+    ) -> int:
+        with self._exit_reservations_lock:
+            token = self._next_exit_reservation_token
+            self._next_exit_reservation_token += 1
+            now = time.time()
+            self._exit_reservations[token] = ExitReservation(
+                token=token,
+                strategy_id=strategy_id,
+                contract_key=contract_key,
+                reserved_qty=max(0, int(reserved_qty)),
+                source=source,
+                created_at=now,
+                updated_at=now,
+            )
+            return token
+
+    def _bind_exit_reservation(self, token: Optional[int], order_id: int) -> None:
+        if not token:
+            return
+        with self._exit_reservations_lock:
+            reservation = self._exit_reservations.get(token)
+            if reservation:
+                reservation.order_id = order_id
+                reservation.updated_at = time.time()
+
+    def _release_exit_reservation(
+        self,
+        *,
+        token: Optional[int] = None,
+        order_id: Optional[int] = None,
+        strategy_id: Optional[str] = None,
+    ) -> None:
+        with self._exit_reservations_lock:
+            doomed = []
+            for reservation_token, reservation in self._exit_reservations.items():
+                if token is not None and reservation_token == token:
+                    doomed.append(reservation_token)
+                elif order_id is not None and reservation.order_id == order_id:
+                    doomed.append(reservation_token)
+                elif strategy_id and reservation.strategy_id == strategy_id:
+                    doomed.append(reservation_token)
+            for reservation_token in doomed:
+                self._exit_reservations.pop(reservation_token, None)
+
+    def _sync_exit_reservation(self, order_id: int, *, remaining: Optional[float], status: str) -> None:
+        with self._exit_reservations_lock:
+            for reservation in self._exit_reservations.values():
+                if reservation.order_id != order_id:
+                    continue
+                if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
+                    reservation.reserved_qty = 0
+                elif remaining is not None:
+                    reservation.reserved_qty = max(0, int(round(float(remaining) or 0.0)))
+                reservation.updated_at = time.time()
+                break
+        if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
+            self._release_exit_reservation(order_id=order_id)
+
+    def _managed_contracts_status(self) -> list:
+        active_positions = self._active_store_positions_by_contract()
+        with self._broker_positions_lock:
+            broker_positions = {
+                key: dict(value) for key, value in self._broker_positions.items()
+            }
+        with self._managed_contract_issues_lock:
+            issues = {
+                key: dict(value) for key, value in self._managed_contract_issues.items()
+            }
+        keys = set(active_positions) | set(broker_positions) | set(issues)
+        results = []
+        now = time.time()
+        for key in sorted(keys, key=self._format_contract_key):
+            broker = broker_positions.get(key)
+            issue = issues.get(key)
+            results.append({
+                "contract_key": self._format_contract_key(key),
+                "instrument": {
+                    "symbol": key[0],
+                    "strike": key[1],
+                    "expiry": key[2],
+                    "right": key[3],
+                },
+                "active_position_ids": [pos["id"] for pos in active_positions.get(key, [])],
+                "active_position_count": len(active_positions.get(key, [])),
+                "broker_qty": int(broker.get("qty", 0)) if broker else None,
+                "broker_accounts": broker.get("accounts", []) if broker else [],
+                "broker_snapshot_age_ms": (
+                    int((now - broker.get("updated_at", now)) * 1000)
+                    if broker else None
+                ),
+                "reserved_exit_qty": self._reserved_exit_qty(key),
+                "status": issue.get("status", "ok") if issue else "ok",
+                "message": issue.get("message", "") if issue else "",
+                "position_ids": issue.get("position_ids", []) if issue else [],
+            })
+        return results
+
+    def _prepare_exit_action(
+        self,
+        state: StrategyState,
+        action: OrderAction,
+    ) -> Optional[int]:
+        contract_key = self._normalize_contract_key(action.contract_dict)
+        contract_label = self._format_contract_key(contract_key)
+        issue = self._get_managed_contract_issue(contract_key)
+        if issue:
+            reason = issue.get("message") or (
+                f"Exit blocked for {contract_label}: duplicate active managed positions"
+            )
+            state.errors.append(reason)
+            try:
+                state.strategy.on_order_dead(None, reason, state.config)
+            except Exception as exc:
+                logger.error("Strategy %s on_order_dead error: %s", state.strategy_id, exc)
+            logger.error(
+                "Fail-closed exit block for %s (%s): %s",
+                state.strategy_id, contract_label, reason,
+            )
+            return None
+
+        broker_position = self._get_broker_position(contract_key)
+        broker_qty = None
+        source = "broker_snapshot"
+        if broker_position is not None:
+            broker_qty = int(round(float(broker_position.get("qty", 0) or 0)))
+        else:
+            source = "strategy_runtime"
+            broker_qty = int(getattr(state.strategy, "remaining_qty", 0) or 0)
+
+        reserved_qty = self._reserved_exit_qty(contract_key)
+        available_qty = max(0, broker_qty - reserved_qty)
+        if available_qty <= 0:
+            reason = (
+                f"Exit blocked for {contract_label}: broker_qty={broker_qty}, "
+                f"reserved={reserved_qty}, requested={action.quantity}"
+            )
+            state.errors.append(reason)
+            try:
+                state.strategy.on_order_dead(None, reason, state.config)
+            except Exception as exc:
+                logger.error("Strategy %s on_order_dead error: %s", state.strategy_id, exc)
+            logger.warning(reason)
+            return None
+
+        requested_qty = max(0, int(action.quantity))
+        approved_qty = min(requested_qty, available_qty)
+        if approved_qty <= 0:
+            return None
+        if approved_qty < requested_qty:
+            logger.warning(
+                "Clamped exit for %s on %s: requested=%d approved=%d "
+                "(broker_qty=%d reserved=%d source=%s)",
+                state.strategy_id,
+                contract_label,
+                requested_qty,
+                approved_qty,
+                broker_qty,
+                reserved_qty,
+                source,
+            )
+        action.quantity = approved_qty
+        return self._create_exit_reservation(
+            state.strategy_id,
+            contract_key,
+            approved_qty,
+            source,
+        )
+
+    def _record_dead_order(
+        self,
+        order_id: int,
+        strategy_id: str,
+        state: Optional[StrategyState],
+        status: str,
+        reason: str,
+        active: Optional[ActiveOrder],
+    ) -> None:
+        ticker = ""
+        if state and state.ticker:
+            ticker = state.ticker
+        elif active and active.contract_dict:
+            ticker = str(active.contract_dict.get("symbol") or "").upper()
+        elif state and isinstance(state.config, dict):
+            inst = state.config.get("instrument") or {}
+            ticker = str(inst.get("symbol") or "").upper()
+
+        record = DeadOrderRecord(
+            order_id=order_id,
+            strategy_id=strategy_id,
+            ticker=ticker,
+            status=status,
+            reason=reason,
+            error_code=active.error_code if active else None,
+            error_string=active.error_string if active else "",
+            warning_text=active.warning_text if active else "",
+            why_held=active.why_held if active else "",
+            advanced_order_reject_json=active.advanced_order_reject_json if active else "",
+            perm_id=active.perm_id if active else 0,
+            filled=active.filled if active else 0.0,
+            remaining=active.remaining if active else 0.0,
+            is_entry=active.is_entry if active is not None else True,
+            placed_at=active.placed_at if active else 0.0,
+            dead_at=time.time(),
+        )
+        with self._recent_dead_orders_lock:
+            self._recent_dead_orders.append(record)
+            if len(self._recent_dead_orders) > 25:
+                self._recent_dead_orders = self._recent_dead_orders[-25:]
+
+    def _mark_order_terminal(self, order_id: int) -> None:
+        now = time.time()
+        cutoff = now - self.RECENT_TERMINAL_ORDER_TTL_SEC
+        with self._recent_terminal_orders_lock:
+            self._recent_terminal_orders[order_id] = now
+            stale = [
+                oid for oid, ts in self._recent_terminal_orders.items()
+                if ts < cutoff
+            ]
+            for oid in stale:
+                self._recent_terminal_orders.pop(oid, None)
+
+    def _was_order_recently_terminal(self, order_id: int) -> bool:
+        now = time.time()
+        cutoff = now - self.RECENT_TERMINAL_ORDER_TTL_SEC
+        with self._recent_terminal_orders_lock:
+            stale = [
+                oid for oid, ts in self._recent_terminal_orders.items()
+                if ts < cutoff
+            ]
+            for oid in stale:
+                self._recent_terminal_orders.pop(oid, None)
+            return order_id in self._recent_terminal_orders
 
     def set_global_entry_cap(self, cap: int) -> dict:
         """Set the global entry cap. Called by operator via UI/API.
@@ -740,6 +1171,15 @@ class ExecutionEngine:
         self._order_timestamps.clear()
         self._order_exec_ids.clear()
         self._exec_id_to_position.clear()
+        with self._recent_terminal_orders_lock:
+            self._recent_terminal_orders.clear()
+        with self._broker_positions_lock:
+            self._broker_positions.clear()
+        with self._managed_contract_issues_lock:
+            self._managed_contract_issues.clear()
+        with self._exit_reservations_lock:
+            self._exit_reservations.clear()
+            self._next_exit_reservation_token = 1
         # Phase 0 instrumentation maps
         self._order_pre_trade_snapshots.clear()
         self._order_contract_dicts.clear()
@@ -854,7 +1294,9 @@ class ExecutionEngine:
             self._order_strategy_map.pop(oid, None)
             with self._active_orders_lock:
                 self._active_orders.pop(oid, None)
+            self._release_exit_reservation(order_id=oid)
         self._order_timestamps.pop(strategy_id, None)
+        self._release_exit_reservation(strategy_id=strategy_id)
 
         logger.info("Unloaded strategy %s (freed %d subscriptions)", strategy_id, len(state.subscriptions))
         return {
@@ -965,14 +1407,38 @@ class ExecutionEngine:
 
                 # Update active order
                 if active:
-                    # Dedup: skip if filled hasn't changed and status is the same
-                    if active.filled == filled and active.status == status:
+                    same_lifecycle = (active.filled == filled and active.status == status)
+                    metadata_changed = any(
+                        data.get(key) not in (None, "", getattr(active, attr))
+                        for key, attr in (
+                            ("warningText", "warning_text"),
+                            ("whyHeld", "why_held"),
+                            ("errorCode", "error_code"),
+                            ("errorString", "error_string"),
+                            ("advancedOrderRejectJson", "advanced_order_reject_json"),
+                        )
+                    )
+                    # Dedup only if neither lifecycle state nor reject metadata changed
+                    if same_lifecycle and not metadata_changed:
                         continue
                     active.status = status
                     active.remaining = remaining
                     active.avg_fill_price = data.get("avgFillPrice", active.avg_fill_price)
                     active.perm_id = data.get("permId", active.perm_id)
+                    active.warning_text = data.get("warningText", active.warning_text)
+                    active.why_held = data.get("whyHeld", active.why_held)
+                    active.error_code = data.get("errorCode", active.error_code)
+                    active.error_string = data.get("errorString", active.error_string)
+                    active.advanced_order_reject_json = data.get(
+                        "advancedOrderRejectJson", active.advanced_order_reject_json
+                    )
                     active.last_update = time.time()
+                    if not active.is_entry:
+                        self._sync_exit_reservation(
+                            order_id,
+                            remaining=remaining,
+                            status=status,
+                        )
 
                     # Detect new fills (filled increased)
                     if filled > active.filled:
@@ -998,11 +1464,15 @@ class ExecutionEngine:
                                     logger.error("Strategy %s on_fill error: %s", strategy_id, e)
                         else:
                             # Order is dead (cancelled/inactive/rejected)
-                            reason = f"Order {order_id} terminal: {status}"
+                            reason = self._build_dead_order_reason(order_id, status, active)
+                            if self._should_surface_dead_order(status, active):
+                                state.errors.append(reason)
                             try:
                                 state.strategy.on_order_dead(order_id, reason, state.config)
                             except Exception as e:
                                 logger.error("Strategy %s on_order_dead error: %s", strategy_id, e)
+                            if self._should_surface_dead_order(status, active):
+                                self._record_dead_order(order_id, strategy_id, state, status, reason, active)
                             # Refund entry budget for IB-side rejections (Inactive = IB
                             # rejected post-accept, e.g. margin deficit discovered async).
                             # Don't refund user-initiated cancels (Cancelled/ApiCancelled).
@@ -1018,10 +1488,19 @@ class ExecutionEngine:
                         with self._active_orders_lock:
                             self._active_orders.pop(order_id, None)
                         self._order_strategy_map.pop(order_id, None)
+                        self._mark_order_terminal(order_id)
+                        if not active.is_entry:
+                            self._release_exit_reservation(order_id=order_id)
 
                 else:
                     # No active order entry yet -- create one (can happen if
                     # orderStatus fires before _on_order_complete runs)
+                    is_entry = True
+                    with self._exit_reservations_lock:
+                        for reservation in self._exit_reservations.values():
+                            if reservation.order_id == order_id:
+                                is_entry = False
+                                break
                     with self._active_orders_lock:
                         self._active_orders[order_id] = ActiveOrder(
                             order_id=order_id,
@@ -1031,8 +1510,20 @@ class ExecutionEngine:
                             remaining=remaining,
                             avg_fill_price=data.get("avgFillPrice", 0.0),
                             perm_id=data.get("permId", 0),
+                            warning_text=data.get("warningText", ""),
+                            why_held=data.get("whyHeld", ""),
+                            error_code=data.get("errorCode"),
+                            error_string=data.get("errorString", ""),
+                            advanced_order_reject_json=data.get("advancedOrderRejectJson", ""),
                             placed_at=time.time(),
                             last_update=time.time(),
+                            is_entry=is_entry,
+                        )
+                    if not is_entry:
+                        self._sync_exit_reservation(
+                            order_id,
+                            remaining=remaining,
+                            status=status,
                         )
                     # Process fills/terminals even for early-arriving events.
                     # Without this, a Filled event that arrives before
@@ -1046,13 +1537,23 @@ class ExecutionEngine:
                         self._persist_fill(strategy_id, state, data)
                     if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
                         if status != "Filled":
+                            with self._active_orders_lock:
+                                active = self._active_orders.get(order_id)
+                            reason = self._build_dead_order_reason(order_id, status, active)
+                            if self._should_surface_dead_order(status, active):
+                                state.errors.append(reason)
                             try:
-                                state.strategy.on_order_dead(order_id, f"Order {order_id} terminal: {status}", state.config)
+                                state.strategy.on_order_dead(order_id, reason, state.config)
                             except Exception as e:
                                 logger.error("Strategy %s on_order_dead error (early): %s", strategy_id, e)
+                            if self._should_surface_dead_order(status, active):
+                                self._record_dead_order(order_id, strategy_id, state, status, reason, active)
                         with self._active_orders_lock:
                             self._active_orders.pop(order_id, None)
                         self._order_strategy_map.pop(order_id, None)
+                        self._mark_order_terminal(order_id)
+                        if not is_entry:
+                            self._release_exit_reservation(order_id=order_id)
 
             elif event_type == "exec":
                 # execDetails: capture exec_id for commission routing
@@ -1069,12 +1570,24 @@ class ExecutionEngine:
                     # (the fill was likely already persisted with exec_id="" from orderStatus)
                     if self._position_store:
                         # Try RM position first, fall back to strategy_id
-                        updated = self._position_store.update_fill_exec_id(
-                            position_id, order_id, exec_id
+                        updated = self._position_store.update_fill_execution_details(
+                            position_id,
+                            order_id,
+                            exec_id=exec_id,
+                            execution_analytics={
+                                "exchange": data.get("exchange", ""),
+                                "last_liquidity": data.get("lastLiquidity", 0),
+                            },
                         )
                         if not updated and position_id != strategy_id:
-                            updated = self._position_store.update_fill_exec_id(
-                                strategy_id, order_id, exec_id
+                            updated = self._position_store.update_fill_execution_details(
+                                strategy_id,
+                                order_id,
+                                exec_id=exec_id,
+                                execution_analytics={
+                                    "exchange": data.get("exchange", ""),
+                                    "last_liquidity": data.get("lastLiquidity", 0),
+                                },
                             )
                         if updated:
                             logger.info("Backfilled exec_id=%s on fill for order %d (%s)",
@@ -1352,6 +1865,15 @@ class ExecutionEngine:
             state.errors.append(f"Order rejected: {reason}")
             return
 
+        exit_reservation_token = None
+        if not is_entry:
+            exit_reservation_token = self._prepare_exit_action(state, action)
+            if exit_reservation_token is None:
+                with self._inflight_lock:
+                    self._inflight_order_count = max(0, self._inflight_order_count - 1)
+                    state.inflight_orders = max(0, state.inflight_orders - 1)
+                return
+
         # ── Record for flip-flop tracking (entries only — exits don't count) ──
         if is_entry:
             self._record_order_submission(state.strategy_id)
@@ -1382,17 +1904,20 @@ class ExecutionEngine:
             self._place_order_worker,
             state.strategy_id, action.contract_dict, order_dict,
             action.pre_trade_snapshot, action.routing_exchange,
+            exit_reservation_token,
         )
         _is_entry = is_entry  # capture for closure
         _pre_trade_snapshot = action.pre_trade_snapshot  # Phase 0
         _contract_dict = action.contract_dict  # Phase 0: for post-fill quote lookups
         _routing_exchange = action.routing_exchange  # Phase 0
+        _exit_reservation_token = exit_reservation_token
         future.add_done_callback(
             lambda f: self._on_order_complete(
                 f, state.strategy_id, _is_entry,
                 pre_trade_snapshot=_pre_trade_snapshot,
                 contract_dict=_contract_dict,
                 routing_exchange=_routing_exchange,
+                exit_reservation_token=_exit_reservation_token,
             )
         )
 
@@ -1400,6 +1925,7 @@ class ExecutionEngine:
         self, strategy_id: str, contract_dict: dict, order_dict: dict,
         pre_trade_snapshot: Optional[dict] = None,
         routing_exchange: str = "SMART",
+        exit_reservation_token: Optional[int] = None,
     ) -> dict:
         """Run on the order-exec thread.  Places order and blocks until TWS ack.
 
@@ -1417,6 +1943,7 @@ class ExecutionEngine:
                 self._order_pre_trade_snapshots[order_id] = pre_trade_snapshot
             self._order_contract_dicts[order_id] = contract_dict
             self._order_routing_exchanges[order_id] = routing_exchange
+            self._bind_exit_reservation(exit_reservation_token, order_id)
 
         return self._scanner.place_order_sync(
             contract_dict, order_dict, timeout_sec=self.ORDER_TIMEOUT_SEC,
@@ -1428,6 +1955,7 @@ class ExecutionEngine:
         pre_trade_snapshot: Optional[dict] = None,
         contract_dict: Optional[dict] = None,
         routing_exchange: str = "SMART",
+        exit_reservation_token: Optional[int] = None,
     ):
         """Callback when order placement finishes (runs on order-exec thread).
 
@@ -1457,6 +1985,8 @@ class ExecutionEngine:
                 self._refund_entry_cap()
                 self._refund_ticker_budget(state)
                 logger.info("Refunded entry budget for %s (order exception)", strategy_id)
+            if not is_entry:
+                self._release_exit_reservation(token=exit_reservation_token)
             return
 
         if state:
@@ -1481,47 +2011,62 @@ class ExecutionEngine:
                     self._refund_ticker_budget(state)
                     logger.info("Refunded entry budget for %s (IB rejection: %s)",
                                 strategy_id, result["error"][:80])
+            if not is_entry:
+                self._release_exit_reservation(
+                    order_id=result.get("orderId"),
+                    token=exit_reservation_token,
+                )
         else:
             order_id = result.get("orderId")
             status = result.get("status", "")
             filled = result.get("filled", 0.0)
 
             if order_id:
+                if self._was_order_recently_terminal(order_id):
+                    if not is_entry:
+                        self._release_exit_reservation(order_id=order_id, token=exit_reservation_token)
+                    logger.info(
+                        "Order %d already reached a terminal state before "
+                        "_on_order_complete; skipping late registration",
+                        order_id,
+                    )
+                    logger.info(
+                        "Order placed for strategy %s: orderId=%s status=%s filled=%s (late ack ignored)",
+                        strategy_id, order_id, status, filled,
+                    )
+                    return
+
                 self._order_strategy_map[order_id] = strategy_id
 
                 # Register in active orders for lifecycle tracking.
                 # IMPORTANT: Don't overwrite if _drain_order_events already
                 # processed a more advanced status (e.g. Filled arrived via
                 # callback before this done-callback fired). If the order was
-                # already cleaned up (terminal), skip registration entirely.
+                # already cleaned up (terminal), the recent-terminal guard
+                # above returns before we get here.
                 with self._active_orders_lock:
                     existing = self._active_orders.get(order_id)
                     if existing is None:
-                        # Order not yet tracked OR already cleaned up (terminal).
-                        # If it was cleaned up (not in strategy map anymore), skip.
-                        if order_id in self._order_strategy_map:
-                            self._active_orders[order_id] = ActiveOrder(
-                                order_id=order_id,
-                                strategy_id=strategy_id,
-                                status=status,
-                                filled=filled,
-                                remaining=result.get("remaining", 0.0),
-                                avg_fill_price=result.get("avgFillPrice", 0.0),
-                                perm_id=result.get("permId", 0),
-                                placed_at=time.time(),
-                                last_update=time.time(),
-                                is_entry=is_entry,
-                                pre_trade_snapshot=pre_trade_snapshot,
-                                contract_dict=contract_dict,
-                                routing_exchange=routing_exchange,
-                            )
-                        else:
-                            # Already processed and cleaned up — skip
-                            logger.info(
-                                "Order %d already processed (terminal) before "
-                                "_on_order_complete — skipping registration",
-                                order_id,
-                            )
+                        self._active_orders[order_id] = ActiveOrder(
+                            order_id=order_id,
+                            strategy_id=strategy_id,
+                            status=status,
+                            filled=filled,
+                            remaining=result.get("remaining", 0.0),
+                            avg_fill_price=result.get("avgFillPrice", 0.0),
+                            perm_id=result.get("permId", 0),
+                            placed_at=time.time(),
+                            last_update=time.time(),
+                            is_entry=is_entry,
+                            warning_text=result.get("warningText", ""),
+                            why_held=result.get("whyHeld", ""),
+                            error_code=result.get("errorCode"),
+                            error_string=result.get("errorString", ""),
+                            advanced_order_reject_json=result.get("advancedOrderRejectJson", ""),
+                            pre_trade_snapshot=pre_trade_snapshot,
+                            contract_dict=contract_dict,
+                            routing_exchange=routing_exchange,
+                        )
                     # else: existing entry is more up-to-date, don't overwrite
 
                 # Notify strategy of order placement (so it can map order_id to level)
@@ -1546,6 +2091,36 @@ class ExecutionEngine:
                         with self._active_orders_lock:
                             self._active_orders.pop(order_id, None)
                         self._order_strategy_map.pop(order_id, None)
+                        self._mark_order_terminal(order_id)
+                        if not is_entry:
+                            self._release_exit_reservation(order_id=order_id)
+                elif status in ("Cancelled", "ApiCancelled", "Inactive"):
+                    with self._active_orders_lock:
+                        active = self._active_orders.get(order_id)
+                    reason = self._build_dead_order_reason(order_id, status, active)
+                    if self._should_surface_dead_order(status, active):
+                        state.errors.append(reason)
+                    try:
+                        state.strategy.on_order_dead(order_id, reason, state.config)
+                    except Exception as e2:
+                        logger.error("Strategy %s on_order_dead error: %s", strategy_id, e2)
+                    if self._should_surface_dead_order(status, active):
+                        self._record_dead_order(order_id, strategy_id, state, status, reason, active)
+                    if status == "Inactive" and is_entry and state:
+                        self._refund_entry_cap()
+                        self._refund_ticker_budget(state)
+                        logger.info(
+                            "Refunded entry budget for %s (terminal ack in _on_order_complete: order %d)",
+                            strategy_id, order_id,
+                        )
+                    with self._active_orders_lock:
+                        self._active_orders.pop(order_id, None)
+                    self._order_strategy_map.pop(order_id, None)
+                    self._mark_order_terminal(order_id)
+                    if not is_entry:
+                        self._release_exit_reservation(order_id=order_id)
+            elif not is_entry:
+                self._release_exit_reservation(token=exit_reservation_token)
 
             logger.info(
                 "Order placed for strategy %s: orderId=%s status=%s filled=%s",
@@ -1817,7 +2392,14 @@ class ExecutionEngine:
         Returns a report with matched, orphaned (in IB but not agent),
         stale (in agent but not IB), and adjusted (quantity mismatch) positions.
         """
-        report = {"matched": [], "orphaned_ib": [], "stale_agent": [], "adjusted": []}
+        report = {
+            "matched": [],
+            "orphaned_ib": [],
+            "stale_agent": [],
+            "adjusted": [],
+            "duplicate_agent": [],
+            "manual_external": [],
+        }
         if not self._position_store:
             return report
 
@@ -1827,20 +2409,23 @@ class ExecutionEngine:
             if p.get("contract", {}).get("symbol") not in IB_IGNORE_TICKERS
         ]
 
-        def _instrument_key(instr):
-            return (
-                instr.get("symbol"),
-                instr.get("strike"),
-                instr.get("expiry") or instr.get("lastTradeDateOrContractMonth"),
-                instr.get("right"),
-            )
+        self._update_broker_position_book(ib_filtered)
 
-        # Build agent position lookup
-        store_positions = {}
-        for p in self._position_store.get_all_positions():
-            if p.get("status") == "active":
-                key = _instrument_key(p.get("instrument", {}))
-                store_positions[key] = p
+        # Build agent position multimap and classify duplicates up front.
+        store_positions = self._active_store_positions_by_contract()
+        duplicate_report_by_key = {}
+        for key, positions in store_positions.items():
+            if len(positions) <= 1:
+                continue
+            duplicate_report = {
+                "instrument": key,
+                "contract_key": self._format_contract_key(key),
+                "position_ids": [pos["id"] for pos in positions],
+                "count": len(positions),
+                "ib_qty": None,
+            }
+            duplicate_report_by_key[key] = duplicate_report
+            report["duplicate_agent"].append(duplicate_report)
 
         # Check each IB position against agent store
         ib_keys = set()
@@ -1849,26 +2434,77 @@ class ExecutionEngine:
             qty = ib_pos.get("position", 0)
             if qty == 0:
                 continue
-            key = (
-                contract.get("symbol"),
-                contract.get("strike"),
-                contract.get("lastTradeDateOrContractMonth"),
-                contract.get("right"),
-            )
+            key = self._normalize_contract_key(contract)
             ib_keys.add(key)
-            if key in store_positions:
-                agent_pos = store_positions[key]
-                agent_qty = agent_pos.get("entry", {}).get("quantity", 0)
-                remaining = agent_pos.get("runtime_state", {}).get("remaining_qty", agent_qty)
-                if remaining != qty:
-                    report["adjusted"].append({
-                        "position_id": agent_pos["id"], "ib_qty": qty, "agent_qty": remaining,
+            matches = store_positions.get(key, [])
+            if len(matches) > 1:
+                duplicate_report = duplicate_report_by_key.get(key)
+                if duplicate_report is not None:
+                    duplicate_report["ib_qty"] = int(qty)
+                    duplicate_report["accounts"] = sorted({
+                        *duplicate_report.get("accounts", []),
+                        *( [ib_pos["account"]] if ib_pos.get("account") else [] ),
                     })
-                report["matched"].append(key)
-            else:
+                continue
+
+            if not matches:
                 report["orphaned_ib"].append({
-                    "instrument": key, "qty": qty, "avg_cost": ib_pos.get("avgCost"),
+                    "instrument": key,
+                    "contract_key": self._format_contract_key(key),
+                    "qty": qty,
+                    "avg_cost": ib_pos.get("avgCost"),
+                    "account": ib_pos.get("account", ""),
                 })
+                continue
+
+            agent_pos = matches[0]
+            entry = agent_pos.get("entry", {}) or {}
+            runtime_state = agent_pos.get("runtime_state", {}) or {}
+            lineage = agent_pos.get("lineage") or {}
+            agent_qty = entry.get("quantity", 0)
+            remaining = runtime_state.get("remaining_qty", agent_qty)
+            agent_entry_price = float(
+                runtime_state.get("entry_price")
+                or entry.get("price")
+                or 0.0
+            )
+            ib_avg_cost = float(ib_pos.get("avgCost") or 0.0)
+            ib_entry_price = (ib_avg_cost / 100.0) if ib_avg_cost > 0 else 0.0
+            entry_price_mismatch = (
+                ib_entry_price > 0
+                and abs(agent_entry_price - ib_entry_price) > 0.005
+            )
+            qty_mismatch = remaining != qty
+            if qty_mismatch or entry_price_mismatch:
+                adjustment = {
+                    "position_id": agent_pos["id"],
+                    "ib_qty": qty,
+                    "agent_qty": remaining,
+                    "agent_entry_price": agent_entry_price,
+                    "ib_entry_price": ib_entry_price,
+                    "orphaned_recovery": (
+                        entry.get("order_id", 0) == 0
+                        and not lineage
+                    ),
+                    "adjustment_kind": (
+                        "manual_external_reduction"
+                        if qty_mismatch and qty < remaining
+                        else "broker_qty_increase"
+                        if qty_mismatch and qty > remaining
+                        else "entry_price_mismatch"
+                    ),
+                }
+                report["adjusted"].append(adjustment)
+                if qty_mismatch and qty < remaining:
+                    report["manual_external"].append({
+                        "position_id": agent_pos["id"],
+                        "instrument": key,
+                        "contract_key": self._format_contract_key(key),
+                        "event": "partial_close",
+                        "ib_qty": int(qty),
+                        "agent_qty": int(remaining),
+                    })
+            report["matched"].append(key)
 
         # ── Auto-repair quantity mismatches (WS-E) ──
         # When IB shows a different qty than the agent, update the runtime RM
@@ -1877,6 +2513,8 @@ class ExecutionEngine:
             position_id = adj["position_id"]
             ib_qty = adj["ib_qty"]
             agent_qty = adj["agent_qty"]
+            ib_entry_price = float(adj.get("ib_entry_price") or 0.0)
+            orphaned_recovery = bool(adj.get("orphaned_recovery"))
             # Find the matching risk manager strategy
             state = self._strategies.get(position_id)
             if not state or not state.strategy:
@@ -1885,10 +2523,36 @@ class ExecutionEngine:
             if not hasattr(rm, "remaining_qty"):
                 continue
             old_qty = rm.remaining_qty
+            old_entry_price = float(getattr(rm, "entry_price", 0.0) or 0.0)
             rm.remaining_qty = ib_qty
             # Bump initial_qty if IB has more than we thought
             if hasattr(rm, "initial_qty") and ib_qty > rm.initial_qty:
                 rm.initial_qty = ib_qty
+            if ib_entry_price > 0 and hasattr(rm, "entry_price"):
+                rm.entry_price = ib_entry_price
+                old_hwm = float(getattr(rm, "high_water_mark", 0.0) or 0.0)
+                if hasattr(rm, "high_water_mark"):
+                    # Reconciliation-spawned orphan managers often start with a
+                    # single synthetic lot whose entry price becomes the HWM.
+                    # If IB later proves the true average entry was different,
+                    # reset that synthetic HWM to the authoritative cost basis.
+                    if old_hwm <= 0 or (
+                        old_entry_price > 0
+                        and abs(old_hwm - old_entry_price) < 1e-9
+                    ):
+                        rm.high_water_mark = ib_entry_price
+                    else:
+                        rm.high_water_mark = max(old_hwm, ib_entry_price)
+            if orphaned_recovery:
+                if hasattr(rm, "lifetime_opened_qty"):
+                    rm.lifetime_opened_qty = max(int(getattr(rm, "lifetime_opened_qty", 0) or 0), int(ib_qty))
+                lot_entries = getattr(rm, "_lot_entries", None)
+                if isinstance(lot_entries, list) and len(lot_entries) == 1:
+                    lot = lot_entries[0]
+                    if lot.get("order_id", 0) == 0:
+                        lot["quantity"] = int(ib_qty)
+                        if ib_entry_price > 0:
+                            lot["entry_price"] = ib_entry_price
             # Sync _completed flag with IB truth
             if hasattr(rm, "_completed"):
                 if ib_qty <= 0:
@@ -1903,37 +2567,72 @@ class ExecutionEngine:
                     )
             adj["repaired"] = True
             adj["old_qty"] = old_qty
+            adj["old_entry_price"] = old_entry_price
             logger.warning(
-                "Reconciliation AUTO-REPAIR: %s qty %d -> %d (IB authoritative)",
-                position_id, old_qty, ib_qty,
+                "Reconciliation AUTO-REPAIR: %s qty %d -> %d, entry %.4f -> %.4f (IB authoritative)",
+                position_id,
+                old_qty,
+                ib_qty,
+                old_entry_price,
+                ib_entry_price or old_entry_price,
             )
             # Persist repaired state immediately
-            if self._position_store and hasattr(rm, "get_runtime_snapshot"):
-                self._position_store.update_runtime_state(
-                    position_id, rm.get_runtime_snapshot()
-                )
-
-        # Check for agent positions not in IB
-        for key, agent_pos in store_positions.items():
-            if key not in ib_keys:
-                report["stale_agent"].append({"position_id": agent_pos["id"], "instrument": key})
-                # Tag for annotation pipeline — position closed outside agent
-                agent_pos["annotation_hint"] = {
-                    "manual_intervention": True,
-                    "intervention_type": "manual_tws_exit",
-                    "auto_note": "Position closed outside agent (IB reconciliation)",
-                }
-                self._position_store.mark_closed(agent_pos["id"], exit_reason="reconciliation")
-                # Unload the risk manager strategy so it doesn't linger in the
-                # engine and appear as an orphan on the dashboard.
-                position_id = agent_pos["id"]
-                if position_id in self._strategies:
-                    self.unload_strategy(position_id)
-                    logger.info(
-                        "Reconciliation: unloaded stale risk manager %s",
-                        position_id,
+            if self._position_store:
+                entry_updates = {"quantity": int(getattr(rm, "initial_qty", ib_qty) or ib_qty)}
+                if ib_entry_price > 0:
+                    entry_updates["price"] = ib_entry_price
+                self._position_store.update_entry(position_id, entry_updates)
+                if getattr(state, "config", None) is not None:
+                    state.config.setdefault("position", {})["quantity"] = entry_updates["quantity"]
+                    if ib_entry_price > 0:
+                        state.config["position"]["entry_price"] = ib_entry_price
+                self._position_store.update_risk_config(position_id, {
+                    "position": {
+                        "quantity": entry_updates["quantity"],
+                        "entry_price": ib_entry_price if ib_entry_price > 0 else old_entry_price,
+                    }
+                })
+                if hasattr(rm, "get_runtime_snapshot"):
+                    self._position_store.update_runtime_state(
+                        position_id, rm.get_runtime_snapshot()
                     )
 
+        # Check for agent positions not in IB
+        for key, agent_positions in store_positions.items():
+            if key not in ib_keys:
+                for agent_pos in agent_positions:
+                    report["stale_agent"].append({"position_id": agent_pos["id"], "instrument": key})
+                    # Tag for annotation pipeline — position closed outside agent
+                    agent_pos["annotation_hint"] = {
+                        "manual_intervention": True,
+                        "intervention_type": "manual_tws_exit",
+                        "auto_note": "Position closed outside agent (IB reconciliation)",
+                    }
+                    report["manual_external"].append({
+                        "position_id": agent_pos["id"],
+                        "instrument": key,
+                        "contract_key": self._format_contract_key(key),
+                        "event": "full_close",
+                        "ib_qty": 0,
+                        "agent_qty": int(
+                            (agent_pos.get("runtime_state", {}) or {}).get(
+                                "remaining_qty",
+                                (agent_pos.get("entry", {}) or {}).get("quantity", 0),
+                            )
+                        ),
+                    })
+                    self._position_store.mark_closed(agent_pos["id"], exit_reason="manual_tws_exit")
+                    # Unload the risk manager strategy so it doesn't linger in the
+                    # engine and appear as an orphan on the dashboard.
+                    position_id = agent_pos["id"]
+                    if position_id in self._strategies:
+                        self.unload_strategy(position_id)
+                        logger.info(
+                            "Reconciliation: unloaded stale risk manager %s",
+                            position_id,
+                        )
+
+        self._set_managed_contract_issues(report)
         return report
 
     # ── Status / telemetry ──
@@ -2036,8 +2735,35 @@ class ExecutionEngine:
                     "avg_fill_price": ao.avg_fill_price,
                     "placed_at": ao.placed_at,
                     "last_update": ao.last_update,
+                    "warning_text": ao.warning_text,
+                    "why_held": ao.why_held,
+                    "error_code": ao.error_code,
+                    "error_string": ao.error_string,
+                    "advanced_order_reject_json": ao.advanced_order_reject_json,
                 }
                 for ao in self._active_orders.values()
+            ]
+        with self._recent_dead_orders_lock:
+            recent_dead_orders_info = [
+                {
+                    "order_id": rec.order_id,
+                    "strategy_id": rec.strategy_id,
+                    "ticker": rec.ticker,
+                    "status": rec.status,
+                    "reason": rec.reason,
+                    "error_code": rec.error_code,
+                    "error_string": rec.error_string,
+                    "warning_text": rec.warning_text,
+                    "why_held": rec.why_held,
+                    "advanced_order_reject_json": rec.advanced_order_reject_json,
+                    "perm_id": rec.perm_id,
+                    "filled": rec.filled,
+                    "remaining": rec.remaining,
+                    "is_entry": rec.is_entry,
+                    "placed_at": rec.placed_at,
+                    "dead_at": rec.dead_at,
+                }
+                for rec in self._recent_dead_orders
             ]
 
         return {
@@ -2051,12 +2777,14 @@ class ExecutionEngine:
             "available_scan_lines": self._resource_manager.available_for_scan,
             "quote_snapshot": self._cache.get_all_serialized(),
             "active_orders": active_orders_info,
+            "recent_dead_orders": recent_dead_orders_info,
             # Backward-compatible aliases
             "order_budget": self._global_entry_cap,
             "total_algo_orders": self._total_entries_placed,
             # New budget structure
             "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
+            "managed_contracts": self._managed_contracts_status(),
             "trade_attribution_summary": self._get_trade_attribution_summary(),
             "trade_attribution_session": self._get_trade_attribution_session(),
             # Connection health
@@ -2070,8 +2798,33 @@ class ExecutionEngine:
         with self._active_orders_lock:
             active_orders_info = [
                 {"order_id": ao.order_id, "strategy_id": ao.strategy_id,
-                 "status": ao.status, "filled": ao.filled, "placed_at": ao.placed_at}
+                 "status": ao.status, "filled": ao.filled, "placed_at": ao.placed_at,
+                 "warning_text": ao.warning_text, "why_held": ao.why_held,
+                 "error_code": ao.error_code, "error_string": ao.error_string,
+                 "advanced_order_reject_json": ao.advanced_order_reject_json}
                 for ao in self._active_orders.values()
+            ]
+        with self._recent_dead_orders_lock:
+            recent_dead_orders_info = [
+                {
+                    "order_id": rec.order_id,
+                    "strategy_id": rec.strategy_id,
+                    "ticker": rec.ticker,
+                    "status": rec.status,
+                    "reason": rec.reason,
+                    "error_code": rec.error_code,
+                    "error_string": rec.error_string,
+                    "warning_text": rec.warning_text,
+                    "why_held": rec.why_held,
+                    "advanced_order_reject_json": rec.advanced_order_reject_json,
+                    "perm_id": rec.perm_id,
+                    "filled": rec.filled,
+                    "remaining": rec.remaining,
+                    "is_entry": rec.is_entry,
+                    "placed_at": rec.placed_at,
+                    "dead_at": rec.dead_at,
+                }
+                for rec in self._recent_dead_orders
             ]
         return {
             "running": self._running,
@@ -2094,6 +2847,7 @@ class ExecutionEngine:
                 for s in self._strategies.values()
             ],
             "active_orders": active_orders_info,
+            "recent_dead_orders": recent_dead_orders_info,
             "inflight_orders_total": self._inflight_order_count,
             "lines_held": self._resource_manager.execution_lines_held,
             "quote_snapshot": self._cache.get_all_serialized(),
@@ -2103,6 +2857,7 @@ class ExecutionEngine:
             # New budget structure
             "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
+            "managed_contracts": self._managed_contracts_status(),
             # Trade attribution (realized P&L from closed positions)
             "trade_attribution_summary": self._get_trade_attribution_summary(),
             "trade_attribution_session": self._get_trade_attribution_session(),

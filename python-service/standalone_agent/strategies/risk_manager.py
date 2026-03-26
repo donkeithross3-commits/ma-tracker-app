@@ -587,6 +587,90 @@ class RiskManagerStrategy(ExecutionStrategy):
                 level_key, filled_delta, remaining_to_allocate, self.cache_key,
             )
 
+    def _reconstruct_lot_remaining_qty(self) -> Dict[int, int]:
+        """Rebuild per-lot remaining quantities from lot entries and fill log.
+
+        Aggregate fills are allocated FIFO across lots to match the runtime
+        semantics used when aggregate exits retire per-lot state.
+        """
+        lot_remaining = {
+            lot_idx: max(0, int(round(float(lot.get("quantity", 0) or 0.0))))
+            for lot_idx, lot in enumerate(self._lot_entries)
+        }
+
+        for fill in self._fill_log:
+            if fill.get("level") == "entry":
+                continue
+            qty_remaining_to_allocate = max(
+                0,
+                int(round(float(fill.get("qty_filled", 0) or 0.0))),
+            )
+            if qty_remaining_to_allocate <= 0:
+                continue
+
+            lot_idx = fill.get("lot_idx")
+            if lot_idx is not None:
+                try:
+                    lot_idx = int(lot_idx)
+                except (TypeError, ValueError):
+                    lot_idx = None
+            if lot_idx is not None and lot_idx in lot_remaining:
+                consume = min(lot_remaining[lot_idx], qty_remaining_to_allocate)
+                lot_remaining[lot_idx] -= consume
+                qty_remaining_to_allocate -= consume
+
+            for candidate_idx in sorted(lot_remaining):
+                if qty_remaining_to_allocate <= 0:
+                    break
+                candidate_remaining = lot_remaining[candidate_idx]
+                if candidate_remaining <= 0:
+                    continue
+                consume = min(candidate_remaining, qty_remaining_to_allocate)
+                lot_remaining[candidate_idx] -= consume
+                qty_remaining_to_allocate -= consume
+
+        return lot_remaining
+
+    def _initialize_per_lot_trailing(self, trail_cfg: dict) -> None:
+        """Seed per-lot trailing state from lots plus realized exit history."""
+        reconstructed_remaining = self._reconstruct_lot_remaining_qty()
+        self._per_lot_trailing = {}
+        tranches = trail_cfg.get("exit_tranches") or []
+        for lot_idx, lot in enumerate(self._lot_entries):
+            remaining_qty = reconstructed_remaining.get(
+                lot_idx,
+                max(0, int(round(float(lot.get("quantity", 0) or 0.0)))),
+            )
+            lot_state = self._make_lot_trailing_state(
+                lot_idx,
+                float(lot.get("entry_price", self.entry_price) or self.entry_price or 0.0),
+                remaining_qty,
+                trail_cfg,
+            )
+            lot_state.high_water_mark = self.high_water_mark
+            lot_state.trailing_tranche_idx = self._trailing_tranche_idx
+            if self._trailing_active and remaining_qty > 0:
+                lot_state.trailing_active = True
+                effective_trail_pct = lot_state.trail_pct
+                if tranches and lot_state.trailing_tranche_idx < len(tranches):
+                    effective_trail_pct = tranches[lot_state.trailing_tranche_idx].get(
+                        "trail_pct",
+                        effective_trail_pct,
+                    )
+                if self.is_long:
+                    lot_state.trailing_stop_price = (
+                        lot_state.high_water_mark * (1.0 - effective_trail_pct / 100.0)
+                    )
+                else:
+                    lot_state.trailing_stop_price = (
+                        lot_state.high_water_mark * (1.0 + effective_trail_pct / 100.0)
+                    )
+            self._per_lot_trailing[lot_idx] = lot_state
+            level_key = f"trailing_lot_{lot_idx}"
+            self._level_states[level_key] = (
+                LevelState.ARMED if remaining_qty > 0 else LevelState.FILLED
+            )
+
     # ── Lot aggregation ──
 
     def add_lot(self, entry_price: float, quantity: int, order_id: int = 0,
@@ -1061,6 +1145,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         # Restore per-lot trailing mode
         self._trailing_mode = state.get("trailing_mode", "uniform")
         persisted_per_lot = state.get("per_lot_trailing")
+        rebuild_per_lot_from_lots = False
         if persisted_per_lot:
             self._per_lot_trailing = {
                 int(k): LotTrailingState.from_dict(v)
@@ -1072,6 +1157,8 @@ class RiskManagerStrategy(ExecutionStrategy):
                 if level_key not in self._level_states:
                     self._level_states[level_key] = LevelState.ARMED
                 self._per_lot_trailing[lot_idx].trailing_tranche_pending = False
+        elif self._trailing_mode == "per_lot":
+            rebuild_per_lot_from_lots = True
 
         # Restore entry timestamp (for EOD close-out same-day detection)
         if state.get("entry_timestamp"):
@@ -1081,6 +1168,10 @@ class RiskManagerStrategy(ExecutionStrategy):
         persisted_lots = state.get("lot_entries")
         if persisted_lots:
             self._lot_entries = list(persisted_lots)
+
+        if rebuild_per_lot_from_lots:
+            trail_cfg = self._risk_config.get("profit_taking", {}).get("trailing_stop", {})
+            self._initialize_per_lot_trailing(trail_cfg)
 
         persisted_levels = state.get("level_states", {})
         for key, value in persisted_levels.items():
@@ -1279,20 +1370,14 @@ class RiskManagerStrategy(ExecutionStrategy):
                 self._trailing_mode = new_mode
                 changes["updated_fields"].append(f"trailing_mode_{old_mode}_to_{new_mode}")
                 if new_mode == "per_lot" and not self._per_lot_trailing:
-                    # Initialize per-lot state from existing lots
-                    for i, lot in enumerate(self._lot_entries):
-                        self._per_lot_trailing[i] = self._make_lot_trailing_state(
-                            i, lot["entry_price"], lot["quantity"], new_ts
-                        )
-                        # Seed HWM from current aggregate HWM
-                        self._per_lot_trailing[i].high_water_mark = self.high_water_mark
-                        level_key = f"trailing_lot_{i}"
-                        if level_key not in self._level_states:
-                            self._level_states[level_key] = LevelState.ARMED
+                    self._initialize_per_lot_trailing(new_ts)
                     # Remove uniform trailing level
-                    if "trailing" in self._level_states and self._level_states["trailing"] == LevelState.ARMED:
-                        del self._level_states["trailing"]
-                    logger.info("Switched to per-lot trailing: %d lots initialized", len(self._per_lot_trailing))
+                    self._level_states.pop("trailing", None)
+                    logger.info(
+                        "Switched to per-lot trailing: %d lots initialized (remaining=%d)",
+                        len(self._per_lot_trailing),
+                        self.remaining_qty,
+                    )
                 elif new_mode == "uniform" and self._per_lot_trailing:
                     # Collapse back: use max HWM from all lots
                     if self._per_lot_trailing:

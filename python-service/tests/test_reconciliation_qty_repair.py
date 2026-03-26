@@ -23,6 +23,16 @@ class MockPositionStore:
     def update_runtime_state(self, position_id, state):
         self._runtime_updates.append((position_id, state))
 
+    def update_entry(self, position_id, updates):
+        for p in self._positions:
+            if p["id"] == position_id:
+                p.setdefault("entry", {}).update(updates)
+
+    def update_risk_config(self, position_id, updates):
+        for p in self._positions:
+            if p["id"] == position_id:
+                p.setdefault("risk_config", {}).update(updates)
+
     def mark_closed(self, position_id, exit_reason=""):
         for p in self._positions:
             if p["id"] == position_id:
@@ -54,6 +64,9 @@ class MockScanner:
 
 
 class MockResourceManager:
+    execution_lines_held = 0
+    available_for_scan = 50
+
     def allocate_execution_lines(self, n):
         return n
 

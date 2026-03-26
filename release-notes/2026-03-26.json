@@ -29,6 +29,15 @@
       "category": "trading",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "options-broker-truth-exit-ownership-guardrails",
+      "title": "Broker-Truth Exit Ownership Guardrails",
+      "summary": "Managed option contracts now reconcile against IB with duplicate-owner detection, broker-quantity exit clamps, and a dashboard signal that separates broker truth from engine ownership.",
+      "description": "The trading engine now classifies reconciliation results by contract instead of flattening them into a single active position record. If multiple active managers claim the same live contract, the engine fails closed for that contract instead of guessing which one should be allowed to exit. Exit paths now reserve broker-visible quantity before placing orders, so competing grouped and per-lot exits cannot sell beyond what IB says is still open. The Signals panel also surfaces broker snapshot freshness and engine ownership status together, making it clearer when the UI is showing broker-confirmed state versus engine-managed state.",
+      "category": "trading",
+      "image": null,
+      "screenshot": null
     }
   ]
 }
