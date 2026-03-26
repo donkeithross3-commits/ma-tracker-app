@@ -2,7 +2,11 @@
 set -euo pipefail
 
 PORT="${FASTAPI_PORT:-8000}"
-LISTENER_PIDS="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | awk '!seen[$0]++')"
+LISTENER_PIDS="$(
+  {
+    lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true
+  } | awk '!seen[$0]++'
+)"
 
 if [[ -z "$LISTENER_PIDS" ]]; then
   exit 0
@@ -20,12 +24,12 @@ for pid in $LISTENER_PIDS; do
   case "$cmdline" in
     *start_server.py*)
       echo "Evicting legacy start_server.py listener on port $PORT (pid $pid)"
-      kill "$pid"
+      kill "$pid" 2>/dev/null || true
       evicted_listener=1
       ;;
     *uvicorn\ app.main:app*)
       echo "Evicting manual uvicorn listener on port $PORT (pid $pid)"
-      kill "$pid"
+      kill "$pid" 2>/dev/null || true
       evicted_listener=1
       ;;
     *)
