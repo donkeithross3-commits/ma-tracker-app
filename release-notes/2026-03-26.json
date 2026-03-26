@@ -38,6 +38,15 @@
       "category": "trading",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "options-orphan-carry-template-recovery",
+      "title": "Persisted Template Recovery For Orphan Carries",
+      "summary": "Orphaned option positions now rebuild from persisted same-contract history before falling back to parent presets, preserving risk behavior across restarts and prior-day carries.",
+      "description": "When IB reports an open option contract that no live risk manager currently owns, the engine now looks for the strongest persisted same-contract template in the position store and uses that historical risk config, lineage, fill log, and lot state to recover management. That means previous-day carry positions can reattach even when the original parent model is no longer running, and broker-side quantity changes are clamped back onto the recovered lot state so per-lot and grouped exits stay aligned with IB after the orphan recovery.",
+      "category": "trading",
+      "image": null,
+      "screenshot": null
     }
   ]
 }

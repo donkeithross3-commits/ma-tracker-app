@@ -488,3 +488,139 @@ def test_recover_persisted_orphan_rebuilds_per_lot_remaining_without_parent_mode
         assert recovered_state.ticker == "SPY"
         assert recovered_rm.remaining_qty == 1
         assert sum(lot.remaining_qty for lot in recovered_rm._per_lot_trailing.values()) == 1
+
+
+def test_orphan_spawn_prefers_persisted_same_contract_template_when_parent_missing():
+    instrument = make_instrument(strike=652, expiry="20260328")
+    config = make_rm_config(
+        instrument=instrument,
+        qty=1,
+        entry_price=1.1,
+        trailing_mode="per_lot",
+        targets=[{"trigger_pct": 40, "exit_pct": 100}],
+        exit_tranches=[{"exit_pct": 100}],
+    )
+    seed_rm = RiskManagerStrategy()
+    seed_rm.on_start(config)
+    runtime_state = seed_rm.get_runtime_snapshot()
+    runtime_state["trailing_mode"] = "per_lot"
+    runtime_state.pop("per_lot_trailing", None)
+    lineage = {"model_version": "dr3-bmc-v5", "signal_id": "sig-652"}
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_path = os.path.join(tmpdir, "position_store.json")
+        store = PositionStore(path=store_path)
+        store.add_position(
+            position_id="bmc_risk_template",
+            entry={
+                "order_id": 52,
+                "price": 1.1,
+                "quantity": 1,
+                "fill_time": 52.0,
+                "perm_id": 52,
+            },
+            instrument=instrument,
+            risk_config=config,
+            parent_strategy="bmc_missing_parent",
+        )
+        store.update_runtime_state("bmc_risk_template", runtime_state)
+        store.set_lineage("bmc_risk_template", lineage)
+        store.mark_closed("bmc_risk_template", exit_reason="stale_reconciliation")
+
+        agent = IBDataAgent()
+        agent.position_store = store
+        engine, _ = make_engine(store)
+        agent.execution_engine = engine
+
+        spawned = agent._spawn_missing_risk_managers([
+            {
+                "instrument": (
+                    instrument["symbol"],
+                    instrument["strike"],
+                    instrument["expiry"],
+                    instrument["right"],
+                ),
+                "qty": 1,
+                "avg_cost": 110.0,
+            }
+        ])
+
+        assert spawned == 1
+        active_positions = store.get_active_positions()
+        assert len(active_positions) == 1
+        recovered_pos = active_positions[0]
+        recovered_state = engine._strategies[recovered_pos["id"]]
+        recovered_rm = recovered_state.strategy
+
+        assert recovered_pos["parent_strategy"] == "bmc_missing_parent"
+        assert recovered_pos["lineage"] == lineage
+        assert recovered_state.ticker == "SPY"
+        assert recovered_rm._risk_config["profit_taking"]["trailing_stop"]["mode"] == "per_lot"
+        assert recovered_rm.remaining_qty == 1
+        assert sum(lot.remaining_qty for lot in recovered_rm._per_lot_trailing.values()) == 1
+
+
+def test_orphan_spawn_clamps_template_history_to_broker_qty():
+    instrument = make_instrument(strike=653, expiry="20260328")
+    config = make_rm_config(
+        instrument=instrument,
+        qty=1,
+        entry_price=1.0,
+        trailing_mode="uniform",
+        targets=[{"trigger_pct": 50, "exit_pct": 50}],
+        exit_tranches=[{"exit_pct": 100}],
+    )
+    seed_rm = RiskManagerStrategy()
+    seed_rm.on_start(config)
+    seed_rm.add_lot(entry_price=1.2, quantity=1, order_id=63, fill_time=63.0, perm_id=63)
+    runtime_state = seed_rm.get_runtime_snapshot()
+    runtime_state["trailing_mode"] = "per_lot"
+    runtime_state.pop("per_lot_trailing", None)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store_path = os.path.join(tmpdir, "position_store.json")
+        store = PositionStore(path=store_path)
+        store.add_position(
+            position_id="bmc_risk_template",
+            entry={
+                "order_id": 62,
+                "price": seed_rm.entry_price,
+                "quantity": seed_rm.initial_qty,
+                "fill_time": 62.0,
+                "perm_id": 62,
+            },
+            instrument=instrument,
+            risk_config=config,
+            parent_strategy="bmc_missing_parent",
+        )
+        store.update_runtime_state("bmc_risk_template", runtime_state)
+        for fill in seed_rm._fill_log:
+            store.add_fill("bmc_risk_template", dict(fill))
+        store.mark_closed("bmc_risk_template", exit_reason="stale_reconciliation")
+
+        agent = IBDataAgent()
+        agent.position_store = store
+        engine, _ = make_engine(store)
+        agent.execution_engine = engine
+
+        spawned = agent._spawn_missing_risk_managers([
+            {
+                "instrument": (
+                    instrument["symbol"],
+                    instrument["strike"],
+                    instrument["expiry"],
+                    instrument["right"],
+                ),
+                "qty": 1,
+                "avg_cost": 120.0,
+            }
+        ])
+
+        assert spawned == 1
+        recovered_pos = store.get_active_positions()[0]
+        recovered_rm = engine._strategies[recovered_pos["id"]].strategy
+
+        assert recovered_rm.remaining_qty == 1
+        assert sum(lot.remaining_qty for lot in recovered_rm._per_lot_trailing.values()) == 1
+        assert recovered_pos["fill_log"][-1]["level"] == "broker_reconcile_exit"
+        assert recovered_pos["fill_log"][-1]["remaining_qty"] == 1

@@ -25,6 +25,7 @@ Environment variables:
 """
 
 import asyncio
+import copy
 import json
 import logging
 import math
@@ -2895,6 +2896,10 @@ class IBDataAgent:
             logger.warning("Cannot spawn risk manager: execution engine not initialized")
             return False
 
+        recovery_entry = risk_config.pop("_recovery_entry", None)
+        recovery_runtime_state = risk_config.pop("_recovery_runtime_state", None)
+        recovery_fill_log = risk_config.pop("_recovery_fill_log", None)
+
         # Extract lineage before passing to risk manager (WS2)
         lineage = risk_config.pop("lineage", None)
 
@@ -2931,7 +2936,7 @@ class IBDataAgent:
             # Persist the new position in the store
             self.position_store.add_position(
                 position_id=strategy_id,
-                entry={
+                entry=recovery_entry or {
                     "order_id": pos_info.get("order_id", 0),
                     "price": pos_info.get("entry_price", 0),
                     "quantity": pos_info.get("quantity", 0),
@@ -2945,6 +2950,12 @@ class IBDataAgent:
             # Attach lineage to position record (WS2)
             if lineage:
                 self.position_store.set_lineage(strategy_id, lineage)
+            if recovery_fill_log:
+                strategy._fill_log = copy.deepcopy(recovery_fill_log)
+                for fill in recovery_fill_log:
+                    self.position_store.add_fill(strategy_id, fill)
+            if recovery_runtime_state:
+                strategy.restore_runtime_state(copy.deepcopy(recovery_runtime_state))
             # Record the entry fill in the ledger.
             # Skipped for reconciliation spawns (record_fill=False) to avoid
             # creating phantom Trade Log rows for non-real entries.
@@ -2993,6 +3004,226 @@ class IBDataAgent:
             ):
                 return sid
         return None
+
+    @staticmethod
+    def _normalize_recovery_contract_key(instrument_or_key) -> tuple:
+        """Normalize contract identity for store/template lookups."""
+        if isinstance(instrument_or_key, tuple):
+            symbol, strike, expiry, right = (list(instrument_or_key) + ["", 0.0, "", ""])[:4]
+        else:
+            instrument = instrument_or_key or {}
+            symbol = instrument.get("symbol")
+            strike = instrument.get("strike")
+            expiry = instrument.get("expiry") or instrument.get("lastTradeDateOrContractMonth")
+            right = instrument.get("right")
+        try:
+            strike_value = round(float(strike or 0.0), 6)
+        except (TypeError, ValueError):
+            strike_value = 0.0
+        return (
+            str(symbol or "").upper(),
+            strike_value,
+            str(expiry or ""),
+            str(right or "").upper(),
+        )
+
+    def _select_orphan_recovery_template(self, instrument: dict) -> Optional[dict]:
+        """Pick the strongest persisted same-contract template for orphan recovery."""
+        if not self.position_store:
+            return None
+
+        target_key = self._normalize_recovery_contract_key(instrument)
+        best_match = None
+        best_score = None
+
+        for position in self.position_store.get_all_positions():
+            if self._normalize_recovery_contract_key(position.get("instrument", {})) != target_key:
+                continue
+            runtime_state = position.get("runtime_state") or {}
+            fill_log = position.get("fill_log") or []
+            lot_entries = runtime_state.get("lot_entries") or []
+            score = (
+                1 if position.get("status") == "active" else 0,
+                1 if runtime_state else 0,
+                len(lot_entries),
+                len(fill_log),
+                1 if position.get("lineage") else 0,
+                float(position.get("closed_at") or position.get("created_at") or 0.0),
+            )
+            if best_match is None or score > best_score:
+                best_match = position
+                best_score = score
+
+        return copy.deepcopy(best_match) if best_match else None
+
+    @staticmethod
+    def _estimate_template_remaining_qty(template: dict) -> int:
+        runtime_state = template.get("runtime_state") or {}
+        lot_entries = copy.deepcopy(runtime_state.get("lot_entries") or [])
+        fill_log = copy.deepcopy(template.get("fill_log") or [])
+        if lot_entries:
+            try:
+                from strategies.risk_manager import RiskManagerStrategy
+
+                probe = RiskManagerStrategy()
+                probe._lot_entries = lot_entries
+                probe._fill_log = fill_log
+                return sum(probe._reconstruct_lot_remaining_qty().values())
+            except Exception:
+                logger.debug("Failed to estimate template remaining qty", exc_info=True)
+        try:
+            return int(
+                runtime_state.get("remaining_qty")
+                or template.get("entry", {}).get("quantity")
+                or template.get("risk_config", {}).get("position", {}).get("quantity")
+                or 0
+            )
+        except (TypeError, ValueError):
+            return 0
+
+    def _build_orphan_spawn_payload(
+        self,
+        *,
+        instrument: dict,
+        qty: int,
+        entry_price: float,
+        parent_sid: Optional[str],
+        parent_config: dict,
+    ) -> dict:
+        """Build broker-authoritative recovery payload for an orphaned IB contract."""
+        ticker = (instrument.get("symbol") or "").upper()
+        fallback_parent_sid = parent_sid or f"bmc_{ticker.lower()}"
+        template = self._select_orphan_recovery_template(instrument)
+
+        if template:
+            risk_config = copy.deepcopy(template.get("risk_config") or {})
+            risk_config.setdefault("position", {})
+            risk_config["instrument"] = copy.deepcopy(instrument)
+            risk_config["position"].setdefault("side", "LONG")
+            if entry_price > 0:
+                risk_config["position"]["entry_price"] = entry_price
+
+            recovery_entry = copy.deepcopy(template.get("entry") or {})
+            recovery_runtime_state = copy.deepcopy(template.get("runtime_state") or {})
+            recovery_fill_log = copy.deepcopy(template.get("fill_log") or [])
+            parent_sid = template.get("parent_strategy") or fallback_parent_sid
+
+            if recovery_runtime_state:
+                lot_entries = recovery_runtime_state.setdefault("lot_entries", [])
+                if not lot_entries and recovery_entry:
+                    lot_entries.append({
+                        "order_id": recovery_entry.get("order_id", 0),
+                        "entry_price": recovery_entry.get("price", entry_price),
+                        "quantity": recovery_entry.get("quantity", qty),
+                        "fill_time": recovery_entry.get("fill_time", time.time()),
+                        "perm_id": recovery_entry.get("perm_id", 0),
+                    })
+
+                historical_remaining = self._estimate_template_remaining_qty(template)
+                synthetic_fill_time = time.time()
+                if qty < historical_remaining:
+                    recovery_fill_log.append({
+                        "time": synthetic_fill_time,
+                        "order_id": 0,
+                        "level": "broker_reconcile_exit",
+                        "qty_filled": historical_remaining - qty,
+                        "avg_price": entry_price if entry_price > 0 else float(recovery_entry.get("price", 0.0) or 0.0),
+                        "remaining_qty": qty,
+                        "pnl_pct": 0.0,
+                        "execution_analytics": {
+                            "synthetic": True,
+                            "source": "ib_orphan_reconcile",
+                            "event": "broker_qty_clamp",
+                        },
+                    })
+                elif qty > historical_remaining:
+                    lot_entries.append({
+                        "order_id": 0,
+                        "entry_price": entry_price if entry_price > 0 else float(recovery_entry.get("price", 0.0) or 0.0),
+                        "quantity": qty - historical_remaining,
+                        "fill_time": synthetic_fill_time,
+                        "perm_id": 0,
+                    })
+
+                prior_initial_qty = int(
+                    recovery_runtime_state.get("initial_qty")
+                    or recovery_entry.get("quantity")
+                    or risk_config["position"].get("quantity")
+                    or historical_remaining
+                    or 0
+                )
+                recovery_runtime_state["remaining_qty"] = int(qty)
+                recovery_runtime_state["initial_qty"] = max(prior_initial_qty, int(qty))
+                if entry_price > 0:
+                    recovery_runtime_state["entry_price"] = entry_price
+                if recovery_runtime_state.get("trailing_mode") == "per_lot":
+                    recovery_runtime_state.pop("per_lot_trailing", None)
+                risk_config["position"]["quantity"] = int(recovery_runtime_state["initial_qty"])
+            else:
+                risk_config["position"]["quantity"] = int(
+                    risk_config["position"].get("quantity") or qty
+                )
+
+            recovery_entry.setdefault("order_id", 0)
+            recovery_entry.setdefault("perm_id", 0)
+            recovery_entry["price"] = entry_price if entry_price > 0 else float(recovery_entry.get("price", 0.0) or 0.0)
+            recovery_entry["quantity"] = int(
+                recovery_runtime_state.get("initial_qty")
+                if recovery_runtime_state
+                else (recovery_entry.get("quantity") or qty)
+            )
+            recovery_entry["fill_time"] = recovery_entry.get("fill_time", time.time()) or time.time()
+
+            risk_config["_parent_strategy_id"] = parent_sid
+            if template.get("lineage"):
+                risk_config["lineage"] = copy.deepcopy(template.get("lineage"))
+            risk_config["_recovery_entry"] = recovery_entry
+            if recovery_runtime_state:
+                risk_config["_recovery_runtime_state"] = recovery_runtime_state
+            if recovery_fill_log:
+                risk_config["_recovery_fill_log"] = recovery_fill_log
+            return {
+                "risk_config": risk_config,
+                "parent_sid": parent_sid,
+                "source": "persisted_same_contract_template",
+            }
+
+        risk_preset = parent_config.get("risk_preset", "zero_dte_convexity")
+        if risk_preset == "custom":
+            risk_section: dict = {
+                "stop_loss": {
+                    "enabled": parent_config.get("risk_stop_loss_enabled", False),
+                    "type": parent_config.get("risk_stop_loss_type", "none"),
+                    "trigger_pct": parent_config.get("risk_stop_loss_trigger_pct", -80.0),
+                },
+                "profit_taking": {
+                    "enabled": parent_config.get("risk_profit_targets_enabled", True),
+                    "targets": parent_config.get("risk_profit_targets", []),
+                    "trailing_stop": {
+                        "enabled": parent_config.get("risk_trailing_enabled", True),
+                        "activation_pct": parent_config.get("risk_trailing_activation_pct", 25),
+                        "trail_pct": parent_config.get("risk_trailing_trail_pct", 15),
+                    },
+                },
+                "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
+            }
+        else:
+            risk_section = {"preset": risk_preset}
+
+        return {
+            "risk_config": {
+                **risk_section,
+                "instrument": copy.deepcopy(instrument),
+                "position": {
+                    "side": "LONG",
+                    "quantity": int(qty),
+                    "entry_price": entry_price,
+                },
+                "_parent_strategy_id": fallback_parent_sid,
+            },
+            "parent_sid": parent_sid,
+            "source": "parent_strategy" if parent_sid else "preset_fallback",
+        }
 
     def _spawn_missing_risk_managers(self, orphaned_ib: list) -> int:
         """Auto-spawn risk managers for IB option positions not tracked by the agent.
@@ -3062,47 +3293,16 @@ class IBDataAgent:
                     parent_config = state.config or {}
                     break
 
-            # ── Build risk config — use parent's preset, fall back to zero_dte_convexity ──
-            risk_preset = parent_config.get("risk_preset", "zero_dte_convexity")
-            if risk_preset == "custom":
-                risk_section: dict = {
-                    "stop_loss": {
-                        "enabled": parent_config.get("risk_stop_loss_enabled", False),
-                        "type": parent_config.get("risk_stop_loss_type", "none"),
-                        "trigger_pct": parent_config.get("risk_stop_loss_trigger_pct", -80.0),
-                    },
-                    "profit_taking": {
-                        "enabled": parent_config.get("risk_profit_targets_enabled", True),
-                        "targets": parent_config.get("risk_profit_targets", []),
-                        "trailing_stop": {
-                            "enabled": parent_config.get("risk_trailing_enabled", True),
-                            "activation_pct": parent_config.get("risk_trailing_activation_pct", 25),
-                            "trail_pct": parent_config.get("risk_trailing_trail_pct", 15),
-                        },
-                    },
-                    "execution": {"stop_order_type": "MKT", "profit_order_type": "MKT"},
-                }
-            else:
-                risk_section = {"preset": risk_preset}
-
-            risk_config = {
-                **risk_section,
-                "instrument": {
-                    "symbol": symbol,
-                    "secType": "OPT",
-                    "exchange": "SMART",
-                    "currency": "USD",
-                    "strike": float(strike) if strike else 0.0,
-                    "expiry": expiry or "",
-                    "right": right or "C",
-                },
-                "position": {
-                    "side": "LONG",
-                    "quantity": int(qty),
-                    "entry_price": entry_price,
-                },
-                "_parent_strategy_id": parent_sid or f"bmc_{ticker.lower()}",
-            }
+            recovery_payload = self._build_orphan_spawn_payload(
+                instrument=inst_dict,
+                qty=int(qty),
+                entry_price=entry_price,
+                parent_sid=parent_sid,
+                parent_config=parent_config,
+            )
+            risk_config = recovery_payload["risk_config"]
+            parent_sid = recovery_payload.get("parent_sid") or parent_sid
+            recovery_source = recovery_payload.get("source", "unknown")
 
             try:
                 spawn_ok = self._spawn_risk_manager_for_bmc(risk_config, record_fill=False)
@@ -3116,8 +3316,8 @@ class IBDataAgent:
                 spawned += 1
                 logger.info(
                     "IB reconciliation: spawned risk manager for %s %s %s %s "
-                    "(entry=%.4f, qty=%d, parent=%s)",
-                    symbol, strike, expiry, right, entry_price, qty, parent_sid,
+                    "(entry=%.4f, qty=%d, parent=%s, source=%s)",
+                    symbol, strike, expiry, right, entry_price, qty, parent_sid, recovery_source,
                 )
 
                 # Populate parent BMC strategy's _active_positions so it knows
