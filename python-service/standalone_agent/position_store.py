@@ -90,7 +90,19 @@ class PositionStore:
             if pos is None:
                 logger.warning("PositionStore: add_fill for unknown position %s", position_id)
                 return
-            pos["fill_log"].append(fill_dict)
+            fill_log = pos.setdefault("fill_log", [])
+            if fill_log and self._is_probable_duplicate_fill(fill_log[-1], fill_dict):
+                logger.warning(
+                    "PositionStore: suppressing probable duplicate fill on %s "
+                    "(level=%s order_id=%s qty=%s price=%.4f)",
+                    position_id,
+                    fill_dict.get("level"),
+                    fill_dict.get("order_id"),
+                    fill_dict.get("qty_filled"),
+                    float(fill_dict.get("avg_price", 0.0) or 0.0),
+                )
+                return
+            fill_log.append(fill_dict)
             self._dirty_ids.add(position_id)
             self._save()
 
@@ -161,6 +173,57 @@ class PositionStore:
                 result[k] = v
         return result
 
+    @staticmethod
+    def _is_probable_duplicate_fill(existing: dict, candidate: dict) -> bool:
+        """Heuristic dedupe for back-to-back identical logical fills.
+
+        This catches cases where a recovered risk manager shares the same
+        fill_log list object as the position store and a real fill is written
+        once by the strategy and then persisted again from orderStatus.
+        """
+        if not existing or not candidate:
+            return False
+
+        existing_level = existing.get("level")
+        candidate_level = candidate.get("level")
+        if existing_level != candidate_level:
+            return False
+
+        def _num(value, default=0.0) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return float(default)
+
+        def _int(value, default=0) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return int(default)
+
+        same_core = (
+            _int(existing.get("qty_filled")) == _int(candidate.get("qty_filled")) and
+            abs(_num(existing.get("avg_price")) - _num(candidate.get("avg_price"))) < 1e-9 and
+            _int(existing.get("remaining_qty")) == _int(candidate.get("remaining_qty")) and
+            abs(_num(existing.get("pnl_pct")) - _num(candidate.get("pnl_pct"))) < 1e-9
+        )
+        if not same_core:
+            return False
+
+        existing_order = _int(existing.get("order_id"))
+        candidate_order = _int(candidate.get("order_id"))
+        order_equivalent = (
+            existing_order == candidate_order or
+            existing_order == 0 or
+            candidate_order == 0
+        )
+        if not order_equivalent:
+            return False
+
+        existing_time = _num(existing.get("time"))
+        candidate_time = _num(candidate.get("time"))
+        return abs(existing_time - candidate_time) <= 2.0
+
     def update_risk_config(self, position_id: str, risk_updates: dict) -> None:
         """Merge risk config updates into stored position.
 
@@ -195,6 +258,35 @@ class PositionStore:
                     self._dirty_ids.add(position_id)
                     self._save()
                     return True
+            return False
+
+    def update_fill_execution_details(
+        self,
+        position_id: str,
+        order_id: int,
+        *,
+        exec_id: str = "",
+        execution_analytics: Optional[dict] = None,
+    ) -> bool:
+        """Merge execution metadata into a fill matched by order_id.
+
+        Used when execDetails arrives after the initial fill record was created.
+        Returns True if a fill was updated.
+        """
+        with self._lock:
+            pos = self._positions.get(position_id)
+            if not pos:
+                return False
+            for fill in reversed(pos.get("fill_log", [])):
+                if fill.get("order_id") != order_id:
+                    continue
+                if exec_id and not fill.get("exec_id"):
+                    fill["exec_id"] = exec_id
+                if execution_analytics:
+                    fill.setdefault("execution_analytics", {}).update(execution_analytics)
+                self._dirty_ids.add(position_id)
+                self._save()
+                return True
             return False
 
     def purge_phantom_entry_fills(self) -> int:
