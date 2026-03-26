@@ -348,6 +348,107 @@ class TestProfitTargetExitSizing:
         assert action.quantity == 15
 
 
+# ── Per-lot trailing inheritance / sequencing ──
+
+
+class TestPerLotTrailingBehavior:
+    def test_switch_to_per_lot_inherits_base_defaults_for_unconfigured_lots(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 1
+        config["position"]["entry_price"] = 0.62
+        rm.on_start(config)
+        rm.add_lot(0.61, 1, order_id=56, fill_time=1001.0)
+        rm.add_lot(0.56, 1, order_id=58, fill_time=1002.0)
+        rm.add_lot(0.57, 1, order_id=59, fill_time=1003.0)
+
+        rm.update_risk_config(
+            {
+                "profit_taking": {
+                    "trailing_stop": {
+                        "enabled": True,
+                        "mode": "per_lot",
+                        "activation_pct": 75,
+                        "trail_pct": 25,
+                        "per_lot_overrides": {
+                            "0": {"trail_pct": 20, "activation_pct": 75},
+                            "1": {"trail_pct": 20, "activation_pct": 125},
+                        },
+                    },
+                },
+            }
+        )
+
+        assert rm._per_lot_trailing[0].trail_pct == 20
+        assert rm._per_lot_trailing[0].activation_pct == 75
+        assert rm._per_lot_trailing[1].trail_pct == 20
+        assert rm._per_lot_trailing[1].activation_pct == 125
+        assert rm._per_lot_trailing[2].trail_pct == 25
+        assert rm._per_lot_trailing[2].activation_pct == 75
+        assert rm._per_lot_trailing[3].trail_pct == 25
+        assert rm._per_lot_trailing[3].activation_pct == 75
+
+    def test_add_lot_in_per_lot_mode_uses_base_defaults_when_no_override_exists(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 1
+        config["position"]["entry_price"] = 0.72
+        config["profit_taking"]["trailing_stop"] = {
+            "enabled": True,
+            "mode": "per_lot",
+            "activation_pct": 66,
+            "trail_pct": 20,
+            "per_lot_overrides": {
+                "0": {"activation_pct": 66, "trail_pct": 20},
+            },
+        }
+        rm.on_start(config)
+
+        rm.add_lot(0.73, 1, order_id=70, fill_time=1001.0)
+
+        assert rm._per_lot_trailing[1].activation_pct == 66
+        assert rm._per_lot_trailing[1].trail_pct == 20
+
+    def test_per_lot_trailing_uses_base_defaults_for_unconfigured_lots_during_evaluation(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 1
+        config["position"]["entry_price"] = 0.62
+        rm.on_start(config)
+        rm.add_lot(0.61, 1, order_id=56, fill_time=1001.0)
+        rm.add_lot(0.56, 1, order_id=58, fill_time=1002.0)
+        rm.add_lot(0.57, 1, order_id=59, fill_time=1003.0)
+        rm.update_risk_config(
+            {
+                "profit_taking": {
+                    "trailing_stop": {
+                        "enabled": True,
+                        "mode": "per_lot",
+                        "activation_pct": 75,
+                        "trail_pct": 25,
+                        "per_lot_overrides": {
+                            "0": {"trail_pct": 20, "activation_pct": 75},
+                            "1": {"trail_pct": 20, "activation_pct": 125},
+                        },
+                    },
+                },
+            }
+        )
+
+        # Drive HWM up enough to activate default lots 2 and 3.
+        rm._check_trailing_stop_per_lot(config, current_price=1.645, quote=_Quote(1.64, 1.65))
+        assert rm._per_lot_trailing[2].trailing_active is True
+        assert rm._per_lot_trailing[3].trailing_active is True
+        assert rm._per_lot_trailing[1].trailing_active is True  # 125% also reached for lot 1
+
+        # Reversal through the trailing stop should trigger a single-lot exit, not a full close.
+        action = rm._check_trailing_stop_per_lot(config, current_price=1.20, quote=_Quote(1.19, 1.20))
+
+        assert action is not None
+        assert action.quantity == 1
+        assert action.reason.startswith("Per-lot trailing stop")
+
+
 # ── Config update persistence ──
 
 

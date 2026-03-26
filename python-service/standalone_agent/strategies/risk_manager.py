@@ -499,12 +499,11 @@ class RiskManagerStrategy(ExecutionStrategy):
         trail_cfg = profit_cfg.get("trailing_stop", {})
         self._trailing_mode = trail_cfg.get("mode", "uniform")
         if self._trailing_mode == "per_lot" and trail_cfg.get("enabled"):
-            overrides = trail_cfg.get("per_lot_overrides", {})
-            lot_override = overrides.get("0", overrides.get(0, {}))
-            self._per_lot_trailing[0] = LotTrailingState(
-                0, pos.get("entry_price", 0), pos.get("quantity", 1),
-                lot_override.get("trail_pct", 0.0),
-                lot_override.get("activation_pct", 0.0),
+            self._per_lot_trailing[0] = self._make_lot_trailing_state(
+                0,
+                pos.get("entry_price", 0),
+                pos.get("quantity", 1),
+                trail_cfg,
             )
             self._level_states["trailing_lot_0"] = LevelState.ARMED
 
@@ -534,6 +533,21 @@ class RiskManagerStrategy(ExecutionStrategy):
         """Clean up on strategy unload."""
         logger.info("RiskManager stopped for %s (remaining_qty=%d, fills=%d)",
                      self.cache_key, self.remaining_qty, len(self._fill_log))
+
+    @staticmethod
+    def _get_per_lot_override(trail_cfg: dict, lot_idx: int) -> dict:
+        if not isinstance(trail_cfg, dict):
+            return {}
+        overrides = trail_cfg.get("per_lot_overrides", {}) or {}
+        return overrides.get(str(lot_idx), overrides.get(lot_idx, {})) or {}
+
+    def _make_lot_trailing_state(self, lot_idx: int, entry_price: float, quantity: int, trail_cfg: dict) -> LotTrailingState:
+        base_trail_pct = float(trail_cfg.get("trail_pct", 10.0) or 0.0)
+        base_activation_pct = float(trail_cfg.get("activation_pct", 0.0) or 0.0)
+        override = self._get_per_lot_override(trail_cfg, lot_idx)
+        trail_pct = float(override["trail_pct"]) if "trail_pct" in override else base_trail_pct
+        activation_pct = float(override["activation_pct"]) if "activation_pct" in override else base_activation_pct
+        return LotTrailingState(lot_idx, entry_price, quantity, trail_pct, activation_pct)
 
     # ── Lot aggregation ──
 
@@ -586,8 +600,9 @@ class RiskManagerStrategy(ExecutionStrategy):
         # Per-lot trailing: create state for new lot
         if self._trailing_mode == "per_lot":
             lot_idx = len(self._lot_entries) - 1
-            self._per_lot_trailing[lot_idx] = LotTrailingState(
-                lot_idx, entry_price, quantity,
+            trail_cfg = self._risk_config.get("profit_taking", {}).get("trailing_stop", {})
+            self._per_lot_trailing[lot_idx] = self._make_lot_trailing_state(
+                lot_idx, entry_price, quantity, trail_cfg
             )
             level_key = f"trailing_lot_{lot_idx}"
             if level_key not in self._level_states:
@@ -1219,13 +1234,9 @@ class RiskManagerStrategy(ExecutionStrategy):
                 changes["updated_fields"].append(f"trailing_mode_{old_mode}_to_{new_mode}")
                 if new_mode == "per_lot" and not self._per_lot_trailing:
                     # Initialize per-lot state from existing lots
-                    overrides = new_ts.get("per_lot_overrides", {})
                     for i, lot in enumerate(self._lot_entries):
-                        lot_override = overrides.get(str(i), overrides.get(i, {}))
-                        self._per_lot_trailing[i] = LotTrailingState(
-                            i, lot["entry_price"], lot["quantity"],
-                            lot_override.get("trail_pct", 0.0),
-                            lot_override.get("activation_pct", 0.0),
+                        self._per_lot_trailing[i] = self._make_lot_trailing_state(
+                            i, lot["entry_price"], lot["quantity"], new_ts
                         )
                         # Seed HWM from current aggregate HWM
                         self._per_lot_trailing[i].high_water_mark = self.high_water_mark
@@ -1255,24 +1266,31 @@ class RiskManagerStrategy(ExecutionStrategy):
 
             # Per-lot override updates (when already in per_lot mode)
             if self._trailing_mode == "per_lot":
-                base_trail_pct = new_ts.get("trail_pct", 10.0)
-                new_overrides = new_ts.get("per_lot_overrides", {})
-                for lot_key, override in new_overrides.items():
-                    lot_idx = int(lot_key) if str(lot_key).isdigit() else -1
-                    lot_state = self._per_lot_trailing.get(lot_idx)
-                    if lot_state:
-                        if "trail_pct" in override:
-                            old_trail = lot_state.trail_pct
-                            lot_state.trail_pct = override["trail_pct"]
-                            # Recalc trail price if active
-                            if lot_state.trailing_active and old_trail != lot_state.trail_pct:
-                                effective_pct = lot_state.trail_pct or base_trail_pct
-                                if self.is_long:
-                                    lot_state.trailing_stop_price = lot_state.high_water_mark * (1 - effective_pct / 100)
-                                else:
-                                    lot_state.trailing_stop_price = lot_state.high_water_mark * (1 + effective_pct / 100)
-                        if "activation_pct" in override:
-                            lot_state.activation_pct = override["activation_pct"]
+                base_trail_pct = float(new_ts.get("trail_pct", old_ts.get("trail_pct", 10.0)) or 0.0)
+                base_activation_pct = float(new_ts.get("activation_pct", old_ts.get("activation_pct", 0.0)) or 0.0)
+                for lot_idx, lot_state in self._per_lot_trailing.items():
+                    new_override = self._get_per_lot_override(new_ts, lot_idx)
+                    old_override = self._get_per_lot_override(old_ts, lot_idx)
+                    old_trail = lot_state.trail_pct
+
+                    if "trail_pct" in new_override:
+                        lot_state.trail_pct = float(new_override["trail_pct"])
+                    elif "trail_pct" not in old_override and base_trail_pct != float(old_ts.get("trail_pct", base_trail_pct) or 0.0):
+                        lot_state.trail_pct = base_trail_pct
+
+                    if "activation_pct" in new_override:
+                        lot_state.activation_pct = float(new_override["activation_pct"])
+                    elif "activation_pct" not in old_override and base_activation_pct != float(old_ts.get("activation_pct", base_activation_pct) or 0.0):
+                        lot_state.activation_pct = base_activation_pct
+
+                    if lot_state.trailing_active and old_trail != lot_state.trail_pct:
+                        effective_pct = lot_state.trail_pct
+                        if self.is_long:
+                            lot_state.trailing_stop_price = lot_state.high_water_mark * (1 - effective_pct / 100)
+                        else:
+                            lot_state.trailing_stop_price = lot_state.high_water_mark * (1 + effective_pct / 100)
+
+                    if new_override:
                         changes["updated_fields"].append(f"per_lot_override_{lot_idx}")
 
         # --- Merge new config into _risk_config ---
