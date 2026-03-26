@@ -70,17 +70,20 @@ function TrailRiskEditor({
     }
     if (Object.keys(update).length === 0) return;
     setSaving(true);
-    if (lotIdx != null) {
-      // Per-lot override: send via per_lot_overrides
-      await onApply(strategyId, {
-        profit_taking: { trailing_stop: { per_lot_overrides: { [String(lotIdx)]: update } } },
-      });
-    } else {
-      await onApply(strategyId, { profit_taking: { trailing_stop: update } });
+    try {
+      if (lotIdx != null) {
+        // Per-lot override: send via per_lot_overrides
+        await onApply(strategyId, {
+          profit_taking: { trailing_stop: { per_lot_overrides: { [String(lotIdx)]: update } } },
+        });
+      } else {
+        await onApply(strategyId, { profit_taking: { trailing_stop: update } });
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -136,6 +139,37 @@ type ProfitTargetDraft = {
   trigger_pct: string;
   exit_pct: string;
 };
+
+const isPlainObject = (value: unknown): value is Record<string, any> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const deepMergeConfig = <T,>(base: T, patch: any): T => {
+  if (patch === undefined) return base;
+  if (Array.isArray(patch)) return patch as T;
+  if (isPlainObject(base) && isPlainObject(patch)) {
+    const merged: Record<string, any> = { ...(base as Record<string, any>) };
+    for (const [key, value] of Object.entries(patch)) {
+      merged[key] = key in merged ? deepMergeConfig(merged[key], value) : value;
+    }
+    return merged as T;
+  }
+  return patch as T;
+};
+
+const normalizeForStableCompare = (value: any): any => {
+  if (Array.isArray(value)) return value.map(normalizeForStableCompare);
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, normalizeForStableCompare(value[key])])
+    );
+  }
+  return value;
+};
+
+const stableSerialize = (value: any): string =>
+  JSON.stringify(normalizeForStableCompare(value));
 
 const profitTargetsToDrafts = (
   targets: Array<{ trigger_pct: number; exit_pct: number }> | undefined
@@ -240,6 +274,8 @@ function PositionProfitTargetsEditor({
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 1800);
+    } catch (e: any) {
+      setLocalError(e.message || "Failed to save profit targets.");
     } finally {
       setSaving(false);
     }
@@ -457,6 +493,7 @@ interface PositionLedgerEntry {
   is_orphan?: boolean;
   entry: { order_id: number; price: number; quantity: number; fill_time: number; perm_id: number };
   instrument: { symbol: string; strike?: number; expiry?: string; right?: string };
+  risk_config?: Record<string, any>;
   runtime_state?: {
     remaining_qty?: number;
     initial_qty?: number;
@@ -875,6 +912,8 @@ export default function SignalsTab() {
   const configPendingSinceRef = useRef<Record<string, number>>({});
   // Snapshot of config values at Apply time (for comparison in stale-closure poll)
   const pendingConfigSnapshotRef = useRef<Record<string, BMCConfig>>({});
+  const positionConfigPendingSinceRef = useRef<Record<string, number>>({});
+  const pendingPositionConfigSnapshotRef = useRef<Record<string, Record<string, any>>>({});
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Currently selected ticker tab for viewing signal details
@@ -1104,6 +1143,38 @@ export default function SignalsTab() {
             // Server hasn't caught up — keep optimistic budget value
             data.order_budget = pendingBudgetRef.current;
           }
+        }
+        const keepPendingPositionIds = new Set<string>();
+        if (Array.isArray(data.strategies)) {
+          data.strategies = data.strategies.map((strategy: ExecutionStrategyInfo) => {
+            const pendingSince = positionConfigPendingSinceRef.current[strategy.strategy_id];
+            const pendingSnapshot = pendingPositionConfigSnapshotRef.current[strategy.strategy_id];
+            if (!pendingSince || !pendingSnapshot) return strategy;
+
+            const serverMatches = stableSerialize(strategy.config || {}) === stableSerialize(pendingSnapshot);
+            if (serverMatches) {
+              delete positionConfigPendingSinceRef.current[strategy.strategy_id];
+              delete pendingPositionConfigSnapshotRef.current[strategy.strategy_id];
+              return strategy;
+            }
+            if (Date.now() - pendingSince > 25_000) {
+              delete positionConfigPendingSinceRef.current[strategy.strategy_id];
+              delete pendingPositionConfigSnapshotRef.current[strategy.strategy_id];
+              return strategy;
+            }
+
+            keepPendingPositionIds.add(strategy.strategy_id);
+            return { ...strategy, config: pendingSnapshot };
+          });
+        }
+        if (Array.isArray(data.position_ledger) && keepPendingPositionIds.size > 0) {
+          data.position_ledger = data.position_ledger.map((ledger: PositionLedgerEntry) => {
+            if (!keepPendingPositionIds.has(ledger.id)) return ledger;
+            return {
+              ...ledger,
+              risk_config: pendingPositionConfigSnapshotRef.current[ledger.id],
+            };
+          });
         }
         setExecutionStatus(data);
         // Sync ticker modes from telemetry (guard against pending optimistic updates)
@@ -1342,12 +1413,45 @@ export default function SignalsTab() {
         credentials: "include",
         body: JSON.stringify({ position_id: positionId, config: configUpdate }),
       });
-      const data = await res.json();
-      if (data.error) setError(data.error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Failed to update position risk config (${res.status})`);
+      }
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      const currentStrategyConfig =
+        executionStatus?.strategies.find((strategy) => strategy.strategy_id === positionId)?.config
+        || executionStatus?.position_ledger?.find((position) => position.id === positionId)?.risk_config
+        || {};
+      const mergedConfig = deepMergeConfig(currentStrategyConfig, configUpdate);
+      positionConfigPendingSinceRef.current[positionId] = Date.now();
+      pendingPositionConfigSnapshotRef.current[positionId] = mergedConfig;
+      setExecutionStatus((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          strategies: prev.strategies.map((strategy) => (
+            strategy.strategy_id === positionId
+              ? { ...strategy, config: mergedConfig }
+              : strategy
+          )),
+          position_ledger: prev.position_ledger?.map((position) => (
+            position.id === positionId
+              ? { ...position, risk_config: mergedConfig }
+              : position
+          )),
+        };
+      });
+      setError(null);
+      return data;
     } catch (e: any) {
-      setError(e.message || "Failed to update position risk config");
+      const message = e.message || "Failed to update position risk config";
+      setError(message);
+      throw new Error(message);
     }
-  }, []);
+  }, [executionStatus]);
 
   // ── Update EOD config for a specific position (convenience wrapper) ──
   const handlePositionEodUpdate = useCallback(async (
