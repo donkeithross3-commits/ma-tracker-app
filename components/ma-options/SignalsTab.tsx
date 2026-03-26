@@ -407,6 +407,41 @@ interface FillLogEntry {
   };
 }
 
+interface ExpandedLotRow {
+  pd: {
+    pos: {
+      order_id: number;
+      entry_price: number;
+      quantity: number;
+      fill_time: number;
+      perm_id?: number;
+      signal?: {
+        option_contract?: {
+          symbol: string;
+          strike: number;
+          expiry: string;
+          right: string;
+        };
+      } | null;
+    };
+    rm: RiskManagerState | null;
+    rmConfig: Record<string, any> | null;
+    quote: QuoteSnapshot | null;
+    pnlPct: number | null;
+    pnlDollar: number | null;
+    optionContract: { symbol: string; strike: number; expiry: string; right: string } | null;
+    strategyId: string | null;
+    recentErrors: string[];
+    isOrphan: boolean;
+    lineage?: PositionLedgerEntry["lineage"];
+    parentStrategy?: string;
+    ledgerRemainingQty: number | null;
+    ledgerInitialQty: number | null;
+  };
+  originalIndex: number;
+  exitFill: FillLogEntry | null;
+}
+
 interface RiskManagerState {
   remaining_qty: number;
   initial_qty: number;
@@ -2466,7 +2501,7 @@ export default function SignalsTab() {
 
   // ── Risk level badge renderer — shows categorized risk status ──
   // Groups levels by category (stop/profit/trailing/eod) with meaningful labels
-  const renderRiskBadges = (rm: RiskManagerState | null) => {
+  const renderRiskBadges = (rm: RiskManagerState | null, opts?: { suppressFilledProfitBadges?: boolean }) => {
     if (!rm) return null;
     const ls: Record<string, string> = rm.level_states || {};
     // Categorize levels
@@ -2501,9 +2536,11 @@ export default function SignalsTab() {
     // Profit targets
     if (profits.length > 0) {
       const filled = profits.filter(s => s.state === "FILLED" || s.state === "PARTIAL").length;
-      if (filled > 0 && filled < profits.length) badges.push(badge(`PT ${filled}/${profits.length}`, "PARTIAL", "pt"));
-      else if (filled === profits.length) badges.push(badge(`PT ${filled}/${profits.length}`, "FILLED", "pt"));
-      else badges.push(badge(`PT ×${profits.length}`, profits[0].state, "pt"));
+      if (!(opts?.suppressFilledProfitBadges && filled > 0)) {
+        if (filled > 0 && filled < profits.length) badges.push(badge(`PT ${filled}/${profits.length}`, "PARTIAL", "pt"));
+        else if (filled === profits.length) badges.push(badge(`PT ${filled}/${profits.length}`, "FILLED", "pt"));
+        else badges.push(badge(`PT ×${profits.length}`, profits[0].state, "pt"));
+      }
     }
     // Trailing
     if (trailing) {
@@ -2513,6 +2550,60 @@ export default function SignalsTab() {
     // EOD closeout
     if (eod) badges.push(badge("eod", eod, "eod"));
     return <>{badges}</>;
+  };
+
+  const renderFilledLotBadge = (level: string) => {
+    if (level.startsWith("profit")) {
+      const idx = Number(level.split("_")[1] ?? 0);
+      return (
+        <span className="px-1 py-0.5 rounded font-mono text-[10px] bg-green-900/60 text-green-300">
+          PT {Number.isFinite(idx) ? `${idx + 1}` : "hit"}
+        </span>
+      );
+    }
+    if (level.startsWith("trailing")) {
+      return (
+        <span className="px-1 py-0.5 rounded font-mono text-[10px] bg-yellow-900/60 text-yellow-300">
+          trail hit
+        </span>
+      );
+    }
+    if (level.startsWith("stop")) {
+      return (
+        <span className="px-1 py-0.5 rounded font-mono text-[10px] bg-red-900/60 text-red-300">
+          SL hit
+        </span>
+      );
+    }
+    return (
+      <span className="px-1 py-0.5 rounded font-mono text-[10px] bg-gray-700/60 text-gray-300">
+        {level}
+      </span>
+    );
+  };
+
+  const allocateExitFillsToLotRows = (items: ExpandedLotRow["pd"][]): ExpandedLotRow[] => {
+    const rows: ExpandedLotRow[] = items.map((pd, originalIndex) => ({
+      pd,
+      originalIndex,
+      exitFill: null,
+    }));
+    const rm = items.find((pd) => pd.rm)?.rm;
+    const exitFills = (rm?.fill_log || [])
+      .filter((fill) => fill.level !== "entry" && (fill.qty_filled ?? 0) > 0)
+      .sort((a, b) => a.time - b.time);
+
+    let rowIdx = 0;
+    for (const fill of exitFills) {
+      let qtyRemaining = Math.max(0, Number(fill.qty_filled ?? 0));
+      while (qtyRemaining > 0 && rowIdx < rows.length) {
+        const lotQty = Math.max(1, Number(rows[rowIdx].pd.pos.quantity ?? 1));
+        rows[rowIdx].exitFill = fill;
+        qtyRemaining -= lotQty;
+        rowIdx += 1;
+      }
+    }
+    return rows;
   };
 
   const ws = signal?.polygon_ws;
@@ -3338,31 +3429,45 @@ export default function SignalsTab() {
                               const expandedIsPerLot = expandedTrailingMode === "per_lot";
                               const perLotTrailing = firstActiveRmForMode?.rm?.per_lot_trailing as Record<string, any> | null | undefined;
                               const expandedSid = firstActiveRmForMode?.strategyId;
+                              const lotRows = allocateExitFillsToLotRows(group.items);
+                              const hasLotExits = lotRows.some((row) => !!row.exitFill);
                               return (
                               <div className="border-t border-gray-700/50 px-2 py-1 space-y-0.5">
-                                {group.items.map((pd, i) => {
+                                {lotRows.map(({ pd, originalIndex, exitFill }) => {
                                   const { pos, rm, rmConfig: lotRmConfig, pnlPct, pnlDollar, strategyId, recentErrors } = pd;
-                                  const isCompleted = rm?.completed;
+                                  const lotClosed = !!exitFill;
+                                  const isCompleted = lotClosed || rm?.completed;
                                   const posLabel = oc ? `${oc.strike} ${isCall ? "C" : "P"}` : "position";
                                   // Per-lot trailing state for this lot
-                                  const lotTrailState = expandedIsPerLot && perLotTrailing ? perLotTrailing[String(i)] : null;
+                                  const lotTrailState = expandedIsPerLot && perLotTrailing ? perLotTrailing[String(originalIndex)] : null;
                                   const lotTrailPct = lotTrailState?.trail_pct as number | undefined;
                                   const lotActPct = lotTrailState?.activation_pct as number | undefined;
                                   const lotHwm = lotTrailState?.high_water_mark as number | undefined;
                                   const lotTrailActive = lotTrailState?.trailing_active as boolean | undefined;
                                   const lotTrailPrice = lotTrailState?.trailing_stop_price as number | undefined;
+                                  const displayPnlPct = exitFill
+                                    ? ((exitFill.avg_price - pos.entry_price) / pos.entry_price) * 100
+                                    : pnlPct;
+                                  const displayPnlDollar = exitFill
+                                    ? (exitFill.avg_price - pos.entry_price) * pos.quantity * 100
+                                    : pnlDollar;
                                   return (
-                                    <div key={i}>
+                                    <div key={originalIndex}>
                                       <div className={`flex items-center gap-2 text-[10px] py-0.5 ${isCompleted ? "opacity-50" : ""}`}>
                                         <span className="text-gray-500 font-mono w-[52px]">{new Date(pos.fill_time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                                         <span className="text-gray-400">Entry <span className="text-gray-300 font-mono">${pos.entry_price.toFixed(2)}</span></span>
                                         <span className="text-gray-500">x{pos.quantity}</span>
-                                        {pnlPct !== null && pnlDollar !== null && (
-                                          <span className={`font-mono ${pnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
-                                            {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
+                                        {exitFill && (
+                                          <span className="text-gray-400">
+                                            Exit <span className="text-gray-300 font-mono">${exitFill.avg_price.toFixed(2)}</span>
                                           </span>
                                         )}
-                                        {renderRiskBadges(rm)}
+                                        {displayPnlPct !== null && displayPnlDollar !== null && (
+                                          <span className={`font-mono ${displayPnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                            {displayPnlPct >= 0 ? "+" : ""}{displayPnlPct.toFixed(1)}% ({displayPnlDollar >= 0 ? "+$" : "-$"}{Math.abs(displayPnlDollar).toFixed(0)})
+                                          </span>
+                                        )}
+                                        {exitFill ? renderFilledLotBadge(exitFill.level) : renderRiskBadges(rm, { suppressFilledProfitBadges: hasLotExits })}
                                         {/* Per-lot trail controls (only in per_lot mode) */}
                                         {expandedIsPerLot && !isCompleted && expandedSid && (
                                           <TrailRiskEditor
@@ -3371,11 +3476,11 @@ export default function SignalsTab() {
                                             strategyId={expandedSid}
                                             onApply={handlePositionRiskUpdate}
                                             stopPropagation
-                                            lotIdx={i}
+                                            lotIdx={originalIndex}
                                           />
                                         )}
                                         {/* Per-lot trail status badges */}
-                                        {expandedIsPerLot && lotTrailActive && lotTrailPrice != null && (
+                                        {expandedIsPerLot && !exitFill && lotTrailActive && lotTrailPrice != null && (
                                           <span className="text-yellow-500/70 font-mono" title={`HWM: ${lotHwm?.toFixed(2)} Trail: ${lotTrailPrice?.toFixed(2)}`}>
                                             ↕{lotTrailPrice.toFixed(2)}
                                           </span>
