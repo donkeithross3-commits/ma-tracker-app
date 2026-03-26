@@ -236,6 +236,7 @@ python3 start_server.py  # FastAPI (port 8000)
 
 # Deploy (flock-gated — NEVER use raw docker compose commands)
 ssh droplet 'DR3_AGENT=<agent> bash ~/apps/scripts/deploy.sh web'
+ops/scripts/deploy.sh  # Source of truth; sync to ~/apps/scripts/deploy.sh when workflow changes
 ```
 
 ### py_proj

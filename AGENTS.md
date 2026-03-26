@@ -92,6 +92,9 @@ python3 start_server.py # Start server (port 8000)
 ssh droplet 'DR3_AGENT=<agent> bash ~/apps/scripts/deploy.sh web'           # Full deploy
 ssh droplet 'DR3_AGENT=<agent> bash ~/apps/scripts/deploy.sh python-service' # Python only
 ssh droplet 'DR3_AGENT=<agent> bash ~/apps/scripts/deploy.sh portfolio'      # Portfolio only
+
+# Source of truth for the host deploy entry point
+ops/scripts/deploy.sh  # Sync to ~/apps/scripts/deploy.sh when deploy workflow changes
 ```
 
 ---

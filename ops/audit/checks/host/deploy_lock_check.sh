@@ -10,12 +10,21 @@ init_check "host/deploy_lock_check"
 
 # 1. Verify deploy.sh exists and is executable
 DEPLOY_SCRIPT="$HOME/apps/scripts/deploy.sh"
+REPO_DEPLOY_SCRIPT="$HOME/apps/ma-tracker-app/ops/scripts/deploy.sh"
 if [[ ! -f "$DEPLOY_SCRIPT" ]]; then
     json_finding "deploy_script_missing" "$SEV_ALERT" \
         "deploy.sh not found at $DEPLOY_SCRIPT — deploy coordination is not active"
 elif [[ ! -x "$DEPLOY_SCRIPT" ]]; then
     json_finding "deploy_script_not_executable" "$SEV_WARN" \
         "deploy.sh exists but is not executable: $DEPLOY_SCRIPT"
+fi
+
+if [[ ! -f "$REPO_DEPLOY_SCRIPT" ]]; then
+    json_finding "repo_deploy_script_missing" "$SEV_WARN" \
+        "Repo source-of-truth deploy script missing at $REPO_DEPLOY_SCRIPT"
+elif [[ -f "$DEPLOY_SCRIPT" ]] && ! cmp -s "$DEPLOY_SCRIPT" "$REPO_DEPLOY_SCRIPT"; then
+    json_finding "deploy_script_drift" "$SEV_WARN" \
+        "Live deploy.sh differs from repo source-of-truth at $REPO_DEPLOY_SCRIPT"
 fi
 
 # 2. Check for stale deploy lock
