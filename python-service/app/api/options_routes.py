@@ -5,7 +5,7 @@ Options Scanner API Routes
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Any, List, Optional
 import logging
 import math
 import os
@@ -58,6 +58,13 @@ POLYGON_PRIMARY = os.environ.get("POLYGON_PRIMARY", "true").lower() != "false"
 
 router = APIRouter(prefix="/options", tags=["options"])
 
+EXECUTION_TELEMETRY_CACHE_MAX_AGE_MS = int(
+    os.environ.get("EXECUTION_TELEMETRY_CACHE_MAX_AGE_MS", "12000")
+)
+EXECUTION_BROKER_SNAPSHOT_MAX_AGE_MS = int(
+    os.environ.get("EXECUTION_BROKER_SNAPSHOT_MAX_AGE_MS", "15000")
+)
+
 # --- Ticker validation helpers ---
 # Allow digits for futures tickers: "6E" (CME Euro FX), "ESH6" (contract month)
 _TICKER_RE = re.compile(r"^[A-Z0-9]{1,10}$")
@@ -77,6 +84,123 @@ def _pydantic_ticker_validator(v: str) -> str:
     if not _TICKER_RE.match(t):
         raise ValueError(f"Invalid ticker format: {v!r}")
     return t
+
+
+def _derive_execution_broker_truth_summary(telemetry: dict) -> dict:
+    """Summarize how trustworthy a cached execution telemetry snapshot is."""
+    now = time.time()
+    received_at = float(telemetry.get("received_at") or 0.0)
+    telemetry_age_ms = max(0, int((now - received_at) * 1000)) if received_at else 0
+    contracts = telemetry.get("managed_contracts") or []
+    awaiting_broker_snapshot_count = 0
+    duplicate_contract_count = 0
+    max_broker_snapshot_age_ms = 0
+
+    for contract in contracts:
+        if contract.get("status") == "duplicate_active_positions":
+            duplicate_contract_count += 1
+        broker_qty = contract.get("broker_qty")
+        broker_age_ms = contract.get("broker_snapshot_age_ms")
+        if broker_qty is None:
+            awaiting_broker_snapshot_count += 1
+            continue
+        if broker_age_ms is None:
+            continue
+        adjusted_age_ms = max(0, int(broker_age_ms)) + telemetry_age_ms
+        max_broker_snapshot_age_ms = max(max_broker_snapshot_age_ms, adjusted_age_ms)
+
+    if telemetry.get("stale"):
+        broker_truth_status = "relay_cache_stale"
+        broker_truth_reason = "relay_cache_restored_after_disconnect"
+    elif not telemetry.get("running", False):
+        broker_truth_status = "engine_stopped"
+        broker_truth_reason = "execution_engine_not_running"
+    elif not contracts:
+        broker_truth_status = "no_managed_contracts"
+        broker_truth_reason = "no_open_managed_contracts"
+    elif awaiting_broker_snapshot_count > 0:
+        broker_truth_status = "awaiting_broker_snapshot"
+        broker_truth_reason = "awaiting_first_ib_reconciliation"
+    elif max_broker_snapshot_age_ms > EXECUTION_BROKER_SNAPSHOT_MAX_AGE_MS:
+        broker_truth_status = "broker_snapshot_stale"
+        broker_truth_reason = "broker_snapshot_age_exceeded"
+    else:
+        broker_truth_status = "broker_snapshot_fresh"
+        broker_truth_reason = "broker_snapshot_within_threshold"
+
+    return {
+        "telemetry_age_ms": telemetry_age_ms,
+        "broker_truth_status": broker_truth_status,
+        "broker_truth_reason": broker_truth_reason,
+        "broker_truth_contract_count": len(contracts),
+        "broker_truth_awaiting_snapshot_count": awaiting_broker_snapshot_count,
+        "broker_truth_max_age_ms": max_broker_snapshot_age_ms if contracts else None,
+        "duplicate_contract_count": duplicate_contract_count,
+    }
+
+
+def _assess_cached_execution_telemetry(provider: Any) -> tuple[bool, Optional[str], dict]:
+    """Return cache usability, bypass reason, and freshness summary."""
+    telemetry = getattr(provider, "execution_telemetry", None) or {}
+    summary = _derive_execution_broker_truth_summary(telemetry)
+    if not telemetry:
+        return False, "no_cached_telemetry", summary
+    if telemetry.get("stale"):
+        return False, "relay_cache_stale", summary
+    if getattr(provider, "boot_phase", None):
+        return False, "boot_in_progress", summary
+    if (
+        telemetry.get("running", False)
+        and summary["telemetry_age_ms"] > EXECUTION_TELEMETRY_CACHE_MAX_AGE_MS
+    ):
+        return False, "telemetry_age_exceeded", summary
+    if telemetry.get("running", False) and summary["broker_truth_status"] in {
+        "awaiting_broker_snapshot",
+        "broker_snapshot_stale",
+    }:
+        return False, summary["broker_truth_status"], summary
+    return True, None, summary
+
+
+def _merge_live_quotes_from_provider(result: dict, provider: Any, telemetry_at: float) -> None:
+    """Prefer fresher live quote pushes over the telemetry snapshot copy."""
+    live_quotes = getattr(provider, "_live_quotes", None)
+    live_quotes_at = getattr(provider, "_live_quotes_at", 0)
+    if live_quotes and live_quotes_at > telemetry_at:
+        result["quote_snapshot"] = live_quotes
+        result["quotes_age_ms"] = int((time.time() - live_quotes_at) * 1000)
+    else:
+        result["quotes_age_ms"] = int((time.time() - telemetry_at) * 1000) if telemetry_at else None
+
+
+def _build_execution_status_result(
+    *,
+    source: str,
+    telemetry: dict,
+    provider: Any = None,
+    cache_bypass_reason: Optional[str] = None,
+    direct_query_failed: bool = False,
+    direct_query_error: str = "",
+) -> dict:
+    """Attach freshness metadata and quote semantics to an execution-status payload."""
+    result = {
+        "source": source,
+        **telemetry,
+    }
+    result.update(_derive_execution_broker_truth_summary(result))
+    if cache_bypass_reason:
+        result["cache_bypass_reason"] = cache_bypass_reason
+    if direct_query_failed:
+        result["direct_query_failed"] = True
+        result["direct_query_error"] = direct_query_error
+    telemetry_at = float(result.get("received_at") or 0.0)
+    if provider is not None:
+        _merge_live_quotes_from_provider(result, provider, telemetry_at)
+    elif telemetry_at:
+        result["quotes_age_ms"] = int((time.time() - telemetry_at) * 1000)
+    else:
+        result["quotes_age_ms"] = None
+    return result
 
 
 @router.get("/ib-status")
@@ -2158,45 +2282,71 @@ async def relay_execution_stop(request: ExecutionStopRequest):
 
 @router.get("/relay/execution/status")
 async def relay_execution_status(user_id: str = ""):
-    """Get execution engine status, preferring stored telemetry for low latency.
-    
-    Returns the latest telemetry snapshot from the agent if available,
-    otherwise queries the agent directly. Requires user_id.
-    """
+    """Get execution engine status with broker-truth-aware cache bypass."""
     if not user_id:
         return {"running": False, "error": "user_id required"}
     try:
-        # First try to return cached telemetry from the relay (no round-trip)
         registry = get_registry()
         provider = await registry.get_active_provider(
             user_id=user_id,
             allow_fallback_to_any=False,
         )
-        if provider and provider.execution_telemetry:
-            result = {
-                "source": "cached_telemetry",
-                **provider.execution_telemetry,
-            }
-            # Merge fresh live quotes if available (pushed every ~2s)
-            live_quotes = getattr(provider, "_live_quotes", None)
-            live_quotes_at = getattr(provider, "_live_quotes_at", 0)
-            telemetry_at = provider.execution_telemetry.get("received_at", 0)
-            if live_quotes and live_quotes_at > telemetry_at:
-                result["quote_snapshot"] = live_quotes
-                result["quotes_age_ms"] = int((time.time() - live_quotes_at) * 1000)
+        cached_telemetry = getattr(provider, "execution_telemetry", None) if provider else None
+        cache_bypass_reason = None
+
+        if provider and cached_telemetry:
+            can_use_cache, cache_bypass_reason, _ = _assess_cached_execution_telemetry(provider)
+            if can_use_cache:
+                return _sanitize_for_json(
+                    _build_execution_status_result(
+                        source="cached_telemetry",
+                        telemetry=cached_telemetry,
+                        provider=provider,
+                    )
+                )
+
+        try:
+            response_data = await send_request_to_provider(
+                request_type="execution_status",
+                payload={},
+                timeout=10.0,
+                user_id=user_id,
+                allow_fallback_to_any_provider=False,
+            )
+            if "error" in response_data:
+                raise HTTPException(status_code=500, detail=response_data["error"])
+            if provider is not None:
+                provider.execution_telemetry = {
+                    **response_data,
+                    "received_at": time.time(),
+                }
+                provider.execution_telemetry.pop("stale", None)
+                provider.execution_telemetry.pop("stale_since", None)
+                telemetry = provider.execution_telemetry
             else:
-                result["quotes_age_ms"] = int((time.time() - telemetry_at) * 1000)
-            return _sanitize_for_json(result)
-        response_data = await send_request_to_provider(
-            request_type="execution_status",
-            payload={},
-            timeout=10.0,
-            user_id=user_id,
-            allow_fallback_to_any_provider=False,
-        )
-        if "error" in response_data:
-            raise HTTPException(status_code=500, detail=response_data["error"])
-        return _sanitize_for_json({"source": "direct_query", **response_data})
+                telemetry = {**response_data, "received_at": time.time()}
+            return _sanitize_for_json(
+                _build_execution_status_result(
+                    source="direct_query",
+                    telemetry=telemetry,
+                    provider=provider,
+                    cache_bypass_reason=cache_bypass_reason,
+                )
+            )
+        except HTTPException as exc:
+            if cached_telemetry:
+                detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+                return _sanitize_for_json(
+                    _build_execution_status_result(
+                        source="cached_telemetry_fallback",
+                        telemetry=cached_telemetry,
+                        provider=provider,
+                        cache_bypass_reason=cache_bypass_reason or "direct_query_failed",
+                        direct_query_failed=True,
+                        direct_query_error=detail,
+                    )
+                )
+            raise
     except HTTPException:
         raise
     except Exception as e:
@@ -2668,20 +2818,25 @@ async def relay_bmc_signal(user_id: str = "", fresh: int = 0):
     if not user_id:
         return {"error": "user_id required", "signal": None}
     try:
-        # Try cached telemetry first (no round-trip) — skip if fresh=1
         registry = get_registry()
         provider = await registry.get_active_provider(
             user_id=user_id,
             allow_fallback_to_any=False,
         )
-        if not fresh and provider and provider.execution_telemetry:
-            telemetry = provider.execution_telemetry
+        cached_telemetry = getattr(provider, "execution_telemetry", None) if provider else None
+        cache_bypass_reason = None
+        can_use_cache = False
+        if not fresh and provider and cached_telemetry:
+            can_use_cache, cache_bypass_reason, _ = _assess_cached_execution_telemetry(provider)
+        if not fresh and provider and cached_telemetry and can_use_cache:
+            telemetry = cached_telemetry
             bmc_strategies = _extract_bmc_strategies(telemetry.get("strategies", []))
             result = {
                 "source": "cached_telemetry",
                 "running": telemetry.get("running", False),
                 "strategies": bmc_strategies,
                 "budget_status": _sanitize_nan(telemetry.get("budget_status", {})),
+                "broker_truth_status": _derive_execution_broker_truth_summary(telemetry)["broker_truth_status"],
             }
             # Pass through stale flag if telemetry was restored from previous provider
             if telemetry.get("stale"):
@@ -2699,34 +2854,78 @@ async def relay_bmc_signal(user_id: str = "", fresh: int = 0):
                 result["config"] = None
             return result
 
-        # Fallback: direct query
-        response_data = await send_request_to_provider(
-            request_type="execution_status",
-            payload={},
-            timeout=10.0,
-            user_id=user_id,
-            allow_fallback_to_any_provider=False,
-        )
-        if "error" in response_data:
-            return {"source": "direct_query", "running": False, "signal": None, "strategies": []}
+        try:
+            response_data = await send_request_to_provider(
+                request_type="execution_status",
+                payload={},
+                timeout=10.0,
+                user_id=user_id,
+                allow_fallback_to_any_provider=False,
+            )
+            if "error" in response_data:
+                return {"source": "direct_query", "running": False, "signal": None, "strategies": []}
+            if provider is not None:
+                provider.execution_telemetry = {
+                    **response_data,
+                    "received_at": time.time(),
+                }
+                provider.execution_telemetry.pop("stale", None)
+                provider.execution_telemetry.pop("stale_since", None)
 
-        bmc_strategies = _extract_bmc_strategies(response_data.get("strategies", []))
-        result = {
-            "source": "direct_query",
-            "running": response_data.get("running", False),
-            "strategies": bmc_strategies,
-            "budget_status": _sanitize_nan(response_data.get("budget_status", {})),
-        }
-        # Include boot phase if agent is still booting
-        if provider and provider.boot_phase:
-            result["boot_phase"] = provider.boot_phase
-        if bmc_strategies:
-            result["signal"] = bmc_strategies[0]["signal"]
-            result["config"] = bmc_strategies[0]["config"]
-        else:
-            result["signal"] = None
-            result["config"] = None
-        return result
+            bmc_strategies = _extract_bmc_strategies(response_data.get("strategies", []))
+            freshness_summary = _derive_execution_broker_truth_summary(
+                provider.execution_telemetry if provider is not None else {
+                    **response_data,
+                    "received_at": time.time(),
+                }
+            )
+            result = {
+                "source": "direct_query",
+                "running": response_data.get("running", False),
+                "strategies": bmc_strategies,
+                "budget_status": _sanitize_nan(response_data.get("budget_status", {})),
+                "broker_truth_status": freshness_summary["broker_truth_status"],
+            }
+            if cache_bypass_reason:
+                result["cache_bypass_reason"] = cache_bypass_reason
+            # Include boot phase if agent is still booting
+            if provider and provider.boot_phase:
+                result["boot_phase"] = provider.boot_phase
+            if bmc_strategies:
+                result["signal"] = bmc_strategies[0]["signal"]
+                result["config"] = bmc_strategies[0]["config"]
+            else:
+                result["signal"] = None
+                result["config"] = None
+            return result
+        except HTTPException as exc:
+            if cached_telemetry:
+                telemetry = cached_telemetry
+                bmc_strategies = _extract_bmc_strategies(telemetry.get("strategies", []))
+                result = {
+                    "source": "cached_telemetry_fallback",
+                    "running": telemetry.get("running", False),
+                    "strategies": bmc_strategies,
+                    "budget_status": _sanitize_nan(telemetry.get("budget_status", {})),
+                    "broker_truth_status": _derive_execution_broker_truth_summary(telemetry)["broker_truth_status"],
+                    "stale": True,
+                    "direct_query_failed": True,
+                    "direct_query_error": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+                }
+                if cache_bypass_reason:
+                    result["cache_bypass_reason"] = cache_bypass_reason
+                if provider and provider.boot_phase:
+                    result["boot_phase"] = provider.boot_phase
+                if telemetry.get("stale"):
+                    result["stale_since"] = telemetry.get("stale_since")
+                if bmc_strategies:
+                    result["signal"] = bmc_strategies[0]["signal"]
+                    result["config"] = bmc_strategies[0]["config"]
+                else:
+                    result["signal"] = None
+                    result["config"] = None
+                return result
+            raise
     except Exception as e:
         logger.error(f"Relay bmc-signal error: {e}")
         return {"error": str(e), "signal": None, "strategies": []}

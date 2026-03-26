@@ -47,6 +47,15 @@
       "category": "trading",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "options-broker-truth-status-refresh",
+      "title": "Broker-Truth Aware Status Refresh",
+      "summary": "Execution status now bypasses stale relay telemetry when broker truth is missing or aged, and the Signals tab shows whether the dashboard is using live agent data or cached relay state.",
+      "description": "The execution status relay no longer treats cached telemetry as implicitly fresh. When the relay cache was restored after a reconnect, when IB reconciliation has not produced a broker snapshot yet, or when the cached broker snapshot ages past the safety threshold, the dashboard now refreshes execution status directly from the agent and labels that decision in the UI. If a direct refresh fails, the Signals tab still shows the cached state, but it explicitly marks that it is displaying relay cache instead of live broker-confirmed status.",
+      "category": "trading",
+      "image": null,
+      "screenshot": null
     }
   ]
 }

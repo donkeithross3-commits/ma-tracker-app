@@ -568,6 +568,17 @@ interface ManagedContractStatus {
 
 interface FullExecutionStatus {
   running: boolean;
+  source?: string;
+  telemetry_age_ms?: number | null;
+  broker_truth_status?: string;
+  broker_truth_reason?: string;
+  broker_truth_contract_count?: number;
+  broker_truth_awaiting_snapshot_count?: number;
+  broker_truth_max_age_ms?: number | null;
+  duplicate_contract_count?: number;
+  cache_bypass_reason?: string;
+  direct_query_failed?: boolean;
+  direct_query_error?: string;
   eval_interval: number;
   strategy_count: number;
   strategies: ExecutionStrategyInfo[];
@@ -2507,8 +2518,22 @@ export default function SignalsTab() {
       awaitingBrokerSnapshotCount: awaitingBrokerSnapshot.length,
       oldestBrokerSnapshotMs,
       reservedExitQty,
+      source: executionStatus?.source || "unknown",
+      brokerTruthStatus: executionStatus?.broker_truth_status || "unknown",
+      cacheBypassReason: executionStatus?.cache_bypass_reason || "",
+      telemetryAgeMs: executionStatus?.telemetry_age_ms ?? null,
+      directQueryFailed: executionStatus?.direct_query_failed === true,
+      directQueryError: executionStatus?.direct_query_error || "",
     };
-  }, [executionStatus?.managed_contracts]);
+  }, [
+    executionStatus?.managed_contracts,
+    executionStatus?.source,
+    executionStatus?.broker_truth_status,
+    executionStatus?.cache_bypass_reason,
+    executionStatus?.telemetry_age_ms,
+    executionStatus?.direct_query_failed,
+    executionStatus?.direct_query_error,
+  ]);
 
   // ── Model attribution badge — shows which model name spawned this position ──
   // Uses lineage from position store; falls back to running strategy model info via parent_strategy.
@@ -2857,9 +2882,22 @@ export default function SignalsTab() {
         <div className={`text-sm px-3 py-2 rounded border ${
           managedContractSummary.duplicateContracts.length > 0
             ? "bg-red-900/25 border-red-700 text-red-200"
+            : managedContractSummary.directQueryFailed || (
+              managedContractSummary.brokerTruthStatus !== "broker_snapshot_fresh"
+              && managedContractSummary.brokerTruthStatus !== "no_managed_contracts"
+              && managedContractSummary.brokerTruthStatus !== "engine_stopped"
+            )
+            ? "bg-amber-900/20 border-amber-700 text-amber-200"
             : "bg-sky-950/40 border-sky-800 text-sky-200"
         }`}>
           <span className="font-medium">Broker Truth</span>{" "}
+          {managedContractSummary.directQueryFailed
+            ? `Direct agent refresh failed; showing relay cache${managedContractSummary.telemetryAgeMs != null ? ` from ${Math.round(managedContractSummary.telemetryAgeMs / 1000)}s ago` : ""}. `
+            : managedContractSummary.source === "direct_query"
+            ? `Status refreshed directly from the agent${managedContractSummary.cacheBypassReason ? ` (${managedContractSummary.cacheBypassReason.replaceAll("_", " ")})` : ""}. `
+            : managedContractSummary.source === "cached_telemetry"
+            ? `Using relay cache${managedContractSummary.telemetryAgeMs != null ? ` from ${Math.round(managedContractSummary.telemetryAgeMs / 1000)}s ago` : ""}. `
+            : ""}
           {managedContractSummary.awaitingBrokerSnapshotCount > 0
             ? `Awaiting first IB reconciliation for ${managedContractSummary.awaitingBrokerSnapshotCount} contract${managedContractSummary.awaitingBrokerSnapshotCount === 1 ? "" : "s"}. `
             : `Last IB snapshot ${Math.round(managedContractSummary.oldestBrokerSnapshotMs / 1000)}s ago across ${managedContractSummary.contractCount} managed contract${managedContractSummary.contractCount === 1 ? "" : "s"}. `}
@@ -2869,6 +2907,9 @@ export default function SignalsTab() {
             : "Single-owner invariant currently holds."}
           {managedContractSummary.reservedExitQty > 0 && (
             <span>{` Working exit reservations: ${managedContractSummary.reservedExitQty}.`}</span>
+          )}
+          {managedContractSummary.directQueryFailed && managedContractSummary.directQueryError && (
+            <span>{` Refresh error: ${managedContractSummary.directQueryError}.`}</span>
           )}
         </div>
       )}
