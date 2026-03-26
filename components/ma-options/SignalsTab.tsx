@@ -3185,9 +3185,9 @@ export default function SignalsTab() {
                                   <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-amber-900/50 text-amber-300 border border-amber-700/50" title="Recovered from IB reconciliation — no model signal lineage">ORPHAN</span>
                                 )}
                                 {renderModelBadge(group.items[0]?.lineage, group.items[0]?.parentStrategy)}
-                                <span className="text-gray-400">x{group.totalInitial}</span>
+                                <span className="text-gray-400">x{group.totalRemaining > 0 ? group.totalRemaining : group.totalInitial}</span>
                                 <span className="text-gray-500">
-                                  ({group.activeCount} active{group.closedCount > 0 ? `, ${group.closedCount} closed` : ""})
+                                  ({group.totalRemaining}/{group.totalInitial} remaining)
                                 </span>
                                 <span className={`ml-auto font-mono font-medium ${group.staleQuote ? "opacity-50" : ""} ${group.weightedPnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
                                   {group.weightedPnlPct >= 0 ? "+" : ""}{group.weightedPnlPct.toFixed(1)}% ({group.totalPnlDollar >= 0 ? "+$" : "-$"}{Math.abs(group.totalPnlDollar).toFixed(0)})
