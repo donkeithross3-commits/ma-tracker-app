@@ -1442,7 +1442,7 @@ class RiskManagerStrategy(ExecutionStrategy):
                 continue
             trigger = target.get("trigger_pct", 10.0)
             if pnl_pct >= trigger:
-                is_last = (i == len(targets) - 1) or target.get("exit_pct", 0) >= 100
+                is_last = target.get("exit_pct", 0) >= 100
                 qty = self._compute_exit_qty(target.get("exit_pct", 25), is_last)
                 action = self._make_order_action(
                     qty, profit_order_type, current_price, quote, config,

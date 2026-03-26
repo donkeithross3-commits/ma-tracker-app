@@ -302,6 +302,52 @@ class TestLiveProfitTargetEdits:
         assert risk_manager._level_states["profit_0"] == LevelState.ARMED
 
 
+# ── Profit target exit sizing ──
+
+
+class _Quote:
+    def __init__(self, bid=1.17, ask=1.18):
+        self.bid = bid
+        self.ask = ask
+
+
+class TestProfitTargetExitSizing:
+    def test_single_profit_target_respects_partial_exit_pct(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 15
+        config["position"]["entry_price"] = 0.79
+        config["profit_taking"] = {
+            "enabled": True,
+            "targets": [{"trigger_pct": 50, "exit_pct": 10}],
+            "trailing_stop": {"enabled": True, "activation_pct": 75, "trail_pct": 25},
+        }
+        rm.on_start(config)
+
+        action = rm._check_profit_targets(config, pnl_pct=50.1, current_price=1.17, quote=_Quote())
+
+        assert action is not None
+        assert action.quantity == 2
+        assert rm._level_states["profit_0"] == LevelState.TRIGGERED
+
+    def test_profit_target_100_pct_still_closes_everything(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 15
+        config["position"]["entry_price"] = 0.79
+        config["profit_taking"] = {
+            "enabled": True,
+            "targets": [{"trigger_pct": 50, "exit_pct": 100}],
+            "trailing_stop": {"enabled": True, "activation_pct": 75, "trail_pct": 25},
+        }
+        rm.on_start(config)
+
+        action = rm._check_profit_targets(config, pnl_pct=50.1, current_price=1.17, quote=_Quote())
+
+        assert action is not None
+        assert action.quantity == 15
+
+
 # ── Config update persistence ──
 
 
