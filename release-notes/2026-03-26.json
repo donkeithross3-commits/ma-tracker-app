@@ -1,0 +1,34 @@
+{
+  "date": "2026-03-26",
+  "title": "Options Position Reconciliation Repair",
+  "summary": "Recovered IB positions now repair aggregate quantity and cost basis more completely, and the positions panel no longer understates orphaned aggregate size when runtime state already knows the true quantity.",
+  "features": [
+    {
+      "id": "options-orphan-aggregate-repair",
+      "title": "Full Orphan Aggregate Repair",
+      "summary": "IB reconciliation now repairs orphaned option positions using authoritative quantity and average cost instead of only updating remaining quantity.",
+      "description": "When a recovered option position grows beyond the single synthetic lot originally spawned during reconciliation, the engine now repairs the full aggregate state from IB: quantity, entry price, config position size, and synthetic lot metadata. This prevents the risk manager and dashboard from drifting apart when IB shows a larger open position than the original orphan record.",
+      "category": "trading",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "options-positions-orphan-quantity-display",
+      "title": "Correct Orphan Quantity Display",
+      "summary": "The positions panel now shows the runtime aggregate size for single-lot orphan placeholders when the engine already knows the true IB quantity.",
+      "description": "The options positions panel previously rendered some recovered positions as x1 because it trusted the original synthetic lot entry even after runtime reconciliation had already updated the aggregate quantity. The panel now promotes that synthetic lot to the reconciled runtime size so the displayed quantity matches the engine's runtime view more closely.",
+      "category": "trading",
+      "image": null,
+      "screenshot": null
+    },
+    {
+      "id": "options-live-profit-target-editor",
+      "title": "Live Profit Target Editing For Open Positions",
+      "summary": "Open option positions can now be reconfigured live with profit targets and scale-out percentages without restarting the agent.",
+      "description": "The options signal panel now exposes per-position profit target controls alongside trailing and EOD settings, and the risk manager correctly hot-applies profit target additions, removals, and edits on running positions. Partial position risk updates now preserve untouched nested settings, so changing live targets no longer strips trailing-stop configuration from the active manager.",
+      "category": "trading",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}

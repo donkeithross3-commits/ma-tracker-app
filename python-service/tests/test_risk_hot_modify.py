@@ -196,6 +196,112 @@ class TestDisableProfitTargets:
         assert "profit_0" in changes["removed_levels"]
 
 
+# ── Live profit-target edits ──
+
+
+class TestLiveProfitTargetEdits:
+    def test_partial_profit_update_preserves_trailing_stop(self, risk_manager):
+        old_trailing = risk_manager._risk_config["profit_taking"]["trailing_stop"].copy()
+
+        risk_manager.update_risk_config(
+            {
+                "profit_taking": {
+                    "targets": [{"trigger_pct": 150, "exit_pct": 40}],
+                },
+            }
+        )
+
+        assert risk_manager._risk_config["profit_taking"]["targets"] == [
+            {"trigger_pct": 150, "exit_pct": 40}
+        ]
+        assert risk_manager._risk_config["profit_taking"]["trailing_stop"] == old_trailing
+
+    def test_partial_trailing_update_preserves_profit_targets(self, risk_manager):
+        old_targets = list(risk_manager._risk_config["profit_taking"]["targets"])
+
+        risk_manager.update_risk_config(
+            {
+                "profit_taking": {
+                    "trailing_stop": {"trail_pct": 9},
+                },
+            }
+        )
+
+        assert risk_manager._risk_config["profit_taking"]["targets"] == old_targets
+        assert risk_manager._risk_config["profit_taking"]["trailing_stop"]["trail_pct"] == 9
+
+    def test_add_profit_target_live_adds_level(self, risk_manager):
+        changes = risk_manager.update_risk_config(
+            {
+                "profit_taking": {
+                    "targets": [
+                        {"trigger_pct": 100, "exit_pct": 50},
+                        {"trigger_pct": 200, "exit_pct": 25},
+                    ],
+                },
+            }
+        )
+
+        assert "profit_1" in risk_manager._level_states
+        assert risk_manager._level_states["profit_1"] == LevelState.ARMED
+        assert "profit_1" in changes["added_levels"]
+
+    def test_remove_profit_target_live_cancels_and_removes_level(self, risk_manager):
+        risk_manager.update_risk_config(
+            {
+                "profit_taking": {
+                    "targets": [
+                        {"trigger_pct": 100, "exit_pct": 50},
+                        {"trigger_pct": 200, "exit_pct": 25},
+                    ],
+                },
+            }
+        )
+        risk_manager._level_states["profit_1"] = LevelState.TRIGGERED
+        risk_manager._pending_orders[88] = PendingOrder(
+            order_id=88,
+            level_key="profit_1",
+            level_type="profit",
+            level_idx=1,
+            expected_qty=1,
+            placed_at=0,
+        )
+
+        changes = risk_manager.update_risk_config(
+            {
+                "profit_taking": {
+                    "targets": [{"trigger_pct": 100, "exit_pct": 50}],
+                },
+            }
+        )
+
+        assert 88 in changes["cancel_order_ids"]
+        assert "profit_1" not in risk_manager._level_states
+        assert "profit_1" in changes["removed_levels"]
+
+    def test_modify_triggered_profit_target_rearms_level(self, risk_manager):
+        risk_manager._level_states["profit_0"] = LevelState.TRIGGERED
+        risk_manager._pending_orders[99] = PendingOrder(
+            order_id=99,
+            level_key="profit_0",
+            level_type="profit",
+            level_idx=0,
+            expected_qty=2,
+            placed_at=0,
+        )
+
+        changes = risk_manager.update_risk_config(
+            {
+                "profit_taking": {
+                    "targets": [{"trigger_pct": 120, "exit_pct": 40}],
+                },
+            }
+        )
+
+        assert 99 in changes["cancel_order_ids"]
+        assert risk_manager._level_states["profit_0"] == LevelState.ARMED
+
+
 # ── Config update persistence ──
 
 
@@ -208,7 +314,9 @@ class TestRiskConfigUpdate:
                 "profit_taking": risk_manager._risk_config["profit_taking"],
             }
         )
-        assert risk_manager._risk_config["stop_loss"] == new_sl
+        assert risk_manager._risk_config["stop_loss"]["enabled"] is False
+        assert risk_manager._risk_config["stop_loss"]["type"] == "none"
+        assert risk_manager._risk_config["stop_loss"]["trigger_pct"] == -80.0
 
     def test_enable_stop_after_disable(self, risk_manager):
         # Disable

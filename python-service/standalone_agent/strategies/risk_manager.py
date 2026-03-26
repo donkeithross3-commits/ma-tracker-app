@@ -1073,6 +1073,14 @@ class RiskManagerStrategy(ExecutionStrategy):
             "skipped_levels": [], "cancel_order_ids": [],
         }
 
+        old_sl = self._risk_config.get("stop_loss", {})
+        sl_patch = new_config.get("stop_loss")
+        new_sl = _deep_merge(old_sl, sl_patch) if isinstance(sl_patch, dict) else old_sl
+
+        old_pt = self._risk_config.get("profit_taking", {})
+        pt_patch = new_config.get("profit_taking")
+        new_pt = _deep_merge(old_pt, pt_patch) if isinstance(pt_patch, dict) else old_pt
+
         # Apply eod_exit_time if present in new_config
         if "eod_exit_time" in new_config:
             new_eod = new_config["eod_exit_time"]
@@ -1097,8 +1105,6 @@ class RiskManagerStrategy(ExecutionStrategy):
             changes["updated_fields"].append("eod_min_bid")
 
         # --- Stop Loss ---
-        old_sl = self._risk_config.get("stop_loss", {})
-        new_sl = new_config.get("stop_loss", old_sl)
         if new_sl != old_sl:
             changes["updated_fields"].append("stop_loss")
             if new_sl.get("enabled") and not old_sl.get("enabled"):
@@ -1127,8 +1133,6 @@ class RiskManagerStrategy(ExecutionStrategy):
                             changes["skipped_levels"].append(key)
 
         # --- Profit Taking ---
-        old_pt = self._risk_config.get("profit_taking", {})
-        new_pt = new_config.get("profit_taking", old_pt)
         if new_pt != old_pt:
             changes["updated_fields"].append("profit_taking")
             if new_pt.get("enabled") and not old_pt.get("enabled"):
@@ -1146,6 +1150,34 @@ class RiskManagerStrategy(ExecutionStrategy):
                             changes["removed_levels"].append(key)
                         else:
                             changes["skipped_levels"].append(key)
+            elif new_pt.get("enabled"):
+                old_targets = old_pt.get("targets", [])
+                new_targets = new_pt.get("targets", [])
+                max_targets = max(len(old_targets), len(new_targets))
+                for i in range(max_targets):
+                    key = f"profit_{i}"
+                    old_target = old_targets[i] if i < len(old_targets) else None
+                    new_target = new_targets[i] if i < len(new_targets) else None
+                    level_state = self._level_states.get(key)
+                    if old_target is None and new_target is not None:
+                        if key not in self._level_states:
+                            self._level_states[key] = LevelState.ARMED
+                            changes["added_levels"].append(key)
+                    elif old_target is not None and new_target is None:
+                        if level_state in (LevelState.ARMED, LevelState.TRIGGERED, LevelState.PARTIAL):
+                            self._collect_cancel_ids(key, changes["cancel_order_ids"])
+                            self._level_states.pop(key, None)
+                            changes["removed_levels"].append(key)
+                        elif key in self._level_states:
+                            changes["skipped_levels"].append(key)
+                    elif old_target != new_target:
+                        changes["updated_fields"].append(f"profit_target_{i}")
+                        if level_state in (LevelState.TRIGGERED, LevelState.PARTIAL):
+                            self._collect_cancel_ids(key, changes["cancel_order_ids"])
+                            self._level_states[key] = LevelState.ARMED
+                        elif key not in self._level_states:
+                            self._level_states[key] = LevelState.ARMED
+                            changes["added_levels"].append(key)
 
         # --- Trailing Stop (activation_pct, trail_pct, exit_tranches) ---
         old_ts = old_pt.get("trailing_stop", {})
@@ -1244,9 +1276,10 @@ class RiskManagerStrategy(ExecutionStrategy):
                         changes["updated_fields"].append(f"per_lot_override_{lot_idx}")
 
         # --- Merge new config into _risk_config ---
-        for key in ("stop_loss", "profit_taking"):
-            if key in new_config:
-                self._risk_config[key] = new_config[key]
+        if "stop_loss" in new_config:
+            self._risk_config["stop_loss"] = new_sl
+        if "profit_taking" in new_config:
+            self._risk_config["profit_taking"] = new_pt
 
         return changes
 

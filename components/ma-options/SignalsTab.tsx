@@ -132,6 +132,202 @@ function TrailRiskEditor({
   );
 }
 
+type ProfitTargetDraft = {
+  trigger_pct: string;
+  exit_pct: string;
+};
+
+const profitTargetsToDrafts = (
+  targets: Array<{ trigger_pct: number; exit_pct: number }> | undefined
+): ProfitTargetDraft[] => (targets || []).map((target) => ({
+  trigger_pct: String(target.trigger_pct),
+  exit_pct: String(target.exit_pct),
+}));
+
+const serializeProfitTargetDrafts = (drafts: ProfitTargetDraft[]): string =>
+  JSON.stringify(
+    drafts.map((draft) => ({
+      trigger_pct: draft.trigger_pct.trim(),
+      exit_pct: draft.exit_pct.trim(),
+    }))
+  );
+
+function PositionProfitTargetsEditor({
+  enabled,
+  targets,
+  strategyId,
+  onApply,
+  stopPropagation,
+}: {
+  enabled: boolean;
+  targets: Array<{ trigger_pct: number; exit_pct: number }> | undefined;
+  strategyId: string;
+  onApply: (strategyId: string, config: Record<string, any>) => Promise<void>;
+  stopPropagation?: boolean;
+}) {
+  const propDrafts = useMemo(() => profitTargetsToDrafts(targets), [targets]);
+  const [localEnabled, setLocalEnabled] = useState(enabled);
+  const [localTargets, setLocalTargets] = useState<ProfitTargetDraft[]>(propDrafts);
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLocalEnabled(enabled);
+  }, [enabled]);
+
+  useEffect(() => {
+    setLocalTargets(propDrafts);
+  }, [propDrafts]);
+
+  const parsedTargets = localTargets.map((target) => ({
+    trigger_pct: parseFloat(target.trigger_pct),
+    exit_pct: parseFloat(target.exit_pct),
+  }));
+  const localTargetsDirty = serializeProfitTargetDrafts(localTargets) !== serializeProfitTargetDrafts(propDrafts);
+  const isDirty = localEnabled !== enabled || localTargetsDirty;
+  const hasInvalidTargets = localEnabled && localTargets.some((target) => {
+    const trigger = parseFloat(target.trigger_pct);
+    const exit = parseFloat(target.exit_pct);
+    return (
+      target.trigger_pct.trim() === "" ||
+      target.exit_pct.trim() === "" ||
+      Number.isNaN(trigger) ||
+      Number.isNaN(exit) ||
+      trigger < 0 ||
+      exit <= 0 ||
+      exit > 100
+    );
+  });
+
+  const stopClick = stopPropagation ? (e: React.MouseEvent) => e.stopPropagation() : undefined;
+
+  const setRow = (idx: number, key: keyof ProfitTargetDraft, value: string) => {
+    setLocalError(null);
+    setLocalTargets((prev) => prev.map((target, i) => (
+      i === idx ? { ...target, [key]: value } : target
+    )));
+  };
+
+  const addTarget = () => {
+    setLocalError(null);
+    setLocalEnabled(true);
+    setLocalTargets((prev) => [...prev, { trigger_pct: "25", exit_pct: "25" }]);
+  };
+
+  const removeTarget = (idx: number) => {
+    setLocalError(null);
+    setLocalTargets((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleApply = async () => {
+    if (hasInvalidTargets) {
+      setLocalError("Targets need valid trigger% and exit% (0-100).");
+      return;
+    }
+    setSaving(true);
+    setLocalError(null);
+    const nextTargets = localTargets.length > 0 ? parsedTargets : [];
+    try {
+      await onApply(strategyId, {
+        profit_taking: {
+          enabled: localEnabled,
+          targets: nextTargets,
+        },
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setLocalError(null);
+          setLocalEnabled((prev) => !prev);
+        }}
+        className={`px-1.5 py-0.5 rounded font-bold transition-colors ${
+          localEnabled
+            ? "bg-green-900/50 text-green-300 hover:bg-green-900/70"
+            : "bg-gray-700/50 text-gray-500 hover:bg-gray-700/80 hover:text-gray-300"
+        }`}
+        title={localEnabled ? "Disable profit targets" : "Enable profit targets"}
+      >
+        Targets {localEnabled ? "ON" : "OFF"}
+      </button>
+      {localEnabled && localTargets.map((target, idx) => (
+        <React.Fragment key={`pt-${idx}`}>
+          <span className="text-gray-600">T{idx + 1}</span>
+          <input
+            type="text"
+            value={target.trigger_pct}
+            onChange={(e) => setRow(idx, "trigger_pct", e.target.value)}
+            className={`inline-edit w-[42px] bg-gray-800 border rounded px-1 py-0.5 text-gray-200 text-center font-mono ${Number.isNaN(parseFloat(target.trigger_pct)) ? "border-red-500" : "border-gray-600"}`}
+            title="Trigger unrealized P&L %"
+            onClick={stopClick}
+          />
+          <span className="text-gray-500">% /</span>
+          <input
+            type="text"
+            value={target.exit_pct}
+            onChange={(e) => setRow(idx, "exit_pct", e.target.value)}
+            className={`inline-edit w-[38px] bg-gray-800 border rounded px-1 py-0.5 text-gray-200 text-center font-mono ${Number.isNaN(parseFloat(target.exit_pct)) ? "border-red-500" : "border-gray-600"}`}
+            title="Exit % of remaining position"
+            onClick={stopClick}
+          />
+          <span className="text-gray-500">%</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              removeTarget(idx);
+            }}
+            className="text-red-500 hover:text-red-400 px-0.5"
+            title="Remove target"
+          >
+            &times;
+          </button>
+        </React.Fragment>
+      ))}
+      {localEnabled && localTargets.length === 0 && (
+        <span className="text-gray-500 italic">no targets</span>
+      )}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          addTarget();
+        }}
+        className="text-blue-400 hover:text-blue-300 font-medium"
+        title="Add a profit target"
+      >
+        + Target
+      </button>
+      {isDirty && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleApply();
+          }}
+          disabled={saving}
+          className="inline-edit px-1.5 py-0.5 rounded font-bold bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
+        >
+          {saving ? "..." : "Apply"}
+        </button>
+      )}
+      {saved && !isDirty && (
+        <span className="text-green-400 font-bold animate-pulse">✓</span>
+      )}
+      {localError && (
+        <span className="text-red-400">{localError}</span>
+      )}
+      <span className="text-gray-700">│</span>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Types — Full execution_status response
 // ---------------------------------------------------------------------------
@@ -222,6 +418,30 @@ interface ActiveOrder {
   avg_fill_price: number;
   placed_at: number;
   last_update: number;
+  warning_text?: string;
+  why_held?: string;
+  error_code?: number | null;
+  error_string?: string;
+  advanced_order_reject_json?: string;
+}
+
+interface DeadOrderRecord {
+  order_id: number;
+  strategy_id: string;
+  ticker: string;
+  status: string;
+  reason: string;
+  error_code?: number | null;
+  error_string?: string;
+  warning_text?: string;
+  why_held?: string;
+  advanced_order_reject_json?: string;
+  perm_id?: number;
+  filled: number;
+  remaining: number;
+  is_entry: boolean;
+  placed_at: number;
+  dead_at: number;
 }
 
 interface PositionLedgerEntry {
@@ -268,6 +488,7 @@ interface FullExecutionStatus {
   available_scan_lines: number;
   quote_snapshot: Record<string, QuoteSnapshot>;
   active_orders: ActiveOrder[];
+  recent_dead_orders?: DeadOrderRecord[];
   order_budget: number;
   total_algo_orders: number;
   position_ledger?: PositionLedgerEntry[];
@@ -618,6 +839,7 @@ export default function SignalsTab() {
 
   // Model availability per ticker (fetched from registry on mount)
   const [modelAvailability, setModelAvailability] = useState<Record<string, ModelAvailability>>({});
+  const enabledTickersInitializedRef = useRef(false);
 
   // Which tickers are enabled for starting — default to all tickers with models
   const [enabledTickers, setEnabledTickers] = useState<string[]>(["SPY", "QQQ", "GLD", "SLV"]);
@@ -710,11 +932,19 @@ export default function SignalsTab() {
       const data = await res.json();
       if (data.tickers) {
         setModelAvailability(data.tickers);
+        if (!enabledTickersInitializedRef.current && !running) {
+          const available = ["SPY", "QQQ", "GLD", "SLV"].filter((ticker) => {
+            const avail = data.tickers[ticker];
+            return !!avail && (avail.has_up || avail.has_down || avail.has_symmetric);
+          });
+          setEnabledTickers(available);
+          enabledTickersInitializedRef.current = true;
+        }
       }
     } catch {
       // Silent fail — badges just won't show
     }
-  }, []);
+  }, [running]);
 
   useEffect(() => {
     fetchModelAvailability();
@@ -1506,8 +1736,26 @@ export default function SignalsTab() {
                     perm_id: ledger.entry?.perm_id,
                   },
                 ];
+        const runtimeInitialQty = Number(ledger.runtime_state?.initial_qty ?? 0);
+        const lotQtyTotal = lots.reduce((sum, lot) => sum + Math.max(0, Number(lot.quantity ?? 0)), 0);
+        const shouldPromoteSyntheticOrphanLot =
+          ledger.is_orphan === true &&
+          runtimeLots.length === 1 &&
+          (ledger.fill_log?.length ?? 0) === 0 &&
+          Number(runtimeLots[0]?.order_id ?? ledger.entry?.order_id ?? 0) === 0 &&
+          runtimeInitialQty > lotQtyTotal;
+        const normalizedLots = shouldPromoteSyntheticOrphanLot
+          ? lots.map((lot, idx) =>
+              idx === 0
+                ? {
+                    ...lot,
+                    quantity: runtimeInitialQty,
+                  }
+                : lot
+            )
+          : lots;
 
-        for (const lot of lots) {
+        for (const lot of normalizedLots) {
           const quantity = Math.max(0, Number(lot.quantity ?? 0));
           if (quantity <= 0) continue;
           const entryPrice = Number(lot.entry_price ?? ledger.entry?.price ?? 0);
@@ -2114,6 +2362,13 @@ export default function SignalsTab() {
   const directionColor = currentSig?.direction === "long" ? "text-green-400"
     : currentSig?.direction === "short" ? "text-red-400"
     : "text-gray-500";
+  const latestDeadOrder = useMemo(() => {
+    const dead = executionStatus?.recent_dead_orders || [];
+    const ticker = activeTicker.toUpperCase();
+    return [...dead]
+      .reverse()
+      .find((entry) => (entry.ticker || "").toUpperCase() === ticker);
+  }, [executionStatus?.recent_dead_orders, activeTicker]);
 
   return (
     <div className="space-y-3">
@@ -2460,6 +2715,16 @@ export default function SignalsTab() {
                 })}
               </div>
             )}
+            {latestDeadOrder && (
+              <div className="mb-2 rounded border border-red-800/70 bg-red-950/40 px-2.5 py-2 text-xs text-red-200">
+                <div className="font-semibold text-red-300">
+                  Last order failed: #{latestDeadOrder.order_id} {latestDeadOrder.status}
+                </div>
+                <div className="mt-0.5 break-words" title={latestDeadOrder.reason}>
+                  {latestDeadOrder.reason}
+                </div>
+              </div>
+            )}
             {currentSig ? (
               <div className="space-y-2">
                 <div className="flex items-baseline gap-3">
@@ -2645,9 +2910,11 @@ export default function SignalsTab() {
                                 const eodEnabled = !!eodTime;
                                 const trailPct = (rmConfig?.profit_taking as any)?.trailing_stop?.trail_pct as number | undefined;
                                 const activationPct = (rmConfig?.profit_taking as any)?.trailing_stop?.activation_pct as number | undefined;
+                                const profitTargetsEnabled = !!(rmConfig?.profit_taking as any)?.enabled;
+                                const profitTargets = ((rmConfig?.profit_taking as any)?.targets as Array<{ trigger_pct: number; exit_pct: number }> | undefined) || [];
                                 const hasTrail = (rmConfig?.profit_taking as any)?.trailing_stop != null || rm?.level_states?.trailing != null;
                                 return (
-                                  <div className="flex items-center gap-2 mt-1 text-[10px]">
+                                  <div className="flex items-center gap-2 mt-1 text-[10px] flex-wrap">
                                     {/* Trail % control */}
                                     {hasTrail && (
                                       <TrailRiskEditor
@@ -2657,6 +2924,12 @@ export default function SignalsTab() {
                                         onApply={handlePositionRiskUpdate}
                                       />
                                     )}
+                                    <PositionProfitTargetsEditor
+                                      enabled={profitTargetsEnabled}
+                                      targets={profitTargets}
+                                      strategyId={strategyId}
+                                      onApply={handlePositionRiskUpdate}
+                                    />
                                     <button
                                       onClick={() => handlePositionEodUpdate(
                                         strategyId,
@@ -2795,6 +3068,8 @@ export default function SignalsTab() {
                               const sid = firstActivePd.strategyId;
                               const grpTrailPct = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop?.trail_pct as number | undefined;
                               const grpActivationPct = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop?.activation_pct as number | undefined;
+                              const grpProfitTargetsEnabled = !!(firstActivePd.rmConfig?.profit_taking as any)?.enabled;
+                              const grpProfitTargets = ((firstActivePd.rmConfig?.profit_taking as any)?.targets as Array<{ trigger_pct: number; exit_pct: number }> | undefined) || [];
                               const grpHasTrail = (firstActivePd.rmConfig?.profit_taking as any)?.trailing_stop != null
                                 || firstActivePd.rm?.level_states?.trailing != null
                                 || Object.keys(firstActivePd.rm?.level_states || {}).some(k => k.startsWith("trailing_lot_"));
@@ -2837,6 +3112,13 @@ export default function SignalsTab() {
                                   {grpHasTrail && isPerLot && (
                                     <span className="text-purple-400/70 italic">expand to edit per-lot trail params ▼</span>
                                   )}
+                                  <PositionProfitTargetsEditor
+                                    enabled={grpProfitTargetsEnabled}
+                                    targets={grpProfitTargets}
+                                    strategyId={sid}
+                                    onApply={handlePositionRiskUpdate}
+                                    stopPropagation
+                                  />
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handlePositionEodUpdate(sid, !eodEnabled, eodTime || "15:30", eodMinBid ?? 0.05); }}
                                     className={`px-1.5 py-0.5 rounded font-bold transition-colors ${
