@@ -1774,6 +1774,8 @@ export default function SignalsTab() {
       isOrphan: boolean;
       lineage?: PositionLedgerEntry["lineage"];
       parentStrategy?: string;
+      ledgerRemainingQty: number | null;
+      ledgerInitialQty: number | null;
     };
 
     const baseDetails: Detail[] = [];
@@ -1886,7 +1888,22 @@ export default function SignalsTab() {
           const recentErrors = matchedStrategy?.recent_errors ?? [];
           const isOrphan = ledger.is_orphan === true;
           const rmConfig = matchedStrategy?.config ?? null;
-          baseDetails.push({ pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan, lineage: ledger.lineage, parentStrategy: ledger.parent_strategy });
+          baseDetails.push({
+            pos,
+            rm,
+            rmConfig,
+            quote,
+            pnlPct,
+            pnlDollar,
+            optionContract,
+            strategyId,
+            recentErrors,
+            isOrphan,
+            lineage: ledger.lineage,
+            parentStrategy: ledger.parent_strategy,
+            ledgerRemainingQty: Number(ledger.runtime_state?.remaining_qty ?? 0),
+            ledgerInitialQty: Number(ledger.runtime_state?.initial_qty ?? lotQtyTotal),
+          });
         }
       }
     } else {
@@ -1961,7 +1978,22 @@ export default function SignalsTab() {
         const optionContract = pos.signal?.option_contract ?? null;
         const recentErrors = matchedStrategy?.recent_errors ?? [];
         const rmConfig = matchedStrategy?.config ?? null;
-        baseDetails.push({ pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan: false, lineage: undefined, parentStrategy: undefined });
+        baseDetails.push({
+          pos,
+          rm,
+          rmConfig,
+          quote,
+          pnlPct,
+          pnlDollar,
+          optionContract,
+          strategyId,
+          recentErrors,
+          isOrphan: false,
+          lineage: undefined,
+          parentStrategy: undefined,
+          ledgerRemainingQty: null,
+          ledgerInitialQty: null,
+        });
       }
     }
 
@@ -2063,7 +2095,22 @@ export default function SignalsTab() {
         const recentErrors = s.recent_errors ?? [];
         const isOrphan = ledger?.is_orphan === true;
         const rmConfig = s.config ?? null;
-        return { pos, rm, rmConfig, quote, pnlPct, pnlDollar, optionContract, strategyId, recentErrors, isOrphan, lineage: ledger?.lineage, parentStrategy: ledger?.parent_strategy };
+        return {
+          pos,
+          rm,
+          rmConfig,
+          quote,
+          pnlPct,
+          pnlDollar,
+          optionContract,
+          strategyId,
+          recentErrors,
+          isOrphan,
+          lineage: ledger?.lineage,
+          parentStrategy: ledger?.parent_strategy,
+          ledgerRemainingQty: ledger ? Number(ledger.runtime_state?.remaining_qty ?? 0) : null,
+          ledgerInitialQty: ledger ? Number(ledger.runtime_state?.initial_qty ?? quantity) : null,
+        };
       });
 
     return [...baseDetails, ...orphanDetails];
@@ -2136,7 +2183,12 @@ export default function SignalsTab() {
       if (pd.pnlDollar != null) g.totalPnlDollar += pd.pnlDollar;
       g.totalCostBasis += pd.pos.entry_price * pd.pos.quantity * 100;
       g.totalInitial += pd.pos.quantity;
-      if (pd.rm && pd.strategyId) {
+      if (pd.strategyId && pd.ledgerRemainingQty != null) {
+        if (!g.countedStrategyIds.has(pd.strategyId)) {
+          g.totalRemaining += pd.ledgerRemainingQty;
+          g.countedStrategyIds.add(pd.strategyId);
+        }
+      } else if (pd.rm && pd.strategyId) {
         if (!g.countedStrategyIds.has(pd.strategyId)) {
           g.totalRemaining += pd.rm.remaining_qty;
           g.countedStrategyIds.add(pd.strategyId);
