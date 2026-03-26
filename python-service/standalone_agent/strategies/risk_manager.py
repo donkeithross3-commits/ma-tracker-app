@@ -549,6 +549,44 @@ class RiskManagerStrategy(ExecutionStrategy):
         activation_pct = float(override["activation_pct"]) if "activation_pct" in override else base_activation_pct
         return LotTrailingState(lot_idx, entry_price, quantity, trail_pct, activation_pct)
 
+    def _apply_aggregate_exit_fill_to_per_lot_state(self, level_key: str, filled_delta: int) -> None:
+        """Reduce per-lot trailing inventory for non-per-lot exit fills.
+
+        Aggregate exits such as profit targets, uniform trailing, stop losses,
+        and manual close-outs reduce the overall position without naming a
+        specific lot. In per-lot trailing mode we must still retire specific lot
+        states so later trailing evaluations do not sell contracts that were
+        already exited by an aggregate order.
+        """
+        if self._trailing_mode != "per_lot" or filled_delta <= 0:
+            return
+
+        remaining_to_allocate = filled_delta
+        for lot_idx, lot_state in sorted(self._per_lot_trailing.items()):
+            if remaining_to_allocate <= 0:
+                break
+            if lot_state.remaining_qty <= 0:
+                continue
+
+            consume = min(lot_state.remaining_qty, remaining_to_allocate)
+            lot_state.remaining_qty = max(0, lot_state.remaining_qty - consume)
+            lot_state.trailing_tranche_pending = False
+            remaining_to_allocate -= consume
+
+            if lot_state.remaining_qty <= 0:
+                self._level_states[f"trailing_lot_{lot_idx}"] = LevelState.FILLED
+                logger.info(
+                    "Per-lot tracking: retired lot %d via aggregate exit %s",
+                    lot_idx, level_key,
+                )
+
+        if remaining_to_allocate > 0:
+            logger.warning(
+                "Per-lot tracking could not fully allocate aggregate exit %s "
+                "(filled=%d, unallocated=%d, cache_key=%s)",
+                level_key, filled_delta, remaining_to_allocate, self.cache_key,
+            )
+
     # ── Lot aggregation ──
 
     def add_lot(self, entry_price: float, quantity: int, order_id: int = 0,
@@ -729,6 +767,14 @@ class RiskManagerStrategy(ExecutionStrategy):
             else:
                 fill_entry["tranche_idx"] = self._trailing_tranche_idx
         self._fill_log.append(fill_entry)
+
+        is_per_lot_trailing_fill = (
+            pending.level_type == "trailing"
+            and self._trailing_mode == "per_lot"
+            and pending.level_key.startswith("trailing_lot_")
+        )
+        if not is_per_lot_trailing_fill:
+            self._apply_aggregate_exit_fill_to_per_lot_state(level_key, filled_delta)
 
         status = fill_data.get("status", "")
         remaining_on_order = fill_data.get("remaining", 1)

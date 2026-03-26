@@ -448,6 +448,44 @@ class TestPerLotTrailingBehavior:
         assert action.quantity == 1
         assert action.reason.startswith("Per-lot trailing stop")
 
+    def test_aggregate_profit_fill_retires_one_per_lot_slot(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 1
+        config["position"]["entry_price"] = 0.62
+        config["profit_taking"] = {
+            "enabled": True,
+            "targets": [{"trigger_pct": 33, "exit_pct": 20}],
+            "trailing_stop": {
+                "enabled": True,
+                "mode": "per_lot",
+                "activation_pct": 75,
+                "trail_pct": 25,
+            },
+        }
+        rm.on_start(config)
+        rm.add_lot(0.61, 1, order_id=56, fill_time=1001.0)
+        rm.add_lot(0.56, 1, order_id=58, fill_time=1002.0)
+        rm.add_lot(0.57, 1, order_id=59, fill_time=1003.0)
+
+        action = rm._check_profit_targets(config, pnl_pct=33.5, current_price=0.79, quote=_Quote(0.78, 0.79))
+        assert action is not None
+        assert action.quantity == 1
+
+        rm.on_order_placed(101, {"remaining": 1, "filled": 0}, config)
+        rm.on_fill(
+            101,
+            {"filled": 1, "avgFillPrice": 0.79, "status": "Filled", "remaining": 0},
+            config,
+        )
+
+        assert rm.remaining_qty == 3
+        open_lots = [lot_idx for lot_idx, lot_state in rm._per_lot_trailing.items() if lot_state.remaining_qty > 0]
+        closed_lots = [lot_idx for lot_idx, lot_state in rm._per_lot_trailing.items() if lot_state.remaining_qty == 0]
+        assert len(open_lots) == 3
+        assert len(closed_lots) == 1
+        assert rm._level_states[f"trailing_lot_{closed_lots[0]}"] == LevelState.FILLED
+
 
 # ── Config update persistence ──
 
