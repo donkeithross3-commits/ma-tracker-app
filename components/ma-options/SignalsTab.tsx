@@ -165,26 +165,29 @@ function PositionProfitTargetsEditor({
   onApply: (strategyId: string, config: Record<string, any>) => Promise<void>;
   stopPropagation?: boolean;
 }) {
-  const propDrafts = useMemo(() => profitTargetsToDrafts(targets), [targets]);
+  const serverDrafts = profitTargetsToDrafts(targets);
+  const serverTargetsKey = serializeProfitTargetDrafts(serverDrafts);
+  const serverConfigKey = `${enabled ? "1" : "0"}|${serverTargetsKey}`;
   const [localEnabled, setLocalEnabled] = useState(enabled);
-  const [localTargets, setLocalTargets] = useState<ProfitTargetDraft[]>(propDrafts);
+  const [localTargets, setLocalTargets] = useState<ProfitTargetDraft[]>(serverDrafts);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const lastServerConfigKeyRef = useRef(serverConfigKey);
 
   useEffect(() => {
+    if (lastServerConfigKeyRef.current === serverConfigKey) return;
+    lastServerConfigKeyRef.current = serverConfigKey;
     setLocalEnabled(enabled);
-  }, [enabled]);
-
-  useEffect(() => {
-    setLocalTargets(propDrafts);
-  }, [propDrafts]);
+    setLocalTargets(serverDrafts);
+    setLocalError(null);
+  }, [enabled, serverConfigKey, serverDrafts]);
 
   const parsedTargets = localTargets.map((target) => ({
     trigger_pct: parseFloat(target.trigger_pct),
     exit_pct: parseFloat(target.exit_pct),
   }));
-  const localTargetsDirty = serializeProfitTargetDrafts(localTargets) !== serializeProfitTargetDrafts(propDrafts);
+  const localTargetsDirty = serializeProfitTargetDrafts(localTargets) !== serverTargetsKey;
   const isDirty = localEnabled !== enabled || localTargetsDirty;
   const hasInvalidTargets = localEnabled && localTargets.some((target) => {
     const trigger = parseFloat(target.trigger_pct);
