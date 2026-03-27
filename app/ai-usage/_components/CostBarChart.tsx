@@ -4,7 +4,31 @@ import { fmtCost, fmtDate } from "../_lib/formatters";
 export function CostBarChart({ data }: { data: DailyAggregate[] }) {
   if (!data.length) return <p className="text-gray-500 text-sm">No data available.</p>;
 
-  const sliced = data.slice(0, 14).reverse();
+  // Fill gaps so x-axis is continuous
+  const sorted = [...data].sort((a, b) => new Date(a.day).getTime() - new Date(b.day).getTime());
+  const filled: DailyAggregate[] = [];
+  if (sorted.length > 0) {
+    const start = new Date(sorted[0].day);
+    const end = new Date(sorted[sorted.length - 1].day);
+    const dayMap = new Map(sorted.map((d) => [d.day, d]));
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const iso = d.toISOString().split("T")[0];
+      filled.push(
+        dayMap.get(iso) ?? {
+          day: iso,
+          interactive_cost: 0,
+          programmatic_cost: 0,
+          total_tokens: 0,
+          sessions: 0,
+          calls: 0,
+          overhead_ratio: 0,
+          cache_creation: 0,
+        }
+      );
+    }
+  }
+
+  const sliced = filled.slice(-14);
   const maxCost = Math.max(...sliced.map((d) => d.interactive_cost + d.programmatic_cost), 0.01);
 
   return (

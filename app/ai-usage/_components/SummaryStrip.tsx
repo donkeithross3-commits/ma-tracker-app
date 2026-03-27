@@ -55,12 +55,18 @@ export function SummaryStrip({
       <span className="text-gray-700">|</span>
       <span className="flex items-center gap-1.5 min-w-[130px]">
         <span className="text-gray-500">Quota</span>
-        <span className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all ${quotaBarColor(quotaPct)}`}
-            style={{ width: `${Math.min(quotaPct, 100)}%` }}
-          />
-        </span>
+        {quotaPct > 100 ? (
+          <span className="text-xs font-medium text-red-400 bg-red-500/15 px-1.5 py-0.5 rounded">
+            OVER LIMIT
+          </span>
+        ) : (
+          <span className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${quotaBarColor(quotaPct)}`}
+              style={{ width: `${quotaPct}%` }}
+            />
+          </span>
+        )}
         <span className={`font-mono tabular-nums ${quotaColor(quotaPct)}`}>
           {quotaPct.toFixed(0)}%
         </span>

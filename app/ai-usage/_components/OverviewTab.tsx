@@ -119,7 +119,7 @@ export function OverviewTab({
                     />
                   </div>
                   <div className="text-[10px] text-gray-500 mt-0.5">
-                    {a.sessions} sessions
+                    {a.sessions} session{a.sessions !== 1 ? "s" : ""}
                   </div>
                 </div>
               );

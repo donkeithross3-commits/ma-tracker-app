@@ -533,11 +533,20 @@ async def efficiency_analysis(
             since,
         )
 
+    # Labels that represent normal interactive Claude Code usage
+    # (high overhead is expected — system prompt caching is inherent to CLI sessions)
+    _INTERACTIVE_LABELS = {"unknown", "interactive", "subagent"}
+
     # Build per-session list
     per_session = []
     for r in rows:
         d = _row_to_dict(r)
-        d["is_inefficient"] = d["overhead_ratio"] > 10 and d["cost_equivalent"] > 5
+        # Only flag as inefficient if it's an identified automated workload
+        # Interactive sessions naturally have high overhead from system prompts
+        is_automated = d["agent_persona"] not in _INTERACTIVE_LABELS
+        d["is_inefficient"] = (
+            is_automated and d["overhead_ratio"] > 10 and d["cost_equivalent"] > 5
+        )
         per_session.append(d)
 
     # Machine × Agent matrix
@@ -573,19 +582,20 @@ async def efficiency_analysis(
             avg_overhead = agg["total_overhead_weighted"] / agg["total_useful_tokens"]
         else:
             avg_overhead = 0.0
+        is_automated = agg["agent"] not in _INTERACTIVE_LABELS
         per_agent.append({
             "agent": agg["agent"],
             "machine": agg["machine"],
             "sessions": agg["sessions"],
             "total_cost": round(agg["total_cost"], 2),
             "avg_overhead_ratio": round(avg_overhead, 1),
-            "is_inefficient": avg_overhead > 10 and agg["total_cost"] > 50,
+            "is_inefficient": is_automated and avg_overhead > 10 and agg["total_cost"] > 50,
         })
 
     # Anomaly detection
     anomalies = []
 
-    # 1. High overhead agents
+    # 1. High overhead on AUTOMATED workloads (not interactive sessions)
     for pa in per_agent:
         if pa["is_inefficient"]:
             anomalies.append({
@@ -595,9 +605,9 @@ async def efficiency_analysis(
                 "agent": pa["agent"],
                 "detail": (
                     f"{pa['agent']} on {pa['machine']}: "
-                    f"{pa['avg_overhead_ratio']:.0f}:1 overhead ratio across "
-                    f"{pa['sessions']} sessions (${pa['total_cost']:.0f} equiv) — "
-                    f"consider migrating to API"
+                    f"{pa['avg_overhead_ratio']:.0f}:1 overhead across "
+                    f"{pa['sessions']} session{'s' if pa['sessions'] != 1 else ''} "
+                    f"(${pa['total_cost']:.0f} equiv) — migrate to API"
                 ),
             })
 
@@ -605,34 +615,15 @@ async def efficiency_analysis(
     daily_cost: dict[str, float] = defaultdict(float)
     for s in per_session:
         daily_cost[str(s["day"])] += s["cost_equivalent"]
-    for day, cost in daily_cost.items():
+    for day, cost in sorted(daily_cost.items(), reverse=True):
         if cost > 500:
             anomalies.append({
                 "type": "daily_spike",
                 "severity": "medium",
                 "machine": None,
                 "agent": None,
-                "detail": f"{day}: ${cost:,.0f} subscription equivalent in one day",
+                "detail": f"{day}: ${cost:,.0f} subscription equivalent",
             })
-
-    # 3. Null-agent high consumption
-    null_cost = sum(
-        s["cost_equivalent"]
-        for s in per_session
-        if s["agent_persona"] == "unknown"
-    )
-    null_sessions = sum(1 for s in per_session if s["agent_persona"] == "unknown")
-    if null_cost > 50:
-        anomalies.append({
-            "type": "null_agent",
-            "severity": "medium",
-            "machine": None,
-            "agent": "unknown",
-            "detail": (
-                f"{null_sessions} sessions with unknown agent consuming "
-                f"${null_cost:,.0f} equivalent — agent inference needs improvement"
-            ),
-        })
 
     return {
         "period_days": days,

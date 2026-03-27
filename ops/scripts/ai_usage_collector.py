@@ -251,27 +251,32 @@ def _infer_agent_persona(project: str, raw: dict) -> str | None:
     """Try to infer which agent persona was used from the project path.
 
     ccusage groups sessions by project directory. We map known directories
-    to the most likely agent persona. Sessions from the home directory
-    could be any agent — left as null for manual enrichment.
+    to the most likely agent persona. Home directory and ma-tracker sessions
+    are labeled "interactive" — they represent mixed agent work that can't
+    be attributed to a single persona from ccusage data alone.
     """
     if not project:
-        return None
+        return "interactive"
     project_lower = project.lower()
+
+    # Subagent sessions (spawned by agents) — label as "subagent"
+    session_id = raw.get("sessionId", "")
+    if session_id == "subagents" or "/subagents" in project_lower:
+        return "subagent"
 
     # Project-path heuristics
     if "py_proj" in project_lower or "py-proj" in project_lower:
         return "bmc-quant"
-    if "ma-tracker" in project_lower:
-        return None  # Could be any of ops-deploy, deal-intel, trading-engine, dashboard-ui
     if "parkinsons" in project_lower:
         return "parkinsons-research"
 
-    # Home directory sessions (sessionId = "-Users-donross") are ambiguous
-    # The user runs different agents from the home dir
-    if "users-donross" in project_lower and "dev" not in project_lower:
-        return None
+    # ma-tracker-app on the droplet is likely ops-deploy or deal-intel
+    # On mac it could be any agent — label as "interactive"
+    if "ma-tracker" in project_lower:
+        return "interactive"
 
-    return None
+    # Home directory sessions — mixed agent usage
+    return "interactive"
 
 
 # ---------------------------------------------------------------------------
