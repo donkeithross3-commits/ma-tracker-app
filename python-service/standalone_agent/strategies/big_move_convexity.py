@@ -2137,7 +2137,7 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         if not increment:
             profile = _get_ticker_profile(self._ticker)
             increment = profile["strike_increment"]
-        strike = round(target_strike / increment) * increment
+        initial_strike = round(target_strike / increment) * increment
 
         # Expiry selection: iterate through preferred DTEs, skipping weekends.
         # SPY/QQQ/IWM have daily expirations; SLV/GLD have weekly (Fri) only.
@@ -2214,64 +2214,155 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
         estimated_premium = (premium_min + effective_premium_max) / 2.0
         qty = min(max_contracts, max(1, int(budget / (estimated_premium * 100))))
 
-        # ── Try each candidate expiry until we get a valid quote ──
-        # Tickers like SLV/GLD only have weekly (Fri) expirations, so the
-        # nearest DTE may not have a listed contract.  We iterate through
-        # candidates and use the first one that returns quote data.
+        # ── Strike walk: try the target strike, then step further OTM if too expensive ──
+        # If the initial strike's ask exceeds the budget cap, walk further OTM
+        # by one increment at a time (e.g. 650C → 651C → 652C for calls).
+        # Each step is one IB quote fetch (~50ms). Capped at max_strike_steps
+        # to bound total latency. This runs on the entry path only (not the
+        # 100ms eval loop) — the eval loop returns OrderAction which triggers
+        # the entry path on the next cycle.
+        max_strike_steps = cfg.get("max_strike_walk_steps", 5)
+        strike_direction = increment if right == "C" else -increment  # further OTM
+
         limit_price = round(max_affordable_premium, 2)  # budget cap fallback
         opt_bid = None
         opt_ask = None
         contract_dict = None
+        strike = initial_strike
+        _strikes_tried = []
 
-        for expiry_str, expiry_date in _candidate_expiries:
-            trading_class = _get_option_trading_class(self._ticker, expiry_date)
-            candidate_contract = {
-                "symbol": self._ticker,
-                "secType": "OPT",
-                "exchange": "SMART",
-                "currency": "USD",
-                "strike": strike,
-                "lastTradeDateOrContractMonth": expiry_str,
-                "right": right,
-                "multiplier": "100",
-                "tradingClass": trading_class,
-            }
+        for strike_step in range(max_strike_steps + 1):  # 0 = initial, 1..N = walked
+            if strike_step > 0:
+                strike = round((initial_strike + strike_direction * strike_step) / increment) * increment
+                # Safety: don't walk past ATM (would become ITM)
+                if right == "C" and strike <= underlying_price:
+                    logger.info(
+                        "Strike walk hit ATM (%.1f <= %.2f) — stopping walk for %s",
+                        strike, underlying_price, self._ticker,
+                    )
+                    break
+                if right == "P" and strike >= underlying_price:
+                    logger.info(
+                        "Strike walk hit ATM (%.1f >= %.2f) — stopping walk for %s",
+                        strike, underlying_price, self._ticker,
+                    )
+                    break
 
-            if self._fetch_option_quote is not None:
-                try:
-                    quote = self._fetch_option_quote(candidate_contract)
-                    q_bid = quote.get("bid")
-                    q_ask = quote.get("ask")
-                    if (q_ask is not None and q_ask > 0) or (q_bid is not None and q_bid > 0):
-                        # Valid quote — use this expiry
-                        opt_bid = q_bid
-                        opt_ask = q_ask
-                        contract_dict = candidate_contract
-                        break
-                    else:
+            _strikes_tried.append(strike)
+
+            # ── Try each candidate expiry for this strike ──
+            _step_contract = None
+            _step_bid = None
+            _step_ask = None
+
+            for expiry_str_c, expiry_date_c in _candidate_expiries:
+                trading_class = _get_option_trading_class(self._ticker, expiry_date_c)
+                candidate_contract = {
+                    "symbol": self._ticker,
+                    "secType": "OPT",
+                    "exchange": "SMART",
+                    "currency": "USD",
+                    "strike": strike,
+                    "lastTradeDateOrContractMonth": expiry_str_c,
+                    "right": right,
+                    "multiplier": "100",
+                    "tradingClass": trading_class,
+                }
+
+                if self._fetch_option_quote is not None:
+                    try:
+                        quote = self._fetch_option_quote(candidate_contract)
+                        q_bid = quote.get("bid")
+                        q_ask = quote.get("ask")
+                        if (q_ask is not None and q_ask > 0) or (q_bid is not None and q_bid > 0):
+                            _step_contract = candidate_contract
+                            _step_bid = q_bid
+                            _step_ask = q_ask
+                            break
+                        else:
+                            logger.info(
+                                "No quote data for %s %.1f%s %s — trying next expiry",
+                                self._ticker, strike, right, expiry_str_c,
+                            )
+                            continue
+                    except Exception:
                         logger.info(
-                            "No quote data for %s %.1f%s %s — trying next expiry",
-                            self._ticker, strike, right, expiry_str,
+                            "Quote fetch failed for %s %.1f%s %s — trying next expiry",
+                            self._ticker, strike, right, expiry_str_c,
                         )
                         continue
-                except Exception:
+                else:
+                    _step_contract = candidate_contract
+                    break
+
+            if _step_contract is None:
+                # No valid contract at this strike — try next strike
+                logger.info(
+                    "No valid contract at strike %.1f for %s — stepping further OTM",
+                    strike, self._ticker,
+                )
+                continue
+
+            # Check if ask is within budget
+            if _step_ask is not None and _step_ask > max_affordable_premium:
+                if strike_step < max_strike_steps:
                     logger.info(
-                        "Quote fetch failed for %s %.1f%s %s — trying next expiry",
-                        self._ticker, strike, right, expiry_str,
+                        "Strike %.1f%s ask $%.2f > cap $%.2f — walking to next strike (%d/%d)",
+                        strike, right, _step_ask, max_affordable_premium,
+                        strike_step + 1, max_strike_steps,
                     )
-                    continue
-            else:
-                # No quote fetcher — use first candidate
-                contract_dict = candidate_contract
-                break
+                    continue  # try next strike
+                else:
+                    # Exhausted all strike steps
+                    logger.info(
+                        "Ask $%.2f exceeds budget cap $%.2f after %d strike steps (tried: %s) — skipping %s entry",
+                        _step_ask, max_affordable_premium, max_strike_steps + 1,
+                        ", ".join(f"{s:.0f}" for s in _strikes_tried), self._ticker,
+                    )
+                    if self._last_signal is not None:
+                        self._last_signal["suppressed"] = (
+                            f"ask_exceeds_budget (ask ${_step_ask:.2f} > cap ${max_affordable_premium:.2f}, "
+                            f"walked {len(_strikes_tried)} strikes: {', '.join(f'{s:.0f}' for s in _strikes_tried)})"
+                        )
+                    return []
+
+            # Check premium_min — don't buy options that are too cheap (likely illiquid)
+            if _step_ask is not None and _step_ask < premium_min:
+                logger.info(
+                    "Strike %.1f%s ask $%.2f below premium_min $%.2f — stopping walk for %s",
+                    strike, right, _step_ask, premium_min, self._ticker,
+                )
+                break  # further OTM will only be cheaper — stop here
+
+            # Found a viable strike+expiry within budget
+            opt_bid = _step_bid
+            opt_ask = _step_ask
+            contract_dict = _step_contract
+            if strike_step > 0:
+                logger.info(
+                    "Strike walk: moved from %.1f to %.1f%s (step %d) — ask $%.2f within cap $%.2f",
+                    initial_strike, strike, right, strike_step, opt_ask or 0, max_affordable_premium,
+                )
+            break
 
         if contract_dict is None:
-            logger.warning(
-                "No valid contract found for %s %.1f%s across %d expiry candidates — skipping entry",
-                self._ticker, strike, right, len(_candidate_expiries),
-            )
-            if self._last_signal is not None:
-                self._last_signal["suppressed"] = f"no_contract ({self._ticker} {strike:.0f}{right}, {len(_candidate_expiries)} expiries tried)"
+            if _strikes_tried:
+                logger.warning(
+                    "No valid contract found for %s %s across %d strikes × %d expiries — skipping entry",
+                    self._ticker, right, len(_strikes_tried), len(_candidate_expiries),
+                )
+                if self._last_signal is not None:
+                    self._last_signal["suppressed"] = (
+                        f"no_contract ({self._ticker} {right}, "
+                        f"{len(_strikes_tried)} strikes × {len(_candidate_expiries)} expiries tried)"
+                    )
+            else:
+                logger.warning(
+                    "No valid contract found for %s %.1f%s across %d expiry candidates — skipping entry",
+                    self._ticker, strike, right, len(_candidate_expiries),
+                )
+                if self._last_signal is not None:
+                    self._last_signal["suppressed"] = f"no_contract ({self._ticker} {strike:.0f}{right}, {len(_candidate_expiries)} expiries tried)"
             return []
 
         # Finalize expiry_str from the winning contract
@@ -2289,6 +2380,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
             "max_spread": max_spread,
             "premium_range": [premium_min, premium_max],
         }
+        if strike != initial_strike:
+            self._last_signal["option_contract"]["initial_strike"] = initial_strike
+            self._last_signal["option_contract"]["strike_walk_steps"] = strike_step
 
         # Compute limit price: ask + spread (adaptive to current market),
         # capped at the budget maximum. This avoids paying dumb prices in
@@ -2309,16 +2403,6 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                 "Option quote: bid=none ask=$%.2f → adaptive limit=$%.2f (budget cap=$%.2f)",
                 opt_ask, adaptive_limit, max_affordable_premium,
             )
-
-        # Budget gate on actual ask: if the current ask exceeds our budget, skip
-        if opt_ask is not None and opt_ask > max_affordable_premium:
-            logger.info(
-                "Ask $%.2f exceeds budget cap $%.2f — skipping %s entry",
-                opt_ask, max_affordable_premium, self._ticker,
-            )
-            if self._last_signal is not None:
-                self._last_signal["suppressed"] = f"ask_exceeds_budget (ask ${opt_ask:.2f} > cap ${max_affordable_premium:.2f})"
-            return []
 
         # ── Qty per entry: intentionally 1 contract ──
         # The budget ($150) is a CEILING (can we afford this option?), not a
