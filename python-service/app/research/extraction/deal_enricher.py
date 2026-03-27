@@ -5,8 +5,12 @@ Runs on the droplet using Claude CLI ($0 via Max subscription).
 Fetches filing text from SEC.gov, sends to Claude for structured extraction,
 updates research_deals with acquirer info, deal price, and structure.
 
+IMPORTANT: Uses BATCHED CLI calls — one prompt per batch of up to 20 filings.
+Never call CLI in a per-filing loop (see CLAUDE.md "AI Token Economics").
+
 Usage (on droplet):
     python -m app.research.extraction.deal_enricher --limit 100 --verbose
+    python -m app.research.extraction.deal_enricher --limit 5 --verbose   # test first
 """
 
 import asyncio
@@ -15,9 +19,10 @@ import logging
 import os
 import re
 import subprocess
+import time as _time
 from datetime import datetime, date
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 
 import asyncpg
@@ -32,29 +37,35 @@ SEC_USER_AGENT = os.environ.get(
 )
 SEC_RATE_DELAY = 0.3  # SEC enforces rate limits aggressively; 3 req/s is safe
 
+# Batching constants
+BATCH_SIZE = 20  # Max filings per CLI call (~20 × 8K chars ≈ 40K tokens content)
+FILING_TRUNCATE_CHARS = 32000  # ~8K tokens — deal terms are near the top
+LARGE_FILING_THRESHOLD = 60000  # >15K tokens — too large to batch, use single fallback
+BATCH_SLEEP_SEC = 5  # Sleep between batches to avoid hammering subscription
+DEFAULT_MAX_PER_RUN = 100
+
 
 class DealEnricher:
     """
     Enriches research_deals with extracted terms from SEC filings.
 
+    Uses batched CLI calls: one Claude invocation extracts terms from up to
+    20 filings simultaneously, amortizing ~100K tokens of system prompt overhead
+    across the batch instead of paying it per-filing.
+
     Priority order for filing selection:
-      1. DEFM14A (definitive merger proxy — most complete)
+      1. DEFM14A (definitive merger proxy -- most complete)
       2. SC TO-T (tender offer statement)
       3. PREM14A (preliminary proxy)
       4. SC 14D9 (target response to tender)
       5. S-4 (registration for stock deals)
       6. Any other filing
-
-    For each deal:
-      1. Find the best filing
-      2. Fetch its text from SEC.gov
-      3. Extract terms via Claude CLI
-      4. Update research_deals with acquirer, price, structure
     """
 
     def __init__(self):
         self.http_client: Optional[httpx.AsyncClient] = None
-        self.cli_model = os.environ.get("CLI_MODEL", "opus")
+        # Sonnet for structured extraction -- equally reliable, 5x cheaper tokens
+        self.cli_model = os.environ.get("CLI_MODEL", "sonnet")
         self.cli_effort = os.environ.get("CLI_EFFORT_LEVEL", "medium")
 
     async def _get_http(self) -> httpx.AsyncClient:
@@ -74,7 +85,7 @@ class DealEnricher:
         """
         Resolve the actual primary document URL from a filing's index page.
 
-        The master.idx .txt file is an SGML index — not the document itself.
+        The master.idx .txt file is an SGML index -- not the document itself.
         We need to fetch the -index.htm page and parse it for the actual doc.
         """
         client = await self._get_http()
@@ -94,22 +105,15 @@ class DealEnricher:
                 return None
             html = resp.text
 
-            # Parse the index page for document links
-            # Look for the primary document — usually the largest .htm file
-            # Pattern: <a href="/Archives/edgar/data/CIK/ACCESSION/filename.htm">
             doc_links = re.findall(
                 r'<a\s+href="(/Archives/edgar/data/[^"]+\.htm)"[^>]*>',
                 html, re.IGNORECASE
             )
 
-            # Also look for table rows with document descriptions
-            # SEC index pages have: Type | Description | Document | Size
-            # The primary doc is usually the first .htm that isn't the index
             for link in doc_links:
                 if "-index" not in link.lower():
                     return f"https://www.sec.gov{link}"
 
-            # Fallback: try any .htm link
             all_links = re.findall(r'href="(/Archives/edgar/data/[^"]+)"', html)
             for link in all_links:
                 if link.endswith(('.htm', '.html')) and '-index' not in link.lower():
@@ -133,7 +137,7 @@ class DealEnricher:
         """
         client = await self._get_http()
 
-        # If URL ends in .txt, it's an index file — resolve the real doc
+        # If URL ends in .txt, it's an index file -- resolve the real doc
         actual_url = filing_url
         if filing_url.endswith('.txt') and accession and cik:
             resolved = await self.resolve_primary_doc_url(accession, cik)
@@ -175,25 +179,164 @@ class DealEnricher:
 
         return text[:max_chars]
 
-    def extract_via_cli(self, filing_text: str) -> Optional[dict]:
-        """Call Claude CLI for deal terms extraction. Synchronous (blocking)."""
-        prompt = f"{DEAL_TERMS_EXTRACTION_PROMPT}\n\nFiling text:\n{filing_text}"
+    # ─── Batch extraction (primary path) ────────────────────────────────
+
+    def extract_batch_via_cli(
+        self, filings: List[Tuple[str, str]]
+    ) -> Dict[str, Optional[dict]]:
+        """
+        Extract deal terms from multiple filings in ONE CLI call.
+
+        Args:
+            filings: List of (accession_number, filing_text) tuples, max 20.
+
+        Returns:
+            Dict mapping accession_number -> extracted dict (or None on failure).
+            System prompt overhead is paid once for the entire batch.
+        """
+        if not filings:
+            return {}
+
+        # Build the batched prompt
+        batch_prompt = (
+            f"{DEAL_TERMS_EXTRACTION_PROMPT}\n\n"
+            "You will now receive multiple SEC filings. Extract deal terms from EACH filing "
+            "independently. Return a JSON array with one object per filing. Each object MUST "
+            "include an \"accession\" field matching the accession number from the filing header.\n\n"
+            f"There are {len(filings)} filings below.\n\n"
+        )
+
+        for i, (accession, text) in enumerate(filings):
+            truncated = text[:FILING_TRUNCATE_CHARS]
+            batch_prompt += (
+                f"--- FILING {i + 1} (accession: {accession}) ---\n"
+                f"{truncated}\n\n"
+            )
+
+        batch_prompt += (
+            "Return ONLY a JSON array with one object per filing. "
+            "Each object must have an \"accession\" field plus all the extraction fields "
+            "from the schema above. Example:\n"
+            "[{\"accession\": \"0001193125-24-012345\", \"target_name\": \"...\", ...}, ...]\n"
+        )
 
         env = os.environ.copy()
         env.pop("ANTHROPIC_API_KEY", None)  # Force OAuth, not API key
-        # Ensure OAuth token is available (loaded from .env by dotenv)
         oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
         if oauth:
             env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
 
-        # Find claude CLI
+        cli_path = self._find_cli()
+        if not cli_path:
+            logger.error("Claude CLI not found")
+            return {acc: None for acc, _ in filings}
+
+        accession_list = [acc for acc, _ in filings]
+        results: Dict[str, Optional[dict]] = {acc: None for acc in accession_list}
+
+        try:
+            t0 = _time.monotonic()
+            # Longer timeout for batch (20 filings could take a while)
+            result = subprocess.run(
+                [cli_path, "-p", batch_prompt, "--output-format", "json",
+                 "--model", self.cli_model],
+                capture_output=True, text=True,
+                timeout=600,  # 10 min for batch
+                env=env,
+            )
+            elapsed_ms = int((_time.monotonic() - t0) * 1000)
+
+            if result.returncode != 0:
+                logger.warning(f"Batch CLI failed (rc={result.returncode}): {result.stdout[:500]}")
+                return results
+
+            # Parse the batch response
+            parsed_array = self._extract_json_array(result.stdout)
+
+            if parsed_array is None:
+                # Try parsing as single object (model might return one if only 1 filing)
+                if len(filings) == 1:
+                    single = self._extract_json(result.stdout)
+                    if single:
+                        results[accession_list[0]] = single
+                        logger.info(f"Batch of 1: parsed single result for {accession_list[0]}")
+                else:
+                    logger.warning(
+                        f"Failed to parse batch JSON array from CLI output "
+                        f"({len(result.stdout)} chars)"
+                    )
+                self._report_batch_usage(result, elapsed_ms, len(filings), batch_prompt)
+                return results
+
+            # Map results back to accession numbers
+            matched = 0
+            for item in parsed_array:
+                if not isinstance(item, dict):
+                    continue
+                acc = item.get("accession", "").strip()
+                if acc in results:
+                    results[acc] = item
+                    matched += 1
+                else:
+                    # Try fuzzy match (model might reformat accession)
+                    for known_acc in accession_list:
+                        if known_acc in acc or acc in known_acc:
+                            results[known_acc] = item
+                            matched += 1
+                            break
+
+            # If model returned positional results without accession keys, map by index
+            if matched == 0 and len(parsed_array) == len(filings):
+                logger.info("Batch: no accession keys in output, mapping by position")
+                for i, item in enumerate(parsed_array):
+                    if isinstance(item, dict):
+                        results[accession_list[i]] = item
+                        matched += 1
+
+            logger.info(
+                f"Batch extraction: {matched}/{len(filings)} filings parsed, "
+                f"{elapsed_ms}ms, model={self.cli_model}"
+            )
+
+            self._report_batch_usage(result, elapsed_ms, len(filings), batch_prompt)
+            return results
+
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Batch CLI timed out (600s) for {len(filings)} filings")
+            return results
+        except Exception as e:
+            logger.error(f"Batch CLI error: {e}")
+            return results
+
+    # ─── Single-filing fallback (for oversized filings) ─────────────────
+
+    def extract_via_cli(self, filing_text: str) -> Optional[dict]:
+        """
+        Call Claude CLI for deal terms extraction from a SINGLE filing.
+
+        WARNING: This is the high-overhead fallback path. Each call pays ~100K tokens
+        of system prompt overhead. Use extract_batch_via_cli() for normal operation.
+        Only use this for filings too large to batch (>15K tokens).
+        """
+        logger.warning(
+            "Single-filing CLI fallback -- high overhead. "
+            "Consider truncating to use batch path instead."
+        )
+
+        prompt = f"{DEAL_TERMS_EXTRACTION_PROMPT}\n\nFiling text:\n{filing_text}"
+
+        env = os.environ.copy()
+        env.pop("ANTHROPIC_API_KEY", None)  # Force OAuth, not API key
+        oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+        if oauth:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
+
         cli_path = self._find_cli()
         if not cli_path:
             logger.error("Claude CLI not found")
             return None
 
         try:
-            import time as _time
             t0 = _time.monotonic()
             result = subprocess.run(
                 [cli_path, "-p", prompt, "--output-format", "json",
@@ -218,14 +361,14 @@ class DealEnricher:
                 cache_c = usage.get("cache_creation_input_tokens", 0)
                 cache_r = usage.get("cache_read_input_tokens", 0)
                 logger.info(
-                    "Deal enricher CLI: model=%s, %d in/%d out, %dms",
+                    "Deal enricher CLI (SINGLE fallback): model=%s, %d in/%d out, %dms",
                     self.cli_model, input_tokens, output_tokens, elapsed_ms,
                 )
-                # Fire-and-forget POST to central telemetry (if running in async context)
                 self._report_usage(
                     input_tokens=input_tokens, output_tokens=output_tokens,
                     cache_creation_tokens=cache_c, cache_read_tokens=cache_r,
                     model=f"cli-{self.cli_model}", elapsed_ms=elapsed_ms,
+                    metadata={"batch_size": 1, "filings_processed": 1, "fallback": True},
                 )
             except Exception:
                 pass  # Telemetry must never break enrichment
@@ -238,12 +381,43 @@ class DealEnricher:
             logger.error(f"CLI error: {e}")
             return None
 
+    # ─── Telemetry ──────────────────────────────────────────────────────
+
+    def _report_batch_usage(self, result: subprocess.CompletedProcess,
+                            elapsed_ms: int, batch_size: int,
+                            prompt: str) -> None:
+        """Report batch CLI usage to central telemetry."""
+        try:
+            raw_output = result.stdout.strip()
+            cli_json = json.loads(raw_output) if raw_output.startswith("{") else {}
+            usage = cli_json.get("usage", {})
+            input_tokens = usage.get("input_tokens", len(prompt) // 4)
+            output_tokens = usage.get("output_tokens", len(raw_output) // 4)
+            cache_c = usage.get("cache_creation_input_tokens", 0)
+            cache_r = usage.get("cache_read_input_tokens", 0)
+            logger.info(
+                "Deal enricher BATCH CLI: model=%s, batch=%d, %d in/%d out, %dms",
+                self.cli_model, batch_size, input_tokens, output_tokens, elapsed_ms,
+            )
+            self._report_usage(
+                input_tokens=input_tokens, output_tokens=output_tokens,
+                cache_creation_tokens=cache_c, cache_read_tokens=cache_r,
+                model=f"cli-{self.cli_model}", elapsed_ms=elapsed_ms,
+                metadata={"batch_size": batch_size, "filings_processed": batch_size},
+            )
+        except Exception:
+            pass  # Telemetry must never break enrichment
+
     def _report_usage(self, *, input_tokens: int, output_tokens: int,
                       cache_creation_tokens: int, cache_read_tokens: int,
-                      model: str, elapsed_ms: int) -> None:
+                      model: str, elapsed_ms: int,
+                      metadata: Optional[dict] = None) -> None:
         """Best-effort POST to the central AI usage ingest endpoint."""
         try:
             import urllib.request
+            meta = {"elapsed_ms": elapsed_ms}
+            if metadata:
+                meta.update(metadata)
             payload = json.dumps({"calls": [{
                 "source": "deal_enricher",
                 "model": model,
@@ -254,7 +428,7 @@ class DealEnricher:
                 "cache_creation_tokens": cache_creation_tokens,
                 "cache_read_tokens": cache_read_tokens,
                 "cost_usd": 0.0,
-                "metadata": {"elapsed_ms": elapsed_ms},
+                "metadata": meta,
             }]}).encode()
             fleet_key = os.environ.get("FLEET_API_KEY", "")
             req = urllib.request.Request(
@@ -270,14 +444,22 @@ class DealEnricher:
         except Exception:
             pass  # Non-fatal
 
-    async def enrich_deal(self, conn: asyncpg.Connection, deal_id: UUID) -> bool:
-        """Enrich a single deal with extracted terms."""
-        # Get the deal and its filings
+    # ─── Deal enrichment (now batch-aware) ──────────────────────────────
+
+    async def fetch_best_filing_text(
+        self, conn: asyncpg.Connection, deal_id: UUID
+    ) -> Optional[Tuple[str, str, str]]:
+        """
+        Fetch the best filing text for a deal.
+
+        Returns (accession_number, filing_text, filing_type) or None.
+        Tries filings in priority order until one succeeds.
+        """
         deal = await conn.fetchrow(
-            "SELECT * FROM research_deals WHERE deal_id = $1", deal_id
+            "SELECT target_cik FROM research_deals WHERE deal_id = $1", deal_id
         )
         if not deal:
-            return False
+            return None
 
         filings = await conn.fetch(
             """
@@ -302,11 +484,9 @@ class DealEnricher:
             """,
             deal_id,
         )
-
         if not filings:
-            return False
+            return None
 
-        # Try each filing until extraction succeeds
         target_cik = deal["target_cik"] or ""
         for filing in filings:
             url = filing["primary_doc_url"] or filing["filing_url"]
@@ -314,28 +494,177 @@ class DealEnricher:
             if not url:
                 continue
 
-            # Resolve the actual document (not the SGML index)
             text = await self.fetch_filing_text(
                 url, accession=accession, cik=target_cik.lstrip("0")
             )
             if not text or len(text) < 500:
                 continue
 
-            logger.info(f"Extracting from {filing['filing_type']} for {deal['deal_key']}")
+            return (accession, text, filing["filing_type"])
 
-            # Run CLI extraction (blocking — runs in thread pool)
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self.extract_via_cli, text)
+        return None
 
-            if not result:
+    async def enrich_deal(self, conn: asyncpg.Connection, deal_id: UUID) -> bool:
+        """
+        Enrich a single deal with extracted terms.
+
+        DEPRECATED for batch use -- prefer enrich_deals_batch() which calls
+        extract_batch_via_cli() for much better token efficiency.
+        Kept for single-deal fallback (oversized filings).
+        """
+        result = await self.fetch_best_filing_text(conn, deal_id)
+        if not result:
+            return False
+
+        accession, text, filing_type = result
+        logger.info(f"Extracting from {filing_type} for deal {deal_id}")
+
+        # Use single-filing fallback (blocking -- runs in thread pool)
+        loop = asyncio.get_event_loop()
+        extracted = await loop.run_in_executor(None, self.extract_via_cli, text)
+
+        if not extracted:
+            return False
+
+        await self._apply_extraction(conn, deal_id, extracted, accession)
+        return True
+
+    async def enrich_deals_batch(
+        self,
+        conn: asyncpg.Connection,
+        deal_ids: List[UUID],
+    ) -> Dict[str, int]:
+        """
+        Enrich multiple deals using batched CLI extraction.
+
+        1. Fetch filing texts for all deals
+        2. Separate into batchable (<15K tokens) and oversized (>15K tokens)
+        3. Process batchable filings in groups of BATCH_SIZE via extract_batch_via_cli()
+        4. Process oversized filings individually via extract_via_cli() fallback
+        5. Apply results to database
+
+        Returns: {"enriched": N, "failed": N, "skipped": N}
+        """
+        results = {"enriched": 0, "failed": 0, "skipped": 0}
+
+        # Phase 1: Fetch all filing texts
+        # List of (deal_id, accession, text, filing_type)
+        batchable: List[Tuple[UUID, str, str, str]] = []
+        oversized: List[Tuple[UUID, str, str, str]] = []
+
+        for deal_id in deal_ids:
+            filing_result = await self.fetch_best_filing_text(conn, deal_id)
+            if not filing_result:
+                results["skipped"] += 1
                 continue
 
-            # Update the deal record
-            await self._apply_extraction(conn, deal_id, result, filing["accession_number"])
-            return True
+            accession, text, filing_type = filing_result
+            if len(text) > LARGE_FILING_THRESHOLD:
+                oversized.append((deal_id, accession, text, filing_type))
+            else:
+                batchable.append((deal_id, accession, text, filing_type))
 
-        logger.warning(f"Enrichment failed for {deal['deal_key']}")
-        return False
+        logger.info(
+            f"Filing fetch complete: {len(batchable)} batchable, "
+            f"{len(oversized)} oversized, {results['skipped']} skipped"
+        )
+
+        # Phase 2: Process batchable filings in batches
+        batch_num = 0
+        total_batches = (len(batchable) + BATCH_SIZE - 1) // BATCH_SIZE if batchable else 0
+
+        for i in range(0, len(batchable), BATCH_SIZE):
+            batch_num += 1
+            batch = batchable[i:i + BATCH_SIZE]
+
+            # Build filing list for CLI: (accession, truncated_text)
+            cli_filings = [(acc, text[:FILING_TRUNCATE_CHARS]) for _, acc, text, _ in batch]
+
+            # Run batch extraction in thread pool (blocking subprocess)
+            loop = asyncio.get_event_loop()
+            batch_results = await loop.run_in_executor(
+                None, self.extract_batch_via_cli, cli_filings
+            )
+
+            # Apply results
+            for deal_id, accession, _, filing_type in batch:
+                extracted = batch_results.get(accession)
+                if extracted:
+                    try:
+                        await self._apply_extraction(conn, deal_id, extracted, accession)
+                        results["enriched"] += 1
+                        await conn.execute(
+                            """UPDATE research_deals SET
+                                enrichment_status = 'enriched',
+                                enrichment_failure_reason = NULL,
+                                enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1
+                               WHERE deal_id = $1""",
+                            deal_id,
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to apply extraction for {accession}: {e}")
+                        results["failed"] += 1
+                        await conn.execute(
+                            """UPDATE research_deals SET
+                                enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1
+                               WHERE deal_id = $1""",
+                            deal_id,
+                        )
+                else:
+                    results["failed"] += 1
+                    await conn.execute(
+                        """UPDATE research_deals SET
+                            enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1
+                           WHERE deal_id = $1""",
+                        deal_id,
+                    )
+
+            logger.info(
+                f"Batch {batch_num}/{total_batches} complete, "
+                f"{results['enriched']}/{len(deal_ids)} filings enriched"
+            )
+
+            # Sleep between batches to avoid hammering the subscription
+            if i + BATCH_SIZE < len(batchable):
+                await asyncio.sleep(BATCH_SLEEP_SEC)
+
+        # Phase 3: Process oversized filings individually (fallback)
+        for deal_id, accession, text, filing_type in oversized:
+            logger.info(
+                f"Oversized filing ({len(text)} chars) for {accession}, "
+                f"using single-filing fallback"
+            )
+            loop = asyncio.get_event_loop()
+            extracted = await loop.run_in_executor(None, self.extract_via_cli, text)
+
+            if extracted:
+                try:
+                    await self._apply_extraction(conn, deal_id, extracted, accession)
+                    results["enriched"] += 1
+                    await conn.execute(
+                        """UPDATE research_deals SET
+                            enrichment_status = 'enriched',
+                            enrichment_failure_reason = NULL,
+                            enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1
+                           WHERE deal_id = $1""",
+                        deal_id,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to apply extraction for {accession}: {e}")
+                    results["failed"] += 1
+            else:
+                results["failed"] += 1
+                await conn.execute(
+                    """UPDATE research_deals SET
+                        enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1
+                       WHERE deal_id = $1""",
+                    deal_id,
+                )
+
+            # Sleep between single calls too
+            await asyncio.sleep(BATCH_SLEEP_SEC)
+
+        return results
 
     async def _apply_extraction(
         self, conn: asyncpg.Connection, deal_id: UUID, data: dict, accession: str
@@ -484,6 +813,8 @@ class DealEnricher:
             f"structure={deal_structure}, value={deal_value}MM"
         )
 
+    # ─── Utilities ──────────────────────────────────────────────────────
+
     @staticmethod
     def _parse_date(s: Optional[str]):
         if not s:
@@ -544,7 +875,7 @@ class DealEnricher:
 
     @classmethod
     def _extract_json(cls, text: str) -> Optional[dict]:
-        """Extract JSON from Claude CLI output, handling wrapper + markdown fences."""
+        """Extract JSON dict from Claude CLI output, handling wrapper + markdown fences."""
         # Try parsing the output-format json wrapper
         try:
             wrapper = json.loads(text)
@@ -553,7 +884,6 @@ class DealEnricher:
                 if isinstance(content, dict):
                     return content
                 if isinstance(content, str):
-                    # Apply full recovery to inner string (may have markdown fences)
                     parsed = cls._parse_json_string(content)
                     if parsed:
                         return parsed
@@ -563,25 +893,85 @@ class DealEnricher:
         # Fallback: parse the entire text
         return cls._parse_json_string(text)
 
+    @classmethod
+    def _extract_json_array(cls, text: str) -> Optional[List[dict]]:
+        """Extract JSON array from Claude CLI output, handling wrapper + markdown fences."""
+        # Try parsing the output-format json wrapper first
+        try:
+            wrapper = json.loads(text)
+            if isinstance(wrapper, dict) and "result" in wrapper:
+                content = wrapper["result"]
+                if isinstance(content, list):
+                    return content
+                if isinstance(content, str):
+                    return cls._parse_json_array_string(content)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Fallback: parse entire text
+        return cls._parse_json_array_string(text)
+
+    @staticmethod
+    def _parse_json_array_string(s: str) -> Optional[List[dict]]:
+        """Parse a JSON array from a string, with recovery for markdown fences."""
+        # Direct parse
+        try:
+            result = json.loads(s)
+            if isinstance(result, list):
+                return result
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Strip markdown fences
+        cleaned = re.sub(r'```(?:json)?\s*', '', s)
+        cleaned = re.sub(r'```\s*$', '', cleaned)
+        try:
+            result = json.loads(cleaned)
+            if isinstance(result, list):
+                return result
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Find outermost [...] brackets
+        match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                # Fix trailing commas
+                fixed = re.sub(r',\s*([}\]])', r'\1', match.group(0))
+                try:
+                    return json.loads(fixed)
+                except json.JSONDecodeError:
+                    pass
+        return None
+
 
 async def run_enrichment(
-    limit: int = 50,
+    limit: int = DEFAULT_MAX_PER_RUN,
     offset: int = 0,
     priority_types: Optional[List[str]] = None,
     retry_mode: bool = False,
+    max_per_run: int = DEFAULT_MAX_PER_RUN,
 ) -> Dict:
     """
-    Run deal enrichment on priority deals.
+    Run deal enrichment on priority deals using batched CLI extraction.
+
+    Uses extract_batch_via_cli() to process up to 20 filings per CLI call,
+    amortizing system prompt overhead across the batch.
 
     Args:
-        limit: Max deals to process
+        limit: Max deals to process (alias for max_per_run, kept for compat)
         offset: Skip first N deals (for parallel workers)
         priority_types: Filing types to filter on
         retry_mode: If True, only retry sec_failed and extraction_failed deals
-                    (skips not_ma false positives)
+        max_per_run: Hard cap on filings per run (default 100)
     """
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parents[3] / ".env")
+
+    # Use the smaller of limit and max_per_run
+    effective_limit = min(limit, max_per_run)
 
     conn = await asyncpg.connect(os.environ["DATABASE_URL"])
     enricher = DealEnricher()
@@ -592,7 +982,6 @@ async def run_enrichment(
     type_list = "', '".join(priority_types)
 
     if retry_mode:
-        # Only retry deals classified as retriable failures
         deals = await conn.fetch(f"""
             SELECT DISTINCT ON (rd.deal_id) rd.deal_id, rd.deal_key, rd.target_ticker,
                    rd.enrichment_status, rd.enrichment_attempts
@@ -602,10 +991,9 @@ async def run_enrichment(
               AND rdf.filing_type IN ('{type_list}')
             ORDER BY rd.deal_id, rd.deal_key
             LIMIT $1 OFFSET $2
-        """, limit, offset)
+        """, effective_limit, offset)
         logger.info(f"RETRY MODE: {len(deals)} retriable deals (sec_failed + extraction_failed)")
     else:
-        # Standard mode: all Unknown deals with priority filings
         deals = await conn.fetch(f"""
             SELECT DISTINCT ON (rd.deal_id) rd.deal_id, rd.deal_key, rd.target_ticker
             FROM research_deals rd
@@ -614,39 +1002,18 @@ async def run_enrichment(
               AND rdf.filing_type IN ('{type_list}')
             ORDER BY rd.deal_id, rd.deal_key
             LIMIT $1 OFFSET $2
-        """, limit, offset)
-        logger.info(f"Enriching {len(deals)} deals with priority filings")
+        """, effective_limit, offset)
+        logger.info(f"Enriching {len(deals)} deals with priority filings (batched)")
 
-    results = {"enriched": 0, "failed": 0, "skipped": 0}
+    if not deals:
+        logger.info("No deals to enrich")
+        await enricher.close()
+        await conn.close()
+        return {"enriched": 0, "failed": 0, "skipped": 0}
 
-    for i, deal in enumerate(deals):
-        try:
-            success = await enricher.enrich_deal(conn, deal["deal_id"])
-            if success:
-                results["enriched"] += 1
-                # Update enrichment tracking
-                await conn.execute(
-                    """UPDATE research_deals SET
-                        enrichment_status = 'enriched',
-                        enrichment_failure_reason = NULL,
-                        enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1
-                       WHERE deal_id = $1""",
-                    deal["deal_id"],
-                )
-            else:
-                results["failed"] += 1
-                await conn.execute(
-                    """UPDATE research_deals SET
-                        enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1
-                       WHERE deal_id = $1""",
-                    deal["deal_id"],
-                )
-        except Exception as e:
-            logger.error(f"Error enriching {deal['deal_key']}: {e}")
-            results["failed"] += 1
-
-        if (i + 1) % 10 == 0:
-            logger.info(f"Progress: {i+1}/{len(deals)} ({results['enriched']} enriched)")
+    # Collect deal IDs and run batch enrichment
+    deal_ids = [deal["deal_id"] for deal in deals]
+    results = await enricher.enrich_deals_batch(conn, deal_ids)
 
     await enricher.close()
     await conn.close()
@@ -659,7 +1026,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Enrich research deals with filing data")
-    parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--limit", type=int, default=DEFAULT_MAX_PER_RUN)
+    parser.add_argument("--max-per-run", type=int, default=DEFAULT_MAX_PER_RUN,
+                        help="Hard cap on filings per run (default 100)")
     parser.add_argument("--offset", type=int, default=0, help="Skip first N deals (for parallel workers)")
     parser.add_argument("--retry", action="store_true", help="Retry only sec_failed and extraction_failed deals")
     parser.add_argument("--verbose", action="store_true")
@@ -671,6 +1040,7 @@ if __name__ == "__main__":
     )
 
     result = asyncio.run(run_enrichment(
-        limit=args.limit, offset=args.offset, retry_mode=args.retry
+        limit=args.limit, offset=args.offset,
+        retry_mode=args.retry, max_per_run=args.max_per_run,
     ))
     print(f"Done: {result}")
