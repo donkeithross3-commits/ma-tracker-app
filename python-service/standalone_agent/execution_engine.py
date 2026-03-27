@@ -367,6 +367,8 @@ class ExecutionEngine:
         #   exec_id → strategy_id (for routing commission reports)
         self._order_exec_ids: Dict[int, str] = {}
         self._exec_id_to_position: Dict[str, str] = {}
+        self._order_exec_details: Dict[int, dict] = {}
+        self._order_position_ids: Dict[int, str] = {}
 
         # Phase 0 execution instrumentation: pre-trade snapshots keyed by order_id.
         # Set in pre_submit_callback (before IB can send fills) to survive the
@@ -1447,6 +1449,8 @@ class ExecutionEngine:
         self._order_timestamps.clear()
         self._order_exec_ids.clear()
         self._exec_id_to_position.clear()
+        self._order_exec_details.clear()
+        self._order_position_ids.clear()
         with self._recent_terminal_orders_lock:
             self._recent_terminal_orders.clear()
         with self._broker_positions_lock:
@@ -1838,13 +1842,19 @@ class ExecutionEngine:
             elif event_type == "exec":
                 # execDetails: capture exec_id for commission routing
                 exec_id = data.get("execId", "")
+                if order_id:
+                    self._order_exec_details[order_id] = dict(data or {})
                 if exec_id and strategy_id:
                     self._order_exec_ids[order_id] = exec_id
                     # For entry orders on parent strategies (bmc_spy_up), the
                     # position_store position_id is the RM (bmc_risk_*), not the
                     # parent.  Prefer the RM mapping if the agent already set it
                     # (via _spawn_risk_manager_for_bmc); otherwise use strategy_id.
-                    position_id = self._exec_id_to_position.get(exec_id) or strategy_id
+                    position_id = (
+                        self._exec_id_to_position.get(exec_id)
+                        or self._order_position_ids.get(order_id)
+                        or strategy_id
+                    )
                     self._exec_id_to_position[exec_id] = position_id
                     # Update the fill in position_store with the real exec_id
                     # (the fill was likely already persisted with exec_id="" from orderStatus)

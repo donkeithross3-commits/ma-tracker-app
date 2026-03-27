@@ -848,6 +848,9 @@ class BigMoveConvexityStrategy(ExecutionStrategy):
                         "side": "LONG",
                         "quantity": int(filled_qty),
                         "entry_price": avg_price,
+                        "order_id": order_id,
+                        "fill_time": time.time(),
+                        "perm_id": perm_id,
                     },
                 }
                 # Attach lineage for position store persistence (WS2)

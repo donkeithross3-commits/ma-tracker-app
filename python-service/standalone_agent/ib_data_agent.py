@@ -3516,7 +3516,8 @@ class IBDataAgent:
             "slippage": None,
         }
         if self.execution_engine and entry_order_id:
-            exec_id = self.execution_engine._order_exec_ids.get(entry_order_id, "")
+            exec_data = dict(self.execution_engine._order_exec_details.get(entry_order_id) or {})
+            exec_id = exec_data.get("execId") or self.execution_engine._order_exec_ids.get(entry_order_id, "")
             pre_trade_snapshot = self.execution_engine._order_pre_trade_snapshots.get(entry_order_id)
             routing_exchange = (
                 self.execution_engine._order_routing_exchanges.get(entry_order_id)
@@ -3524,6 +3525,18 @@ class IBDataAgent:
                     self.execution_engine._order_contract_dicts.get(entry_order_id)
                 )
             )
+            fill_exchange = str(exec_data.get("exchange") or "").strip().upper()
+            if fill_exchange:
+                analytics["fill_exchange"] = fill_exchange
+                analytics["exchange"] = fill_exchange
+            if "lastLiquidity" in exec_data and exec_data.get("lastLiquidity") is not None:
+                analytics["last_liquidity"] = exec_data.get("lastLiquidity")
+            if exec_data.get("permId"):
+                analytics["perm_id"] = exec_data.get("permId")
+            if exec_data.get("side"):
+                analytics["side"] = exec_data.get("side")
+            if exec_data.get("account"):
+                analytics["account"] = exec_data.get("account")
             if pre_trade_snapshot and fill_price > 0:
                 opt_ask = pre_trade_snapshot.get("option_ask")
                 opt_mid = pre_trade_snapshot.get("option_mid")
@@ -3553,6 +3566,9 @@ class IBDataAgent:
 
         order_id = int(entry_fill.get("order_id", 0) or 0)
         exec_id = entry_fill.get("exec_id", "") or ""
+
+        if order_id > 0:
+            self.execution_engine._order_position_ids[order_id] = strategy_id
 
         # Route future commission reports to the RM position.
         if exec_id:
