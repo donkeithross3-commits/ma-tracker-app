@@ -106,7 +106,7 @@ def write_experiment_record(
             "fill": {
                 "fill_time": fill_time,
                 "fill_price": fill_price,
-                "fill_exchange": analytics.get("exchange", ""),
+                "fill_exchange": analytics.get("fill_exchange") or analytics.get("exchange", ""),
                 "last_liquidity": analytics.get("last_liquidity", 0),
                 "commission": analytics.get("commission"),
                 "latency_ms": latency_ms,

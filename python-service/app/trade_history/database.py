@@ -337,7 +337,7 @@ class TradeDatabase:
             fill.get("pnl_pct"),
             analytics.get("commission"),
             analytics.get("realized_pnl_ib"),
-            analytics.get("fill_exchange", ""),
+            analytics.get("fill_exchange") or analytics.get("exchange", ""),
             analytics.get("slippage"),
             analytics.get("last_liquidity"),
         )

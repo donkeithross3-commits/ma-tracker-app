@@ -262,8 +262,8 @@ class PositionStore:
         if not PositionStore._fills_share_logical_identity(existing, candidate):
             return False
 
-        existing_order = _int(existing.get("order_id"))
-        candidate_order = _int(candidate.get("order_id"))
+        existing_order = PositionStore._coerce_int(existing.get("order_id"))
+        candidate_order = PositionStore._coerce_int(candidate.get("order_id"))
         order_equivalent = (
             existing_order == candidate_order or
             existing_order == 0 or
@@ -499,7 +499,10 @@ class PositionStore:
             if exec_id and not fill.get("exec_id"):
                 fill["exec_id"] = exec_id
             if execution_analytics:
-                fill.setdefault("execution_analytics", {}).update(execution_analytics)
+                normalized_analytics = dict(execution_analytics)
+                if normalized_analytics.get("exchange") and not normalized_analytics.get("fill_exchange"):
+                    normalized_analytics["fill_exchange"] = normalized_analytics["exchange"]
+                fill.setdefault("execution_analytics", {}).update(normalized_analytics)
             resolved_match_hint = {
                 **(match_hint or {}),
                 "exec_id": exec_id or fill.get("exec_id", ""),
@@ -525,7 +528,7 @@ class PositionStore:
                 order_id=order_id,
                 exec_id=exec_id,
                 execution_analytics={
-                    **(execution_analytics or {}),
+                    **(normalized_analytics if execution_analytics else {}),
                     "perm_id": resolved_match_hint["perm_id"],
                 },
                 match_hint=resolved_match_hint,

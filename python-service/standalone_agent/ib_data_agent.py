@@ -3518,7 +3518,12 @@ class IBDataAgent:
         if self.execution_engine and entry_order_id:
             exec_id = self.execution_engine._order_exec_ids.get(entry_order_id, "")
             pre_trade_snapshot = self.execution_engine._order_pre_trade_snapshots.get(entry_order_id)
-            routing_exchange = self.execution_engine._order_routing_exchanges.get(entry_order_id, "SMART")
+            routing_exchange = (
+                self.execution_engine._order_routing_exchanges.get(entry_order_id)
+                or self.execution_engine._contract_exchange(
+                    self.execution_engine._order_contract_dicts.get(entry_order_id)
+                )
+            )
             if pre_trade_snapshot and fill_price > 0:
                 opt_ask = pre_trade_snapshot.get("option_ask")
                 opt_mid = pre_trade_snapshot.get("option_mid")
@@ -3562,7 +3567,10 @@ class IBDataAgent:
 
         contract_d = self.execution_engine._order_contract_dicts.get(order_id)
         pre_trade_snapshot = self.execution_engine._order_pre_trade_snapshots.get(order_id)
-        routing_exchange = self.execution_engine._order_routing_exchanges.get(order_id, "SMART")
+        routing_exchange = (
+            self.execution_engine._order_routing_exchanges.get(order_id)
+            or self.execution_engine._contract_exchange(contract_d)
+        )
         if contract_d and pre_trade_snapshot:
             self.execution_engine._schedule_post_fill_capture(
                 strategy_id,

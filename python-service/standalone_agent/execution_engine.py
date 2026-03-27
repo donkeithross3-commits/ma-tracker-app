@@ -101,7 +101,7 @@ class OrderAction:
     is_exit: bool = False  # True for risk manager exits — bypasses entry budget
     estimated_notional: Optional[float] = None  # pre-computed $ cost for MKT orders (qty × price × multiplier)
     pre_trade_snapshot: Optional[dict] = None  # market state at order creation (Phase 0 instrumentation)
-    routing_exchange: str = "SMART"  # target exchange for directed routing experiments
+    routing_exchange: str = "SMART"  # strategy hint; telemetry records the submitted contract exchange
 
 
 @dataclass
@@ -125,7 +125,7 @@ class ActiveOrder:
     is_entry: bool = True  # budget refund on IB-side rejection (Inactive status)
     pre_trade_snapshot: Optional[dict] = None  # Phase 0: market state at order creation
     contract_dict: Optional[dict] = None  # Phase 0: for post-fill quote lookups
-    routing_exchange: str = "SMART"  # Phase 0: target exchange for this order
+    routing_exchange: str = "SMART"  # submitted contract exchange recorded for venue telemetry
 
 
 @dataclass
@@ -409,6 +409,11 @@ class ExecutionEngine:
         self._tick_count = 0
 
         self._restore_exit_reservations_from_store()
+
+    @staticmethod
+    def _contract_exchange(contract_dict: Optional[dict]) -> str:
+        """Return the exchange actually present on the submitted contract payload."""
+        return str((contract_dict or {}).get("exchange") or "").strip().upper()
 
     # ── Entry Budget (two-tier) ──
 
@@ -1846,6 +1851,7 @@ class ExecutionEngine:
                     if self._position_store:
                         match_hint = self._build_execution_match_hint(exec_data=data)
                         execution_analytics = {
+                            "fill_exchange": data.get("exchange", ""),
                             "exchange": data.get("exchange", ""),
                             "last_liquidity": data.get("lastLiquidity", 0),
                             "perm_id": data.get("permId", 0),
@@ -2215,13 +2221,24 @@ class ExecutionEngine:
         Phase 0: Also registers pre_trade_snapshot and contract_dict in the
         pre_submit_callback so they're available for early-arriving fills.
         """
+        submitted_exchange = self._contract_exchange(contract_dict)
+        intended_exchange = str(routing_exchange or "").strip().upper()
+        if submitted_exchange and intended_exchange and submitted_exchange != intended_exchange:
+            logger.warning(
+                "Routing hint %s differs from submitted contract exchange %s for %s; "
+                "venue telemetry will record the submitted exchange",
+                intended_exchange,
+                submitted_exchange,
+                strategy_id,
+            )
+
         def _pre_register(order_id):
             self._order_strategy_map[order_id] = strategy_id
             # Phase 0: register snapshot before IB can fire fill callbacks
             if pre_trade_snapshot:
                 self._order_pre_trade_snapshots[order_id] = pre_trade_snapshot
-            self._order_contract_dicts[order_id] = contract_dict
-            self._order_routing_exchanges[order_id] = routing_exchange
+            self._order_contract_dicts[order_id] = dict(contract_dict or {})
+            self._order_routing_exchanges[order_id] = submitted_exchange
             self._bind_exit_reservation(exit_reservation_token, order_id)
 
         return self._scanner.place_order_sync(
@@ -2442,7 +2459,10 @@ class ExecutionEngine:
 
             # Phase 0: retrieve pre-trade snapshot for slippage computation
             pre_trade_snapshot = self._order_pre_trade_snapshots.get(order_id)
-            routing_exchange = self._order_routing_exchanges.get(order_id, "SMART")
+            routing_exchange = (
+                self._order_routing_exchanges.get(order_id)
+                or self._contract_exchange(self._order_contract_dicts.get(order_id))
+            )
             fill_price = fill_data.get("avgFillPrice", 0)
             fill_time = time.time()
 
@@ -2469,6 +2489,7 @@ class ExecutionEngine:
                 "pnl_pct": 0.0,
                 # Execution analytics (WS3 + Phase 0 instrumentation)
                 "execution_analytics": {
+                    "fill_exchange": fill_data.get("exchange", ""),
                     "exchange": fill_data.get("exchange", ""),
                     "last_liquidity": fill_data.get("lastLiquidity", 0),
                     "commission": None,      # filled async from commissionReport

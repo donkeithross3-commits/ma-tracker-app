@@ -300,8 +300,11 @@ class ExecutionLedgerStore:
                     record.get("routing_exchange", ""),
                 ),
                 "fill_exchange": analytics.get(
-                    "exchange",
-                    record.get("fill_exchange", ""),
+                    "fill_exchange",
+                    analytics.get(
+                        "exchange",
+                        record.get("fill_exchange", ""),
+                    ),
                 ),
                 "last_liquidity": self._coerce_int(
                     analytics.get("last_liquidity", record.get("last_liquidity", 0))
@@ -414,6 +417,8 @@ class ExecutionLedgerStore:
                 "remaining_qty": 0,
                 "pnl_pct": 0.0,
                 "execution_analytics": {
+                    "routing_exchange": str(contract.get("exchange") or "").strip().upper(),
+                    "fill_exchange": execution.get("exchange", ""),
                     "exchange": execution.get("exchange", ""),
                     "last_liquidity": execution.get("lastLiquidity", 0),
                     "commission": commission.get("commission"),
