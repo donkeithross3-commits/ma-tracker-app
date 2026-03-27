@@ -1231,6 +1231,21 @@ class RiskManagerStrategy(ExecutionStrategy):
 
         old_pt = self._risk_config.get("profit_taking", {})
         pt_patch = new_config.get("profit_taking")
+        if isinstance(pt_patch, dict):
+            trail_patch = pt_patch.get("trailing_stop")
+            # The dashboard only exposes the visible trailing controls. If a live
+            # edit changes those controls without also specifying exit_tranches,
+            # collapse hidden preset tranches so the edited trail behaves as
+            # displayed instead of silently inheriting tighter preset legs.
+            if isinstance(trail_patch, dict) and "exit_tranches" not in trail_patch:
+                touches_visible_trailing = any(
+                    key in trail_patch for key in ("activation_pct", "trail_pct", "per_lot_overrides")
+                )
+                if touches_visible_trailing:
+                    pt_patch = dict(pt_patch)
+                    trail_patch = dict(trail_patch)
+                    trail_patch["exit_tranches"] = [{"exit_pct": 100}]
+                    pt_patch["trailing_stop"] = trail_patch
         new_pt = _deep_merge(old_pt, pt_patch) if isinstance(pt_patch, dict) else old_pt
 
         # Apply eod_exit_time if present in new_config

@@ -230,6 +230,81 @@ class TestLiveProfitTargetEdits:
         assert risk_manager._risk_config["profit_taking"]["targets"] == old_targets
         assert risk_manager._risk_config["profit_taking"]["trailing_stop"]["trail_pct"] == 9
 
+    def test_visible_trailing_edit_clears_hidden_preset_tranches(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 1
+        config["position"]["entry_price"] = 1.1885795
+        config["profit_taking"] = {
+            "enabled": True,
+            "targets": [],
+            "trailing_stop": {
+                "enabled": True,
+                "activation_pct": 40,
+                "trail_pct": 25,
+                "exit_tranches": [
+                    {"exit_pct": 33, "trail_pct": 8},
+                    {"exit_pct": 50, "trail_pct": 5},
+                    {"exit_pct": 100},
+                ],
+            },
+        }
+        rm.on_start(config)
+
+        rm.update_risk_config(
+            {
+                "profit_taking": {
+                    "trailing_stop": {"activation_pct": 135, "trail_pct": 50},
+                },
+            }
+        )
+
+        trailing = rm._risk_config["profit_taking"]["trailing_stop"]
+        assert trailing["activation_pct"] == 135
+        assert trailing["trail_pct"] == 50
+        assert trailing["exit_tranches"] == [{"exit_pct": 100}]
+
+    def test_visible_trailing_edit_recomputes_stop_from_visible_trail_pct(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 1
+        config["position"]["entry_price"] = 1.1885795
+        config["profit_taking"] = {
+            "enabled": True,
+            "targets": [],
+            "trailing_stop": {
+                "enabled": True,
+                "activation_pct": 40,
+                "trail_pct": 25,
+                "exit_tranches": [
+                    {"exit_pct": 33, "trail_pct": 8},
+                    {"exit_pct": 50, "trail_pct": 5},
+                    {"exit_pct": 100},
+                ],
+            },
+        }
+        rm.on_start(config)
+        rm._trailing_active = True
+        rm.high_water_mark = 3.08
+        rm._trailing_tranche_idx = 0
+
+        rm.update_risk_config(
+            {
+                "profit_taking": {
+                    "trailing_stop": {"activation_pct": 135, "trail_pct": 50},
+                },
+            }
+        )
+
+        assert rm._trailing_stop_price == pytest.approx(1.54, rel=1e-9)
+        action = rm._check_trailing_stop(
+            rm._risk_config,
+            pnl_pct=135.5,
+            current_price=2.80,
+            quote=_Quote(2.79, 2.81),
+        )
+        assert action is None
+
     def test_add_profit_target_live_adds_level(self, risk_manager):
         changes = risk_manager.update_risk_config(
             {
