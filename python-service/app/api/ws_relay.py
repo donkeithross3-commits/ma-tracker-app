@@ -531,6 +531,40 @@ async def data_provider_websocket(websocket: WebSocket):
                         except Exception as e:
                             logger.error(f"position_sync upsert error: {e}")
 
+                elif msg_type == "execution_ledger_sync":
+                    executions = msg.get("executions", [])
+                    if executions:
+                        try:
+                            from app.trade_history.database import get_trade_db
+                            trade_db = get_trade_db()
+                            if trade_db and trade_db.pool:
+                                count = await trade_db.upsert_executions(user_id, executions)
+                                logger.debug(
+                                    f"Provider {provider_id} execution_ledger_sync: "
+                                    f"{count}/{len(executions)} upserted"
+                                )
+                            else:
+                                logger.debug("execution_ledger_sync received but TradeDatabase not available")
+                        except Exception as e:
+                            logger.error(f"execution_ledger_sync upsert error: {e}")
+
+                elif msg_type == "exit_reservation_sync":
+                    reservations = msg.get("reservations", [])
+                    if reservations:
+                        try:
+                            from app.trade_history.database import get_trade_db
+                            trade_db = get_trade_db()
+                            if trade_db and trade_db.pool:
+                                count = await trade_db.upsert_exit_reservations(user_id, reservations)
+                                logger.debug(
+                                    f"Provider {provider_id} exit_reservation_sync: "
+                                    f"{count}/{len(reservations)} upserted"
+                                )
+                            else:
+                                logger.debug("exit_reservation_sync received but TradeDatabase not available")
+                        except Exception as e:
+                            logger.error(f"exit_reservation_sync upsert error: {e}")
+
                 else:
                     logger.warning(f"Unknown message type from provider: {msg_type}")
                     

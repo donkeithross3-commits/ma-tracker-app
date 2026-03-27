@@ -441,12 +441,23 @@ class IBDataAgent:
                         # IB Reconciliation on reconnect (WS4) — MUST complete before hold is released
                         try:
                             if self.execution_engine and self.execution_engine.is_running:
-                                ib_positions = [
-                                    p for p in self.scanner.get_positions_snapshot()
-                                    if p.get("account") == self.IB_ACCT_CODE
-                                ]
-                                recon = self.execution_engine.reconcile_with_ib(ib_positions)
-                                self.position_store.purge_phantom_entry_fills()
+                                recovery = self._run_broker_recovery_pass(
+                                    include_executions=True,
+                                    open_orders_force_refresh=True,
+                                )
+                                recon = recovery["reconciliation"] or {
+                                    "matched": [],
+                                    "orphaned_ib": [],
+                                    "stale_agent": [],
+                                    "adjusted": [],
+                                }
+                                ingest = recovery["execution_ingest"] or {}
+                                if ingest.get("ingested"):
+                                    logger.info(
+                                        "Reconnect broker replay: ingested %d execution(s), %d unresolved",
+                                        ingest.get("ingested", 0),
+                                        ingest.get("unresolved", 0),
+                                    )
                                 if recon["orphaned_ib"]:
                                     n_spawned = self._spawn_missing_risk_managers(recon["orphaned_ib"])
                                     logger.warning(
@@ -502,6 +513,53 @@ class IBDataAgent:
         if self.scanner and self.scanner.isConnected():
             logger.info("Disconnecting from IB TWS...")
             self.scanner.disconnect()
+
+    def _run_broker_recovery_pass(
+        self,
+        *,
+        include_executions: bool,
+        open_orders_force_refresh: bool = True,
+    ) -> dict:
+        """Replay broker truth into the local ledgers before automation resumes."""
+        if not self.execution_engine:
+            return {
+                "reconciliation": None,
+                "execution_ingest": {"ingested": 0, "unresolved": 0},
+                "ib_open_orders": [],
+            }
+        if not self.scanner or not self.scanner.isConnected():
+            return {
+                "reconciliation": None,
+                "execution_ingest": {"ingested": 0, "unresolved": 0},
+                "ib_open_orders": [],
+            }
+
+        ib_positions = [
+            p for p in self.scanner.get_positions_snapshot()
+            if p.get("account") == self.IB_ACCT_CODE
+        ]
+        ib_open_orders = self.scanner.get_open_orders_snapshot(
+            timeout_sec=10.0,
+            force_refresh=open_orders_force_refresh,
+        )
+        execution_ingest = {"ingested": 0, "unresolved": 0}
+        if include_executions and hasattr(self.position_store, "ingest_ib_execution_batch"):
+            raw_execs = self.scanner.fetch_executions_sync(
+                timeout_sec=10.0,
+                acct_code=self.IB_ACCT_CODE,
+            )
+            execution_ingest = self.position_store.ingest_ib_execution_batch(raw_execs)
+
+        recon = self.execution_engine.reconcile_with_ib(
+            ib_positions,
+            ib_open_orders=ib_open_orders,
+        )
+        self.position_store.purge_phantom_entry_fills()
+        return {
+            "reconciliation": recon,
+            "execution_ingest": execution_ingest,
+            "ib_open_orders": ib_open_orders,
+        }
     
     async def handle_request(self, request: dict) -> dict:
         """Handle a data request from the relay"""
@@ -700,12 +758,23 @@ class IBDataAgent:
             # IB Reconciliation — MUST complete before hold is released
             try:
                 if self.execution_engine and self.execution_engine.is_running:
-                    ib_positions = [
-                        p for p in self.scanner.get_positions_snapshot()
-                        if p.get("account") == self.IB_ACCT_CODE
-                    ]
-                    recon = self.execution_engine.reconcile_with_ib(ib_positions)
-                    self.position_store.purge_phantom_entry_fills()
+                    recovery = self._run_broker_recovery_pass(
+                        include_executions=True,
+                        open_orders_force_refresh=True,
+                    )
+                    recon = recovery["reconciliation"] or {
+                        "matched": [],
+                        "orphaned_ib": [],
+                        "stale_agent": [],
+                        "adjusted": [],
+                    }
+                    ingest = recovery["execution_ingest"] or {}
+                    if ingest.get("ingested"):
+                        logger.info(
+                            "Manual reconnect broker replay: ingested %d execution(s), %d unresolved",
+                            ingest.get("ingested", 0),
+                            ingest.get("unresolved", 0),
+                        )
                     if recon["orphaned_ib"]:
                         n_spawned = self._spawn_missing_risk_managers(recon["orphaned_ib"])
                         logger.warning(
@@ -1964,12 +2033,23 @@ class IBDataAgent:
 
             # ── IB Reconciliation on startup (WS4) ──
             try:
-                ib_positions = [
-                    p for p in self.scanner.get_positions_snapshot()
-                    if p.get("account") == self.IB_ACCT_CODE
-                ]
-                recon = self.execution_engine.reconcile_with_ib(ib_positions)
-                self.position_store.purge_phantom_entry_fills()
+                recovery = self._run_broker_recovery_pass(
+                    include_executions=True,
+                    open_orders_force_refresh=True,
+                )
+                recon = recovery["reconciliation"] or {
+                    "matched": [],
+                    "orphaned_ib": [],
+                    "stale_agent": [],
+                    "adjusted": [],
+                }
+                ingest = recovery["execution_ingest"] or {}
+                if ingest.get("ingested"):
+                    logger.info(
+                        "Startup broker replay: ingested %d execution(s), %d unresolved",
+                        ingest.get("ingested", 0),
+                        ingest.get("unresolved", 0),
+                    )
                 if recon["orphaned_ib"]:
                     n_spawned = self._spawn_missing_risk_managers(recon["orphaned_ib"])
                     logger.warning(
@@ -3813,7 +3893,14 @@ class IBDataAgent:
                 p for p in self.scanner.get_positions_snapshot(timeout_sec=5.0)
                 if p.get("account") == self.IB_ACCT_CODE
             ]
-            recon = self.execution_engine.reconcile_with_ib(ib_positions)
+            ib_open_orders = self.scanner.get_open_orders_snapshot(
+                timeout_sec=5.0,
+                force_refresh=False,
+            )
+            recon = self.execution_engine.reconcile_with_ib(
+                ib_positions,
+                ib_open_orders=ib_open_orders,
+            )
             self.position_store.purge_phantom_entry_fills()
             return recon
         except Exception as e:
@@ -3915,6 +4002,28 @@ class IBDataAgent:
                         # Re-dirty so they retry next cycle
                         for p in dirty_positions:
                             self.position_store._dirty_ids.add(p["id"])
+                dirty_executions = self.position_store.drain_dirty_executions()
+                if dirty_executions and self.websocket:
+                    try:
+                        await self._send_ws_json({
+                            "type": "execution_ledger_sync",
+                            "executions": dirty_executions,
+                        })
+                        logger.info("Execution ledger sync: pushed %d execution(s)", len(dirty_executions))
+                    except Exception as sync_err:
+                        logger.warning("Execution ledger sync failed: %s — marking all dirty", sync_err)
+                        self.position_store.mark_all_dirty()
+                dirty_reservations = self.position_store.drain_dirty_exit_reservations()
+                if dirty_reservations and self.websocket:
+                    try:
+                        await self._send_ws_json({
+                            "type": "exit_reservation_sync",
+                            "reservations": dirty_reservations,
+                        })
+                        logger.info("Exit reservation sync: pushed %d reservation(s)", len(dirty_reservations))
+                    except Exception as sync_err:
+                        logger.warning("Exit reservation sync failed: %s — marking all dirty", sync_err)
+                        self.position_store.mark_all_dirty()
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")

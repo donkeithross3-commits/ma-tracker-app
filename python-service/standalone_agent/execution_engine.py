@@ -47,6 +47,7 @@ import logging
 import queue
 import threading
 import time
+import uuid
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass, field
@@ -152,11 +153,15 @@ class DeadOrderRecord:
 class ExitReservation:
     """Contract-level reservation for a working exit order."""
     token: int
+    reservation_id: str
     strategy_id: str
     contract_key: tuple
     reserved_qty: int
     order_id: Optional[int] = None
+    perm_id: int = 0
     source: str = ""
+    status: str = "pending_submit"
+    release_reason: str = ""
     created_at: float = 0.0
     updated_at: float = 0.0
 
@@ -346,6 +351,8 @@ class ExecutionEngine:
         self._recent_terminal_orders_lock = threading.Lock()
         self._broker_positions: Dict[tuple, dict] = {}
         self._broker_positions_lock = threading.Lock()
+        self._broker_open_orders: Dict[tuple, dict] = {}
+        self._broker_open_orders_lock = threading.Lock()
         self._managed_contract_issues: Dict[tuple, dict] = {}
         self._managed_contract_issues_lock = threading.Lock()
         self._exit_reservations: Dict[int, ExitReservation] = {}
@@ -400,6 +407,8 @@ class ExecutionEngine:
 
         # ── Lifecycle sweep counter ──
         self._tick_count = 0
+
+        self._restore_exit_reservations_from_store()
 
     # ── Entry Budget (two-tier) ──
 
@@ -479,6 +488,27 @@ class ExecutionEngine:
             positions.setdefault(key, []).append(pos)
         return positions
 
+    def _managed_qty_by_contract(self) -> Dict[tuple, int]:
+        positions = self._active_store_positions_by_contract()
+        managed_qty: Dict[tuple, int] = {}
+        for key, contract_positions in positions.items():
+            total = 0
+            for pos in contract_positions:
+                runtime_state = pos.get("runtime_state", {}) or {}
+                entry = pos.get("entry", {}) or {}
+                total += int(
+                    round(
+                        float(
+                            runtime_state.get(
+                                "remaining_qty",
+                                entry.get("quantity", 0),
+                            ) or 0
+                        )
+                    )
+                )
+            managed_qty[key] = total
+        return managed_qty
+
     def _update_broker_position_book(self, ib_positions: list) -> None:
         now = time.time()
         snapshot: Dict[tuple, dict] = {}
@@ -505,6 +535,41 @@ class ExecutionEngine:
             entry["accounts"] = sorted(entry["accounts"])
         with self._broker_positions_lock:
             self._broker_positions = snapshot
+
+    def _update_broker_open_orders_book(self, ib_open_orders: list) -> None:
+        now = time.time()
+        snapshot: Dict[tuple, dict] = {}
+        for order in ib_open_orders or []:
+            contract = order.get("contract", {}) or {}
+            symbol = contract.get("symbol")
+            if symbol in IB_IGNORE_TICKERS:
+                continue
+            key = self._normalize_contract_key(contract)
+            last_status = order.get("_lastStatus", {}) or {}
+            order_payload = order.get("order", {}) or {}
+            remaining = last_status.get("remaining")
+            if remaining is None:
+                remaining = order_payload.get("totalQuantity")
+            remaining_qty = int(round(float(remaining or 0)))
+            entry = snapshot.setdefault(key, {
+                "contract_key": key,
+                "working_open_order_qty": 0,
+                "order_ids": [],
+                "perm_ids": [],
+                "updated_at": now,
+            })
+            entry["working_open_order_qty"] += max(0, remaining_qty)
+            if order.get("orderId"):
+                entry["order_ids"].append(int(order["orderId"]))
+            if order.get("permId"):
+                entry["perm_ids"].append(int(order["permId"]))
+        with self._broker_open_orders_lock:
+            self._broker_open_orders = snapshot
+
+    def _get_broker_open_orders(self, contract_key: tuple) -> Optional[dict]:
+        with self._broker_open_orders_lock:
+            broker = self._broker_open_orders.get(contract_key)
+            return dict(broker) if broker else None
 
     def _get_broker_position(self, contract_key: tuple) -> Optional[dict]:
         with self._broker_positions_lock:
@@ -541,8 +606,63 @@ class ExecutionEngine:
             return sum(
                 max(0, reservation.reserved_qty)
                 for reservation in self._exit_reservations.values()
-                if reservation.contract_key == contract_key
+                if reservation.contract_key == contract_key and reservation.reserved_qty > 0
             )
+
+    def _reservation_issue_state(self, contract_key: tuple) -> Optional[str]:
+        with self._exit_reservations_lock:
+            active = [
+                reservation
+                for reservation in self._exit_reservations.values()
+                if reservation.contract_key == contract_key and reservation.reserved_qty > 0
+            ]
+        if not active:
+            return None
+        if any(reservation.status == "ambiguous" for reservation in active):
+            return "reservation_ambiguous"
+        if any(reservation.status == "recovery_pending" for reservation in active):
+            return "recovery_pending"
+        return "working"
+
+    def _restore_exit_reservations_from_store(self) -> None:
+        if not self._position_store or not hasattr(self._position_store, "get_active_exit_reservations"):
+            return
+        restored = 0
+        with self._exit_reservations_lock:
+            self._exit_reservations.clear()
+            self._next_exit_reservation_token = 1
+            for record in self._position_store.get_active_exit_reservations():
+                contract_key = tuple(str(record.get("contract_key", "")).split(":"))
+                if len(contract_key) == 4:
+                    symbol, strike, expiry, right = contract_key
+                    try:
+                        contract_key = (
+                            symbol,
+                            round(float(strike or 0.0), 6),
+                            expiry,
+                            right,
+                        )
+                    except (TypeError, ValueError):
+                        contract_key = self._normalize_contract_key({})
+                token = self._next_exit_reservation_token
+                self._next_exit_reservation_token += 1
+                self._exit_reservations[token] = ExitReservation(
+                    token=token,
+                    reservation_id=record.get("reservation_id") or uuid.uuid4().hex,
+                    strategy_id=record.get("strategy_id", ""),
+                    contract_key=contract_key,
+                    reserved_qty=max(0, int(record.get("reserved_qty", 0) or 0)),
+                    order_id=int(record.get("order_id", 0) or 0) or None,
+                    perm_id=int(record.get("perm_id", 0) or 0),
+                    source=record.get("source", ""),
+                    status=record.get("status", "recovery_pending"),
+                    release_reason=record.get("release_reason", ""),
+                    created_at=float(record.get("created_at") or time.time()),
+                    updated_at=float(record.get("updated_at") or time.time()),
+                )
+                restored += 1
+        if restored:
+            logger.info("ExecutionEngine: restored %d persisted exit reservations", restored)
 
     def _create_exit_reservation(
         self,
@@ -555,25 +675,48 @@ class ExecutionEngine:
             token = self._next_exit_reservation_token
             self._next_exit_reservation_token += 1
             now = time.time()
-            self._exit_reservations[token] = ExitReservation(
+            reservation = ExitReservation(
                 token=token,
+                reservation_id=uuid.uuid4().hex,
                 strategy_id=strategy_id,
                 contract_key=contract_key,
                 reserved_qty=max(0, int(reserved_qty)),
                 source=source,
+                status="pending_submit",
                 created_at=now,
                 updated_at=now,
             )
-            return token
+            self._exit_reservations[token] = reservation
+        if self._position_store and hasattr(self._position_store, "create_exit_reservation"):
+            self._position_store.create_exit_reservation(
+                reservation_id=reservation.reservation_id,
+                strategy_id=strategy_id,
+                contract_key=contract_key,
+                reserved_qty=reservation.reserved_qty,
+                source=source,
+                status=reservation.status,
+            )
+        return token
 
-    def _bind_exit_reservation(self, token: Optional[int], order_id: int) -> None:
+    def _bind_exit_reservation(self, token: Optional[int], order_id: int, perm_id: int = 0) -> None:
         if not token:
             return
+        reservation_id = ""
         with self._exit_reservations_lock:
             reservation = self._exit_reservations.get(token)
             if reservation:
                 reservation.order_id = order_id
+                if perm_id:
+                    reservation.perm_id = int(perm_id)
+                reservation.status = "working"
                 reservation.updated_at = time.time()
+                reservation_id = reservation.reservation_id
+        if reservation_id and self._position_store and hasattr(self._position_store, "bind_exit_reservation"):
+            self._position_store.bind_exit_reservation(
+                reservation_id,
+                order_id=order_id,
+                perm_id=perm_id,
+            )
 
     def _release_exit_reservation(
         self,
@@ -581,49 +724,161 @@ class ExecutionEngine:
         token: Optional[int] = None,
         order_id: Optional[int] = None,
         strategy_id: Optional[str] = None,
+        release_reason: str = "released",
     ) -> None:
+        doomed: List[ExitReservation] = []
         with self._exit_reservations_lock:
-            doomed = []
             for reservation_token, reservation in self._exit_reservations.items():
                 if token is not None and reservation_token == token:
-                    doomed.append(reservation_token)
+                    doomed.append(reservation)
                 elif order_id is not None and reservation.order_id == order_id:
-                    doomed.append(reservation_token)
+                    doomed.append(reservation)
                 elif strategy_id and reservation.strategy_id == strategy_id:
-                    doomed.append(reservation_token)
-            for reservation_token in doomed:
-                self._exit_reservations.pop(reservation_token, None)
+                    doomed.append(reservation)
+            for reservation in doomed:
+                self._exit_reservations.pop(reservation.token, None)
+        if self._position_store and hasattr(self._position_store, "release_exit_reservation"):
+            for reservation in doomed:
+                self._position_store.release_exit_reservation(
+                    reservation_id=reservation.reservation_id,
+                    release_reason=release_reason,
+                )
 
-    def _sync_exit_reservation(self, order_id: int, *, remaining: Optional[float], status: str) -> None:
+    def _sync_exit_reservation(
+        self,
+        order_id: int,
+        *,
+        remaining: Optional[float],
+        status: str,
+        perm_id: int = 0,
+    ) -> None:
+        release_reason = status.lower() if status else "released"
         with self._exit_reservations_lock:
             for reservation in self._exit_reservations.values():
                 if reservation.order_id != order_id:
                     continue
+                if perm_id:
+                    reservation.perm_id = int(perm_id)
                 if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
                     reservation.reserved_qty = 0
+                    reservation.status = status or "released"
+                    reservation.release_reason = release_reason
                 elif remaining is not None:
                     reservation.reserved_qty = max(0, int(round(float(remaining) or 0.0)))
+                    reservation.status = "working"
                 reservation.updated_at = time.time()
                 break
+        if self._position_store and hasattr(self._position_store, "sync_exit_reservation"):
+            self._position_store.sync_exit_reservation(
+                order_id=order_id,
+                remaining=remaining,
+                status=status,
+                perm_id=perm_id,
+            )
         if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
-            self._release_exit_reservation(order_id=order_id)
+            self._release_exit_reservation(order_id=order_id, release_reason=release_reason)
+
+    def reconcile_exit_reservations(self, ib_open_orders: list) -> dict:
+        """Reconcile persisted exit reservations against broker open orders."""
+        report = {
+            "matched": [],
+            "released": [],
+            "ambiguous": [],
+            "shrunk": [],
+        }
+        self._update_broker_open_orders_book(ib_open_orders or [])
+        open_by_order_id = {}
+        open_by_perm_id = {}
+        for order in ib_open_orders or []:
+            if order.get("orderId"):
+                open_by_order_id[int(order["orderId"])] = order
+            if order.get("permId"):
+                open_by_perm_id[int(order["permId"])] = order
+
+        with self._exit_reservations_lock:
+            reservations = list(self._exit_reservations.values())
+
+        for reservation in reservations:
+            broker_order = None
+            if reservation.order_id and reservation.order_id in open_by_order_id:
+                broker_order = open_by_order_id[reservation.order_id]
+            elif reservation.perm_id and reservation.perm_id in open_by_perm_id:
+                broker_order = open_by_perm_id[reservation.perm_id]
+            if broker_order:
+                status = (
+                    (broker_order.get("_lastStatus", {}) or {}).get("status")
+                    or (broker_order.get("orderState", {}) or {}).get("status")
+                    or "Submitted"
+                )
+                remaining = (broker_order.get("_lastStatus", {}) or {}).get("remaining")
+                if remaining is None:
+                    remaining = (broker_order.get("order", {}) or {}).get("totalQuantity")
+                old_qty = reservation.reserved_qty
+                self._sync_exit_reservation(
+                    reservation.order_id or int(broker_order.get("orderId") or 0),
+                    remaining=remaining,
+                    status=status,
+                    perm_id=int(broker_order.get("permId") or reservation.perm_id or 0),
+                )
+                report["matched"].append(reservation.reservation_id)
+                if remaining is not None and int(round(float(remaining or 0))) != old_qty:
+                    report["shrunk"].append(reservation.reservation_id)
+            else:
+                contract_open_orders = self._get_broker_open_orders(reservation.contract_key)
+                working_qty = int(round(float((contract_open_orders or {}).get("working_open_order_qty") or 0)))
+                if working_qty <= 0:
+                    self._release_exit_reservation(
+                        token=reservation.token,
+                        release_reason="broker_open_order_missing",
+                    )
+                    report["released"].append(reservation.reservation_id)
+                else:
+                    with self._exit_reservations_lock:
+                        current = self._exit_reservations.get(reservation.token)
+                        if current:
+                            current.status = "ambiguous"
+                            current.updated_at = time.time()
+                    if self._position_store and hasattr(self._position_store, "create_exit_reservation"):
+                        # Upsert the ambiguous state for operator visibility.
+                        self._position_store.create_exit_reservation(
+                            reservation_id=reservation.reservation_id,
+                            strategy_id=reservation.strategy_id,
+                            contract_key=reservation.contract_key,
+                            reserved_qty=reservation.reserved_qty,
+                            source=reservation.source,
+                            order_id=reservation.order_id or 0,
+                            perm_id=reservation.perm_id,
+                            status="ambiguous",
+                        )
+                    report["ambiguous"].append(reservation.reservation_id)
+        return report
 
     def _managed_contracts_status(self) -> list:
         active_positions = self._active_store_positions_by_contract()
+        managed_qty = self._managed_qty_by_contract()
         with self._broker_positions_lock:
             broker_positions = {
                 key: dict(value) for key, value in self._broker_positions.items()
+            }
+        with self._broker_open_orders_lock:
+            broker_open_orders = {
+                key: dict(value) for key, value in self._broker_open_orders.items()
             }
         with self._managed_contract_issues_lock:
             issues = {
                 key: dict(value) for key, value in self._managed_contract_issues.items()
             }
-        keys = set(active_positions) | set(broker_positions) | set(issues)
+        keys = set(active_positions) | set(broker_positions) | set(issues) | set(broker_open_orders)
         results = []
         now = time.time()
         for key in sorted(keys, key=self._format_contract_key):
             broker = broker_positions.get(key)
             issue = issues.get(key)
+            open_orders = broker_open_orders.get(key)
+            reservation_state = self._reservation_issue_state(key)
+            issue_state = issue.get("status") if issue else None
+            if issue_state is None and reservation_state in {"ambiguous", "recovery_pending", "reservation_ambiguous"}:
+                issue_state = "reservation_ambiguous"
             results.append({
                 "contract_key": self._format_contract_key(key),
                 "instrument": {
@@ -634,6 +889,7 @@ class ExecutionEngine:
                 },
                 "active_position_ids": [pos["id"] for pos in active_positions.get(key, [])],
                 "active_position_count": len(active_positions.get(key, [])),
+                "managed_qty": int(managed_qty.get(key, 0)),
                 "broker_qty": int(broker.get("qty", 0)) if broker else None,
                 "broker_accounts": broker.get("accounts", []) if broker else [],
                 "broker_snapshot_age_ms": (
@@ -641,7 +897,11 @@ class ExecutionEngine:
                     if broker else None
                 ),
                 "reserved_exit_qty": self._reserved_exit_qty(key),
-                "status": issue.get("status", "ok") if issue else "ok",
+                "working_open_order_qty": int(open_orders.get("working_open_order_qty", 0)) if open_orders else 0,
+                "reservation_state": reservation_state or "none",
+                "issue_state": issue_state or "ok",
+                "fail_closed": bool(issue_state in {"duplicate_active_positions", "reservation_ambiguous"}),
+                "status": issue_state or "ok",
                 "message": issue.get("message", "") if issue else "",
                 "position_ids": issue.get("position_ids", []) if issue else [],
             })
@@ -668,6 +928,16 @@ class ExecutionEngine:
                 "Fail-closed exit block for %s (%s): %s",
                 state.strategy_id, contract_label, reason,
             )
+            return None
+
+        reservation_state = self._reservation_issue_state(contract_key)
+        if reservation_state == "reservation_ambiguous":
+            reason = (
+                f"Exit blocked for {contract_label}: reservation state is ambiguous "
+                "after restart/reconciliation"
+            )
+            state.errors.append(reason)
+            logger.error(reason)
             return None
 
         broker_position = self._get_broker_position(contract_key)
@@ -1102,6 +1372,7 @@ class ExecutionEngine:
         # Register order status listener on scanner
         self._scanner.add_order_status_listener(self.on_scanner_order_status)
         self._scanner.add_exec_details_listener(self.on_scanner_exec_details)
+        self._restore_exit_reservations_from_store()
 
         self._running = True
         self._tick_count = 0
@@ -1175,6 +1446,8 @@ class ExecutionEngine:
             self._recent_terminal_orders.clear()
         with self._broker_positions_lock:
             self._broker_positions.clear()
+        with self._broker_open_orders_lock:
+            self._broker_open_orders.clear()
         with self._managed_contract_issues_lock:
             self._managed_contract_issues.clear()
         with self._exit_reservations_lock:
@@ -1294,9 +1567,9 @@ class ExecutionEngine:
             self._order_strategy_map.pop(oid, None)
             with self._active_orders_lock:
                 self._active_orders.pop(oid, None)
-            self._release_exit_reservation(order_id=oid)
+            self._release_exit_reservation(order_id=oid, release_reason="strategy_unloaded")
         self._order_timestamps.pop(strategy_id, None)
-        self._release_exit_reservation(strategy_id=strategy_id)
+        self._release_exit_reservation(strategy_id=strategy_id, release_reason="strategy_unloaded")
 
         logger.info("Unloaded strategy %s (freed %d subscriptions)", strategy_id, len(state.subscriptions))
         return {
@@ -1438,6 +1711,7 @@ class ExecutionEngine:
                             order_id,
                             remaining=remaining,
                             status=status,
+                            perm_id=data.get("permId", active.perm_id),
                         )
 
                     # Detect new fills (filled increased)
@@ -1490,7 +1764,7 @@ class ExecutionEngine:
                         self._order_strategy_map.pop(order_id, None)
                         self._mark_order_terminal(order_id)
                         if not active.is_entry:
-                            self._release_exit_reservation(order_id=order_id)
+                            self._release_exit_reservation(order_id=order_id, release_reason=status.lower())
 
                 else:
                     # No active order entry yet -- create one (can happen if
@@ -1524,6 +1798,7 @@ class ExecutionEngine:
                             order_id,
                             remaining=remaining,
                             status=status,
+                            perm_id=data.get("permId", 0),
                         )
                     # Process fills/terminals even for early-arriving events.
                     # Without this, a Filled event that arrives before
@@ -1553,7 +1828,7 @@ class ExecutionEngine:
                         self._order_strategy_map.pop(order_id, None)
                         self._mark_order_terminal(order_id)
                         if not is_entry:
-                            self._release_exit_reservation(order_id=order_id)
+                            self._release_exit_reservation(order_id=order_id, release_reason=status.lower())
 
             elif event_type == "exec":
                 # execDetails: capture exec_id for commission routing
@@ -1569,25 +1844,29 @@ class ExecutionEngine:
                     # Update the fill in position_store with the real exec_id
                     # (the fill was likely already persisted with exec_id="" from orderStatus)
                     if self._position_store:
+                        match_hint = self._build_execution_match_hint(exec_data=data)
+                        execution_analytics = {
+                            "exchange": data.get("exchange", ""),
+                            "last_liquidity": data.get("lastLiquidity", 0),
+                            "perm_id": data.get("permId", 0),
+                            "side": data.get("side", ""),
+                            "account": data.get("account", ""),
+                        }
                         # Try RM position first, fall back to strategy_id
                         updated = self._position_store.update_fill_execution_details(
                             position_id,
                             order_id,
                             exec_id=exec_id,
-                            execution_analytics={
-                                "exchange": data.get("exchange", ""),
-                                "last_liquidity": data.get("lastLiquidity", 0),
-                            },
+                            execution_analytics=execution_analytics,
+                            match_hint=match_hint,
                         )
                         if not updated and position_id != strategy_id:
                             updated = self._position_store.update_fill_execution_details(
                                 strategy_id,
                                 order_id,
                                 exec_id=exec_id,
-                                execution_analytics={
-                                    "exchange": data.get("exchange", ""),
-                                    "last_liquidity": data.get("lastLiquidity", 0),
-                                },
+                                execution_analytics=execution_analytics,
+                                match_hint=match_hint,
                             )
                         if updated:
                             logger.info("Backfilled exec_id=%s on fill for order %d (%s)",
@@ -1986,7 +2265,10 @@ class ExecutionEngine:
                 self._refund_ticker_budget(state)
                 logger.info("Refunded entry budget for %s (order exception)", strategy_id)
             if not is_entry:
-                self._release_exit_reservation(token=exit_reservation_token)
+                self._release_exit_reservation(
+                    token=exit_reservation_token,
+                    release_reason="order_exception",
+                )
             return
 
         if state:
@@ -2015,6 +2297,7 @@ class ExecutionEngine:
                 self._release_exit_reservation(
                     order_id=result.get("orderId"),
                     token=exit_reservation_token,
+                    release_reason="order_error",
                 )
         else:
             order_id = result.get("orderId")
@@ -2024,7 +2307,11 @@ class ExecutionEngine:
             if order_id:
                 if self._was_order_recently_terminal(order_id):
                     if not is_entry:
-                        self._release_exit_reservation(order_id=order_id, token=exit_reservation_token)
+                        self._release_exit_reservation(
+                            order_id=order_id,
+                            token=exit_reservation_token,
+                            release_reason="late_terminal_ack",
+                        )
                     logger.info(
                         "Order %d already reached a terminal state before "
                         "_on_order_complete; skipping late registration",
@@ -2037,6 +2324,12 @@ class ExecutionEngine:
                     return
 
                 self._order_strategy_map[order_id] = strategy_id
+                if not is_entry:
+                    self._bind_exit_reservation(
+                        exit_reservation_token,
+                        order_id,
+                        perm_id=result.get("permId", 0),
+                    )
 
                 # Register in active orders for lifecycle tracking.
                 # IMPORTANT: Don't overwrite if _drain_order_events already
@@ -2093,7 +2386,10 @@ class ExecutionEngine:
                         self._order_strategy_map.pop(order_id, None)
                         self._mark_order_terminal(order_id)
                         if not is_entry:
-                            self._release_exit_reservation(order_id=order_id)
+                            self._release_exit_reservation(
+                                order_id=order_id,
+                                release_reason="filled",
+                            )
                 elif status in ("Cancelled", "ApiCancelled", "Inactive"):
                     with self._active_orders_lock:
                         active = self._active_orders.get(order_id)
@@ -2118,9 +2414,15 @@ class ExecutionEngine:
                     self._order_strategy_map.pop(order_id, None)
                     self._mark_order_terminal(order_id)
                     if not is_entry:
-                        self._release_exit_reservation(order_id=order_id)
+                        self._release_exit_reservation(
+                            order_id=order_id,
+                            release_reason=status.lower(),
+                        )
             elif not is_entry:
-                self._release_exit_reservation(token=exit_reservation_token)
+                self._release_exit_reservation(
+                    token=exit_reservation_token,
+                    release_reason="missing_order_id",
+                )
 
             logger.info(
                 "Order placed for strategy %s: orderId=%s status=%s filled=%s",
@@ -2213,10 +2515,14 @@ class ExecutionEngine:
             # Phase 0: schedule post-fill adverse selection capture
             contract_d = self._order_contract_dicts.get(order_id)
             if contract_d and pre_trade_snapshot:
+                fill_match_hint = self._build_execution_match_hint(
+                    exec_data=fill_data,
+                    fill_dict=fill_dict,
+                )
                 self._schedule_post_fill_capture(
                     strategy_id, order_id, contract_d,
                     fill_price, fill_time, pre_trade_snapshot,
-                    routing_exchange, fill_dict,
+                    routing_exchange, fill_dict, fill_match_hint,
                 )
 
         except Exception as e:
@@ -2225,6 +2531,38 @@ class ExecutionEngine:
     # ── Phase 0: Post-fill adverse selection measurement ──
 
     _POST_FILL_DELAYS = [5, 30, 60]  # seconds after fill
+
+    @staticmethod
+    def _build_execution_match_hint(exec_data: Optional[dict] = None, fill_dict: Optional[dict] = None) -> dict:
+        exec_data = exec_data or {}
+        fill_dict = fill_dict or {}
+        analytics = dict(fill_dict.get("execution_analytics") or {})
+        return {
+            "exec_id": exec_data.get("execId") or fill_dict.get("exec_id") or "",
+            "fill_time": exec_data.get("time") or fill_dict.get("time"),
+            "qty_filled": (
+                exec_data.get("shares")
+                if exec_data.get("shares") is not None
+                else fill_dict.get("qty_filled")
+            ),
+            "avg_price": (
+                exec_data.get("price")
+                if exec_data.get("price") is not None
+                else fill_dict.get("avg_price")
+            ),
+            "perm_id": (
+                exec_data.get("permId")
+                or analytics.get("perm_id")
+                or fill_dict.get("perm_id")
+                or fill_dict.get("permId")
+            ),
+            "side": (
+                exec_data.get("side")
+                or analytics.get("side")
+                or ("BOT" if fill_dict.get("level") == "entry" else "SLD")
+            ),
+            "account": exec_data.get("account") or analytics.get("account") or "",
+        }
 
     def _schedule_post_fill_capture(
         self,
@@ -2236,6 +2574,7 @@ class ExecutionEngine:
         pre_trade_snapshot: dict,
         routing_exchange: str,
         fill_dict: dict,
+        fill_match_hint: dict,
     ):
         """Schedule timer-based quote captures at +5s/+30s/+60s after fill.
 
@@ -2250,7 +2589,7 @@ class ExecutionEngine:
             t = threading.Timer(
                 delay,
                 self._capture_post_fill_quote,
-                args=[strategy_id, order_id, contract_dict, delay, post_fill_data],
+                args=[strategy_id, order_id, contract_dict, delay, post_fill_data, dict(fill_match_hint or {})],
             )
             t.daemon = True
             t.name = f"post-fill-{order_id}-{delay}s"
@@ -2277,6 +2616,7 @@ class ExecutionEngine:
         contract_dict: dict,
         delay_seconds: int,
         post_fill_data: dict,
+        match_hint: Optional[dict] = None,
     ):
         """Capture option midpoint at a fixed delay after fill.
 
@@ -2321,6 +2661,7 @@ class ExecutionEngine:
             if self._position_store:
                 self._position_store.update_fill_post_trade(
                     strategy_id, order_id, delay_seconds, post_fill_data,
+                    match_hint=match_hint,
                 )
         except Exception as e:
             logger.error(
@@ -2399,6 +2740,12 @@ class ExecutionEngine:
             "adjusted": [],
             "duplicate_agent": [],
             "manual_external": [],
+            "reservation_reconciliation": {
+                "matched": [],
+                "released": [],
+                "ambiguous": [],
+                "shrunk": [],
+            },
         }
         if not self._position_store:
             return report
@@ -2410,6 +2757,10 @@ class ExecutionEngine:
         ]
 
         self._update_broker_position_book(ib_filtered)
+        if ib_open_orders is not None:
+            report["reservation_reconciliation"] = self.reconcile_exit_reservations(ib_open_orders)
+        else:
+            self._update_broker_open_orders_book([])
 
         # Build agent position multimap and classify duplicates up front.
         store_positions = self._active_store_positions_by_contract()
@@ -2662,6 +3013,16 @@ class ExecutionEngine:
             lineage = p.get("lineage", {})
             # Orphan: reconciliation-spawned position (order_id 0, no model lineage)
             is_orphan = (entry.get("order_id", 0) == 0 and not lineage)
+            execution_summary = {}
+            if hasattr(self._position_store, "summarize_canonical_position"):
+                multiplier = p.get("instrument", {}).get("multiplier", 100)
+                try:
+                    execution_summary = self._position_store.summarize_canonical_position(
+                        p["id"],
+                        multiplier=int(multiplier or 100),
+                    )
+                except Exception:
+                    execution_summary = {}
             results.append({
                 "id": p["id"],
                 "status": p.get("status", "active"),
@@ -2676,8 +3037,17 @@ class ExecutionEngine:
                 "lineage": lineage,
                 "parent_strategy": p.get("parent_strategy", ""),
                 "is_orphan": is_orphan,
+                "execution_summary": execution_summary,
             })
         return results
+
+    def _get_exit_reservations_status(self) -> list:
+        if not self._position_store or not hasattr(self._position_store, "get_active_exit_reservations"):
+            return []
+        try:
+            return self._position_store.get_active_exit_reservations()
+        except Exception:
+            return []
 
     def _get_trade_attribution_summary(self) -> list:
         """Compute model-level P&L attribution from position store."""
@@ -2785,6 +3155,7 @@ class ExecutionEngine:
             "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
             "managed_contracts": self._managed_contracts_status(),
+            "exit_reservations": self._get_exit_reservations_status(),
             "trade_attribution_summary": self._get_trade_attribution_summary(),
             "trade_attribution_session": self._get_trade_attribution_session(),
             # Connection health
@@ -2858,6 +3229,7 @@ class ExecutionEngine:
             "budget_status": self.get_budget_status(),
             "position_ledger": self._get_position_ledger(),
             "managed_contracts": self._managed_contracts_status(),
+            "exit_reservations": self._get_exit_reservations_status(),
             # Trade attribution (realized P&L from closed positions)
             "trade_attribution_summary": self._get_trade_attribution_summary(),
             "trade_attribution_session": self._get_trade_attribution_session(),

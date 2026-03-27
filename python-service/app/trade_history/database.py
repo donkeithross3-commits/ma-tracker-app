@@ -11,6 +11,7 @@ All writes are idempotent upserts (ON CONFLICT ... DO UPDATE).
 import asyncpg
 import json
 import logging
+import math
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -90,6 +91,46 @@ class TradeDatabase:
         if count:
             logger.info("TradeDatabase: upserted %d/%d positions for user %s",
                         count, len(positions), user_id)
+        return count
+
+    async def upsert_executions(self, user_id: str, executions: List[dict]) -> int:
+        """Upsert canonical execution ledger rows."""
+        if not self.pool or not executions:
+            return 0
+        count = 0
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for execution in executions:
+                    try:
+                        async with conn.transaction():
+                            await self._upsert_one_execution(conn, user_id, execution)
+                            count += 1
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to upsert execution %s: %s",
+                            execution.get("broker_execution_key", "?"),
+                            exc,
+                        )
+        return count
+
+    async def upsert_exit_reservations(self, user_id: str, reservations: List[dict]) -> int:
+        """Upsert exit reservation ledger rows."""
+        if not self.pool or not reservations:
+            return 0
+        count = 0
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for reservation in reservations:
+                    try:
+                        async with conn.transaction():
+                            await self._upsert_one_exit_reservation(conn, user_id, reservation)
+                            count += 1
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to upsert reservation %s: %s",
+                            reservation.get("reservation_id", "?"),
+                            exc,
+                        )
         return count
 
     async def _upsert_one_position(
@@ -199,9 +240,9 @@ class TradeDatabase:
             total_net_pnl,
             multiplier,
             model_version,
-            json.dumps(lineage) if lineage else "{}",
-            json.dumps(risk_config) if risk_config else "{}",
-            json.dumps(runtime_state) if runtime_state else "{}",
+            self._json_dumps(lineage) if lineage else "{}",
+            self._json_dumps(risk_config) if risk_config else "{}",
+            self._json_dumps(runtime_state) if runtime_state else "{}",
             agent_created_at_raw,
             created_at_dt,
         )
@@ -251,7 +292,9 @@ class TradeDatabase:
     ):
         """Upsert a single fill entry."""
         analytics = fill.get("execution_analytics", {})
-        fill_time = self._parse_timestamp(fill.get("fill_time"))
+        fill_time = self._parse_timestamp(
+            fill.get("fill_time", fill.get("time"))
+        )
 
         await conn.execute(
             """
@@ -297,6 +340,187 @@ class TradeDatabase:
             analytics.get("fill_exchange", ""),
             analytics.get("slippage"),
             analytics.get("last_liquidity"),
+        )
+
+    async def _upsert_one_execution(
+        self,
+        conn: asyncpg.Connection,
+        user_id: str,
+        execution: dict,
+    ):
+        instrument = execution.get("instrument", {}) or {}
+        contract_key = execution.get("contract_key", "")
+        degraded_reasons = execution.get("degraded_reasons") or []
+        finalization_state = execution.get("finalization_state") or {}
+        await conn.execute(
+            """
+            INSERT INTO algo_executions (
+                user_id, broker_execution_key, position_id, strategy_id,
+                account, exec_id, order_id, perm_id, contract_key,
+                symbol, sec_type, strike, expiry, right_type,
+                side, level, qty_filled, avg_price, fill_time,
+                remaining_qty, pnl_pct, routing_exchange, fill_exchange,
+                last_liquidity, slippage, effective_spread, pre_trade_snapshot, post_fill,
+                commission, realized_pnl_ib, source, unresolved_position,
+                analytics_status, degraded_reasons, finalization_state,
+                captured_at, broker_enriched_at, analytics_finalized_at, updated_at
+            ) VALUES (
+                $1, $2, $3, $4,
+                $5, $6, $7, $8, $9,
+                $10, $11, $12, $13, $14,
+                $15, $16, $17, $18, $19,
+                $20, $21, $22, $23,
+                $24, $25, $26, $27, $28,
+                $29, $30, $31, $32,
+                $33, $34, $35,
+                $36, $37, $38, NOW()
+            )
+            ON CONFLICT (user_id, broker_execution_key) DO UPDATE SET
+                position_id = EXCLUDED.position_id,
+                strategy_id = EXCLUDED.strategy_id,
+                account = EXCLUDED.account,
+                exec_id = EXCLUDED.exec_id,
+                order_id = EXCLUDED.order_id,
+                perm_id = EXCLUDED.perm_id,
+                contract_key = EXCLUDED.contract_key,
+                symbol = EXCLUDED.symbol,
+                sec_type = EXCLUDED.sec_type,
+                strike = EXCLUDED.strike,
+                expiry = EXCLUDED.expiry,
+                right_type = EXCLUDED.right_type,
+                side = EXCLUDED.side,
+                level = EXCLUDED.level,
+                qty_filled = EXCLUDED.qty_filled,
+                avg_price = EXCLUDED.avg_price,
+                fill_time = EXCLUDED.fill_time,
+                remaining_qty = EXCLUDED.remaining_qty,
+                pnl_pct = EXCLUDED.pnl_pct,
+                routing_exchange = EXCLUDED.routing_exchange,
+                fill_exchange = EXCLUDED.fill_exchange,
+                last_liquidity = EXCLUDED.last_liquidity,
+                slippage = EXCLUDED.slippage,
+                effective_spread = EXCLUDED.effective_spread,
+                pre_trade_snapshot = EXCLUDED.pre_trade_snapshot,
+                post_fill = EXCLUDED.post_fill,
+                commission = EXCLUDED.commission,
+                realized_pnl_ib = EXCLUDED.realized_pnl_ib,
+                source = EXCLUDED.source,
+                unresolved_position = EXCLUDED.unresolved_position,
+                analytics_status = EXCLUDED.analytics_status,
+                degraded_reasons = EXCLUDED.degraded_reasons,
+                finalization_state = EXCLUDED.finalization_state,
+                captured_at = EXCLUDED.captured_at,
+                broker_enriched_at = EXCLUDED.broker_enriched_at,
+                analytics_finalized_at = EXCLUDED.analytics_finalized_at,
+                updated_at = NOW()
+            """,
+            user_id,
+            execution.get("broker_execution_key", ""),
+            execution.get("position_id", ""),
+            execution.get("strategy_id", ""),
+            execution.get("account", ""),
+            execution.get("exec_id", ""),
+            execution.get("order_id"),
+            execution.get("perm_id"),
+            contract_key,
+            instrument.get("symbol", ""),
+            instrument.get("secType", instrument.get("sec_type", "OPT")),
+            instrument.get("strike"),
+            instrument.get("expiry") or instrument.get("lastTradeDateOrContractMonth"),
+            instrument.get("right", ""),
+            execution.get("side", ""),
+            execution.get("level", ""),
+            execution.get("qty_filled"),
+            execution.get("avg_price"),
+            self._parse_timestamp(execution.get("fill_time")),
+            execution.get("remaining_qty"),
+            execution.get("pnl_pct"),
+            execution.get("routing_exchange", ""),
+            execution.get("fill_exchange", ""),
+            execution.get("last_liquidity"),
+            execution.get("slippage"),
+            execution.get("effective_spread"),
+            self._json_dumps(execution.get("pre_trade_snapshot")) if execution.get("pre_trade_snapshot") is not None else None,
+            self._json_dumps(execution.get("post_fill") or {}),
+            execution.get("commission"),
+            execution.get("realized_pnl_ib"),
+            execution.get("source", ""),
+            bool(execution.get("unresolved_position", False)),
+            execution.get("analytics_status", "provisional"),
+            self._json_dumps(degraded_reasons),
+            self._json_dumps(finalization_state),
+            self._parse_timestamp(execution.get("captured_at")),
+            self._parse_timestamp(execution.get("broker_enriched_at")),
+            self._parse_timestamp(execution.get("analytics_finalized_at")),
+        )
+
+    async def _upsert_one_exit_reservation(
+        self,
+        conn: asyncpg.Connection,
+        user_id: str,
+        reservation: dict,
+    ):
+        contract_key = str(reservation.get("contract_key", ""))
+        symbol = ""
+        strike = None
+        expiry = ""
+        right_type = ""
+        parts = contract_key.split(":")
+        if len(parts) == 4:
+            symbol, strike_text, expiry, right_type = parts
+            try:
+                strike = float(strike_text or 0.0)
+            except (TypeError, ValueError):
+                strike = None
+        await conn.execute(
+            """
+            INSERT INTO algo_exit_reservations (
+                user_id, reservation_id, strategy_id, contract_key,
+                symbol, strike, expiry, right_type, reserved_qty,
+                order_id, perm_id, source, status, active,
+                release_reason, created_at, updated_at, released_at
+            ) VALUES (
+                $1, $2, $3, $4,
+                $5, $6, $7, $8, $9,
+                $10, $11, $12, $13, $14,
+                $15, $16, $17, $18
+            )
+            ON CONFLICT (user_id, reservation_id) DO UPDATE SET
+                strategy_id = EXCLUDED.strategy_id,
+                contract_key = EXCLUDED.contract_key,
+                symbol = EXCLUDED.symbol,
+                strike = EXCLUDED.strike,
+                expiry = EXCLUDED.expiry,
+                right_type = EXCLUDED.right_type,
+                reserved_qty = EXCLUDED.reserved_qty,
+                order_id = EXCLUDED.order_id,
+                perm_id = EXCLUDED.perm_id,
+                source = EXCLUDED.source,
+                status = EXCLUDED.status,
+                active = EXCLUDED.active,
+                release_reason = EXCLUDED.release_reason,
+                created_at = EXCLUDED.created_at,
+                updated_at = EXCLUDED.updated_at,
+                released_at = EXCLUDED.released_at
+            """,
+            user_id,
+            reservation.get("reservation_id", ""),
+            reservation.get("strategy_id", ""),
+            contract_key,
+            symbol,
+            strike,
+            expiry,
+            right_type,
+            reservation.get("reserved_qty"),
+            reservation.get("order_id"),
+            reservation.get("perm_id"),
+            reservation.get("source", ""),
+            reservation.get("status", ""),
+            bool(reservation.get("active", False)),
+            reservation.get("release_reason", ""),
+            self._parse_timestamp(reservation.get("created_at")),
+            self._parse_timestamp(reservation.get("updated_at")),
+            self._parse_timestamp(reservation.get("released_at")),
         )
 
     # ── Query Methods ──
@@ -620,6 +844,20 @@ class TradeDatabase:
             except (ValueError, OSError):
                 pass
         return None
+
+    @classmethod
+    def _json_sanitize(cls, value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, dict):
+            return {key: cls._json_sanitize(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._json_sanitize(item) for item in value]
+        return value
+
+    @classmethod
+    def _json_dumps(cls, value) -> str:
+        return json.dumps(cls._json_sanitize(value))
 
     @staticmethod
     def _row_to_dict(row: asyncpg.Record) -> dict:
