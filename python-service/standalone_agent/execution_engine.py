@@ -2640,6 +2640,53 @@ class ExecutionEngine:
         t_log.name = f"experiment-log-{order_id}"
         t_log.start()
 
+    def _post_fill_cache_keys(self, strategy_id: str, contract_dict: Optional[dict]) -> list[str]:
+        """Return cache keys that may hold quotes for a filled contract."""
+        candidates: list[str] = []
+        seen: set[str] = set()
+
+        def _add(key: Optional[str]) -> None:
+            if not key:
+                return
+            key = str(key).strip()
+            if not key or key in seen:
+                return
+            seen.add(key)
+            candidates.append(key)
+
+        strategy_state = self._strategies.get(strategy_id)
+        strategy = getattr(strategy_state, "strategy", None)
+        _add(getattr(strategy, "cache_key", ""))
+
+        contract_data = contract_dict or {}
+        con_id = contract_data.get("conId")
+        if con_id:
+            _add(f"OPT:{con_id}")
+
+        sym = str(contract_data.get("symbol", "") or "").upper()
+        exp = str(
+            contract_data.get("lastTradeDateOrContractMonth")
+            or contract_data.get("expiry")
+            or ""
+        ).strip()
+        right = str(contract_data.get("right", "") or "").upper()
+        strike_value = contract_data.get("strike", "")
+        strike_texts: list[str] = []
+        if strike_value not in (None, ""):
+            strike_texts.append(str(strike_value))
+            try:
+                strike_num = float(strike_value)
+                strike_texts.append(f"{strike_num}")
+                strike_texts.append(f"{strike_num:.6f}".rstrip("0").rstrip("."))
+            except (TypeError, ValueError):
+                pass
+
+        for strike_text in strike_texts or [""]:
+            _add(f"OPT:{sym}:{exp}:{strike_text}:{right}")
+            _add(f"{sym}:{strike_text}:{exp}:{right}")
+
+        return candidates
+
     def _capture_post_fill_quote(
         self,
         strategy_id: str,
@@ -2655,21 +2702,15 @@ class ExecutionEngine:
         Falls back gracefully if the option is no longer streaming.
         """
         try:
-            # Build cache key for this option contract
-            # The streaming cache keys options by conId or by
-            # "OPT:{symbol}:{expiry}:{strike}:{right}"
-            con_id = contract_dict.get("conId")
-            cache_key = None
-            if con_id:
-                cache_key = f"OPT:{con_id}"
-            if not cache_key:
-                sym = contract_dict.get("symbol", "")
-                exp = contract_dict.get("lastTradeDateOrContractMonth", "")
-                strike = contract_dict.get("strike", "")
-                right = contract_dict.get("right", "")
-                cache_key = f"OPT:{sym}:{exp}:{strike}:{right}"
-
-            quote = self._cache.get(cache_key) if self._cache else None
+            cache_keys = self._post_fill_cache_keys(strategy_id, contract_dict)
+            cache_key = next(
+                (
+                    key for key in cache_keys
+                    if self._cache and self._cache.get(key) is not None
+                ),
+                cache_keys[0] if cache_keys else None,
+            )
+            quote = self._cache.get(cache_key) if (self._cache and cache_key) else None
 
             if quote and quote.bid > 0 and quote.ask > 0:
                 mid = round((quote.bid + quote.ask) / 2, 6)
@@ -2683,8 +2724,8 @@ class ExecutionEngine:
                 )
             else:
                 logger.debug(
-                    "Post-fill +%ds capture for order %d: no valid quote (key=%s)",
-                    delay_seconds, order_id, cache_key,
+                    "Post-fill +%ds capture for order %d: no valid quote (keys=%s)",
+                    delay_seconds, order_id, cache_keys,
                 )
                 post_fill_data[f"mid_{delay_seconds}s"] = None
 

@@ -1,5 +1,7 @@
 import os
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "standalone_agent"))
 
@@ -121,6 +123,61 @@ def test_canonical_execution_finalizes_without_duplication(tmp_path):
     assert reloaded_executions[0]["analytics_status"] == "finalized"
 
 
+def test_entry_execution_finalizes_without_realized_pnl(tmp_path):
+    store = _make_store(tmp_path)
+    store.add_position(
+        position_id="bmc_risk_entry_final",
+        entry={"order_id": 11, "price": 1.0, "quantity": 1, "fill_time": 1000.0, "perm_id": 111},
+        instrument=_instrument(),
+        risk_config={},
+        parent_strategy="bmc_spy",
+    )
+
+    store.add_fill("bmc_risk_entry_final", {
+        "time": 2000.0,
+        "order_id": 55,
+        "exec_id": "",
+        "level": "entry",
+        "qty_filled": 1,
+        "avg_price": 1.05,
+        "remaining_qty": 1,
+        "pnl_pct": 0.0,
+        "execution_analytics": {
+            "routing_exchange": "SMART",
+            "slippage": -0.01,
+            "effective_spread": 0.02,
+            "pre_trade_snapshot": {
+                "option_bid": 1.0,
+                "option_ask": 1.1,
+                "option_mid": 1.05,
+            },
+        },
+    })
+    store.update_fill_execution_details(
+        "bmc_risk_entry_final",
+        55,
+        exec_id="000123.entry.01",
+        execution_analytics={"exchange": "CBOE", "last_liquidity": 2},
+    )
+    store.update_fill_commission(
+        "bmc_risk_entry_final",
+        "000123.entry.01",
+        {"commission": 0.65},
+    )
+    store.update_fill_post_trade(
+        "bmc_risk_entry_final",
+        55,
+        60,
+        {"mid_60s": 1.02, "bid_60s": 1.01, "ask_60s": 1.03},
+    )
+
+    executions = store.get_canonical_executions("bmc_risk_entry_final")
+    assert len(executions) == 1
+    assert executions[0]["analytics_status"] == "finalized"
+    assert executions[0]["degraded_reasons"] == []
+    assert executions[0]["finalization_state"]["ib_realized_pnl_status"] == "not_applicable_for_entry"
+
+
 def test_ib_batch_ingest_keeps_unmatched_manual_execution_as_unresolved(tmp_path):
     store = _make_store(tmp_path)
 
@@ -134,6 +191,87 @@ def test_ib_batch_ingest_keeps_unmatched_manual_execution_as_unresolved(tmp_path
     assert executions[0]["unresolved_position"] is True
     assert executions[0]["source"] == "ib_reconciliation"
     assert executions[0]["analytics_status"] in {"broker_enriched", "degraded"}
+
+
+def test_ib_batch_ingest_parses_ib_exec_times_as_eastern(tmp_path):
+    store = _make_store(tmp_path)
+
+    store.ingest_ib_execution_batch(_batch_execution("000999.manual.02"))
+    executions = store.get_canonical_executions()
+
+    expected_fill_time = datetime(
+        2026, 3, 26, 9, 45, 1, tzinfo=ZoneInfo("America/New_York")
+    ).timestamp()
+    assert len(executions) == 1
+    assert executions[0]["fill_time"] == expected_fill_time
+
+
+def test_ib_reingest_preserves_live_entry_metadata(tmp_path):
+    store = _make_store(tmp_path)
+    store.add_position(
+        position_id="bmc_risk_live_entry",
+        entry={"order_id": 11, "price": 1.0, "quantity": 1, "fill_time": 1000.0, "perm_id": 111},
+        instrument=_instrument(),
+        risk_config={},
+        parent_strategy="bmc_spy",
+    )
+
+    store.add_fill("bmc_risk_live_entry", {
+        "time": 2000.0,
+        "order_id": 55,
+        "exec_id": "000123.live.01",
+        "level": "entry",
+        "qty_filled": 1,
+        "avg_price": 1.05,
+        "remaining_qty": 1,
+        "pnl_pct": 0.0,
+        "execution_analytics": {
+            "routing_exchange": "SMART",
+            "fill_exchange": "SAPPHIRE",
+            "slippage": -0.01,
+            "effective_spread": 0.02,
+            "pre_trade_snapshot": {
+                "option_bid": 1.0,
+                "option_ask": 1.1,
+                "option_mid": 1.05,
+            },
+        },
+    })
+
+    result = store.ingest_ib_execution_batch([{
+        "contract": {
+            "symbol": "SPY",
+            "secType": "OPT",
+            "strike": 647.0,
+            "lastTradeDateOrContractMonth": "20260326",
+            "right": "P",
+            "exchange": "CBOE",
+        },
+        "execution": {
+            "execId": "000123.live.01",
+            "orderId": 55,
+            "account": "U152133",
+            "time": "20260326  09:45:01",
+            "side": "BOT",
+            "shares": 1,
+            "price": 1.05,
+            "exchange": "CBOE",
+            "permId": 7001,
+            "lastLiquidity": 2,
+        },
+        "commission": {
+            "commission": 0.65,
+            "realized_pnl": None,
+        },
+    }])
+
+    executions = store.get_canonical_executions("bmc_risk_live_entry")
+    assert result["ingested"] == 1
+    assert len(executions) == 1
+    assert executions[0]["source"] == "position_store_fill"
+    assert executions[0]["routing_exchange"] == "SMART"
+    assert executions[0]["fill_exchange"] == "CBOE"
+    assert executions[0]["fill_time"] == 2000.0
 
 
 def test_out_of_order_partial_exec_details_attach_to_correct_fill(tmp_path):

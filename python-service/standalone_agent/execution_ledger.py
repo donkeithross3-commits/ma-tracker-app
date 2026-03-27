@@ -16,10 +16,12 @@ import shutil
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+IB_EXECUTION_TIMEZONE = ZoneInfo("America/New_York")
 
 
 class ExecutionLedgerStore:
@@ -95,14 +97,18 @@ class ExecutionLedgerStore:
                 return float(value)
             except ValueError:
                 pass
-            for fmt in (
-                "%Y-%m-%d %H:%M:%S",
-                "%Y%m%d  %H:%M:%S",
-                "%Y-%m-%dT%H:%M:%S%z",
-                "%Y-%m-%dT%H:%M:%S.%f%z",
+            for fmt, tzinfo in (
+                ("%Y-%m-%dT%H:%M:%S.%f%z", None),
+                ("%Y-%m-%dT%H:%M:%S%z", None),
+                # IB reqExecutions timestamps arrive as market-local strings.
+                ("%Y%m%d  %H:%M:%S", IB_EXECUTION_TIMEZONE),
+                ("%Y-%m-%d %H:%M:%S", timezone.utc),
             ):
                 try:
-                    return datetime.strptime(value, fmt).timestamp()
+                    parsed = datetime.strptime(value, fmt)
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=tzinfo or timezone.utc)
+                    return parsed.timestamp()
                 except ValueError:
                     continue
         return time.time()
@@ -167,25 +173,61 @@ class ExecutionLedgerStore:
             or fill_dict.get("perm_id")
             or fill_dict.get("permId")
         )
-        execution_key = self._build_execution_key(
-            account=account,
-            exec_id=exec_id,
-            order_id=order_id,
-            perm_id=perm_id,
-            contract_key=contract_key,
-            side=side,
-            fill_time=fill_time,
-            qty_filled=qty_filled,
-            avg_price=avg_price,
-        )
-
         with self._lock:
-            record = dict(self._executions.get(execution_key) or {})
+            existing_key = None
+            if exec_id:
+                existing_key = self._find_execution_key_locked(
+                    exec_id=exec_id,
+                    order_id=order_id,
+                    position_id=position_id,
+                    match_hint={
+                        "exec_id": exec_id,
+                        "fill_time": fill_time,
+                        "qty_filled": qty_filled,
+                        "avg_price": avg_price,
+                        "perm_id": perm_id,
+                        "side": side,
+                        "account": account,
+                    },
+                )
+            record = dict(self._executions.get(existing_key or "") or {})
+            preserve_live_capture = (
+                record.get("source") == "position_store_fill"
+                and source == "ib_reconciliation"
+            )
+            merged_fill_time = (
+                self._coerce_float(record.get("fill_time"), fill_time)
+                if preserve_live_capture and record.get("fill_time") is not None
+                else fill_time
+            )
+            merged_routing_exchange = (
+                str(record.get("routing_exchange") or "")
+                if preserve_live_capture and record.get("routing_exchange")
+                else analytics.get("routing_exchange", record.get("routing_exchange", ""))
+            )
+            resolved_execution_key = self._build_execution_key(
+                account=account or record.get("account", ""),
+                exec_id=exec_id or record.get("exec_id", ""),
+                order_id=order_id or record.get("order_id", 0),
+                perm_id=perm_id or self._coerce_int(record.get("perm_id")),
+                contract_key=contract_key,
+                side=side or str(record.get("side") or "").upper(),
+                fill_time=merged_fill_time,
+                qty_filled=qty_filled or self._coerce_int(record.get("qty_filled")),
+                avg_price=avg_price or self._coerce_float(record.get("avg_price")),
+            )
             now = time.time()
+            resolved_position_id = position_id or record.get("position_id", "")
+            resolved_strategy_id = (
+                strategy_id
+                or position_id
+                or record.get("strategy_id", "")
+                or resolved_position_id
+            )
             record.update({
-                "broker_execution_key": execution_key,
-                "position_id": position_id or "",
-                "strategy_id": strategy_id or position_id or "",
+                "broker_execution_key": resolved_execution_key,
+                "position_id": resolved_position_id,
+                "strategy_id": resolved_strategy_id,
                 "account": account or record.get("account", ""),
                 "exec_id": exec_id or record.get("exec_id", ""),
                 "order_id": order_id or record.get("order_id", 0),
@@ -196,14 +238,14 @@ class ExecutionLedgerStore:
                 "level": fill_dict.get("level", record.get("level", "unknown")),
                 "qty_filled": qty_filled or record.get("qty_filled", 0),
                 "avg_price": avg_price or record.get("avg_price", 0.0),
-                "fill_time": fill_time,
+                "fill_time": merged_fill_time,
                 "remaining_qty": self._coerce_int(
                     fill_dict.get("remaining_qty", record.get("remaining_qty", 0))
                 ),
                 "pnl_pct": self._coerce_float(
                     fill_dict.get("pnl_pct", record.get("pnl_pct", 0.0))
                 ),
-                "routing_exchange": analytics.get("routing_exchange", record.get("routing_exchange", "")),
+                "routing_exchange": merged_routing_exchange,
                 "fill_exchange": (
                     analytics.get("fill_exchange")
                     or analytics.get("exchange")
@@ -232,17 +274,27 @@ class ExecutionLedgerStore:
                     "realized_pnl_ib",
                     record.get("realized_pnl_ib"),
                 ),
-                "source": source or record.get("source", "position_store_fill"),
-                "unresolved_position": bool(unresolved_position and not position_id),
+                "source": (
+                    record.get("source")
+                    if preserve_live_capture and record.get("source")
+                    else (source or record.get("source", "position_store_fill"))
+                ),
+                "unresolved_position": bool(
+                    (unresolved_position or record.get("unresolved_position"))
+                    and not resolved_position_id
+                ),
                 "captured_at": record.get("captured_at", now),
                 "updated_at": now,
             })
             self._apply_pending_commission(record)
             self._refresh_record_states(record, now=now)
-            self._executions[execution_key] = record
-            self._dirty_execution_keys.add(execution_key)
+            if existing_key and existing_key != resolved_execution_key:
+                self._executions.pop(existing_key, None)
+                self._dirty_execution_keys.add(existing_key)
+            self._executions[resolved_execution_key] = record
+            self._dirty_execution_keys.add(resolved_execution_key)
             self._save_locked()
-            return execution_key
+            return resolved_execution_key
 
     def update_execution_details(
         self,
@@ -801,6 +853,7 @@ class ExecutionLedgerStore:
         exec_id = str(record.get("exec_id") or "")
         commission = record.get("commission")
         realized_pnl_ib = record.get("realized_pnl_ib")
+        level = str(record.get("level") or "").lower()
         pre_trade_snapshot = record.get("pre_trade_snapshot")
         post_fill = dict(record.get("post_fill") or {})
         post_fill_complete = post_fill.get("mid_60s") is not None
@@ -811,13 +864,17 @@ class ExecutionLedgerStore:
             degraded_reasons.append("missing_pre_trade_snapshot")
         if commission is None and age_sec >= self.COMMISSION_TIMEOUT_SEC:
             degraded_reasons.append("missing_commission")
-        if realized_pnl_ib is None and age_sec >= self.COMMISSION_TIMEOUT_SEC:
+        realized_pnl_required = level != "entry"
+        if realized_pnl_required and realized_pnl_ib is None and age_sec >= self.COMMISSION_TIMEOUT_SEC:
             degraded_reasons.append("missing_realized_pnl_ib")
         if not post_fill_complete and age_sec >= self.POST_FILL_TIMEOUT_SEC:
             degraded_reasons.append("missing_post_fill_60s")
 
         commission_status = "commission_captured" if commission is not None else "commission_pending"
-        rpnl_status = "ib_realized_pnl_captured" if realized_pnl_ib is not None else "ib_realized_pnl_pending"
+        if not realized_pnl_required:
+            rpnl_status = "not_applicable_for_entry"
+        else:
+            rpnl_status = "ib_realized_pnl_captured" if realized_pnl_ib is not None else "ib_realized_pnl_pending"
         post_fill_status = "captured" if post_fill_complete else "pending"
         if degraded_reasons:
             analytics_status = "degraded"

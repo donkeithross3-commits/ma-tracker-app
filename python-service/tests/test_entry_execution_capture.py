@@ -191,6 +191,55 @@ def test_attach_entry_execution_tracking_registers_order_position_mapping():
     assert scheduled_calls[0][-1]["exec_id"] == "0000fb2c.69c6877d.01.01"
 
 
+def test_post_fill_capture_uses_strategy_cache_key_fallback():
+    updates = []
+
+    class _Cache:
+        def __init__(self):
+            self.lookups = []
+
+        def get(self, key):
+            self.lookups.append(key)
+            if key == "SPY:627.0:20260330:P":
+                return SimpleNamespace(bid=1.00, ask=1.10)
+            return None
+
+    engine = object.__new__(ExecutionEngine)
+    engine._cache = _Cache()
+    engine._strategies = {
+        "bmc_risk_123": SimpleNamespace(
+            strategy=SimpleNamespace(cache_key="SPY:627.0:20260330:P")
+        )
+    }
+    engine._position_store = SimpleNamespace(
+        update_fill_post_trade=lambda *args, **kwargs: updates.append((args, kwargs))
+    )
+
+    post_fill_data = {}
+    ExecutionEngine._capture_post_fill_quote(
+        engine,
+        "bmc_risk_123",
+        123,
+        {
+            "symbol": "SPY",
+            "secType": "OPT",
+            "exchange": "SMART",
+            "strike": 627.0,
+            "lastTradeDateOrContractMonth": "20260330",
+            "right": "P",
+        },
+        5,
+        post_fill_data,
+        {"exec_id": "000123.live.01"},
+    )
+
+    assert engine._cache.lookups[0] == "SPY:627.0:20260330:P"
+    assert post_fill_data["mid_5s"] == 1.05
+    assert post_fill_data["bid_5s"] == 1.0
+    assert post_fill_data["ask_5s"] == 1.1
+    assert updates
+
+
 def test_exec_event_routes_to_risk_manager_when_order_mapping_exists():
     updates = []
     deferred = []
