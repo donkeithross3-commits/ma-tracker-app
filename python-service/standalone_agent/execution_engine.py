@@ -2711,16 +2711,34 @@ class ExecutionEngine:
                 cache_keys[0] if cache_keys else None,
             )
             quote = self._cache.get(cache_key) if (self._cache and cache_key) else None
+            bid = float(getattr(quote, "bid", 0.0) or 0.0) if quote is not None else 0.0
+            ask = float(getattr(quote, "ask", 0.0) or 0.0) if quote is not None else 0.0
 
-            if quote and quote.bid > 0 and quote.ask > 0:
-                mid = round((quote.bid + quote.ask) / 2, 6)
+            if not (bid > 0 and ask > 0):
+                fallback = None
+                sec_type = str((contract_dict or {}).get("secType") or "").upper()
+                if self._scanner is not None and sec_type == "OPT":
+                    try:
+                        fallback = self._scanner.fetch_option_snapshot(contract_dict, timeout_sec=2.0)
+                    except Exception as snapshot_exc:
+                        logger.debug(
+                            "Post-fill +%ds snapshot fallback failed for order %d: %s",
+                            delay_seconds,
+                            order_id,
+                            snapshot_exc,
+                        )
+                bid = float((fallback or {}).get("bid") or 0.0)
+                ask = float((fallback or {}).get("ask") or 0.0)
+
+            if bid > 0 and ask > 0:
+                mid = round((bid + ask) / 2, 6)
                 post_fill_data[f"mid_{delay_seconds}s"] = mid
-                post_fill_data[f"bid_{delay_seconds}s"] = quote.bid
-                post_fill_data[f"ask_{delay_seconds}s"] = quote.ask
-                post_fill_data[f"spread_{delay_seconds}s"] = round(quote.ask - quote.bid, 6)
+                post_fill_data[f"bid_{delay_seconds}s"] = bid
+                post_fill_data[f"ask_{delay_seconds}s"] = ask
+                post_fill_data[f"spread_{delay_seconds}s"] = round(ask - bid, 6)
                 logger.debug(
                     "Post-fill +%ds capture for order %d: mid=$%.4f (bid=$%.4f ask=$%.4f)",
-                    delay_seconds, order_id, mid, quote.bid, quote.ask,
+                    delay_seconds, order_id, mid, bid, ask,
                 )
             else:
                 logger.debug(

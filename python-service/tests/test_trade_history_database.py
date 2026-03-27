@@ -118,3 +118,25 @@ async def test_upsert_one_execution_persists_slippage_and_effective_spread():
     assert "effective_spread" in query
     assert args[24] == -0.01
     assert args[25] == 0.02
+    assert args[26] == '{"option_ask": 0.8, "option_mid": 0.78}'
+    assert args[27] == '{"mid_60s": 0.75}'
+    assert args[33] == "[]"
+    assert args[34] == '{"captured": true}'
+
+
+def test_row_to_dict_decodes_execution_json_columns():
+    row = {
+        "fill_time": datetime(2026, 3, 27, 15, 0, tzinfo=timezone.utc),
+        "pre_trade_snapshot": '{"option_ask": 0.8, "option_mid": 0.78}',
+        "post_fill": '{"mid_60s": 0.75}',
+        "degraded_reasons": '["missing_post_fill_60s"]',
+        "finalization_state": '{"captured": true, "analytics_status": "degraded"}',
+    }
+
+    decoded = TradeDatabase._row_to_dict(row)
+
+    assert decoded["fill_time"] == "2026-03-27T15:00:00+00:00"
+    assert decoded["pre_trade_snapshot"]["option_ask"] == 0.8
+    assert decoded["post_fill"]["mid_60s"] == 0.75
+    assert decoded["degraded_reasons"] == ["missing_post_fill_60s"]
+    assert decoded["finalization_state"]["analytics_status"] == "degraded"

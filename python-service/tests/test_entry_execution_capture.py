@@ -240,6 +240,55 @@ def test_post_fill_capture_uses_strategy_cache_key_fallback():
     assert updates
 
 
+def test_post_fill_capture_falls_back_to_option_snapshot():
+    updates = []
+
+    class _Cache:
+        def get(self, key):
+            return None
+
+    class _Scanner:
+        def __init__(self):
+            self.calls = []
+
+        def fetch_option_snapshot(self, contract_dict, timeout_sec=3.0):
+            self.calls.append((dict(contract_dict), timeout_sec))
+            return {"bid": 1.20, "ask": 1.40}
+
+    scanner = _Scanner()
+    engine = object.__new__(ExecutionEngine)
+    engine._cache = _Cache()
+    engine._scanner = scanner
+    engine._strategies = {}
+    engine._position_store = SimpleNamespace(
+        update_fill_post_trade=lambda *args, **kwargs: updates.append((args, kwargs))
+    )
+
+    post_fill_data = {}
+    ExecutionEngine._capture_post_fill_quote(
+        engine,
+        "bmc_risk_123",
+        123,
+        {
+            "symbol": "SPY",
+            "secType": "OPT",
+            "exchange": "SMART",
+            "strike": 627.0,
+            "lastTradeDateOrContractMonth": "20260330",
+            "right": "P",
+        },
+        60,
+        post_fill_data,
+        {"exec_id": "000123.live.01"},
+    )
+
+    assert scanner.calls
+    assert post_fill_data["mid_60s"] == 1.30
+    assert post_fill_data["bid_60s"] == 1.20
+    assert post_fill_data["ask_60s"] == 1.40
+    assert updates
+
+
 def test_exec_event_routes_to_risk_manager_when_order_mapping_exists():
     updates = []
     deferred = []

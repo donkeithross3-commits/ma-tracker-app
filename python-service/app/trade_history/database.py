@@ -868,7 +868,15 @@ class TradeDatabase:
                 d[k] = v.isoformat()
             elif hasattr(v, "__float__"):  # Decimal
                 d[k] = float(v)
-            elif isinstance(v, str) and k in ("lineage", "risk_config", "runtime_state"):
+            elif isinstance(v, str) and k in (
+                "lineage",
+                "risk_config",
+                "runtime_state",
+                "pre_trade_snapshot",
+                "post_fill",
+                "degraded_reasons",
+                "finalization_state",
+            ):
                 try:
                     d[k] = json.loads(v)
                 except (json.JSONDecodeError, TypeError):
