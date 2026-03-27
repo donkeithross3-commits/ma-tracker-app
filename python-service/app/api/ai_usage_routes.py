@@ -185,6 +185,8 @@ async def ingest_usage(
                                $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
                        ON CONFLICT (session_id) DO UPDATE SET
                            ended_at = EXCLUDED.ended_at,
+                           agent_persona = COALESCE(EXCLUDED.agent_persona, ai_usage_sessions.agent_persona),
+                           model_primary = COALESCE(EXCLUDED.model_primary, ai_usage_sessions.model_primary),
                            input_tokens = EXCLUDED.input_tokens,
                            output_tokens = EXCLUDED.output_tokens,
                            cache_creation_tokens = EXCLUDED.cache_creation_tokens,
