@@ -171,6 +171,11 @@ Process in sequential batches with 5s sleep between batches.
 | One-off research question | CLI | Normal usage |
 
 **Budget guardrails for automated workloads:**
+- **All automated workloads MUST use QuotaGate** (`from app.utils.quota_gate import QuotaGate`).
+  Call `gate.wait()` before each batch and `gate.can_proceed(cost)` to check budget.
+  The gate queries `/ai-usage/quota-budget` and sleeps adaptively (1s→60s based on budget).
+  Daily automated cap: $200 (env: `AI_USAGE_DAILY_AUTO_CAP`). 60% of weekly budget reserved
+  for interactive work (env: `AI_USAGE_INTERACTIVE_RESERVE`).
 - Max 100 items per run (configurable via `--max-per-run`)
 - Log progress every 10 items with running cost
 - If estimated cost exceeds $10/run (API) or 5% of weekly quota (CLI), stop and warn

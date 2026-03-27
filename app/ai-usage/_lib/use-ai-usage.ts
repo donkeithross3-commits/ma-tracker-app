@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SummaryResponse, BurnRateResponse, SessionsResponse, EfficiencyResponse } from "./types";
+import type { SummaryResponse, BurnRateResponse, SessionsResponse, EfficiencyResponse, QuotaBudget } from "./types";
 
 export type AIUsageData = {
   summary: SummaryResponse | null;
   burnRate: BurnRateResponse | null;
   sessions: SessionsResponse | null;
   efficiency: EfficiencyResponse | null;
+  quotaBudget: QuotaBudget | null;
   loading: boolean;
   error: string | null;
   lastSync: string | null;
@@ -19,6 +20,7 @@ export function useAIUsageData(days: number): AIUsageData {
   const [burnRate, setBurnRate] = useState<BurnRateResponse | null>(null);
   const [sessions, setSessions] = useState<SessionsResponse | null>(null);
   const [efficiency, setEfficiency] = useState<EfficiencyResponse | null>(null);
+  const [quotaBudget, setQuotaBudget] = useState<QuotaBudget | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
@@ -40,12 +42,16 @@ export function useAIUsageData(days: number): AIUsageData {
         fetch(`/api/ai-usage/efficiency?days=${days}`, { cache: "no-store" }).then((r) =>
           r.ok ? r.json() : Promise.reject(new Error(`efficiency: ${r.status}`))
         ),
+        fetch("/api/ai-usage/quota-budget", { cache: "no-store" }).then((r) =>
+          r.ok ? r.json() : Promise.reject(new Error(`quota-budget: ${r.status}`))
+        ),
       ]);
 
       if (results[0].status === "fulfilled") setSummary(results[0].value);
       if (results[1].status === "fulfilled") setBurnRate(results[1].value);
       if (results[2].status === "fulfilled") setSessions(results[2].value);
       if (results[3].status === "fulfilled") setEfficiency(results[3].value);
+      if (results[4].status === "fulfilled") setQuotaBudget(results[4].value);
 
       const failures = results.filter((r) => r.status === "rejected");
       if (failures.length > 0 && failures.length < 4) {
@@ -83,5 +89,5 @@ export function useAIUsageData(days: number): AIUsageData {
     };
   }, [fetchData]);
 
-  return { summary, burnRate, sessions, efficiency, loading, error, lastSync, refresh: fetchData };
+  return { summary, burnRate, sessions, efficiency, quotaBudget, loading, error, lastSync, refresh: fetchData };
 }

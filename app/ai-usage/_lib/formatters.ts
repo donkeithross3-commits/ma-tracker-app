@@ -62,3 +62,16 @@ export function quotaBarColor(pct: number): string {
   if (pct >= 60) return "bg-amber-500";
   return "bg-emerald-500";
 }
+
+/** Color for auto-budget remaining (inverted: high remaining = good). */
+export function autoBudgetColor(remainingPct: number): string {
+  if (remainingPct <= 20) return "text-red-400";
+  if (remainingPct <= 50) return "text-amber-400";
+  return "text-emerald-400";
+}
+
+export function autoBudgetBarColor(remainingPct: number): string {
+  if (remainingPct <= 20) return "bg-red-500";
+  if (remainingPct <= 50) return "bg-amber-500";
+  return "bg-emerald-500";
+}

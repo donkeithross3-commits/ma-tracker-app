@@ -14,7 +14,7 @@ import { EfficiencyTab } from "./_components/EfficiencyTab";
 export default function AIUsagePage() {
   const [days, setDays] = useState(7);
   const [activeTab, setActiveTab] = useState<"overview" | "sessions" | "efficiency">("overview");
-  const { summary, burnRate, sessions, efficiency, loading, error, lastSync, refresh } =
+  const { summary, burnRate, sessions, efficiency, quotaBudget, loading, error, lastSync, refresh } =
     useAIUsageData(days);
 
   const dailyData = useMemo(() => aggregateByDay(summary), [summary]);
@@ -79,7 +79,7 @@ export default function AIUsagePage() {
 
         <AnomalyBanner anomalies={efficiency?.anomalies} />
 
-        <SummaryStrip summary={summary} burnRate={burnRate} days={days} />
+        <SummaryStrip summary={summary} burnRate={burnRate} quotaBudget={quotaBudget} days={days} />
 
         {/* Tab bar */}
         <div className="flex items-center gap-1 border-b border-gray-800">
@@ -104,7 +104,7 @@ export default function AIUsagePage() {
         )}
         {activeTab === "sessions" && <SessionsTab sessions={sessions} />}
         {activeTab === "efficiency" && (
-          <EfficiencyTab efficiency={efficiency} summary={summary} />
+          <EfficiencyTab efficiency={efficiency} summary={summary} quotaBudget={quotaBudget} />
         )}
       </main>
     </div>

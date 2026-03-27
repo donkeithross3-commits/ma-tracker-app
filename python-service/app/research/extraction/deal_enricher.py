@@ -28,6 +28,7 @@ from uuid import UUID
 import asyncpg
 import httpx
 
+from ...utils.quota_gate import QuotaGate
 from .prompts import DEAL_TERMS_EXTRACTION_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ class DealEnricher:
         # Sonnet for structured extraction -- equally reliable, 5x cheaper tokens
         self.cli_model = os.environ.get("CLI_MODEL", "sonnet")
         self.cli_effort = os.environ.get("CLI_EFFORT_LEVEL", "medium")
+        # Quota gate: adaptive rate limiting for subscription budget
+        self.gate = QuotaGate()
 
     async def _get_http(self) -> httpx.AsyncClient:
         if self.http_client is None:
@@ -572,6 +575,16 @@ class DealEnricher:
             batch_num += 1
             batch = batchable[i:i + BATCH_SIZE]
 
+            # Quota gate: adaptive delay + budget check before each batch
+            await asyncio.get_event_loop().run_in_executor(None, self.gate.wait)
+            if not self.gate.can_proceed(estimated_cost=5.0):
+                logger.warning(
+                    "Quota gate: stopping enrichment at batch %d/%d "
+                    "(session cost: $%.2f)",
+                    batch_num, total_batches, self.gate.session_cost,
+                )
+                break
+
             # Build filing list for CLI: (accession, truncated_text)
             cli_filings = [(acc, text[:FILING_TRUNCATE_CHARS]) for _, acc, text, _ in batch]
 
@@ -614,17 +627,28 @@ class DealEnricher:
                         deal_id,
                     )
 
+            # Report estimated cost for this batch
+            self.gate.report(actual_cost=len(batch) * 0.35)
+
             logger.info(
                 f"Batch {batch_num}/{total_batches} complete, "
-                f"{results['enriched']}/{len(deal_ids)} filings enriched"
+                f"{results['enriched']}/{len(deal_ids)} filings enriched "
+                f"(session cost: ${self.gate.session_cost:.2f})"
             )
 
-            # Sleep between batches to avoid hammering the subscription
-            if i + BATCH_SIZE < len(batchable):
-                await asyncio.sleep(BATCH_SLEEP_SEC)
+            # QuotaGate.wait() handles adaptive delay — no hardcoded sleep needed
 
         # Phase 3: Process oversized filings individually (fallback)
         for deal_id, accession, text, filing_type in oversized:
+            # Quota gate before each oversized filing
+            await asyncio.get_event_loop().run_in_executor(None, self.gate.wait)
+            if not self.gate.can_proceed(estimated_cost=2.0):
+                logger.warning(
+                    "Quota gate: stopping oversized processing "
+                    "(session cost: $%.2f)", self.gate.session_cost,
+                )
+                break
+
             logger.info(
                 f"Oversized filing ({len(text)} chars) for {accession}, "
                 f"using single-filing fallback"
@@ -656,8 +680,9 @@ class DealEnricher:
                     deal_id,
                 )
 
-            # Sleep between single calls too
-            await asyncio.sleep(BATCH_SLEEP_SEC)
+            # Report cost for oversized filing
+            self.gate.report(actual_cost=0.50)
+            # QuotaGate.wait() handles adaptive delay
 
         return results
 

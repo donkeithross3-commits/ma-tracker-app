@@ -1,11 +1,12 @@
 """
 AI Usage Tracking API — unified telemetry for all AI consumption.
 
-POST /ai-usage/ingest      — Collector pushes session data (auth: X-Fleet-Key)
-GET  /ai-usage/summary     — Dashboard summary (daily/weekly/monthly)
-GET  /ai-usage/sessions    — Session list with detail
-GET  /ai-usage/burn-rate   — Real-time burn rate estimate
-GET  /ai-usage/efficiency  — Overhead ratios, anomalies, machine×agent matrix
+POST /ai-usage/ingest        — Collector pushes session data (auth: X-Fleet-Key)
+GET  /ai-usage/summary       — Dashboard summary (daily/weekly/monthly)
+GET  /ai-usage/sessions      — Session list with detail
+GET  /ai-usage/burn-rate     — Real-time burn rate estimate
+GET  /ai-usage/efficiency    — Overhead ratios, anomalies, machine×agent matrix
+GET  /ai-usage/quota-budget  — Real-time quota budget for automated workload gating
 """
 
 import json
@@ -26,6 +27,10 @@ router = APIRouter(prefix="/ai-usage", tags=["ai-usage"])
 # Estimated weekly quota in API-equivalent dollars (for Max subscription).
 # This is a rough heuristic — Anthropic doesn't publish exact limits.
 WEEKLY_QUOTA_EQUIV = float(os.environ.get("AI_USAGE_WEEKLY_QUOTA", "5000"))
+
+# Quota budget config for automated workload gating
+INTERACTIVE_RESERVE = float(os.environ.get("AI_USAGE_INTERACTIVE_RESERVE", "0.60"))
+DAILY_AUTO_CAP = float(os.environ.get("AI_USAGE_DAILY_AUTO_CAP", "200"))
 
 # Pricing per million tokens (for computing cost_usd when callers send $0)
 _PRICING: dict[str, dict[str, float]] = {
@@ -633,4 +638,140 @@ async def efficiency_analysis(
         "per_agent": per_agent,
         "machine_agent_matrix": matrix_out,
         "anomalies": anomalies,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /ai-usage/quota-budget — real-time quota gate for automated workloads
+# ---------------------------------------------------------------------------
+
+def _compute_recommended_delay(weekly_pct: float, daily_auto_pct: float) -> float:
+    """Compute recommended delay in seconds based on budget utilization.
+
+    Inputs are percentages (0-100+). Uses the TIGHTER of the two constraints.
+    """
+    # Use the higher utilization of weekly vs daily automated
+    pct = max(weekly_pct, daily_auto_pct)
+
+    if pct >= 90:
+        return 60.0  # Critical: 1 minute between requests
+    if pct >= 80:
+        return 30.0
+    if pct >= 60:
+        return 15.0
+    if pct >= 30:
+        return 5.0
+    return 1.0  # Plentiful: 1s between requests
+
+
+@router.get("/quota-budget")
+async def quota_budget():
+    """Real-time quota budget status for automated workload gating.
+
+    Returns can_proceed, recommended_delay_sec, budget breakdown, and pace
+    analysis. Designed to be called by QuotaGate clients before each batch.
+    """
+    pool = _get_pool()
+    if not pool:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+    now = datetime.now(timezone.utc)
+
+    # Weekly reset: estimate next Monday 12:00 UTC (Anthropic seems to reset ~Monday)
+    # Calculate days until next Monday (0=Mon, 6=Sun)
+    days_until_monday = (7 - now.weekday()) % 7
+    if days_until_monday == 0 and now.hour >= 12:
+        days_until_monday = 7  # already past noon Monday, next week
+    weekly_resets_at = (now + timedelta(days=days_until_monday)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+    hours_until_reset = max(
+        (weekly_resets_at - now).total_seconds() / 3600, 0.1
+    )
+
+    async with pool.acquire() as conn:
+        # Trailing 7-day session cost (subscription equiv)
+        week_ago = now - timedelta(days=7)
+        weekly_row = await conn.fetchrow(
+            """SELECT COALESCE(SUM(cost_equivalent), 0) AS used
+               FROM ai_usage_sessions
+               WHERE COALESCE(started_at, ended_at) >= $1""",
+            week_ago,
+        )
+
+        # Today's automated cost (api_call_log = programmatic, typically automated)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Automated = api_call_log (programmatic) + sessions from known automated agents
+        auto_call_row = await conn.fetchrow(
+            """SELECT COALESCE(SUM(cost_usd), 0) AS cost
+               FROM api_call_log WHERE called_at >= $1""",
+            today_start,
+        )
+        auto_session_row = await conn.fetchrow(
+            """SELECT COALESCE(SUM(cost_equivalent), 0) AS cost
+               FROM ai_usage_sessions
+               WHERE COALESCE(started_at, ended_at) >= $1
+                 AND agent_persona NOT IN ('unknown', 'interactive', 'subagent')""",
+            today_start,
+        )
+
+        # Current hourly burn rate (trailing 1h, sessions + calls)
+        hour_ago = now - timedelta(hours=1)
+        hourly_session = await conn.fetchrow(
+            """SELECT COALESCE(SUM(cost_equivalent), 0) AS cost
+               FROM ai_usage_sessions
+               WHERE COALESCE(started_at, ended_at) >= $1""",
+            hour_ago,
+        )
+        hourly_call = await conn.fetchrow(
+            """SELECT COALESCE(SUM(cost_usd), 0) AS cost
+               FROM api_call_log WHERE called_at >= $1""",
+            hour_ago,
+        )
+
+    weekly_used = float(weekly_row["used"]) if weekly_row else 0.0
+    weekly_remaining = max(WEEKLY_QUOTA_EQUIV - weekly_used, 0.0)
+    weekly_pct = (weekly_used / WEEKLY_QUOTA_EQUIV * 100) if WEEKLY_QUOTA_EQUIV > 0 else 0.0
+
+    daily_auto_used = (
+        float(auto_call_row["cost"]) + float(auto_session_row["cost"])
+    )
+    daily_auto_remaining = max(DAILY_AUTO_CAP - daily_auto_used, 0.0)
+    daily_auto_pct = (daily_auto_used / DAILY_AUTO_CAP * 100) if DAILY_AUTO_CAP > 0 else 0.0
+
+    current_hourly = float(hourly_session["cost"]) + float(hourly_call["cost"])
+    sustainable_hourly = weekly_remaining / hours_until_reset if hours_until_reset > 0 else 0.0
+    throttle_factor = (
+        sustainable_hourly / current_hourly if current_hourly > 0 else 99.0
+    )
+
+    recommended_delay = _compute_recommended_delay(weekly_pct, daily_auto_pct)
+
+    # can_proceed = both weekly and daily auto have headroom
+    can_proceed = weekly_pct < 90 and daily_auto_remaining > 0
+
+    return {
+        "can_proceed": can_proceed,
+        "recommended_delay_sec": recommended_delay,
+        "budget": {
+            "weekly_limit_equiv": WEEKLY_QUOTA_EQUIV,
+            "weekly_used": round(weekly_used, 2),
+            "weekly_remaining": round(weekly_remaining, 2),
+            "weekly_pct": round(weekly_pct, 1),
+            "weekly_resets_at": weekly_resets_at.isoformat(),
+            "hours_until_reset": round(hours_until_reset, 1),
+        },
+        "pace": {
+            "current_hourly_rate": round(current_hourly, 2),
+            "sustainable_hourly_rate": round(sustainable_hourly, 2),
+            "throttle_factor": round(throttle_factor, 2),
+        },
+        "automated_budget": {
+            "daily_cap_equiv": DAILY_AUTO_CAP,
+            "daily_used": round(daily_auto_used, 2),
+            "daily_remaining": round(daily_auto_remaining, 2),
+            "reserved_for_interactive": INTERACTIVE_RESERVE,
+        },
+        "computed_at": now.isoformat(),
     }

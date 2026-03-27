@@ -143,6 +143,35 @@ export type EfficiencyResponse = {
 };
 
 // ---------------------------------------------------------------------------
+// Quota budget (for automated workload gating dashboard)
+// ---------------------------------------------------------------------------
+
+export type QuotaBudget = {
+  can_proceed: boolean;
+  recommended_delay_sec: number;
+  budget: {
+    weekly_limit_equiv: number;
+    weekly_used: number;
+    weekly_remaining: number;
+    weekly_pct: number;
+    weekly_resets_at: string;
+    hours_until_reset: number;
+  };
+  pace: {
+    current_hourly_rate: number;
+    sustainable_hourly_rate: number;
+    throttle_factor: number;
+  };
+  automated_budget: {
+    daily_cap_equiv: number;
+    daily_used: number;
+    daily_remaining: number;
+    reserved_for_interactive: number;
+  };
+  computed_at: string;
+};
+
+// ---------------------------------------------------------------------------
 // Aggregation types (frontend-computed)
 // ---------------------------------------------------------------------------
 

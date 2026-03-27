@@ -11,6 +11,15 @@
       "category": "general",
       "image": null,
       "screenshot": null
+    },
+    {
+      "id": "quota-budget-gate",
+      "title": "Adaptive Quota-Aware Rate Limiting",
+      "summary": "Automated workloads now self-regulate based on remaining weekly quota and daily budget caps",
+      "description": "New quota budget system prevents automated workloads from burning the weekly Claude Max subscription limit.\n\n- **Quota Budget API** (`/ai-usage/quota-budget`): Returns real-time budget status including weekly usage vs limit, sustainable hourly rate, throttle factor, and daily automated cap. Automated scripts query this before each batch.\n- **QuotaGate client** (`quota_gate.py`): 5-line integration for any workload — `gate.wait()` sleeps adaptively (1s when flush, 60s when critical) and `gate.can_proceed(cost)` stops work before hitting limits.\n- **Deal enricher integration**: First consumer — enrichment batches now throttle automatically based on budget and stop gracefully when quota is exhausted.\n- **Dashboard integration**: Summary strip shows Auto Budget remaining. Efficiency tab has new Budget Allocation section with weekly/daily bars, pace metrics, throttle factor, and AUTOMATED WORK BLOCKED warning.\n- **60/40 budget split**: 60% of weekly budget reserved for interactive work, 40% available to automated workloads. Prevents batch jobs from locking Don out of Claude Code.",
+      "category": "general",
+      "image": null,
+      "screenshot": null
     }
   ]
 }

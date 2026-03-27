@@ -1,13 +1,15 @@
-import type { SummaryResponse, BurnRateResponse } from "../_lib/types";
-import { fmtCost, fmtTokens, fmtOverhead, overheadColor, quotaColor, quotaBarColor } from "../_lib/formatters";
+import type { SummaryResponse, BurnRateResponse, QuotaBudget } from "../_lib/types";
+import { fmtCost, fmtTokens, fmtOverhead, overheadColor, quotaColor, quotaBarColor, autoBudgetColor } from "../_lib/formatters";
 
 export function SummaryStrip({
   summary,
   burnRate,
+  quotaBudget,
   days,
 }: {
   summary: SummaryResponse | null;
   burnRate: BurnRateResponse | null;
+  quotaBudget: QuotaBudget | null;
   days: number;
 }) {
   const n = (v: number | null | undefined) => v ?? 0;
@@ -71,6 +73,22 @@ export function SummaryStrip({
           {quotaPct.toFixed(0)}%
         </span>
       </span>
+      {quotaBudget && (
+        <>
+          <span className="text-gray-700">|</span>
+          <span className="flex items-center gap-1">
+            <span className="text-gray-500">Auto Budget</span>
+            <span className={`font-mono font-medium ${autoBudgetColor(
+              quotaBudget.automated_budget.daily_cap_equiv > 0
+                ? (quotaBudget.automated_budget.daily_remaining / quotaBudget.automated_budget.daily_cap_equiv) * 100
+                : 100
+            )}`}>
+              {fmtCost(quotaBudget.automated_budget.daily_remaining)}
+              <span className="text-gray-500 font-normal"> / {fmtCost(quotaBudget.automated_budget.daily_cap_equiv)}</span>
+            </span>
+          </span>
+        </>
+      )}
     </section>
   );
 }
