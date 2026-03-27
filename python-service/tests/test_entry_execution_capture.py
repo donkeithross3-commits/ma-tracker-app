@@ -124,6 +124,7 @@ def test_build_entry_fill_record_uses_cached_exec_details():
 
 def test_attach_entry_execution_tracking_registers_order_position_mapping():
     deferred_calls = []
+    scheduled_calls = []
 
     agent = object.__new__(IBDataAgent)
     agent.execution_engine = SimpleNamespace(
@@ -134,15 +135,46 @@ def test_attach_entry_execution_tracking_registers_order_position_mapping():
         ),
         _deferred_commission_update=object(),
         _order_routing_exchanges={123: "SMART"},
-        _order_contract_dicts={},
-        _order_pre_trade_snapshots={},
+        _order_contract_dicts={
+            123: {
+                "symbol": "SPY",
+                "secType": "OPT",
+                "exchange": "SMART",
+                "strike": 625.0,
+                "expiry": "20260330",
+                "right": "P",
+            }
+        },
+        _order_pre_trade_snapshots={
+            123: {
+                "option_bid": 0.95,
+                "option_ask": 0.97,
+                "option_mid": 0.96,
+            }
+        },
         _contract_exchange=lambda contract: str((contract or {}).get("exchange") or "").upper(),
+        _build_execution_match_hint=lambda fill_dict=None, exec_data=None: {
+            "exec_id": (fill_dict or {}).get("exec_id", ""),
+            "fill_time": (fill_dict or {}).get("time"),
+            "qty_filled": (fill_dict or {}).get("qty_filled"),
+            "avg_price": (fill_dict or {}).get("avg_price"),
+            "perm_id": ((fill_dict or {}).get("execution_analytics") or {}).get("perm_id"),
+            "side": ((fill_dict or {}).get("execution_analytics") or {}).get("side"),
+        },
+        _schedule_post_fill_capture=lambda *args: scheduled_calls.append(args),
     )
 
     IBDataAgent._attach_entry_execution_tracking(
         agent,
         "bmc_risk_123",
-        {"order_id": 123, "exec_id": "0000fb2c.69c6877d.01.01", "avg_price": 1.50, "time": 1774619845.3772416},
+        {
+            "order_id": 123,
+            "exec_id": "0000fb2c.69c6877d.01.01",
+            "avg_price": 1.50,
+            "time": 1774619845.3772416,
+            "qty_filled": 1,
+            "execution_analytics": {"perm_id": 162103040, "side": "BOT"},
+        },
     )
 
     assert agent.execution_engine._order_position_ids[123] == "bmc_risk_123"
@@ -153,6 +185,10 @@ def test_attach_entry_execution_tracking_registers_order_position_mapping():
             ("bmc_risk_123", "0000fb2c.69c6877d.01.01"),
         )
     ]
+    assert len(scheduled_calls) == 1
+    assert scheduled_calls[0][0] == "bmc_risk_123"
+    assert scheduled_calls[0][1] == 123
+    assert scheduled_calls[0][-1]["exec_id"] == "0000fb2c.69c6877d.01.01"
 
 
 def test_exec_event_routes_to_risk_manager_when_order_mapping_exists():

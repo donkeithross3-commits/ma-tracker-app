@@ -3588,6 +3588,9 @@ class IBDataAgent:
             or self.execution_engine._contract_exchange(contract_d)
         )
         if contract_d and pre_trade_snapshot:
+            fill_match_hint = self.execution_engine._build_execution_match_hint(
+                fill_dict=entry_fill,
+            )
             self.execution_engine._schedule_post_fill_capture(
                 strategy_id,
                 order_id,
@@ -3597,6 +3600,7 @@ class IBDataAgent:
                 pre_trade_snapshot,
                 routing_exchange,
                 entry_fill,
+                fill_match_hint,
             )
 
     # ── Periodic runtime state persistence ──
