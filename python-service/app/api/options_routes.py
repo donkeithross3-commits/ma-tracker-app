@@ -58,11 +58,15 @@ POLYGON_PRIMARY = os.environ.get("POLYGON_PRIMARY", "true").lower() != "false"
 
 router = APIRouter(prefix="/options", tags=["options"])
 
+# Execution telemetry is piggybacked roughly every 20s from the agent heartbeat
+# loop, and broker reconciliation refreshes managed-contract broker snapshots
+# roughly every 60s. Keep freshness windows slightly above those cadences so the
+# dashboard does not oscillate into warning states during normal operation.
 EXECUTION_TELEMETRY_CACHE_MAX_AGE_MS = int(
-    os.environ.get("EXECUTION_TELEMETRY_CACHE_MAX_AGE_MS", "12000")
+    os.environ.get("EXECUTION_TELEMETRY_CACHE_MAX_AGE_MS", "25000")
 )
 EXECUTION_BROKER_SNAPSHOT_MAX_AGE_MS = int(
-    os.environ.get("EXECUTION_BROKER_SNAPSHOT_MAX_AGE_MS", "15000")
+    os.environ.get("EXECUTION_BROKER_SNAPSHOT_MAX_AGE_MS", "75000")
 )
 
 # --- Ticker validation helpers ---

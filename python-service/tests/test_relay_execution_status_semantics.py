@@ -90,7 +90,7 @@ async def test_relay_execution_status_uses_fresh_cached_telemetry(monkeypatch):
 async def test_relay_execution_status_bypasses_cache_when_telemetry_is_too_old(monkeypatch):
     provider = make_provider(
         make_telemetry(
-            received_at=time.time() - 20,
+            received_at=time.time() - 30,
             contracts=[make_contract(broker_snapshot_age_ms=250)],
         )
     )
@@ -110,6 +110,56 @@ async def test_relay_execution_status_bypasses_cache_when_telemetry_is_too_old(m
     assert result["cache_bypass_reason"] == "telemetry_age_exceeded"
     assert result["broker_truth_status"] == "broker_snapshot_fresh"
     assert provider.execution_telemetry["received_at"] > time.time() - 2
+
+
+@pytest.mark.asyncio
+async def test_relay_execution_status_keeps_cache_when_broker_snapshot_age_matches_normal_reconciliation(monkeypatch):
+    provider = make_provider(
+        make_telemetry(
+            received_at=time.time() - 2,
+            contracts=[make_contract(broker_snapshot_age_ms=29_000)],
+        )
+    )
+    monkeypatch.setattr(options_routes, "get_registry", lambda: StubRegistry(provider))
+
+    called = {"count": 0}
+
+    async def fake_send_request_to_provider(*args, **kwargs):
+        called["count"] += 1
+        return {}
+
+    monkeypatch.setattr(options_routes, "send_request_to_provider", fake_send_request_to_provider)
+
+    result = await options_routes.relay_execution_status("user-1")
+
+    assert result["source"] == "cached_telemetry"
+    assert result["broker_truth_status"] == "broker_snapshot_fresh"
+    assert called["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_relay_execution_status_bypasses_cache_when_broker_snapshot_exceeds_reconciliation_window(monkeypatch):
+    provider = make_provider(
+        make_telemetry(
+            received_at=time.time() - 2,
+            contracts=[make_contract(broker_snapshot_age_ms=80_000)],
+        )
+    )
+    monkeypatch.setattr(options_routes, "get_registry", lambda: StubRegistry(provider))
+
+    async def fake_send_request_to_provider(*args, **kwargs):
+        return make_telemetry(
+            received_at=time.time(),
+            contracts=[make_contract(broker_snapshot_age_ms=0)],
+        )
+
+    monkeypatch.setattr(options_routes, "send_request_to_provider", fake_send_request_to_provider)
+
+    result = await options_routes.relay_execution_status("user-1")
+
+    assert result["source"] == "direct_query"
+    assert result["cache_bypass_reason"] == "broker_snapshot_stale"
+    assert result["broker_truth_status"] == "broker_snapshot_fresh"
 
 
 @pytest.mark.asyncio
