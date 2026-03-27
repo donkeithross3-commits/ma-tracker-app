@@ -126,6 +126,64 @@ FEATURE = os.environ.get("FEATURE_NAME", "default_value")
 const FEATURE = process.env.FEATURE_NAME !== "false"
 ```
 
+### AI Token Economics (NON-NEGOTIABLE)
+
+Two billing tracks exist. Every automated workload must choose the right one.
+
+**Track 1: Max Subscription (Claude CLI / interactive sessions)**
+- Cost: $0 per token (included in subscription)
+- BUT: Weekly quota limit. Every `claude -p "..."` invocation pays ~100K+ tokens
+  of system prompt overhead (cache_creation) before the first useful token.
+- **Rule: NEVER call `claude` CLI in a loop.** One subprocess per filing / per record
+  is the worst possible pattern — 95 CLI calls for 95 filings burned $999 in quota
+  for $5 worth of actual extraction work (100:1 overhead ratio).
+- **Correct pattern for batch CLI work:** Send ONE prompt containing multiple items.
+  The system prompt overhead is paid once and amortized across all items.
+
+```python
+# WRONG — 100:1 overhead, burns weekly quota in minutes
+for filing in filings:
+    subprocess.run([claude, "-p", f"Extract terms from: {filing.text}"])
+
+# RIGHT — overhead paid once, amortized across batch
+batch_prompt = "Extract deal terms from each filing. Return JSON array.\n\n"
+for i, filing in enumerate(filings[:30]):
+    batch_prompt += f"--- FILING {i+1} ({filing.accession}) ---\n{filing.text[:10000]}\n\n"
+batch_prompt += "Return: [{...}, {...}, ...]"
+subprocess.run([claude, "-p", batch_prompt])
+```
+
+Batch sizing: ~20-30 items per CLI call (stay under 150K input tokens).
+Process in sequential batches with 5s sleep between batches.
+
+**Track 2: Anthropic API (SDK / direct HTTP)**
+- Cost: Pay per token ($3-15/M input, $15-75/M output depending on model)
+- No system prompt overhead — you control the prompt, zero wasted tokens
+- Use for: high-volume extraction where batch CLI isn't practical, or when
+  you need fine-grained retry/error handling per item
+
+**Decision framework:**
+| Scenario | Use | Why |
+|----------|-----|-----|
+| Interactive agent work | CLI | That's what it's for |
+| <50 batch extractions | CLI (batched in one prompt) | $0 cost, low overhead |
+| >50 extractions or need retry | API (Sonnet) | Granular control, predictable cost |
+| One-off research question | CLI | Normal usage |
+
+**Budget guardrails for automated workloads:**
+- Max 100 items per run (configurable via `--max-per-run`)
+- Log progress every 10 items with running cost
+- If estimated cost exceeds $10/run (API) or 5% of weekly quota (CLI), stop and warn
+- All automated calls MUST post telemetry to `/ai-usage/ingest`
+
+**Model selection for automation:**
+- Structured extraction (JSON, deal terms, risk grades): **Sonnet** — 5x cheaper, equally reliable
+- Complex reasoning (research reports, novel analysis): **Opus** — worth the cost
+- Classification / tagging: **Haiku** — 20x cheaper than Sonnet
+
+**Monitor your impact:** https://dr3-dashboard.com/ai-usage — the Efficiency tab
+shows overhead ratios per agent. If your workload shows >10:1, you're doing it wrong.
+
 ---
 
 ## Quick Start Commands
