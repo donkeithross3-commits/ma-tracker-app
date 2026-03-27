@@ -305,6 +305,168 @@ class TestLiveProfitTargetEdits:
         )
         assert action is None
 
+    def test_uniform_final_tranche_keeps_last_tightened_trail(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 3
+        config["position"]["entry_price"] = 1.0
+        config["profit_taking"] = {
+            "enabled": True,
+            "targets": [],
+            "trailing_stop": {
+                "enabled": True,
+                "activation_pct": 75,
+                "trail_pct": 25,
+                "exit_tranches": [
+                    {"exit_pct": 33, "trail_pct": 8},
+                    {"exit_pct": 50, "trail_pct": 5},
+                    {"exit_pct": 100},
+                ],
+            },
+        }
+        rm.on_start(config)
+        rm.high_water_mark = 2.895
+        rm._trailing_active = True
+        rm._trailing_tranche_idx = 1
+        rm._trailing_tranche_pending = True
+        rm._trailing_stop_price = 2.75025
+        rm._level_states["trailing"] = LevelState.TRIGGERED
+        rm._pending_orders[42] = PendingOrder(
+            order_id=42,
+            level_key="trailing",
+            level_type="trailing",
+            level_idx=1,
+            expected_qty=1,
+            placed_at=0,
+        )
+
+        rm.on_fill(
+            42,
+            {"filled": 1, "avgFillPrice": 2.66, "status": "Filled", "remaining": 0},
+            config,
+        )
+
+        assert rm._trailing_tranche_idx == 2
+        assert rm._trailing_stop_price == pytest.approx(2.75025, rel=1e-9)
+
+    def test_per_lot_final_tranche_keeps_last_tightened_trail(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 1
+        config["position"]["entry_price"] = 1.0
+        config["profit_taking"] = {
+            "enabled": True,
+            "targets": [],
+            "trailing_stop": {
+                "enabled": True,
+                "mode": "per_lot",
+                "activation_pct": 75,
+                "trail_pct": 25,
+                "exit_tranches": [
+                    {"exit_pct": 33, "trail_pct": 8},
+                    {"exit_pct": 50, "trail_pct": 5},
+                    {"exit_pct": 100},
+                ],
+            },
+        }
+        rm.on_start(config)
+        lot = rm._per_lot_trailing[0]
+        lot.trailing_active = True
+        lot.high_water_mark = 2.895
+        lot.trailing_tranche_idx = 2
+        lot.trailing_stop_price = 0.0
+
+        action = rm._check_trailing_stop_per_lot(
+            config,
+            current_price=2.70,
+            quote=_Quote(2.69, 2.71),
+        )
+
+        assert action is not None
+        assert action.reason.startswith("Per-lot trailing stop")
+
+    def test_uniform_trailing_recomputes_when_tranches_change_without_base_trail_change(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 1
+        config["position"]["entry_price"] = 1.0
+        config["profit_taking"] = {
+            "enabled": True,
+            "targets": [],
+            "trailing_stop": {
+                "enabled": True,
+                "activation_pct": 75,
+                "trail_pct": 25,
+                "exit_tranches": [
+                    {"exit_pct": 33, "trail_pct": 8},
+                    {"exit_pct": 50, "trail_pct": 5},
+                    {"exit_pct": 100},
+                ],
+            },
+        }
+        rm.on_start(config)
+        rm._trailing_active = True
+        rm.high_water_mark = 3.0
+        rm._trailing_tranche_idx = 1
+
+        rm.update_risk_config(
+            {
+                "profit_taking": {
+                    "trailing_stop": {
+                        "exit_tranches": [
+                            {"exit_pct": 33, "trail_pct": 10},
+                            {"exit_pct": 50, "trail_pct": 7},
+                            {"exit_pct": 100},
+                        ],
+                    },
+                },
+            }
+        )
+
+        assert rm._trailing_stop_price == pytest.approx(2.79, rel=1e-9)
+
+    def test_per_lot_trailing_recomputes_when_tranches_change_without_base_trail_change(self):
+        rm = RiskManagerStrategy()
+        config = _make_config()
+        config["position"]["quantity"] = 1
+        config["position"]["entry_price"] = 1.0
+        config["profit_taking"] = {
+            "enabled": True,
+            "targets": [],
+            "trailing_stop": {
+                "enabled": True,
+                "mode": "per_lot",
+                "activation_pct": 75,
+                "trail_pct": 25,
+                "exit_tranches": [
+                    {"exit_pct": 33, "trail_pct": 8},
+                    {"exit_pct": 50, "trail_pct": 5},
+                    {"exit_pct": 100},
+                ],
+            },
+        }
+        rm.on_start(config)
+        lot = rm._per_lot_trailing[0]
+        lot.trailing_active = True
+        lot.high_water_mark = 3.0
+        lot.trailing_tranche_idx = 1
+
+        rm.update_risk_config(
+            {
+                "profit_taking": {
+                    "trailing_stop": {
+                        "exit_tranches": [
+                            {"exit_pct": 33, "trail_pct": 10},
+                            {"exit_pct": 50, "trail_pct": 7},
+                            {"exit_pct": 100},
+                        ],
+                    },
+                },
+            }
+        )
+
+        assert lot.trailing_stop_price == pytest.approx(2.79, rel=1e-9)
+
     def test_add_profit_target_live_adds_level(self, risk_manager):
         changes = risk_manager.update_risk_config(
             {

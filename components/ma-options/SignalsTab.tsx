@@ -452,6 +452,7 @@ interface RiskManagerState {
   completed: boolean;
   trailing_stop_price: number;
   trailing_active: boolean;
+  trailing_tranche_idx?: number;
   trailing_mode?: string;
   per_lot_trailing?: Record<string, {
     lot_idx: number;
@@ -2561,20 +2562,68 @@ export default function SignalsTab() {
     );
   };
 
+  const calcPnlPctFromEntry = (entryPrice?: number | null, price?: number | null, isLong = true): number | null => {
+    if (entryPrice == null || price == null || !isFinite(entryPrice) || !isFinite(price) || entryPrice <= 0) {
+      return null;
+    }
+    return isLong
+      ? ((price - entryPrice) / entryPrice) * 100
+      : ((entryPrice - price) / entryPrice) * 100;
+  };
+
+  const formatSignedPct = (value?: number | null, digits = 0): string => {
+    if (value == null || !isFinite(value)) return "?";
+    return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
+  };
+
+  const formatTrailPct = (value?: number | null): string => {
+    if (value == null || !isFinite(value)) return "?";
+    return Number.isInteger(value) ? `${value.toFixed(0)}%` : `${value.toFixed(1)}%`;
+  };
+
+  const resolveEffectiveTrailPct = (
+    trailingConfig: Record<string, any> | null | undefined,
+    trailingTrancheIdx: number | null | undefined,
+    fallbackTrailPct?: number | null,
+  ): number | null => {
+    let effectivePct = fallbackTrailPct;
+    const tranches = trailingConfig?.exit_tranches;
+    if (!Array.isArray(tranches) || trailingTrancheIdx == null || trailingTrancheIdx < 0) {
+      return typeof effectivePct === "number" && isFinite(effectivePct) ? effectivePct : null;
+    }
+
+    for (let idx = 0; idx <= trailingTrancheIdx && idx < tranches.length; idx += 1) {
+      const tranchePct = tranches[idx]?.trail_pct;
+      if (typeof tranchePct === "number" && isFinite(tranchePct)) {
+        effectivePct = tranchePct;
+      }
+    }
+    return typeof effectivePct === "number" && isFinite(effectivePct) ? effectivePct : null;
+  };
+
   // ── Risk level badge renderer — shows categorized risk status ──
   // Groups levels by category (stop/profit/trailing/eod) with meaningful labels
-  const renderRiskBadges = (rm: RiskManagerState | null, opts?: { suppressFilledProfitBadges?: boolean }) => {
+  const renderRiskBadges = (
+    rm: RiskManagerState | null,
+    opts?: {
+      suppressFilledProfitBadges?: boolean;
+      rmConfig?: Record<string, any>;
+      includePerLotSummary?: boolean;
+    },
+  ) => {
     if (!rm) return null;
     const ls: Record<string, string> = rm.level_states || {};
     // Categorize levels
     const stops: { key: string; state: string }[] = [];
     const profits: { key: string; state: string }[] = [];
     let trailing: string | null = null;
+    const trailingLots: { key: string; state: string }[] = [];
     let eod: string | null = null;
     for (const [key, state] of Object.entries(ls)) {
       if (key.startsWith("stop")) stops.push({ key, state });
       else if (key.startsWith("profit")) profits.push({ key, state });
       else if (key === "trailing") trailing = state;
+      else if (key.startsWith("trailing_lot_")) trailingLots.push({ key, state });
       else if (key === "eod_closeout") eod = state;
     }
     const stateColor = (s: string) =>
@@ -2583,8 +2632,12 @@ export default function SignalsTab() {
       s === "PARTIAL" ? "bg-blue-900/60 text-blue-300" :
       s === "FAILED" ? "bg-red-900/60 text-red-300" :
       "bg-gray-700/60 text-gray-400";
-    const badge = (label: string, state: string, key?: string) => (
-      <span key={key || label} className={`px-1 py-0.5 rounded font-mono text-[10px] cursor-default ${stateColor(state)}`}>
+    const badge = (label: string, state: string, key?: string, title?: string) => (
+      <span
+        key={key || label}
+        title={title}
+        className={`px-1 py-0.5 rounded font-mono text-[10px] cursor-default ${stateColor(state)}`}
+      >
         {label}
       </span>
     );
@@ -2606,8 +2659,73 @@ export default function SignalsTab() {
     }
     // Trailing
     if (trailing) {
-      if (rm.trailing_active) badges.push(badge(`trail @${rm.trailing_stop_price?.toFixed(2) || "?"}`, "TRIGGERED", "ts"));
-      else badges.push(badge("trail", trailing, "ts"));
+      if (rm.trailing_active) {
+        const trailingConfig = (opts?.rmConfig?.profit_taking as any)?.trailing_stop as Record<string, any> | undefined;
+        const liveTrailPct = resolveEffectiveTrailPct(trailingConfig, rm.trailing_tranche_idx, trailingConfig?.trail_pct);
+        const hwmPct = calcPnlPctFromEntry(rm.entry_price, rm.high_water_mark, rm.is_long);
+        const liveLabel = liveTrailPct != null
+          ? `trail ${formatTrailPct(liveTrailPct)} @${rm.trailing_stop_price?.toFixed(2) || "?"}`
+          : `trail @${rm.trailing_stop_price?.toFixed(2) || "?"}`;
+        badges.push(
+          badge(
+            liveLabel,
+            "TRIGGERED",
+            "ts",
+            `Live trailing stop ${rm.trailing_stop_price?.toFixed(2) || "?"}; peak ${formatSignedPct(hwmPct, 1)} from entry`,
+          ),
+        );
+        if (hwmPct != null) {
+          badges.push(
+            badge(
+              `peak ${formatSignedPct(hwmPct, 0)}`,
+              "TRIGGERED",
+              "ts-peak",
+              `High water mark ${formatSignedPct(hwmPct, 1)} from entry`,
+            ),
+          );
+        }
+      } else {
+        badges.push(badge("trail", trailing, "ts"));
+      }
+    } else if (opts?.includePerLotSummary && trailingLots.length > 0) {
+      const activeLots = Object.values(rm.per_lot_trailing || {}).filter(
+        (lot) => lot.trailing_active && lot.remaining_qty > 0,
+      );
+      if (activeLots.length > 0) {
+        const trailingConfig = (opts?.rmConfig?.profit_taking as any)?.trailing_stop as Record<string, any> | undefined;
+        const liveTrailPcts = activeLots
+          .map((lot) => resolveEffectiveTrailPct(trailingConfig, lot.trailing_tranche_idx, lot.trail_pct))
+          .filter((value): value is number => value != null);
+        const peakPcts = activeLots
+          .map((lot) => calcPnlPctFromEntry(lot.entry_price, lot.high_water_mark, rm.is_long))
+          .filter((value): value is number => value != null);
+        const minPeak = peakPcts.length > 0 ? Math.min(...peakPcts) : null;
+        const maxPeak = peakPcts.length > 0 ? Math.max(...peakPcts) : null;
+        const liveLabel = activeLots.length === 1
+          ? `trail ${formatTrailPct(liveTrailPcts[0] ?? null)} @${activeLots[0].trailing_stop_price.toFixed(2)}`
+          : `trail ${activeLots.length} live`;
+        badges.push(
+          badge(
+            liveLabel,
+            "TRIGGERED",
+            "ts",
+            activeLots.length === 1
+              ? `One lot trailing live; peak ${formatSignedPct(maxPeak, 1)} from entry`
+              : `${activeLots.length} lots have live trailing stops`,
+          ),
+        );
+        if (maxPeak != null) {
+          const peakLabel = activeLots.length > 1 ? `peak ${formatSignedPct(maxPeak, 0)} max` : `peak ${formatSignedPct(maxPeak, 0)}`;
+          const peakTitle = minPeak != null && maxPeak != null && activeLots.length > 1
+            ? `Active lot peak range ${formatSignedPct(minPeak, 1)} to ${formatSignedPct(maxPeak, 1)} from entry`
+            : `High water mark ${formatSignedPct(maxPeak, 1)} from entry`;
+          badges.push(badge(peakLabel, "TRIGGERED", "ts-peak", peakTitle));
+        }
+      } else {
+        const filledTrailingLots = trailingLots.filter((lot) => lot.state === "FILLED").length;
+        if (filledTrailingLots > 0) badges.push(badge("trail hit", "FILLED", "ts"));
+        else badges.push(badge("trail", trailingLots[0]?.state || "ARMED", "ts"));
+      }
     }
     // EOD closeout
     if (eod) badges.push(badge("eod", eod, "eod"));
@@ -3228,7 +3346,7 @@ export default function SignalsTab() {
                                 ) : rm ? (
                                   <span className="text-gray-600 italic text-[10px]">waiting...</span>
                                 ) : null}
-                                {renderRiskBadges(rm)}
+                                {renderRiskBadges(rm, { rmConfig: rmConfig || undefined, includePerLotSummary: true })}
                                 {pnlPct !== null && pnlDollar !== null && (
                                   <span className={`ml-auto font-mono font-medium ${staleQuote ? "opacity-50" : ""} ${pnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
                                     {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}% ({pnlDollar >= 0 ? "+$" : "-$"}{Math.abs(pnlDollar).toFixed(0)})
@@ -3399,8 +3517,11 @@ export default function SignalsTab() {
                                 )}
                                 <span className="text-gray-600">│</span>
                                 {(() => {
-                                  const firstActiveRm = group.items.find(pd => pd.rm && !pd.rm.completed)?.rm || group.items[0]?.rm;
-                                  return renderRiskBadges(firstActiveRm ?? null);
+                                  const firstActivePd = group.items.find(pd => pd.rm && !pd.rm.completed) || group.items[0];
+                                  return renderRiskBadges(firstActivePd?.rm ?? null, {
+                                    rmConfig: firstActivePd?.rmConfig || undefined,
+                                    includePerLotSummary: true,
+                                  });
                                 })()}
                                 <span className="text-gray-600 ml-auto">{group.totalRemaining}/{group.totalInitial} remaining</span>
                               </div>
@@ -3543,6 +3664,13 @@ export default function SignalsTab() {
                                   const lotHwm = lotTrailState?.high_water_mark as number | undefined;
                                   const lotTrailActive = lotTrailState?.trailing_active as boolean | undefined;
                                   const lotTrailPrice = lotTrailState?.trailing_stop_price as number | undefined;
+                                  const lotTrailingConfig = (lotRmConfig?.profit_taking as any)?.trailing_stop as Record<string, any> | undefined;
+                                  const lotLiveTrailPct = resolveEffectiveTrailPct(
+                                    lotTrailingConfig,
+                                    lotTrailState?.trailing_tranche_idx as number | undefined,
+                                    lotTrailPct,
+                                  );
+                                  const lotHwmPct = calcPnlPctFromEntry(pos.entry_price, lotHwm, rm?.is_long ?? true);
                                   const displayPnlPct = exitFill
                                     ? ((exitFill.avg_price - pos.entry_price) / pos.entry_price) * 100
                                     : pnlPct;
@@ -3579,8 +3707,11 @@ export default function SignalsTab() {
                                         )}
                                         {/* Per-lot trail status badges */}
                                         {expandedIsPerLot && !exitFill && lotTrailActive && lotTrailPrice != null && (
-                                          <span className="text-yellow-500/70 font-mono" title={`HWM: ${lotHwm?.toFixed(2)} Trail: ${lotTrailPrice?.toFixed(2)}`}>
-                                            ↕{lotTrailPrice.toFixed(2)}
+                                          <span
+                                            className="text-yellow-500/70 font-mono"
+                                            title={`HWM ${formatSignedPct(lotHwmPct, 1)} from entry${lotHwm != null ? ` ($${lotHwm.toFixed(2)})` : ""}; live trail ${formatTrailPct(lotLiveTrailPct)} at $${lotTrailPrice.toFixed(2)}`}
+                                          >
+                                            ↕{lotTrailPrice.toFixed(2)} {lotHwmPct != null ? formatSignedPct(lotHwmPct, 0) : ""}
                                           </span>
                                         )}
                                         {isCompleted ? (

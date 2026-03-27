@@ -47,6 +47,30 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _resolve_effective_trail_pct(
+    base_trail_pct: float,
+    tranches: Optional[list],
+    tranche_idx: int,
+) -> float:
+    """Resolve the live trail width for a tranche index.
+
+    A tranche without an explicit ``trail_pct`` inherits the last configured
+    tightening rather than widening back out to the base trail. This matches
+    the preset intent that later tranches keep tightening unless they say
+    otherwise.
+    """
+    effective_pct = float(base_trail_pct or 0.0)
+    if not tranches or tranche_idx < 0:
+        return effective_pct
+
+    for idx, tranche in enumerate(tranches):
+        if idx > tranche_idx:
+            break
+        if isinstance(tranche, dict) and "trail_pct" in tranche and tranche["trail_pct"] is not None:
+            effective_pct = float(tranche["trail_pct"])
+    return effective_pct
+
+
 # ── Tick sizes for common futures (used for limit order price rounding) ──
 # Stocks/options default to 0.01 if not found.
 TICK_SIZES: Dict[str, float] = {
@@ -651,12 +675,11 @@ class RiskManagerStrategy(ExecutionStrategy):
             lot_state.trailing_tranche_idx = self._trailing_tranche_idx
             if self._trailing_active and remaining_qty > 0:
                 lot_state.trailing_active = True
-                effective_trail_pct = lot_state.trail_pct
-                if tranches and lot_state.trailing_tranche_idx < len(tranches):
-                    effective_trail_pct = tranches[lot_state.trailing_tranche_idx].get(
-                        "trail_pct",
-                        effective_trail_pct,
-                    )
+                effective_trail_pct = _resolve_effective_trail_pct(
+                    lot_state.trail_pct,
+                    tranches,
+                    lot_state.trailing_tranche_idx,
+                )
                 if self.is_long:
                     lot_state.trailing_stop_price = (
                         lot_state.high_water_mark * (1.0 - effective_trail_pct / 100.0)
@@ -670,6 +693,45 @@ class RiskManagerStrategy(ExecutionStrategy):
             self._level_states[level_key] = (
                 LevelState.ARMED if remaining_qty > 0 else LevelState.FILLED
             )
+
+    def _recompute_uniform_trailing_stop(self, trail_cfg: dict) -> bool:
+        """Recalculate the live uniform trailing stop from current HWM."""
+        if not self._trailing_active:
+            return False
+
+        effective_pct = _resolve_effective_trail_pct(
+            float(trail_cfg.get("trail_pct", 10.0) or 0.0),
+            trail_cfg.get("exit_tranches") or [],
+            self._trailing_tranche_idx,
+        )
+        if self.is_long:
+            self._trailing_stop_price = self.high_water_mark * (1.0 - effective_pct / 100.0)
+        else:
+            self._trailing_stop_price = self.high_water_mark * (1.0 + effective_pct / 100.0)
+        return True
+
+    def _recompute_per_lot_trailing_stops(self, trail_cfg: dict) -> bool:
+        """Recalculate live per-lot trailing stops from each lot HWM."""
+        tranches = trail_cfg.get("exit_tranches") or []
+        updated = False
+        for lot_state in self._per_lot_trailing.values():
+            if not lot_state.trailing_active or lot_state.remaining_qty <= 0:
+                continue
+            effective_pct = _resolve_effective_trail_pct(
+                lot_state.trail_pct,
+                tranches,
+                lot_state.trailing_tranche_idx,
+            )
+            if self.is_long:
+                lot_state.trailing_stop_price = (
+                    lot_state.high_water_mark * (1.0 - effective_pct / 100.0)
+                )
+            else:
+                lot_state.trailing_stop_price = (
+                    lot_state.high_water_mark * (1.0 + effective_pct / 100.0)
+                )
+            updated = True
+        return updated
 
     # ── Lot aggregation ──
 
@@ -894,9 +956,11 @@ class RiskManagerStrategy(ExecutionStrategy):
                             next_idx = lot_state.trailing_tranche_idx + 1
                             if tranches and next_idx < len(tranches):
                                 lot_state.trailing_tranche_idx = next_idx
-                                next_tranche = tranches[next_idx]
-                                next_trail_pct = next_tranche.get("trail_pct",
-                                    lot_state.trail_pct or config_trail.get("trail_pct", 10.0))
+                                next_trail_pct = _resolve_effective_trail_pct(
+                                    lot_state.trail_pct or config_trail.get("trail_pct", 10.0),
+                                    tranches,
+                                    next_idx,
+                                )
                                 if self.is_long:
                                     lot_state.trailing_stop_price = lot_state.high_water_mark * (1.0 - next_trail_pct / 100.0)
                                 else:
@@ -930,8 +994,11 @@ class RiskManagerStrategy(ExecutionStrategy):
                     if tranches and next_idx < len(tranches):
                         # Advance to next tranche: tighter trail, re-arm
                         self._trailing_tranche_idx = next_idx
-                        next_tranche = tranches[next_idx]
-                        next_trail_pct = next_tranche.get("trail_pct", config_trail.get("trail_pct", 10.0))
+                        next_trail_pct = _resolve_effective_trail_pct(
+                            config_trail.get("trail_pct", 10.0),
+                            tranches,
+                            next_idx,
+                        )
 
                         # Recompute trail price from HWM with tighter percentage
                         if self.is_long:
@@ -1351,6 +1418,13 @@ class RiskManagerStrategy(ExecutionStrategy):
         new_ts = new_pt.get("trailing_stop", old_ts)
         if new_ts != old_ts:
             changes["updated_fields"].append("trailing_stop")
+            old_mode = self._trailing_mode
+            new_mode = new_ts.get("mode", old_ts.get("mode", old_mode))
+            live_trailing_inputs_changed = any(
+                new_ts.get(key) != old_ts.get(key)
+                for key in ("trail_pct", "exit_tranches", "per_lot_overrides")
+            ) or new_mode != old_mode
+
             if new_ts.get("enabled") and not old_ts.get("enabled"):
                 if "trailing" not in self._level_states:
                     self._level_states["trailing"] = LevelState.ARMED
@@ -1365,22 +1439,8 @@ class RiskManagerStrategy(ExecutionStrategy):
                     self._trailing_stop_price = 0.0
                 elif "trailing" in self._level_states:
                     changes["skipped_levels"].append("trailing")
-            # If trail_pct changed and trailing IS active, recalculate trail price from HWM
-            if self._trailing_active and new_ts.get("trail_pct") != old_ts.get("trail_pct"):
-                new_trail_pct = new_ts["trail_pct"]
-                # Determine effective trail_pct (may be tightened by current tranche)
-                tranches = new_ts.get("exit_tranches", [])
-                if tranches and self._trailing_tranche_idx < len(tranches):
-                    new_trail_pct = tranches[self._trailing_tranche_idx].get("trail_pct", new_trail_pct)
-                if self.is_long:
-                    self._trailing_stop_price = self.high_water_mark * (1 - new_trail_pct / 100)
-                else:
-                    self._trailing_stop_price = self.high_water_mark * (1 + new_trail_pct / 100)
-                changes["updated_fields"].append("trailing_stop_price_recalc")
 
             # Mode switching: uniform <-> per_lot
-            new_mode = new_ts.get("mode", old_ts.get("mode", "uniform"))
-            old_mode = self._trailing_mode
             if new_mode != old_mode:
                 self._trailing_mode = new_mode
                 changes["updated_fields"].append(f"trailing_mode_{old_mode}_to_{new_mode}")
@@ -1430,7 +1490,11 @@ class RiskManagerStrategy(ExecutionStrategy):
                         lot_state.activation_pct = base_activation_pct
 
                     if lot_state.trailing_active and old_trail != lot_state.trail_pct:
-                        effective_pct = lot_state.trail_pct
+                        effective_pct = _resolve_effective_trail_pct(
+                            lot_state.trail_pct,
+                            new_ts.get("exit_tranches", []),
+                            lot_state.trailing_tranche_idx,
+                        )
                         if self.is_long:
                             lot_state.trailing_stop_price = lot_state.high_water_mark * (1 - effective_pct / 100)
                         else:
@@ -1438,6 +1502,13 @@ class RiskManagerStrategy(ExecutionStrategy):
 
                     if new_override:
                         changes["updated_fields"].append(f"per_lot_override_{lot_idx}")
+
+            if live_trailing_inputs_changed:
+                if self._trailing_mode == "per_lot":
+                    if self._recompute_per_lot_trailing_stops(new_ts):
+                        changes["updated_fields"].append("per_lot_trailing_stop_price_recalc")
+                elif self._recompute_uniform_trailing_stop(new_ts):
+                    changes["updated_fields"].append("trailing_stop_price_recalc")
 
         # --- Merge new config into _risk_config ---
         if "stop_loss" in new_config:
@@ -1648,7 +1719,7 @@ class RiskManagerStrategy(ExecutionStrategy):
         tranches = trail_cfg.get("exit_tranches")
         if tranches and self._trailing_tranche_idx < len(tranches):
             tranche = tranches[self._trailing_tranche_idx]
-            trail_pct = tranche.get("trail_pct", base_trail_pct)
+            trail_pct = _resolve_effective_trail_pct(base_trail_pct, tranches, self._trailing_tranche_idx)
         else:
             trail_pct = base_trail_pct
             tranche = None
@@ -1775,7 +1846,7 @@ class RiskManagerStrategy(ExecutionStrategy):
             # Resolve effective trail_pct from current tranche
             if base_tranches and lot_state.trailing_tranche_idx < len(base_tranches):
                 tranche = base_tranches[lot_state.trailing_tranche_idx]
-                trail_pct = tranche.get("trail_pct", trail_pct)
+                trail_pct = _resolve_effective_trail_pct(trail_pct, base_tranches, lot_state.trailing_tranche_idx)
             else:
                 tranche = None
 
