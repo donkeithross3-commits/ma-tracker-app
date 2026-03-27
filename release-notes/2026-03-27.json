@@ -1,0 +1,16 @@
+{
+  "date": "2026-03-27",
+  "title": "Week of Mar 23-27, 2026",
+  "summary": "Complete redesign of the AI Usage dashboard with efficiency metrics, anomaly detection, and overhead analysis.",
+  "features": [
+    {
+      "id": "ai-usage-redesign",
+      "title": "AI Usage Dashboard Redesign",
+      "summary": "Rebuilt from scratch with subscription vs API cost clarity, overhead ratio analysis, machine x agent heatmap, anomaly detection, and three focused tabs",
+      "description": "Complete redesign of the /ai-usage page driven by hitting the Claude Max weekly limit twice in one week.\n\nKey improvements:\n- **Summary strip** replaces 9 cards with one dense Fleet-style row showing Sub Equiv, API Spend, Tokens, Sessions, Overhead ratio, and Quota health bar\n- **Anomaly detection** automatically flags high-overhead agents, daily cost spikes, and unattributed sessions\n- **Machine x Agent heatmap** reveals which agents run on which machines (caught the invisible droplet usage)\n- **Overhead ratio** (cache_creation / useful_tokens) on every table — the key metric for identifying workloads that should move from CLI to API\n- **Efficiency tab** with per-agent overhead bars, worst offender sessions, and API cost-per-call analysis\n- **Sessions tab** with filters, column chooser, and red highlighting for high-overhead sessions\n- Backend: new /efficiency endpoint, quota health tracking, cost computation at ingest for $0 entries",
+      "category": "general",
+      "image": null,
+      "screenshot": null
+    }
+  ]
+}
