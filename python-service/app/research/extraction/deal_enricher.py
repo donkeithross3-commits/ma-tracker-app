@@ -232,10 +232,13 @@ class DealEnricher:
 
         try:
             t0 = _time.monotonic()
-            # Longer timeout for batch (20 filings could take a while)
+            # Pipe prompt via stdin to avoid E2BIG (OS arg limit ~2MB).
+            # Batch prompts with 14+ filings × 32K chars easily exceed that.
+            # `claude -p` with no argument reads from stdin.
             result = subprocess.run(
-                [cli_path, "-p", batch_prompt, "--output-format", "json",
+                [cli_path, "-p", "--output-format", "json",
                  "--model", self.cli_model],
+                input=batch_prompt,
                 capture_output=True, text=True,
                 timeout=600,  # 10 min for batch
                 env=env,
