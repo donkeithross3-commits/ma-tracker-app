@@ -220,16 +220,12 @@ class DealEnricher:
             "[{\"accession\": \"0001193125-24-012345\", \"target_name\": \"...\", ...}, ...]\n"
         )
 
-        env = os.environ.copy()
-        env.pop("ANTHROPIC_API_KEY", None)  # Force OAuth, not API key
-        oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
-        if oauth:
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
-
         cli_path = self._find_cli()
         if not cli_path:
             logger.error("Claude CLI not found")
             return {acc: None for acc, _ in filings}
+
+        env = self._build_cli_env(cli_path)
 
         accession_list = [acc for acc, _ in filings]
         results: Dict[str, Optional[dict]] = {acc: None for acc in accession_list}
@@ -325,16 +321,12 @@ class DealEnricher:
 
         prompt = f"{DEAL_TERMS_EXTRACTION_PROMPT}\n\nFiling text:\n{filing_text}"
 
-        env = os.environ.copy()
-        env.pop("ANTHROPIC_API_KEY", None)  # Force OAuth, not API key
-        oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
-        if oauth:
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
-
         cli_path = self._find_cli()
         if not cli_path:
             logger.error("Claude CLI not found")
             return None
+
+        env = self._build_cli_env(cli_path)
 
         try:
             t0 = _time.monotonic()
@@ -841,6 +833,30 @@ class DealEnricher:
         except Exception:
             pass
         return None
+
+    def _build_cli_env(self, cli_path: str) -> dict:
+        """
+        Build subprocess env for Claude CLI.
+
+        Handles two critical issues:
+        1. Removes ANTHROPIC_API_KEY so CLI uses OAuth (Max subscription = $0)
+        2. Injects nvm node bin dir into PATH so `#!/usr/bin/env node` resolves
+           (without nvm in PATH, the shebang fails with rc=127)
+        """
+        env = os.environ.copy()
+        env.pop("ANTHROPIC_API_KEY", None)
+
+        oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+        if oauth:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
+
+        # Inject the node bin dir into PATH so the claude shebang works
+        cli_dir = str(Path(cli_path).parent)
+        current_path = env.get("PATH", "/usr/bin:/bin")
+        if cli_dir not in current_path:
+            env["PATH"] = f"{cli_dir}:{current_path}"
+
+        return env
 
     @staticmethod
     def _parse_json_string(s: str) -> Optional[dict]:
