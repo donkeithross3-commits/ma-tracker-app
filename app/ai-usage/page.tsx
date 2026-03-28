@@ -100,7 +100,7 @@ export default function AIUsagePage() {
 
         {/* Tab content */}
         {activeTab === "overview" && (
-          <OverviewTab dailyData={dailyData} summary={summary} efficiency={efficiency} />
+          <OverviewTab dailyData={dailyData} summary={summary} sessions={sessions} efficiency={efficiency} />
         )}
         {activeTab === "sessions" && <SessionsTab sessions={sessions} />}
         {activeTab === "efficiency" && (

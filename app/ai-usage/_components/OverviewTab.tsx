@@ -1,10 +1,10 @@
 import { useMemo, useCallback } from "react";
 import { ColumnChooser, type ColumnDef } from "@/components/ui/ColumnChooser";
 import { useUIPreferences } from "@/lib/ui-preferences";
-import type { DailyAggregate, SummaryResponse, EfficiencyResponse } from "../_lib/types";
+import type { DailyAggregate, SummaryResponse, EfficiencyResponse, SessionsResponse } from "../_lib/types";
 import { fmtCost, fmtTokens, fmtDate, fmtOverhead, overheadColor } from "../_lib/formatters";
 import { AGENT_COLORS, MACHINE_COLORS } from "../_lib/constants";
-import { CostBarChart } from "./CostBarChart";
+import { Last24Hours } from "./Last24Hours";
 import { MachineAgentMatrix } from "./MachineAgentMatrix";
 
 // Column definitions (module-level to avoid infinite loops)
@@ -22,10 +22,12 @@ const DAILY_LOCKED = ["date"];
 export function OverviewTab({
   dailyData,
   summary,
+  sessions,
   efficiency,
 }: {
   dailyData: DailyAggregate[];
   summary: SummaryResponse | null;
+  sessions: SessionsResponse | null;
   efficiency: EfficiencyResponse | null;
 }) {
   const { getVisibleColumns, setVisibleColumns } = useUIPreferences();
@@ -39,9 +41,9 @@ export function OverviewTab({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-      {/* Chart */}
+      {/* Last 24 Hours */}
       <div className="lg:col-span-2 bg-gray-900 rounded border border-gray-800 px-3 py-2">
-        <CostBarChart data={dailyData} />
+        <Last24Hours sessions={sessions?.sessions ?? null} />
       </div>
 
       {/* Matrix */}
